@@ -1960,16 +1960,23 @@ class DataService:
                         if 'draftkings' not in book_name and 'draftkings' not in vendor:
                             continue  # Skip non-DraftKings props
 
+                        # FILTER: Only over_under market type (not milestone props)
+                        market = prop.get('market', {})
+                        market_type = market.get('type', '') if isinstance(market, dict) else ''
+                        if market_type != 'over_under':
+                            continue  # Skip milestone and other prop types
+
                         draftkings_count += 1
-                        p_id = prop.get('player', {}).get('id')
+                        # FIX: API returns player_id directly, not nested in player object
+                        p_id = prop.get('player_id')
                         if not p_id:
                             continue
 
                         if p_id not in lines_by_player:
                             lines_by_player[p_id] = {}
 
-                        # Map API prop types to our types
-                        api_type = prop.get('stat_type', '').lower()
+                        # FIX: API uses 'prop_type' not 'stat_type'
+                        api_type = prop.get('prop_type', '').lower()
                         prop_type_map = {
                             'points': 'points',
                             'pts': 'points',
@@ -1987,8 +1994,8 @@ class DataService:
                         }
                         mapped_type = prop_type_map.get(api_type, api_type)
 
-                        # Store the line value
-                        line_value = prop.get('line') or prop.get('value')
+                        # FIX: API uses 'line_value' not 'line' or 'value'
+                        line_value = prop.get('line_value')
                         if line_value is not None:
                             lines_by_player[p_id][mapped_type] = float(line_value)
 
