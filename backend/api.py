@@ -162,13 +162,17 @@ def _build_prop_prediction(player_data: dict, prop_key: str) -> Optional[PropPre
     if pred_key not in player_data or player_data.get(pred_key) is None:
         return None
 
-    line = player_data.get(f"{prop_key}_line", 0) or 0
+    # Get line - use None for missing/invalid lines instead of 0
+    line = player_data.get(f"{prop_key}_line")
+    if line is not None and line <= 0:
+        line = None  # Treat 0 or negative as "no line available"
+
     prediction = player_data.get(pred_key, 0) or 0
     edge = player_data.get(f"{prop_key}_edge", 0) or 0
     confidence = player_data.get(f"{prop_key}_confidence", 50) or 50
     pick = player_data.get(f"{prop_key}_pick", "-") or "-"
 
-    # Calculate edge_pct
+    # Calculate edge_pct - only if we have a valid line
     edge_pct = (edge / line * 100) if line and line > 0 else 0
 
     return PropPrediction(
@@ -177,7 +181,7 @@ def _build_prop_prediction(player_data: dict, prop_key: str) -> Optional[PropPre
         edge=edge,
         edge_pct=edge_pct,
         pick=pick,
-        line=line,
+        line=line,  # Can be None now
         implied_probability=None,
     )
 

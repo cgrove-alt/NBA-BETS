@@ -26,7 +26,7 @@ export interface PropPrediction {
   edge: number;
   edge_pct: number;
   pick: 'OVER' | 'UNDER' | '-';
-  line?: number;
+  line?: number | null;  // null = no line available from sportsbook
   implied_probability?: number;
 }
 

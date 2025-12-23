@@ -2762,7 +2762,7 @@ class DataService:
                     # Round to nearest 0.5 for realistic lines
                     line = round(line * 2) / 2
                 else:
-                    line = 0
+                    line = None  # No line available for players without stats
 
             # Calculate confidence with full features context
             confidence = self._calculate_prop_confidence(
@@ -2774,8 +2774,11 @@ class DataService:
             if injury_confidence_penalty > 0:
                 confidence *= (1.0 - injury_confidence_penalty)
 
-            # Determine pick with proper edge calculation
-            pick, edge = self._determine_prop_pick(pred_value, line)
+            # Determine pick with proper edge calculation - skip if no line
+            if line is not None and line > 0:
+                pick, edge = self._determine_prop_pick(pred_value, line)
+            else:
+                pick, edge = "-", 0  # No pick without a valid line
 
             prop_key = prop_label.lower().replace(" ", "_")
             result[f"{prop_key}_line"] = line
