@@ -4,6 +4,7 @@ import { GameSelector } from '../components/game/GameSelector';
 import { FilterPanel } from '../components/predictions/FilterPanel';
 import { PropTable } from '../components/predictions/PropTable';
 import { BestBets } from '../components/predictions/BestBets';
+import { GamePredictions } from '../components/predictions/GamePredictions';
 import { useGames } from '../hooks/useGames';
 import { usePredictions } from '../hooks/usePredictions';
 import { useFilters } from '../hooks/useFilters';
@@ -103,6 +104,11 @@ export function Predictions() {
         <div className="bg-danger-light border border-accent-danger/30 rounded-lg p-4 text-accent-danger">
           Error loading games. Make sure the API server is running.
         </div>
+      )}
+
+      {/* Game Predictions (Spread/Moneyline) */}
+      {selectedGameId && selectedGame && (
+        <GamePredictions gameId={selectedGameId} game={selectedGame} />
       )}
 
       {/* Loading state */}
