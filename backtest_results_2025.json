@@ -1,0 +1,51 @@
+{
+  "games_processed": 372,
+  "games_with_errors": 0,
+  "start_date": "2025-10-21",
+  "end_date": "2025-12-12",
+  "total_predictions": 57910,
+  "metrics": {
+    "points": {
+      "count": 7078,
+      "rmse": 6.757,
+      "mae": 5.072,
+      "r2": 0.381,
+      "bias": -1.518
+    },
+    "rebounds": {
+      "count": 7097,
+      "rmse": 2.543,
+      "mae": 1.944,
+      "r2": 0.364,
+      "bias": 0.161
+    },
+    "assists": {
+      "count": 6007,
+      "rmse": 2.035,
+      "mae": 1.441,
+      "r2": 0.324,
+      "bias": -0.464
+    },
+    "threes": {
+      "count": 4578,
+      "rmse": 1.7,
+      "mae": 1.268,
+      "r2": -0.568,
+      "bias": -0.92
+    },
+    "pra": {
+      "count": 7685,
+      "rmse": 8.469,
+      "mae": 6.668,
+      "r2": 0.513,
+      "bias": -0.375
+    }
+  },
+  "overall": {
+    "count": 32445,
+    "rmse": 5.435,
+    "mae": 3.557,
+    "r2": 0.681,
+    "bias": -0.601
+  }
+}

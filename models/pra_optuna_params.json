@@ -1,0 +1,22 @@
+{
+  "xgboost": {
+    "n_estimators": 250,
+    "max_depth": 4,
+    "learning_rate": 0.026859556937551075,
+    "min_child_weight": 1,
+    "subsample": 0.6392435161078952,
+    "colsample_bytree": 0.8179925408001855,
+    "reg_alpha": 0.16357271069390775,
+    "reg_lambda": 2.3725324003742396
+  },
+  "random_forest": {
+    "n_estimators": 398,
+    "max_depth": 15,
+    "min_samples_split": 5,
+    "min_samples_leaf": 7,
+    "max_features": "sqrt"
+  },
+  "ridge": {
+    "alpha": 99.31901475257159
+  }
+}

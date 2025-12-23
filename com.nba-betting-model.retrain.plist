@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nba-betting-model.retrain</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/sygrovefamily/NBA Betting Model/scheduled_retrain.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/sygrovefamily/NBA Betting Model</string>
+
+    <!-- Run every Sunday at 3:00 AM -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Also run at boot if we missed a scheduled run -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Log output -->
+    <key>StandardOutPath</key>
+    <string>/Users/sygrovefamily/NBA Betting Model/logs/retrain_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sygrovefamily/NBA Betting Model/logs/retrain_stderr.log</string>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

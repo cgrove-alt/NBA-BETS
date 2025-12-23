@@ -1,0 +1,16 @@
+{
+  "date": "2025-12-18",
+  "generated_at": "2025-12-18T21:31:51.309631",
+  "games_analyzed": 0,
+  "total_recommendations": 0,
+  "top_picks": [],
+  "parlay_recommendations": [],
+  "bankroll_allocation": {
+    "total_stake": 0,
+    "num_bets": 0,
+    "allocation": [],
+    "remaining_daily_budget": 200.0,
+    "bankroll_percentage_used": 0.0
+  },
+  "game_analyses": []
+}

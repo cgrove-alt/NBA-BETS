@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+/* NBA Props Dashboard - Dark Theme */
+/* Colors from theme.py */
+
+@theme {
+  /* Background colors */
+  --color-bg-primary: #0d1117;
+  --color-bg-secondary: #161b22;
+  --color-bg-tertiary: #21262d;
+  --color-bg-card: #1c2128;
+  --color-bg-card-hover: #262c36;
+  --color-bg-hover: #30363d;
+
+  /* Text colors */
+  --color-text-primary: #e6edf3;
+  --color-text-secondary: #8b949e;
+  --color-text-muted: #6e7681;
+
+  /* Accent colors */
+  --color-accent-primary: #58a6ff;
+  --color-accent-primary-hover: #79b8ff;
+  --color-accent-success: #3fb950;
+  --color-accent-warning: #d29922;
+  --color-accent-danger: #f85149;
+
+  /* Border colors */
+  --color-border: #30363d;
+  --color-border-light: #21262d;
+}
+
+/* Base styles */
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: dark;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-primary);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--color-bg-primary);
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Utility classes for gradients */
+.gradient-success {
+  background: linear-gradient(135deg, #238636 0%, #3fb950 100%);
+}
+
+.gradient-danger {
+  background: linear-gradient(135deg, #da3633 0%, #f85149 100%);
+}
+
+.gradient-primary {
+  background: linear-gradient(135deg, #1f6feb 0%, #58a6ff 100%);
+}
+
+.gradient-warning {
+  background: linear-gradient(135deg, #9e6a03 0%, #d29922 100%);
+}
+
+.gradient-neutral {
+  background: linear-gradient(135deg, #30363d 0%, #484f58 100%);
+}
+
+/* Semi-transparent backgrounds */
+.bg-success-light {
+  background-color: rgba(63, 185, 80, 0.15);
+}
+
+.bg-warning-light {
+  background-color: rgba(210, 153, 34, 0.15);
+}
+
+.bg-danger-light {
+  background-color: rgba(248, 81, 73, 0.15);
+}
+
+.bg-primary-light {
+  background-color: rgba(88, 166, 255, 0.15);
+}
+
+/* Shadows */
+.shadow-card {
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
+}
+
+.shadow-hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.shadow-glow-primary {
+  box-shadow: 0 0 15px rgba(88, 166, 255, 0.3);
+}
+
+.shadow-glow-success {
+  box-shadow: 0 0 15px rgba(63, 185, 80, 0.3);
+}

@@ -1,0 +1,512 @@
+{
+  "date": "2025-12-12",
+  "generated_at": "2025-12-12T18:25:14.523858",
+  "games_analyzed": 7,
+  "total_recommendations": 7,
+  "top_picks": [
+    {
+      "bet_type": "spread",
+      "description": "Cleveland Cavaliers +3.5",
+      "selection": "away",
+      "line": 3.5,
+      "probability": 5.515999999999999,
+      "confidence": "high",
+      "edge": 4.991999999999999,
+      "expected_value": 1003.1999999999998,
+      "recommended_stake": 50.0,
+      "reasoning": "Model predicts -170.7 spread vs line -3.5",
+      "game_info": {
+        "home": "WAS",
+        "away": "CLE"
+      }
+    },
+    {
+      "bet_type": "spread",
+      "description": "Chicago Bulls +3.5",
+      "selection": "away",
+      "line": 3.5,
+      "probability": 4.984999999999999,
+      "confidence": "high",
+      "edge": 4.460999999999999,
+      "expected_value": 896.9999999999999,
+      "recommended_stake": 50.0,
+      "reasoning": "Model predicts -153.0 spread vs line -3.5",
+      "game_info": {
+        "home": "CHA",
+        "away": "CHI"
+      }
+    },
+    {
+      "bet_type": "spread",
+      "description": "Memphis Grizzlies -3.5",
+      "selection": "home",
+      "line": -3.5,
+      "probability": 4.673,
+      "confidence": "high",
+      "edge": 4.149,
+      "expected_value": 834.6,
+      "recommended_stake": 50.0,
+      "reasoning": "Model predicts +135.6 spread vs line -3.5",
+      "game_info": {
+        "home": "MEM",
+        "away": "UTA"
+      }
+    },
+    {
+      "bet_type": "spread",
+      "description": "Indiana Pacers +3.5",
+      "selection": "away",
+      "line": 3.5,
+      "probability": 1.7,
+      "confidence": "high",
+      "edge": 1.176,
+      "expected_value": 240.0,
+      "recommended_stake": 50.0,
+      "reasoning": "Model predicts -43.5 spread vs line -3.5",
+      "game_info": {
+        "home": "PHI",
+        "away": "IND"
+      }
+    },
+    {
+      "bet_type": "spread",
+      "description": "Atlanta Hawks +3.5",
+      "selection": "away",
+      "line": 3.5,
+      "probability": 1.6009999999999998,
+      "confidence": "high",
+      "edge": 1.0769999999999997,
+      "expected_value": 220.19999999999993,
+      "recommended_stake": 50.0,
+      "reasoning": "Model predicts -40.2 spread vs line -3.5",
+      "game_info": {
+        "home": "DET",
+        "away": "ATL"
+      }
+    }
+  ],
+  "parlay_recommendations": [
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Cleveland Cavaliers +3.5",
+          "probability": 5.515999999999999,
+          "confidence": "high",
+          "edge": 4.991999999999999
+        },
+        {
+          "type": "spread",
+          "description": "Chicago Bulls +3.5",
+          "probability": 4.984999999999999,
+          "confidence": "high",
+          "edge": 4.460999999999999
+        }
+      ],
+      "combined_probability": 27.497259999999994,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Cleveland Cavaliers +3.5",
+          "probability": 5.515999999999999,
+          "confidence": "high",
+          "edge": 4.991999999999999
+        },
+        {
+          "type": "spread",
+          "description": "Memphis Grizzlies -3.5",
+          "probability": 4.673,
+          "confidence": "high",
+          "edge": 4.149
+        }
+      ],
+      "combined_probability": 25.776267999999995,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Cleveland Cavaliers +3.5",
+          "probability": 5.515999999999999,
+          "confidence": "high",
+          "edge": 4.991999999999999
+        },
+        {
+          "type": "spread",
+          "description": "Indiana Pacers +3.5",
+          "probability": 1.7,
+          "confidence": "high",
+          "edge": 1.176
+        }
+      ],
+      "combined_probability": 9.377199999999998,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Chicago Bulls +3.5",
+          "probability": 4.984999999999999,
+          "confidence": "high",
+          "edge": 4.460999999999999
+        },
+        {
+          "type": "spread",
+          "description": "Memphis Grizzlies -3.5",
+          "probability": 4.673,
+          "confidence": "high",
+          "edge": 4.149
+        }
+      ],
+      "combined_probability": 23.294904999999996,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Chicago Bulls +3.5",
+          "probability": 4.984999999999999,
+          "confidence": "high",
+          "edge": 4.460999999999999
+        },
+        {
+          "type": "spread",
+          "description": "Indiana Pacers +3.5",
+          "probability": 1.7,
+          "confidence": "high",
+          "edge": 1.176
+        }
+      ],
+      "combined_probability": 8.474499999999999,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Memphis Grizzlies -3.5",
+          "probability": 4.673,
+          "confidence": "high",
+          "edge": 4.149
+        },
+        {
+          "type": "spread",
+          "description": "Indiana Pacers +3.5",
+          "probability": 1.7,
+          "confidence": "high",
+          "edge": 1.176
+        }
+      ],
+      "combined_probability": 7.9441,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Cleveland Cavaliers +3.5",
+          "probability": 5.515999999999999,
+          "confidence": "high",
+          "edge": 4.991999999999999
+        },
+        {
+          "type": "spread",
+          "description": "Chicago Bulls +3.5",
+          "probability": 4.984999999999999,
+          "confidence": "high",
+          "edge": 4.460999999999999
+        },
+        {
+          "type": "spread",
+          "description": "Memphis Grizzlies -3.5",
+          "probability": 4.673,
+          "confidence": "high",
+          "edge": 4.149
+        }
+      ],
+      "combined_probability": 128.49469597999996,
+      "num_legs": 3,
+      "type": "3-leg parlay"
+    }
+  ],
+  "bankroll_allocation": {
+    "total_stake": 200.0,
+    "num_bets": 4,
+    "allocation": [
+      {
+        "bet": "Cleveland Cavaliers +3.5",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Chicago Bulls +3.5",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Memphis Grizzlies -3.5",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Indiana Pacers +3.5",
+        "stake": 50.0,
+        "confidence": "high"
+      }
+    ],
+    "remaining_daily_budget": 0.0,
+    "bankroll_percentage_used": 20.0
+  },
+  "game_analyses": [
+    {
+      "game_id": "0022501209",
+      "home_team": "Charlotte Hornets",
+      "away_team": "Chicago Bulls",
+      "moneyline_prediction": {
+        "home_win_probability": 0.51524527298808,
+        "away_win_probability": 0.48475472701192,
+        "predicted_winner": "home",
+        "confidence": 0.51524527298808
+      },
+      "spread_prediction": {
+        "predicted_spread": -153.0,
+        "predicted_winner": "away",
+        "predicted_margin": 153.0
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Chicago Bulls +3.5",
+          "selection": "away",
+          "line": 3.5,
+          "probability": 4.984999999999999,
+          "confidence": "high",
+          "edge": 4.460999999999999,
+          "expected_value": 896.9999999999999,
+          "recommended_stake": 50.0,
+          "reasoning": "Model predicts -153.0 spread vs line -3.5",
+          "game_info": {
+            "home": "CHA",
+            "away": "CHI"
+          }
+        }
+      ]
+    },
+    {
+      "game_id": "0022501210",
+      "home_team": "Detroit Pistons",
+      "away_team": "Atlanta Hawks",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5,
+        "away_win_probability": 0.5,
+        "predicted_winner": "away",
+        "confidence": 0.5
+      },
+      "spread_prediction": {
+        "predicted_spread": -40.199999999999996,
+        "predicted_winner": "away",
+        "predicted_margin": 40.199999999999996
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Atlanta Hawks +3.5",
+          "selection": "away",
+          "line": 3.5,
+          "probability": 1.6009999999999998,
+          "confidence": "high",
+          "edge": 1.0769999999999997,
+          "expected_value": 220.19999999999993,
+          "recommended_stake": 50.0,
+          "reasoning": "Model predicts -40.2 spread vs line -3.5",
+          "game_info": {
+            "home": "DET",
+            "away": "ATL"
+          }
+        }
+      ]
+    },
+    {
+      "game_id": "0022501211",
+      "home_team": "Philadelphia 76ers",
+      "away_team": "Indiana Pacers",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5,
+        "away_win_probability": 0.5,
+        "predicted_winner": "away",
+        "confidence": 0.5
+      },
+      "spread_prediction": {
+        "predicted_spread": -43.5,
+        "predicted_winner": "away",
+        "predicted_margin": 43.5
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Indiana Pacers +3.5",
+          "selection": "away",
+          "line": 3.5,
+          "probability": 1.7,
+          "confidence": "high",
+          "edge": 1.176,
+          "expected_value": 240.0,
+          "recommended_stake": 50.0,
+          "reasoning": "Model predicts -43.5 spread vs line -3.5",
+          "game_info": {
+            "home": "PHI",
+            "away": "IND"
+          }
+        }
+      ]
+    },
+    {
+      "game_id": "0022501212",
+      "home_team": "Washington Wizards",
+      "away_team": "Cleveland Cavaliers",
+      "moneyline_prediction": {
+        "home_win_probability": 0.49450022182259706,
+        "away_win_probability": 0.5054997781774029,
+        "predicted_winner": "away",
+        "confidence": 0.5054997781774029
+      },
+      "spread_prediction": {
+        "predicted_spread": -170.7,
+        "predicted_winner": "away",
+        "predicted_margin": 170.7
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Cleveland Cavaliers +3.5",
+          "selection": "away",
+          "line": 3.5,
+          "probability": 5.515999999999999,
+          "confidence": "high",
+          "edge": 4.991999999999999,
+          "expected_value": 1003.1999999999998,
+          "recommended_stake": 50.0,
+          "reasoning": "Model predicts -170.7 spread vs line -3.5",
+          "game_info": {
+            "home": "WAS",
+            "away": "CLE"
+          }
+        }
+      ]
+    },
+    {
+      "game_id": "0022501213",
+      "home_team": "Memphis Grizzlies",
+      "away_team": "Utah Jazz",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5121226238063344,
+        "away_win_probability": 0.48787737619366556,
+        "predicted_winner": "home",
+        "confidence": 0.5121226238063344
+      },
+      "spread_prediction": {
+        "predicted_spread": 135.6,
+        "predicted_winner": "home",
+        "predicted_margin": 135.6
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Memphis Grizzlies -3.5",
+          "selection": "home",
+          "line": -3.5,
+          "probability": 4.673,
+          "confidence": "high",
+          "edge": 4.149,
+          "expected_value": 834.6,
+          "recommended_stake": 50.0,
+          "reasoning": "Model predicts +135.6 spread vs line -3.5",
+          "game_info": {
+            "home": "MEM",
+            "away": "UTA"
+          }
+        }
+      ]
+    },
+    {
+      "game_id": "0022501214",
+      "home_team": "Dallas Mavericks",
+      "away_team": "Brooklyn Nets",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5037499296890819,
+        "away_win_probability": 0.49625007031091806,
+        "predicted_winner": "home",
+        "confidence": 0.5037499296890819
+      },
+      "spread_prediction": {
+        "predicted_spread": 3.0,
+        "predicted_winner": "home",
+        "predicted_margin": 3.0
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Dallas Mavericks -3.5",
+          "selection": "home",
+          "line": -3.5,
+          "probability": 0.6950000000000001,
+          "confidence": "high",
+          "edge": 0.17100000000000004,
+          "expected_value": 39.00000000000001,
+          "recommended_stake": 50.0,
+          "reasoning": "Model predicts +3.0 spread vs line -3.5",
+          "game_info": {
+            "home": "DAL",
+            "away": "BKN"
+          }
+        }
+      ]
+    },
+    {
+      "game_id": "0022501215",
+      "home_team": "Golden State Warriors",
+      "away_team": "Minnesota Timberwolves",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5037499296890819,
+        "away_win_probability": 0.49625007031091806,
+        "predicted_winner": "home",
+        "confidence": 0.5037499296890819
+      },
+      "spread_prediction": {
+        "predicted_spread": 3.0,
+        "predicted_winner": "home",
+        "predicted_margin": 3.0
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Golden State Warriors -3.5",
+          "selection": "home",
+          "line": -3.5,
+          "probability": 0.6950000000000001,
+          "confidence": "high",
+          "edge": 0.17100000000000004,
+          "expected_value": 39.00000000000001,
+          "recommended_stake": 50.0,
+          "reasoning": "Model predicts +3.0 spread vs line -3.5",
+          "game_info": {
+            "home": "GSW",
+            "away": "MIN"
+          }
+        }
+      ]
+    }
+  ]
+}
