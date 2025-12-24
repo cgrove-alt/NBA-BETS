@@ -803,6 +803,9 @@ class DataService:
 
         OPTIMIZATION: Uses Balldontlie API only (fast, no rate limiting).
         NBA API fallback removed to improve performance.
+
+        NOTE: Uses US Eastern timezone (where NBA schedules games) to ensure
+        correct date regardless of server timezone.
         """
         print("[DEBUG] get_todays_games called", flush=True)
         cache_key = "todays_games"
@@ -818,8 +821,12 @@ class DataService:
         # Use Balldontlie API only (fast, 600 req/min limit)
         if self.balldontlie:
             try:
-                today = datetime.now().strftime("%Y-%m-%d")
-                print(f"[DEBUG] Fetching games for {today}", flush=True)
+                # Use US Eastern timezone (NBA schedules games based on ET)
+                # This fixes the bug where UTC servers fetch wrong date
+                from zoneinfo import ZoneInfo
+                eastern = ZoneInfo("America/New_York")
+                today = datetime.now(eastern).strftime("%Y-%m-%d")
+                print(f"[DEBUG] Fetching games for {today} (Eastern time)", flush=True)
                 bdl_games = self.balldontlie.get_games(dates=[today])
                 print(f"[DEBUG] API returned {len(bdl_games) if bdl_games else 0} games", flush=True)
                 if bdl_games:
@@ -1652,8 +1659,9 @@ class DataService:
             home_team_bdl_id = target_game.get('home_team', {}).get('id')
             away_team_bdl_id = target_game.get('visitor_team', {}).get('id')
 
-            # Step 2: Get ACTUAL team rosters using active players endpoint
-            print(f"Background: [2/4] Getting team rosters...", flush=True)
+            # Step 2: Get players DIRECTLY from DraftKings props (ensures ID consistency)
+            # This fixes the bug where get_active_players() returns different IDs than get_player_props()
+            print(f"Background: [2/4] Getting players from DraftKings props...", flush=True)
 
             # Get team mappings first
             teams = self.balldontlie.get_teams()
@@ -1664,58 +1672,16 @@ class DataService:
             home_team_id = abbrev_to_team_id.get(home_abbrev)
             away_team_id = abbrev_to_team_id.get(away_abbrev)
 
-            # Get all active players and filter by team
-            all_players = {}
-            try:
-                active_players = self.balldontlie.get_active_players()
-                for player in active_players:
-                    pid = player.get('id')
-                    # Handle both nested and flat team_id formats
-                    team_id = player.get('team', {}).get('id') if isinstance(player.get('team'), dict) else player.get('team_id')
+            # Get players directly from props endpoint - this ensures player IDs match the prop lines cache
+            all_players = self._get_players_from_props(int(game_id))
 
-                    if pid and team_id in [home_team_id, away_team_id]:
-                        all_players[pid] = {
-                            'player_id': pid,
-                            'player_name': f"{player.get('first_name', '')} {player.get('last_name', '')}".strip(),
-                            'team_id': team_id,
-                            'team_abbrev': team_id_to_abbrev.get(team_id, ''),
-                            'position': player.get('position', ''),
-                        }
-                print(f"Background: Found {len(all_players)} players on both rosters from active players", flush=True)
-            except Exception as e:
-                print(f"Background: get_active_players failed ({e}), falling back to leaders...", flush=True)
+            # Add team abbreviations to players
+            for pid, player_data in all_players.items():
+                team_id = player_data.get('team_id')
+                player_data['team_abbrev'] = team_id_to_abbrev.get(team_id, '')
+                player_data['game_id'] = game_id  # Add game_id for prop line lookup
 
-            # Fallback to league leaders if active players fails or returns too few
-            if not all_players or len(all_players) < 10:
-                print(f"Background: Using expanded league leaders (found only {len(all_players)} from active players)...", flush=True)
-                # Get more leaders across more stat categories for better team coverage
-                leader_calls = [
-                    ('pts', 100),  # Top 100 scorers
-                    ('reb', 75),   # Top 75 rebounders
-                    ('ast', 75),   # Top 75 assist leaders
-                    ('fg3m', 50),  # Top 50 three-point shooters
-                    ('min', 100),  # Top 100 by minutes (captures starters)
-                ]
-
-                for stat, per_page in leader_calls:
-                    try:
-                        leaders = self.balldontlie.get_leaders(stat=stat, per_page=per_page)
-                        for p in leaders:
-                            player_data = p.get('player', {})
-                            pid = player_data.get('id')
-                            team_id = player_data.get('team_id')
-                            if pid and pid not in all_players:
-                                all_players[pid] = {
-                                    'player_id': pid,
-                                    'player_name': f"{player_data.get('first_name', '')} {player_data.get('last_name', '')}".strip(),
-                                    'team_id': team_id,
-                                    'team_abbrev': team_id_to_abbrev.get(team_id, ''),
-                                    'position': player_data.get('position', ''),
-                                }
-                    except Exception as e:
-                        print(f"Background: Could not fetch {stat} leaders: {e}", flush=True)
-
-                print(f"Background: Expanded leaders found {len(all_players)} total players", flush=True)
+            print(f"Background: Found {len(all_players)} players with DraftKings props", flush=True)
 
             # Filter players by team
             home_player_ids = [pid for pid, p in all_players.items() if p['team_abbrev'] == home_abbrev]
@@ -1912,6 +1878,67 @@ class DataService:
 
     # _get_key_players method removed - replaced by Balldontlie API in _fetch_props_background()
 
+    def _get_players_from_props(self, game_id: int) -> Dict[int, Dict]:
+        """Get player info for all players with DraftKings props.
+
+        This ensures player IDs match between the props cache and player lookups,
+        solving the ID mismatch issue where get_active_players() returns different
+        IDs than get_player_props().
+
+        Args:
+            game_id: Balldontlie game ID
+
+        Returns:
+            Dict keyed by player_id with player info (name, team_id, position)
+        """
+        if not self.balldontlie:
+            return {}
+
+        players = {}
+        try:
+            props = self.balldontlie.get_player_props(int(game_id))
+            if not props:
+                return {}
+
+            # Get unique player IDs from DraftKings over_under props
+            player_ids = set()
+            for prop in props:
+                vendor = prop.get('vendor', '').lower()
+                market = prop.get('market', {})
+                market_type = market.get('type', '') if isinstance(market, dict) else ''
+
+                if 'draftkings' in vendor and market_type == 'over_under':
+                    pid = prop.get('player_id')
+                    if pid:
+                        player_ids.add(pid)
+
+            # Fetch player details for each unique player
+            for pid in player_ids:
+                try:
+                    player = self.balldontlie.get_player(pid)
+                    if player:
+                        # Handle both nested and flat team formats
+                        team_data = player.get('team', {})
+                        if isinstance(team_data, dict):
+                            team_id = team_data.get('id')
+                        else:
+                            team_id = player.get('team_id')
+
+                        players[pid] = {
+                            'player_id': pid,
+                            'player_name': f"{player.get('first_name', '')} {player.get('last_name', '')}".strip(),
+                            'team_id': team_id,
+                            'position': player.get('position', ''),
+                        }
+                except Exception as e:
+                    # Skip players we can't fetch, but log the error
+                    print(f"Could not fetch player {pid}: {e}")
+
+        except Exception as e:
+            print(f"Error getting players from props for game {game_id}: {e}")
+
+        return players
+
     def _get_real_prop_line(self, game_id: str, player_id: int, prop_type: str) -> Optional[float]:
         """Get real prop line from DraftKings ONLY for a player/prop.
 
@@ -1960,16 +1987,23 @@ class DataService:
                         if 'draftkings' not in book_name and 'draftkings' not in vendor:
                             continue  # Skip non-DraftKings props
 
+                        # FILTER: Only over_under market type (not milestone props)
+                        market = prop.get('market', {})
+                        market_type = market.get('type', '') if isinstance(market, dict) else ''
+                        if market_type != 'over_under':
+                            continue  # Skip milestone and other prop types
+
                         draftkings_count += 1
-                        p_id = prop.get('player', {}).get('id')
+                        # FIX: API returns player_id directly, not nested in player object
+                        p_id = prop.get('player_id')
                         if not p_id:
                             continue
 
                         if p_id not in lines_by_player:
                             lines_by_player[p_id] = {}
 
-                        # Map API prop types to our types
-                        api_type = prop.get('stat_type', '').lower()
+                        # FIX: API uses 'prop_type' not 'stat_type'
+                        api_type = prop.get('prop_type', '').lower()
                         prop_type_map = {
                             'points': 'points',
                             'pts': 'points',
@@ -1987,8 +2021,8 @@ class DataService:
                         }
                         mapped_type = prop_type_map.get(api_type, api_type)
 
-                        # Store the line value
-                        line_value = prop.get('line') or prop.get('value')
+                        # FIX: API uses 'line_value' not 'line' or 'value'
+                        line_value = prop.get('line_value')
                         if line_value is not None:
                             lines_by_player[p_id][mapped_type] = float(line_value)
 
@@ -2762,7 +2796,7 @@ class DataService:
                     # Round to nearest 0.5 for realistic lines
                     line = round(line * 2) / 2
                 else:
-                    line = 0
+                    line = None  # No line available for players without stats
 
             # Calculate confidence with full features context
             confidence = self._calculate_prop_confidence(
@@ -2774,8 +2808,11 @@ class DataService:
             if injury_confidence_penalty > 0:
                 confidence *= (1.0 - injury_confidence_penalty)
 
-            # Determine pick with proper edge calculation
-            pick, edge = self._determine_prop_pick(pred_value, line)
+            # Determine pick with proper edge calculation - skip if no line
+            if line is not None and line > 0:
+                pick, edge = self._determine_prop_pick(pred_value, line)
+            else:
+                pick, edge = "-", 0  # No pick without a valid line
 
             prop_key = prop_label.lower().replace(" ", "_")
             result[f"{prop_key}_line"] = line

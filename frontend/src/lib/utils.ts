@@ -74,9 +74,9 @@ export function formatPrediction(prediction: number): string {
   return prediction.toFixed(1);
 }
 
-// Format line
-export function formatLine(line: number | undefined): string {
-  if (line === undefined) return '-';
+// Format line - returns "-" for missing, null, or invalid lines
+export function formatLine(line: number | undefined | null): string {
+  if (line === undefined || line === null || line <= 0) return '-';
   return line.toFixed(1);
 }
 
