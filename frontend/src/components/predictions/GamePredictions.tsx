@@ -31,7 +31,6 @@ export function GamePredictions({ gameId, game }: GamePredictionsProps) {
     analysis,
     isLoading,
     isPending,
-    isReady,
     startAnalysis,
     isStarting,
   } = useGameAnalysis(gameId, game);
