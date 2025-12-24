@@ -803,6 +803,9 @@ class DataService:
 
         OPTIMIZATION: Uses Balldontlie API only (fast, no rate limiting).
         NBA API fallback removed to improve performance.
+
+        NOTE: Uses US Eastern timezone (where NBA schedules games) to ensure
+        correct date regardless of server timezone.
         """
         print("[DEBUG] get_todays_games called", flush=True)
         cache_key = "todays_games"
@@ -818,8 +821,12 @@ class DataService:
         # Use Balldontlie API only (fast, 600 req/min limit)
         if self.balldontlie:
             try:
-                today = datetime.now().strftime("%Y-%m-%d")
-                print(f"[DEBUG] Fetching games for {today}", flush=True)
+                # Use US Eastern timezone (NBA schedules games based on ET)
+                # This fixes the bug where UTC servers fetch wrong date
+                from zoneinfo import ZoneInfo
+                eastern = ZoneInfo("America/New_York")
+                today = datetime.now(eastern).strftime("%Y-%m-%d")
+                print(f"[DEBUG] Fetching games for {today} (Eastern time)", flush=True)
                 bdl_games = self.balldontlie.get_games(dates=[today])
                 print(f"[DEBUG] API returned {len(bdl_games) if bdl_games else 0} games", flush=True)
                 if bdl_games:
