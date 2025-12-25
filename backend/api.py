@@ -416,50 +416,33 @@ def get_game_results(game_id: str):
             message="Game not yet completed"
         )
 
-    # Fetch box score from Balldontlie API
+    # Fetch player stats using get_player_stats (NOT get_box_score which uses non-existent endpoint)
     try:
         from balldontlie_api import BalldontlieAPI
         api = BalldontlieAPI()
-        box_score = api.get_box_score(int(game_id))
+        player_stats_list = api.get_player_stats(game_ids=[int(game_id)])
     except Exception as e:
         return GameResults(
             game_id=game_id,
             status="error",
-            message=f"Could not fetch box score: {str(e)}"
+            message=f"Could not fetch stats: {str(e)}"
         )
 
-    if not box_score:
+    if not player_stats_list:
         return GameResults(
             game_id=game_id,
             status="error",
-            message="Box score not available"
+            message="Player stats not available for this game"
         )
 
-    # Extract final score from box score
+    # Extract scores from the first player's game data
     home_abbrev = game.get('home_team', {}).get('abbreviation', '')
     away_abbrev = game.get('visitor_team', {}).get('abbreviation', '')
 
-    # The box_score response has different formats - handle both
-    box_data = box_score.get('data', box_score)
-    home_score = 0
-    away_score = 0
-
-    # Try to get scores from the game info
-    if isinstance(box_data, dict):
-        home_score = box_data.get('home_team_score', 0) or 0
-        away_score = box_data.get('away_team_score', 0) or 0
-
-        # If no scores in data, calculate from player stats
-        if home_score == 0 and away_score == 0:
-            players = box_data.get('players', [])
-            home_team_id = game.get('home_team', {}).get('id')
-            for player in players:
-                team_id = player.get('team', {}).get('id') or player.get('team_id')
-                pts = player.get('pts', 0) or 0
-                if team_id == home_team_id:
-                    home_score += pts
-                else:
-                    away_score += pts
+    # Get game data from first player stat entry (all have same game info)
+    game_data = player_stats_list[0].get('game', {})
+    home_score = game_data.get('home_team_score', 0) or 0
+    away_score = game_data.get('visitor_team_score', 0) or 0
 
     final_score = FinalScore(
         home_team=home_abbrev,
@@ -494,20 +477,18 @@ def get_game_results(game_id: str):
                 away_win_probability=ml_data.get("away_win_probability"),
             )
 
-    # Extract player stats from box score for comparison
+    # Extract player stats from player_stats_list for comparison
     player_stats = {}
-    if isinstance(box_data, dict):
-        players_list = box_data.get('players', [])
-        for player in players_list:
-            player_info = player.get('player', player)
-            player_id = player_info.get('id') or player.get('player_id')
-            if player_id:
-                player_stats[player_id] = {
-                    'pts': player.get('pts', 0) or 0,
-                    'reb': player.get('reb', 0) or 0,
-                    'ast': player.get('ast', 0) or 0,
-                    'fg3m': player.get('fg3m', player.get('fg3_made', 0)) or 0,
-                }
+    for stat in player_stats_list:
+        player_info = stat.get('player', {})
+        player_id = player_info.get('id')
+        if player_id:
+            player_stats[player_id] = {
+                'pts': stat.get('pts', 0) or 0,
+                'reb': stat.get('reb', 0) or 0,
+                'ast': stat.get('ast', 0) or 0,
+                'fg3m': stat.get('fg3m', 0) or 0,
+            }
 
     # Build player results comparing predictions vs actuals
     player_results = []
