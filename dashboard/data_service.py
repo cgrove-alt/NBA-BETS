@@ -303,7 +303,7 @@ def calc_three_pm_specialized_features(fg3a_avg: float, fg3m_avg: float, fg3a_st
     }
 
 
-def get_position_group(features: Dict) -> str:
+def get_position_group_from_features(features: Dict) -> str:
     """
     TIER 1.4: Determine position group from features for position-aware model routing.
 
@@ -2180,7 +2180,7 @@ class DataService:
                 confidence += 5  # Clearer matchup edge
 
         # Factor 4: Edge magnitude (larger edge = higher confidence, up to a point)
-        if line > 0:
+        if line is not None and line > 0:
             edge_pct = abs(prediction - line) / line * 100
             if edge_pct > 15:
                 confidence += 10
@@ -2191,9 +2191,9 @@ class DataService:
 
         # Factor 5: Prediction vs line distance
         # Penalize predictions very close to line (coin flip territory)
-        if abs(prediction - line) < 0.5:
+        if line is not None and abs(prediction - line) < 0.5:
             confidence -= 15
-        elif abs(prediction - line) < 1.0:
+        elif line is not None and abs(prediction - line) < 1.0:
             confidence -= 8
 
         # Apply calibration shrinkage to prevent overconfidence
