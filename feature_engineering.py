@@ -38,6 +38,129 @@ POSITION_GROUPS = {
 
 
 # =============================================================================
+# TIER 1.2: NBA Arena Data for Travel Fatigue Calculations
+# =============================================================================
+# Arena coordinates (lat, lon) and altitude (feet) for travel impact
+NBA_ARENA_DATA = {
+    # Atlantic Division
+    'BOS': {'coords': (42.366, -71.062), 'altitude': 20, 'timezone': -5},
+    'BKN': {'coords': (40.683, -73.976), 'altitude': 30, 'timezone': -5},
+    'NYK': {'coords': (40.751, -73.994), 'altitude': 33, 'timezone': -5},
+    'PHI': {'coords': (39.901, -75.172), 'altitude': 39, 'timezone': -5},
+    'TOR': {'coords': (43.643, -79.379), 'altitude': 249, 'timezone': -5},
+    # Central Division
+    'CHI': {'coords': (41.881, -87.674), 'altitude': 594, 'timezone': -6},
+    'CLE': {'coords': (41.497, -81.688), 'altitude': 653, 'timezone': -5},
+    'DET': {'coords': (42.341, -83.055), 'altitude': 600, 'timezone': -5},
+    'IND': {'coords': (39.764, -86.156), 'altitude': 715, 'timezone': -5},
+    'MIL': {'coords': (43.045, -87.917), 'altitude': 617, 'timezone': -6},
+    # Southeast Division
+    'ATL': {'coords': (33.757, -84.396), 'altitude': 1050, 'timezone': -5},
+    'CHA': {'coords': (35.225, -80.839), 'altitude': 751, 'timezone': -5},
+    'MIA': {'coords': (25.781, -80.188), 'altitude': 10, 'timezone': -5},
+    'ORL': {'coords': (28.539, -81.384), 'altitude': 82, 'timezone': -5},
+    'WAS': {'coords': (38.898, -77.021), 'altitude': 50, 'timezone': -5},
+    # Northwest Division
+    'DEN': {'coords': (39.749, -105.008), 'altitude': 5280, 'timezone': -7},  # HIGH ALTITUDE
+    'MIN': {'coords': (44.979, -93.276), 'altitude': 830, 'timezone': -6},
+    'OKC': {'coords': (35.463, -97.515), 'altitude': 1201, 'timezone': -6},
+    'POR': {'coords': (45.532, -122.667), 'altitude': 77, 'timezone': -8},
+    'UTA': {'coords': (40.768, -111.901), 'altitude': 4327, 'timezone': -7},  # HIGH ALTITUDE
+    # Pacific Division
+    'GSW': {'coords': (37.768, -122.388), 'altitude': 13, 'timezone': -8},
+    'LAC': {'coords': (34.043, -118.267), 'altitude': 270, 'timezone': -8},
+    'LAL': {'coords': (34.043, -118.267), 'altitude': 270, 'timezone': -8},
+    'PHX': {'coords': (33.446, -112.071), 'altitude': 1086, 'timezone': -7},
+    'SAC': {'coords': (38.580, -121.500), 'altitude': 30, 'timezone': -8},
+    # Southwest Division
+    'DAL': {'coords': (32.790, -96.810), 'altitude': 430, 'timezone': -6},
+    'HOU': {'coords': (29.751, -95.362), 'altitude': 50, 'timezone': -6},
+    'MEM': {'coords': (35.138, -90.051), 'altitude': 337, 'timezone': -6},
+    'NOP': {'coords': (29.949, -90.082), 'altitude': 3, 'timezone': -6},
+    'SAS': {'coords': (29.427, -98.437), 'altitude': 650, 'timezone': -6},
+}
+
+# Map old/alternate abbreviations to current ones
+TEAM_ABBREV_MAP = {'NJN': 'BKN', 'SEA': 'OKC', 'VAN': 'MEM', 'NOH': 'NOP', 'NOK': 'NOP'}
+
+
+def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+    """Calculate great-circle distance between two points in miles."""
+    from math import radians, cos, sin, asin, sqrt
+    lat1, lon1 = radians(coord1[0]), radians(coord1[1])
+    lat2, lon2 = radians(coord2[0]), radians(coord2[1])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    return 2 * 3956 * asin(sqrt(a))  # 3956 = Earth's radius in miles
+
+
+def calculate_travel_fatigue(last_venue: str, current_venue: str, days_rest: int) -> Dict:
+    """
+    TIER 1.2: Calculate travel-related fatigue for predictions.
+
+    Research shows:
+    - Coast-to-coast travel reduces performance by 2-4 points
+    - Timezone changes of 3+ hours have significant impact
+    - High altitude (Denver, Utah) takes 24-48 hours to adjust
+
+    Args:
+        last_venue: Team abbreviation where last game was played
+        current_venue: Team abbreviation where current game will be played
+        days_rest: Days since last game
+
+    Returns:
+        Dictionary with travel fatigue features
+    """
+    last_venue = TEAM_ABBREV_MAP.get(last_venue, last_venue)
+    current_venue = TEAM_ABBREV_MAP.get(current_venue, current_venue)
+
+    result = {
+        'travel_distance': 0.0,
+        'timezone_change': 0,
+        'altitude_change': 0,
+        'altitude_disadvantage': 0.0,
+        'travel_fatigue_score': 0.0,
+        'coast_to_coast': 0,
+    }
+
+    last_arena = NBA_ARENA_DATA.get(last_venue)
+    current_arena = NBA_ARENA_DATA.get(current_venue)
+    if not last_arena or not current_arena:
+        return result
+
+    # Calculate distance
+    distance = haversine_distance(last_arena['coords'], current_arena['coords'])
+    result['travel_distance'] = round(distance, 1)
+
+    # Timezone change
+    result['timezone_change'] = current_arena['timezone'] - last_arena['timezone']
+
+    # Altitude change (significant for Denver/Utah)
+    result['altitude_change'] = current_arena['altitude'] - last_arena['altitude']
+    if current_arena['altitude'] >= 4000:
+        result['altitude_disadvantage'] = min(current_arena['altitude'] / 10000, 0.5)
+
+    # Coast-to-coast flag
+    if distance > 2000:
+        result['coast_to_coast'] = 1
+
+    # Calculate composite fatigue score (0-1 scale)
+    distance_factor = min(distance / 3000, 1.0) * 0.4
+    tz_factor = min(abs(result['timezone_change']) / 3, 1.0) * 0.25
+    alt_factor = result['altitude_disadvantage'] * 0.2
+    fatigue = distance_factor + tz_factor + alt_factor
+
+    # Rest mitigates fatigue
+    if days_rest >= 2:
+        fatigue *= 0.6
+    elif days_rest == 1:
+        fatigue *= 0.85
+
+    result['travel_fatigue_score'] = round(min(fatigue, 1.0), 3)
+    return result
+
+
+# =============================================================================
 # FEATURE VALIDATION - Critical for preventing broken model outputs
 # =============================================================================
 
@@ -700,21 +823,27 @@ class TeamFeatureGenerator:
             "reb_avg": overall.get("reb_avg", 0) or 0,
         }
 
-    def calculate_rest_and_fatigue(self, team_id, game_date=None):
+    def calculate_rest_and_fatigue(self, team_id, game_date=None, current_venue=None):
         """
-        Calculate rest days and back-to-back status for a team.
+        Calculate rest days, back-to-back status, and TRAVEL FATIGUE for a team.
+
+        TIER 1.2: Now includes travel fatigue calculation based on:
+        - Travel distance from last game venue
+        - Timezone changes
+        - Altitude changes (especially for Denver/Utah)
 
         Research shows:
         - Back-to-back games reduce win probability by 3-5%
-        - Each extra day of rest improves win probability by 2-3%
-        - 3+ days rest can actually hurt performance (rust factor)
+        - Coast-to-coast travel reduces performance by 2-4 points
+        - High altitude games require 24-48 hours to adjust
 
         Args:
             team_id: NBA team ID
             game_date: Date of upcoming game (defaults to today)
+            current_venue: Team abbreviation of current game venue (for travel calc)
 
         Returns:
-            Dictionary with rest/fatigue features
+            Dictionary with rest/fatigue features including travel fatigue
         """
         if game_date is None:
             game_date = datetime.now()
@@ -725,48 +854,53 @@ class TeamFeatureGenerator:
             except ValueError:
                 game_date = datetime.now()
 
-        # Fetch recent games to find last game date
+        # Fetch recent games to find last game date and venue
         games = fetch_historical_games(team_id=team_id, season=self.season, last_n_games=5)
 
-        if not games:
-            return {
-                "days_rest": 2,  # Default to 2 days rest
-                "is_back_to_back": 0,
-                "is_3_in_4": 0,
-                "rest_advantage": 0,
-                "fatigue_factor": 0,
-            }
+        default_result = {
+            "days_rest": 2,  # Default to 2 days rest
+            "is_back_to_back": 0,
+            "is_3_in_4": 0,
+            "rest_advantage": 0,
+            "fatigue_factor": 0,
+            # TIER 1.2: Travel fatigue defaults
+            "travel_distance": 0.0,
+            "timezone_change": 0,
+            "altitude_change": 0,
+            "altitude_disadvantage": 0.0,
+            "travel_fatigue_score": 0.0,
+            "coast_to_coast": 0,
+        }
 
-        # Parse game dates and sort (most recent first)
-        game_dates = []
+        if not games:
+            return default_result
+
+        # Parse game dates and matchups, sort by date (most recent first)
+        game_info = []
         for g in games:
             date_str = g.get("game_date")
+            matchup = g.get("matchup", "")  # e.g., "LAL vs. BOS" or "LAL @ BOS"
             if date_str:
                 try:
                     gd = datetime.strptime(date_str, "%Y-%m-%d")
-                    game_dates.append(gd)
+                    game_info.append({"date": gd, "matchup": matchup})
                 except ValueError:
                     continue
 
-        if not game_dates:
-            return {
-                "days_rest": 2,
-                "is_back_to_back": 0,
-                "is_3_in_4": 0,
-                "rest_advantage": 0,
-                "fatigue_factor": 0,
-            }
+        if not game_info:
+            return default_result
 
-        game_dates.sort(reverse=True)
-        last_game = game_dates[0]
-        days_rest = (game_date.date() - last_game.date()).days
+        game_info.sort(key=lambda x: x["date"], reverse=True)
+        last_game = game_info[0]
+        last_game_date = last_game["date"]
+        days_rest = (game_date.date() - last_game_date.date()).days
 
         # Check for back-to-back (0 or 1 day rest)
         is_back_to_back = 1 if days_rest <= 1 else 0
 
         # Check for 3 games in 4 nights
         four_days_ago = game_date - timedelta(days=4)
-        games_in_4 = sum(1 for d in game_dates if four_days_ago <= d < game_date)
+        games_in_4 = sum(1 for gi in game_info if four_days_ago <= gi["date"] < game_date)
         is_3_in_4 = 1 if games_in_4 >= 3 else 0
 
         # Calculate fatigue factor (-1 to +1 scale)
@@ -782,13 +916,43 @@ class TeamFeatureGenerator:
         else:
             fatigue_factor = 0
 
-        return {
+        result = {
             "days_rest": min(days_rest, 7),  # Cap at 7 days
             "is_back_to_back": is_back_to_back,
             "is_3_in_4": is_3_in_4,
             "rest_advantage": 0,  # Will be calculated in matchup
             "fatigue_factor": fatigue_factor,
+            # TIER 1.2: Travel fatigue defaults
+            "travel_distance": 0.0,
+            "timezone_change": 0,
+            "altitude_change": 0,
+            "altitude_disadvantage": 0.0,
+            "travel_fatigue_score": 0.0,
+            "coast_to_coast": 0,
         }
+
+        # TIER 1.2: Calculate travel fatigue if we know the current venue
+        if current_venue:
+            # Extract last game venue from matchup string
+            # Format: "LAL vs. BOS" (home game) or "LAL @ BOS" (away game)
+            matchup = last_game["matchup"]
+            last_venue = None
+            if " @ " in matchup:
+                # Away game - venue is the opponent
+                parts = matchup.split(" @ ")
+                if len(parts) == 2:
+                    last_venue = parts[1].strip()
+            elif " vs. " in matchup:
+                # Home game - venue is the team itself
+                parts = matchup.split(" vs. ")
+                if len(parts) == 2:
+                    last_venue = parts[0].strip()
+
+            if last_venue:
+                travel = calculate_travel_fatigue(last_venue, current_venue, days_rest)
+                result.update(travel)
+
+        return result
 
     def calculate_advanced_shooting(self, team_stats):
         """
@@ -832,7 +996,7 @@ class TeamFeatureGenerator:
             "fg3_rate": (fg3m / fgm) if fgm > 0 else 0.35,  # 3PT rate
         }
 
-    def generate_team_features(self, team_id, is_home=True, last_n_games=10, game_date=None):
+    def generate_team_features(self, team_id, is_home=True, last_n_games=10, game_date=None, current_venue=None):
         """
         Generate comprehensive features for a team.
 
@@ -842,6 +1006,7 @@ class TeamFeatureGenerator:
             last_n_games: Number of recent games for form calculation
             game_date: Game date (YYYY-MM-DD) - CRITICAL for preventing data leakage.
                       When set, only uses games BEFORE this date for features.
+            current_venue: Team abbreviation of current game venue (for TIER 1.2 travel fatigue)
 
         Returns:
             Dictionary with all team features
@@ -852,7 +1017,8 @@ class TeamFeatureGenerator:
         home_advantage = self.calculate_home_advantage(team_id)
         offensive = self.calculate_offensive_rating(team_stats)
         defensive = self.calculate_defensive_rating(team_stats)
-        rest_fatigue = self.calculate_rest_and_fatigue(team_id, game_date)
+        # TIER 1.2: Pass current_venue for travel fatigue calculation
+        rest_fatigue = self.calculate_rest_and_fatigue(team_id, game_date, current_venue=current_venue)
         advanced_shooting = self.calculate_advanced_shooting(team_stats)
 
         overall = team_stats.get("overall", {})
@@ -898,6 +1064,14 @@ class TeamFeatureGenerator:
             "is_3_in_4": rest_fatigue.get("is_3_in_4", 0),
             "fatigue_factor": rest_fatigue.get("fatigue_factor", 0),
 
+            # TIER 1.2: Travel fatigue features
+            "travel_distance": rest_fatigue.get("travel_distance", 0.0),
+            "timezone_change": rest_fatigue.get("timezone_change", 0),
+            "altitude_change": rest_fatigue.get("altitude_change", 0),
+            "altitude_disadvantage": rest_fatigue.get("altitude_disadvantage", 0.0),
+            "travel_fatigue_score": rest_fatigue.get("travel_fatigue_score", 0.0),
+            "coast_to_coast": rest_fatigue.get("coast_to_coast", 0),
+
             # NEW: Advanced shooting efficiency
             "ts_pct": advanced_shooting.get("ts_pct", 0.55),
             "efg_pct": advanced_shooting.get("efg_pct", 0.50),
@@ -923,12 +1097,15 @@ class MatchupFeatureGenerator:
         self._h2h_cache = None
         self._positional_cache = None
 
-    def _get_team_features(self, team_id: int, is_home: bool, last_n_games: int = 10, game_date: str = None) -> Dict:
-        """Get team features with caching to avoid duplicate API calls."""
-        cache_key = (team_id, is_home)
+    def _get_team_features(self, team_id: int, is_home: bool, last_n_games: int = 10, game_date: str = None, current_venue: str = None) -> Dict:
+        """Get team features with caching to avoid duplicate API calls.
+
+        TIER 1.2: Now accepts current_venue for travel fatigue calculations.
+        """
+        cache_key = (team_id, is_home, current_venue)
         if cache_key not in self._team_features_cache:
             self._team_features_cache[cache_key] = self.team_generator.generate_team_features(
-                team_id, is_home=is_home, last_n_games=last_n_games, game_date=game_date
+                team_id, is_home=is_home, last_n_games=last_n_games, game_date=game_date, current_venue=current_venue
             )
         return self._team_features_cache[cache_key]
 
@@ -1021,7 +1198,7 @@ class MatchupFeatureGenerator:
             },
         }
 
-    def generate_moneyline_features(self, home_team_id, away_team_id, last_n_games=10, include_advanced=True, game_date=None):
+    def generate_moneyline_features(self, home_team_id, away_team_id, last_n_games=10, include_advanced=True, game_date=None, venue=None):
         """
         Generate features for moneyline prediction.
 
@@ -1032,17 +1209,19 @@ class MatchupFeatureGenerator:
             include_advanced: Include H2H, positional, and injury analysis
             game_date: Game date (YYYY-MM-DD) - CRITICAL for preventing data leakage.
                       When training, pass the game date so only prior games are used.
+            venue: Team abbreviation of venue (TIER 1.2 travel fatigue)
 
         Returns:
             Dictionary with matchup features for moneyline prediction
         """
         # OPTIMIZED: Fetch home and away team features in parallel with caching
+        # TIER 1.2: Pass venue for travel fatigue calculations
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             home_future = executor.submit(
-                self._get_team_features, home_team_id, True, last_n_games, game_date
+                self._get_team_features, home_team_id, True, last_n_games, game_date, venue
             )
             away_future = executor.submit(
-                self._get_team_features, away_team_id, False, last_n_games, game_date
+                self._get_team_features, away_team_id, False, last_n_games, game_date, venue
             )
             home_features = home_future.result()
             away_features = away_future.result()
@@ -1102,6 +1281,17 @@ class MatchupFeatureGenerator:
             "away_is_3_in_4": away_features.get("is_3_in_4", 0),
             "fatigue_advantage": home_features.get("fatigue_factor", 0) - away_features.get("fatigue_factor", 0),
 
+            # TIER 1.2: Travel fatigue features - HIGH IMPACT
+            "home_travel_distance": home_features.get("travel_distance", 0.0),
+            "away_travel_distance": away_features.get("travel_distance", 0.0),
+            "home_travel_fatigue": home_features.get("travel_fatigue_score", 0.0),
+            "away_travel_fatigue": away_features.get("travel_fatigue_score", 0.0),
+            "travel_fatigue_diff": away_features.get("travel_fatigue_score", 0.0) - home_features.get("travel_fatigue_score", 0.0),
+            "home_altitude_disadvantage": home_features.get("altitude_disadvantage", 0.0),
+            "away_altitude_disadvantage": away_features.get("altitude_disadvantage", 0.0),
+            "home_coast_to_coast": home_features.get("coast_to_coast", 0),
+            "away_coast_to_coast": away_features.get("coast_to_coast", 0),
+
             # NEW: Advanced shooting efficiency - CRITICAL for accuracy
             "ts_pct_diff": home_features.get("ts_pct", 0.55) - away_features.get("ts_pct", 0.55),
             "efg_pct_diff": home_features.get("efg_pct", 0.50) - away_features.get("efg_pct", 0.50),
@@ -1134,7 +1324,7 @@ class MatchupFeatureGenerator:
         features = validate_features_dict(features, warn=True)
         return features
 
-    def generate_spread_features(self, home_team_id, away_team_id, last_n_games=10, include_advanced=True, game_date=None):
+    def generate_spread_features(self, home_team_id, away_team_id, last_n_games=10, include_advanced=True, game_date=None, venue=None):
         """
         Generate features for spread prediction.
 
@@ -1146,18 +1336,21 @@ class MatchupFeatureGenerator:
             last_n_games: Recent games for form calculation
             include_advanced: Include H2H, positional, and injury analysis
             game_date: Game date (YYYY-MM-DD) - CRITICAL for preventing data leakage.
+            venue: Team abbreviation of venue (TIER 1.2 travel fatigue)
 
         Returns:
             Dictionary with matchup features for spread prediction
         """
-        # Start with moneyline features - pass game_date to prevent leakage
+        # Start with moneyline features - pass game_date and venue to prevent leakage
+        # TIER 1.2: venue passed for travel fatigue
         features = self.generate_moneyline_features(
-            home_team_id, away_team_id, last_n_games, include_advanced, game_date=game_date
+            home_team_id, away_team_id, last_n_games, include_advanced, game_date=game_date, venue=venue
         )
 
         # OPTIMIZED: Use cached team features (already fetched by generate_moneyline_features)
-        home_features = self._get_team_features(home_team_id, True, last_n_games, game_date)
-        away_features = self._get_team_features(away_team_id, False, last_n_games, game_date)
+        # TIER 1.2: Pass venue for consistent caching
+        home_features = self._get_team_features(home_team_id, True, last_n_games, game_date, venue)
+        away_features = self._get_team_features(away_team_id, False, last_n_games, game_date, venue)
 
         # Additional spread-specific features
         spread_features = {
@@ -1843,17 +2036,22 @@ def generate_game_features(
 
     matchup_gen = MatchupFeatureGenerator(season, injury_manager)
 
+    # TIER 1.2: Pass home_team as venue for travel fatigue calculations
+    # The venue is where the game is being played (home team's arena)
+    home_abbrev = home_team.upper() if isinstance(home_team, str) else str(home_team)
+
     return {
         "home_team": home_team,
         "away_team": away_team,
         "home_team_id": home_id,
         "away_team_id": away_id,
         # CRITICAL: Pass game_date to prevent using future data in training
+        # TIER 1.2: Pass venue for travel fatigue calculations
         "moneyline_features": matchup_gen.generate_moneyline_features(
-            home_id, away_id, last_n_games, include_advanced, game_date=game_date
+            home_id, away_id, last_n_games, include_advanced, game_date=game_date, venue=home_abbrev
         ),
         "spread_features": matchup_gen.generate_spread_features(
-            home_id, away_id, last_n_games, include_advanced, game_date=game_date
+            home_id, away_id, last_n_games, include_advanced, game_date=game_date, venue=home_abbrev
         ),
         "total_features": matchup_gen.generate_total_points_features(home_id, away_id, last_n_games, game_date=game_date),
     }

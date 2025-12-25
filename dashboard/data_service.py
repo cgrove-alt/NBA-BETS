@@ -831,10 +831,12 @@ class DataService:
         """Generate spread prediction from features when ML model unavailable.
 
         Uses a weighted combination of key predictive features:
-        - net_rating_diff: Most predictive (net rating diff of 10 ≈ 10 point spread)
+        - vegas_spread: Most predictive - sharp money moves lines (TIER 1.1)
+        - net_rating_diff: Second most predictive (net rating diff of 10 ≈ 10 point spread)
         - expected_point_diff: Location-adjusted scoring differential
         - plus_minus_diff: Recent form indicator
         - h2h_spread_prediction: Historical matchup data
+        - travel_fatigue_diff: TIER 1.2 - Travel fatigue advantage (2-4 pts impact)
 
         Args:
             features: Dictionary of spread features from feature_engineering
@@ -848,31 +850,62 @@ class DataService:
         plus_minus_diff = features.get("plus_minus_diff", 0) or 0
         h2h_spread = features.get("h2h_spread_prediction", 0) or 0
 
-        # Weighted combination (net rating is most predictive for spread)
-        predicted_spread = (
-            net_rating_diff * 0.40 +       # Most predictive - 10 net rating ≈ 10 pts
-            expected_diff * 0.25 +          # Location-adjusted scoring
-            plus_minus_diff * 0.20 +        # Recent form
-            h2h_spread * 0.15               # Historical matchups
-        )
+        # TIER 1.1: Vegas spread is the most predictive single feature
+        vegas_spread = features.get("vegas_spread", 0) or 0
 
-        # Add home court advantage (~3 points in NBA)
-        predicted_spread += 3.0
+        # TIER 1.2: Travel fatigue - research shows 2-4 point impact for coast-to-coast
+        travel_fatigue_diff = features.get("travel_fatigue_diff", 0) or 0
+        away_altitude_disadvantage = features.get("away_altitude_disadvantage", 0) or 0
 
-        # Confidence based on feature magnitude and agreement
-        # Higher confidence when features agree on direction
-        feature_signs = [
-            1 if net_rating_diff > 0 else (-1 if net_rating_diff < 0 else 0),
-            1 if expected_diff > 0 else (-1 if expected_diff < 0 else 0),
-            1 if plus_minus_diff > 0 else (-1 if plus_minus_diff < 0 else 0),
-        ]
-        sign_agreement = abs(sum(feature_signs)) / 3.0  # 0 to 1
-        base_confidence = 0.55 + (sign_agreement * 0.15)  # 0.55 to 0.70
+        # Travel fatigue impact: +diff means away team more fatigued = home advantage
+        # Scale: 0.5 fatigue score diff ≈ 2 points impact
+        travel_adjustment = travel_fatigue_diff * 4.0  # Max ~2 pts for 0.5 diff
+        # Altitude disadvantage for away team (Denver/Utah = ~0.5) ≈ 1-2 pts impact
+        altitude_adjustment = away_altitude_disadvantage * 3.0  # Max ~1.5 pts
+
+        if vegas_spread != 0:
+            # When Vegas spread is available, use it as the primary signal
+            # Our model can find edge by adjusting Vegas spread based on factors Vegas may underweight
+            model_adjustment = (
+                net_rating_diff * 0.12 +       # Net rating adjustment
+                expected_diff * 0.08 +          # Location-adjusted scoring
+                plus_minus_diff * 0.08 +        # Recent form
+                h2h_spread * 0.04 +             # Historical matchups
+                travel_adjustment * 0.05 +      # TIER 1.2: Travel fatigue
+                altitude_adjustment * 0.03      # TIER 1.2: Altitude
+            )
+            # Vegas spread + small model adjustment (capped to prevent overcorrection)
+            adjustment = max(-3.0, min(3.0, model_adjustment))
+            predicted_spread = vegas_spread + adjustment
+
+            # Higher confidence when we have Vegas data
+            base_confidence = 0.68
+        else:
+            # Fallback to pure model-based prediction without Vegas
+            predicted_spread = (
+                net_rating_diff * 0.35 +       # Most predictive - 10 net rating ≈ 10 pts
+                expected_diff * 0.20 +          # Location-adjusted scoring
+                plus_minus_diff * 0.15 +        # Recent form
+                h2h_spread * 0.10 +             # Historical matchups
+                travel_adjustment * 0.10 +      # TIER 1.2: Travel fatigue (HIGH IMPACT)
+                altitude_adjustment * 0.10      # TIER 1.2: Altitude (HIGH IMPACT)
+            )
+            # Add home court advantage (~3 points in NBA)
+            predicted_spread += 3.0
+
+            # Lower confidence without Vegas data
+            feature_signs = [
+                1 if net_rating_diff > 0 else (-1 if net_rating_diff < 0 else 0),
+                1 if expected_diff > 0 else (-1 if expected_diff < 0 else 0),
+                1 if plus_minus_diff > 0 else (-1 if plus_minus_diff < 0 else 0),
+            ]
+            sign_agreement = abs(sum(feature_signs)) / 3.0  # 0 to 1
+            base_confidence = 0.55 + (sign_agreement * 0.15)  # 0.55 to 0.70
 
         return {
             "predicted_spread": round(predicted_spread, 1),
             "confidence": round(base_confidence, 2),
-            "method": "feature_based"
+            "method": "feature_based_vegas" if vegas_spread != 0 else "feature_based"
         }
 
     def get_todays_games(self, force_refresh: bool = False) -> List[Dict]:
@@ -1382,6 +1415,11 @@ class DataService:
                 }
                 return
 
+            # TIER 1.1: Fetch Vegas odds for line movement integration
+            vegas_odds = self._get_market_odds(game_id, home_abbrev, away_abbrev)
+            vegas_spread = vegas_odds.get('spread', {}).get('home_line', 0) if vegas_odds else 0
+            vegas_ml_home = vegas_odds.get('moneyline', {}).get('home', -110) if vegas_odds else -110
+
             # Fetch injury data from ESPN and create InjuryReportManager
             injury_manager = self.get_injury_manager(home_abbrev, away_abbrev)
 
@@ -1405,6 +1443,21 @@ class DataService:
                 except Exception as e:
                     print(f"Background: Feature generation error: {e}", flush=True)
                     traceback.print_exc()
+
+            # TIER 1.1: Add Vegas line features to spread_features for improved predictions
+            # Sharp money moves lines - this is one of the most predictive signals
+            if features.get("spread_features") and vegas_spread != 0:
+                spread_features = features["spread_features"]
+                # Vegas spread is already the "consensus" prediction
+                spread_features["vegas_spread"] = vegas_spread
+                # Calculate implied probability from moneyline
+                if vegas_ml_home < 0:
+                    vegas_implied_prob = abs(vegas_ml_home) / (abs(vegas_ml_home) + 100)
+                else:
+                    vegas_implied_prob = 100 / (vegas_ml_home + 100)
+                spread_features["vegas_implied_home_prob"] = vegas_implied_prob
+                spread_features["vegas_implied_away_prob"] = 1 - vegas_implied_prob
+                print(f"Background: Added Vegas features - spread={vegas_spread}, implied_prob={vegas_implied_prob:.1%}", flush=True)
 
             moneyline_pred = None
             spread_pred = None
