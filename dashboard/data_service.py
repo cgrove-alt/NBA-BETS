@@ -728,6 +728,12 @@ class DataService:
             print(f"Error loading spread model: {e}")
             traceback.print_exc()
 
+        # Log spread model status
+        if self._spread_model:
+            print(f"Spread model loaded successfully")
+        else:
+            print(f"Spread model not available - will use feature-based fallback")
+
         # Load prop models with full metadata (model, scaler, feature_names)
         prop_types = ["points", "rebounds", "assists", "threes", "pra"]
         self._prop_model_data = {}  # Store full model data (model, scaler, feature_names)
@@ -820,6 +826,54 @@ class DataService:
         if self._continuous_learning:
             return self._continuous_learning.get_status()
         return {'status': 'not_initialized'}
+
+    def _feature_based_spread_prediction(self, features: Dict) -> Dict:
+        """Generate spread prediction from features when ML model unavailable.
+
+        Uses a weighted combination of key predictive features:
+        - net_rating_diff: Most predictive (net rating diff of 10 ≈ 10 point spread)
+        - expected_point_diff: Location-adjusted scoring differential
+        - plus_minus_diff: Recent form indicator
+        - h2h_spread_prediction: Historical matchup data
+
+        Args:
+            features: Dictionary of spread features from feature_engineering
+
+        Returns:
+            Dict with predicted_spread, confidence, and method='feature_based'
+        """
+        # Extract features with None handling
+        expected_diff = features.get("expected_point_diff", 0) or 0
+        net_rating_diff = features.get("net_rating_diff", 0) or 0
+        plus_minus_diff = features.get("plus_minus_diff", 0) or 0
+        h2h_spread = features.get("h2h_spread_prediction", 0) or 0
+
+        # Weighted combination (net rating is most predictive for spread)
+        predicted_spread = (
+            net_rating_diff * 0.40 +       # Most predictive - 10 net rating ≈ 10 pts
+            expected_diff * 0.25 +          # Location-adjusted scoring
+            plus_minus_diff * 0.20 +        # Recent form
+            h2h_spread * 0.15               # Historical matchups
+        )
+
+        # Add home court advantage (~3 points in NBA)
+        predicted_spread += 3.0
+
+        # Confidence based on feature magnitude and agreement
+        # Higher confidence when features agree on direction
+        feature_signs = [
+            1 if net_rating_diff > 0 else (-1 if net_rating_diff < 0 else 0),
+            1 if expected_diff > 0 else (-1 if expected_diff < 0 else 0),
+            1 if plus_minus_diff > 0 else (-1 if plus_minus_diff < 0 else 0),
+        ]
+        sign_agreement = abs(sum(feature_signs)) / 3.0  # 0 to 1
+        base_confidence = 0.55 + (sign_agreement * 0.15)  # 0.55 to 0.70
+
+        return {
+            "predicted_spread": round(predicted_spread, 1),
+            "confidence": round(base_confidence, 2),
+            "method": "feature_based"
+        }
 
     def get_todays_games(self, force_refresh: bool = False) -> List[Dict]:
         """Get today's scheduled NBA games.
@@ -1398,17 +1452,24 @@ class DataService:
                     print(f"Background: Moneyline prediction error: {e}", flush=True)
                     traceback.print_exc()
 
-            # Make spread prediction
-            if self._spread_model and features.get("spread_features"):
-                try:
-                    spread_features = features["spread_features"]
-                    spread_pred = self._spread_model.predict(spread_features)
-                    print(f"Background: Spread prediction: {spread_pred}", flush=True)
-                except Exception as e:
-                    print(f"Background: Spread prediction error: {e}", flush=True)
-                    traceback.print_exc()
+            # Make spread prediction (with feature-based fallback)
+            if features.get("spread_features"):
+                spread_features = features["spread_features"]
+                if self._spread_model:
+                    try:
+                        spread_pred = self._spread_model.predict(spread_features)
+                        spread_pred["method"] = "ml_model"
+                        print(f"Background: Spread prediction (ML): {spread_pred}", flush=True)
+                    except Exception as e:
+                        print(f"Background: Spread ML error, using feature-based: {e}", flush=True)
+                        spread_pred = self._feature_based_spread_prediction(spread_features)
+                        print(f"Background: Spread prediction (fallback): {spread_pred}", flush=True)
+                else:
+                    # No ML model available - use feature-based prediction
+                    spread_pred = self._feature_based_spread_prediction(spread_features)
+                    print(f"Background: Spread prediction (feature-based): {spread_pred}", flush=True)
 
-            # Store results - NO FALLBACKS, return unavailable if ML failed
+            # Store results
             self._analysis_status[game_id] = {
                 'status': 'ready',
                 'moneyline': moneyline_pred if moneyline_pred else {"status": "unavailable", "reason": "ML prediction failed"},
