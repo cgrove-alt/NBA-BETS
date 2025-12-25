@@ -682,6 +682,29 @@ class DataService:
             print(f"Error loading moneyline model: {e}")
             traceback.print_exc()
 
+        # Fallback: Try simpler moneyline models if ensemble failed
+        if not self._moneyline_model:
+            fallback_models = ["moneyline_gradient_boosting.pkl", "moneyline_logistic_regression.pkl"]
+            for fallback in fallback_models:
+                try:
+                    fb_path = model_dir / fallback
+                    if fb_path.exists():
+                        with open(fb_path, "rb") as f:
+                            loaded = pickle.load(f)
+                        if isinstance(loaded, dict) and 'model' in loaded:
+                            self._moneyline_model = loaded['model']
+                            self._moneyline_scaler = loaded.get('scaler')
+                            self._moneyline_features = loaded.get('feature_names', [])
+                        else:
+                            self._moneyline_model = loaded
+                        if hasattr(self._moneyline_model, 'predict'):
+                            print(f"Moneyline FALLBACK loaded: {fallback}")
+                            break
+                        else:
+                            self._moneyline_model = None
+                except Exception as fb_e:
+                    print(f"Fallback {fallback} failed: {fb_e}")
+
         # Load spread model
         try:
             spread_path = model_dir / "spread_ensemble.pkl"
@@ -1336,8 +1359,41 @@ class DataService:
             if self._moneyline_model and features.get("moneyline_features"):
                 try:
                     ml_features = features["moneyline_features"]
-                    moneyline_pred = self._moneyline_model.predict(ml_features)
-                    print(f"Background: Moneyline prediction: {moneyline_pred}", flush=True)
+
+                    # Convert dict features to 2D array in correct order
+                    if isinstance(ml_features, dict) and self._moneyline_features:
+                        import numpy as np
+                        feature_values = []
+                        for feat_name in self._moneyline_features:
+                            val = ml_features.get(feat_name, 0)
+                            # Handle nested dicts or non-numeric values
+                            if isinstance(val, dict):
+                                val = 0
+                            feature_values.append(float(val) if val is not None else 0.0)
+                        X = np.array([feature_values])
+
+                        # Apply scaler if available
+                        if self._moneyline_scaler:
+                            X = self._moneyline_scaler.transform(X)
+                    else:
+                        X = ml_features
+
+                    # Get prediction and probability
+                    prediction = self._moneyline_model.predict(X)[0]
+                    proba = self._moneyline_model.predict_proba(X)[0] if hasattr(self._moneyline_model, 'predict_proba') else [0.5, 0.5]
+
+                    # Format as expected by frontend
+                    home_prob = float(proba[1]) if len(proba) > 1 else 0.5
+                    away_prob = float(proba[0]) if len(proba) > 0 else 0.5
+
+                    moneyline_pred = {
+                        "home_win_probability": round(home_prob, 3),
+                        "away_win_probability": round(away_prob, 3),
+                        "predicted_winner": "home" if home_prob > 0.5 else "away",
+                        "confidence": round(max(home_prob, away_prob), 3),
+                        "calibrated": True
+                    }
+                    print(f"Background: Moneyline prediction: home={home_prob:.1%}, away={away_prob:.1%}", flush=True)
                 except Exception as e:
                     print(f"Background: Moneyline prediction error: {e}", flush=True)
                     traceback.print_exc()
