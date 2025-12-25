@@ -424,6 +424,83 @@ class PropTracker:
         print(f"\n{'='*60}\n")
 
 
+    def get_player_performance(self, min_predictions: int = 20, days: int = 60) -> Dict:
+        """Get player-level prediction performance for blacklist/whitelist.
+
+        Players with <30% win rate on 20+ predictions should be blacklisted.
+        Players with >60% win rate on 20+ predictions can be whitelisted.
+
+        Args:
+            min_predictions: Minimum predictions to include player
+            days: Number of days to look back
+
+        Returns:
+            Dict with blacklist and whitelist player IDs
+        """
+        cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT
+                    player_id,
+                    player_name,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins
+                FROM prop_predictions
+                WHERE is_settled = 1 AND hit >= 0
+                  AND game_date >= ?
+                GROUP BY player_id, player_name
+                HAVING COUNT(*) >= ?
+                ORDER BY total DESC
+            """, (cutoff_date, min_predictions))
+
+            blacklist = []  # Players with <30% win rate
+            whitelist = []  # Players with >60% win rate
+            all_players = []
+
+            for row in cursor.fetchall():
+                player_id, player_name, total, wins = row
+                win_rate = wins / total if total > 0 else 0
+
+                player_data = {
+                    'player_id': player_id,
+                    'player_name': player_name,
+                    'total': total,
+                    'wins': wins,
+                    'win_rate': win_rate,
+                }
+                all_players.append(player_data)
+
+                # Blacklist: consistently bad predictions
+                if win_rate < 0.30:
+                    blacklist.append(player_id)
+
+                # Whitelist: consistently good predictions
+                elif win_rate > 0.60:
+                    whitelist.append(player_id)
+
+            return {
+                'blacklist': blacklist,
+                'whitelist': whitelist,
+                'all_players': all_players,
+                'blacklist_count': len(blacklist),
+                'whitelist_count': len(whitelist),
+            }
+
+    def get_blacklisted_players(self, min_predictions: int = 20, days: int = 60) -> List[int]:
+        """Get list of player IDs that should be blacklisted (skipped).
+
+        Args:
+            min_predictions: Minimum predictions to qualify
+            days: Number of days to look back
+
+        Returns:
+            List of player IDs to skip
+        """
+        performance = self.get_player_performance(min_predictions, days)
+        return performance['blacklist']
+
+
 # Convenience function for quick reporting
 def print_prop_report(days: int = 30, db_path: str = None):
     """Print prop performance report."""

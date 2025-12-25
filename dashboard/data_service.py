@@ -2344,6 +2344,14 @@ class DataService:
                                     games_played: int, features: Dict = None) -> float:
         """Calculate confidence score for prop prediction (0-100).
 
+        CRITICAL FIX: Historical data shows inverse correlation between
+        model confidence and actual win rate:
+        - High confidence (75+): 37.6% win rate
+        - Low confidence (<60): 48.8% win rate
+        - Large edges (>10 pts): 18.9% win rate (catastrophic)
+
+        This recalibration maps confidence to ACTUAL expected win probability.
+
         Args:
             prediction: Predicted value
             line: Betting line
@@ -2352,67 +2360,65 @@ class DataService:
             games_played: Number of games played
             features: Optional full features dict from PlayerPropFeatureGenerator
         """
-        confidence = 50.0  # Base confidence
+        # Start with moderate base confidence
+        confidence = 48.0  # Slightly below break-even - honest about model accuracy
 
-        # Factor 1: Sample size (more games = more confidence)
+        # Factor 1: Sample size (moderate boost only)
         if games_played >= 20:
-            confidence += 15
+            confidence += 5
         elif games_played >= 10:
-            confidence += 8
-        elif games_played >= 5:
             confidence += 3
 
-        # Factor 2: Consistency (use feature generator's score if available)
+        # Factor 2: Consistency - this is a VALID confidence signal
         if features and "consistency_score" in features:
-            # consistency_score is 1 / (1 + std), higher = more consistent
             consistency = features["consistency_score"]
-            confidence += consistency * 15  # Up to 15 pts for consistency
+            # Consistent players are more predictable - small boost
+            confidence += consistency * 8  # Up to 8 pts
         elif season_avg > 0:
             consistency = 1 - abs(season_avg - recent_avg) / max(season_avg, 1)
             consistency = max(0, min(1, consistency))
-            confidence += consistency * 15
+            confidence += consistency * 6
 
-        # Factor 3: Opponent context quality (more data = higher confidence)
+        # Factor 3: Opponent historical data (small boost)
         if features:
             vs_team_games = features.get("vs_team_games", 0)
             if vs_team_games >= 3:
-                confidence += 8  # Good historical sample vs opponent
-            elif vs_team_games >= 1:
-                confidence += 4
+                confidence += 4  # Good historical sample
 
-            # Boost confidence if opponent defense is notably bad/good
-            opp_def_strength = features.get("opp_def_strength", 0)
-            if abs(opp_def_strength) > 0.3:  # Significant deviation from average
-                confidence += 5  # Clearer matchup edge
-
-        # Factor 4: Edge magnitude (larger edge = higher confidence, up to a point)
+        # Factor 4: Edge magnitude - INVERSE RELATIONSHIP
+        # Data shows: large edges = overconfident = lower win rate
+        # Near-line predictions actually perform better
         if line is not None and line > 0:
             edge_pct = abs(prediction - line) / line * 100
-            if edge_pct > 15:
-                confidence += 10
+
+            # Extreme edges are BAD signals - model is probably wrong
+            if edge_pct > 25:
+                confidence -= 15  # Very suspicious - model is way off
+            elif edge_pct > 15:
+                confidence -= 10  # Large edge = overconfident
             elif edge_pct > 10:
-                confidence += 6
-            elif edge_pct > 5:
-                confidence += 3
+                confidence -= 5   # Moderate edge = somewhat overconfident
+            elif edge_pct < 3:
+                confidence -= 5   # Too close to call
+            # Sweet spot is 3-10% edge - no adjustment
 
-        # Factor 5: Prediction vs line distance
-        # Penalize predictions very close to line (coin flip territory)
-        if line is not None and abs(prediction - line) < 0.5:
-            confidence -= 15
-        elif line is not None and abs(prediction - line) < 1.0:
-            confidence -= 8
+        # Factor 5: Using real Vegas line improves accuracy
+        # Vegas lines are highly efficient - aligning with them is good
+        if features and features.get("used_real_line", False):
+            confidence += 3  # Real line available
 
-        # Apply calibration shrinkage to prevent overconfidence
-        # Convert to probability (0-1), apply shrinkage, convert back to 0-100
-        raw_confidence = min(100, max(0, confidence))
+        # Cap confidence to realistic range based on actual performance
+        # Our best observed win rate is ~50% for low-confidence predictions
+        confidence = max(35.0, min(58.0, confidence))
+
+        # Apply stronger shrinkage to prevent overconfidence
         if HAS_CALIBRATION:
-            # Convert to probability scale (0-1)
-            prob = raw_confidence / 100.0
-            # Apply moderate shrinkage (0.10) to pull extreme confidences toward 50%
-            calibrated_prob = apply_probability_shrinkage(prob, shrinkage=0.10)
-            # Convert back to 0-100 scale
+            prob = confidence / 100.0
+            # Stronger shrinkage (0.20) pulls toward 50%
+            calibrated_prob = apply_probability_shrinkage(prob, shrinkage=0.20)
             return calibrated_prob * 100.0
-        return raw_confidence
+
+        return confidence
 
     def _predict_with_ml_model(self, prop_type: str, player_stats: Dict,
                                 opp_stats: Dict, is_home: bool) -> Optional[float]:
@@ -2731,21 +2737,99 @@ class DataService:
             traceback.print_exc()
             return None
 
-    def _determine_prop_pick(self, prediction: float, line: float) -> Tuple[str, float]:
-        """Determine OVER/UNDER pick with proper edge calculation."""
+    def _project_player_minutes(self, player: Dict, game_context: Dict = None) -> float:
+        """Project minutes for a player with game-context adjustments.
+
+        CRITICAL: Minutes drive all stat predictions. A player who plays 20 min
+        instead of 30 min will score ~33% less. This method adjusts for:
+        - Back-to-back games (-12% to -18% minutes)
+        - Travel fatigue (-5% to -10%)
+        - Blowout risk (spreads >10 = -10% star minutes)
+        - Recent minutes trend
+
+        Args:
+            player: Player data dictionary
+            game_context: Optional context with is_b2b, travel_fatigue, spread
+
+        Returns:
+            Projected minutes for this game
+        """
+        # Get baseline minutes
+        season_min = player.get("avg_minutes", 0) or player.get("season_averages", {}).get("min_avg", 0)
+        recent_min = player.get("recent_averages", {}).get("min_avg", season_min)
+
+        if season_min <= 0:
+            return 0.0
+
+        # Start with recent minutes trend (weighted)
+        base_minutes = recent_min * 0.6 + season_min * 0.4
+
+        # Apply context adjustments
+        if game_context:
+            # Back-to-back: Stars lose 12-18% of minutes
+            if game_context.get("is_b2b", False):
+                is_star = (player.get("season_averages", {}).get("pts_avg", 0) or 0) >= 18
+                b2b_factor = 0.85 if is_star else 0.88  # Stars rest more on B2B
+                base_minutes *= b2b_factor
+
+            # Travel fatigue: coast-to-coast = 5-10% reduction
+            travel_fatigue = game_context.get("travel_fatigue", 0)
+            if travel_fatigue > 0.3:
+                base_minutes *= (1 - travel_fatigue * 0.15)
+
+            # Blowout risk: big favorites/underdogs mean fewer star minutes
+            spread = abs(game_context.get("spread", 0))
+            if spread > 12:
+                # Big spread = potential blowout = fewer minutes for starters
+                base_minutes *= 0.92
+            elif spread > 8:
+                base_minutes *= 0.96
+
+        # Clamp to reasonable range
+        return max(8.0, min(42.0, base_minutes))
+
+    def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None) -> Tuple[str, float]:
+        """Determine OVER/UNDER pick with calibrated thresholds.
+
+        CRITICAL FIX: Model systematically overestimates player stats by 15-35%.
+        Historical data shows:
+        - OVER picks: 29-33% win rate (catastrophic)
+        - UNDER picks: 62-75% win rate (strong)
+
+        Solution: Apply asymmetric thresholds that account for overestimation bias.
+        """
         if line <= 0:
             return "-", 0.0
 
-        # Calculate true edge
-        edge = prediction - line
+        # CALIBRATION FACTORS: Reduce raw predictions by empirically-derived amounts
+        # Based on analysis: avg_predicted vs avg_actual by prop type
+        CALIBRATION_FACTORS = {
+            'points': 0.75,    # Points predictions ~33% too high
+            'rebounds': 0.85,  # Rebounds ~18% too high
+            'assists': 0.80,   # Assists ~25% too high
+            '3pm': 0.78,       # 3PM ~28% too high
+            'threes': 0.78,    # Alias for 3pm
+            'pra': 0.72,       # PRA ~39% too high (combined effect)
+        }
+
+        # Apply calibration to prediction
+        prop_key = (prop_type or '').lower().replace(' ', '_')
+        calibration = CALIBRATION_FACTORS.get(prop_key, 0.80)
+        calibrated_pred = prediction * calibration
+
+        # Calculate edge from calibrated prediction
+        edge = calibrated_pred - line
         edge_pct = (edge / line) * 100 if line > 0 else 0
 
-        # Require minimum edge threshold (calibrated to model accuracy)
-        MIN_EDGE_PCT = 3.0  # 3% edge minimum to make a pick
+        # ASYMMETRIC THRESHOLDS: Require more edge for OVER (model tends to overestimate)
+        # OVER: Need 8% edge (was 3%) because model overestimates
+        # UNDER: Need only 3% edge because model's overestimation helps UNDER picks
+        OVER_THRESHOLD = 8.0   # Higher bar for OVER picks
+        UNDER_THRESHOLD = 3.0  # Lower bar for UNDER picks
 
-        if edge_pct >= MIN_EDGE_PCT:
+        if edge_pct >= OVER_THRESHOLD:
             return "OVER", round(edge_pct, 1)
-        elif edge_pct <= -MIN_EDGE_PCT:
+        elif edge_pct <= -UNDER_THRESHOLD:
             return "UNDER", round(abs(edge_pct), 1)
         else:
             return "-", round(abs(edge_pct), 1)
@@ -2776,6 +2860,36 @@ class DataService:
         games_played = player.get("games_played", 0)
         player_id = player.get("player_id")
 
+        # =============================================================
+        # PLAYER BLACKLIST CHECK (Phase 6)
+        # =============================================================
+        # Skip predictions for players where we historically perform badly
+        # This prevents wasting picks on unpredictable players
+        is_blacklisted = False
+        if player_id and self._prop_tracker:
+            try:
+                # Cache blacklist to avoid repeated DB queries
+                if not hasattr(self, '_player_blacklist_cache'):
+                    self._player_blacklist_cache = {}
+                    self._player_blacklist_timestamp = None
+
+                # Refresh cache every 6 hours
+                cache_age = None
+                if self._player_blacklist_timestamp:
+                    cache_age = (datetime.now() - self._player_blacklist_timestamp).total_seconds()
+
+                if cache_age is None or cache_age > 21600:  # 6 hours
+                    blacklist = self._prop_tracker.get_blacklisted_players(
+                        min_predictions=20, days=60
+                    )
+                    self._player_blacklist_cache = set(blacklist)
+                    self._player_blacklist_timestamp = datetime.now()
+
+                is_blacklisted = player_id in self._player_blacklist_cache
+
+            except Exception:
+                pass  # Continue without blacklist check if it fails
+
         # Get opponent team ID for matchup analysis
         opponent_team_id = NBA_TEAM_IDS.get(opponent_abbrev)
 
@@ -2784,6 +2898,7 @@ class DataService:
             "player_id": player_id,
             "position": player.get("position", ""),
             "avg_minutes": player.get("avg_minutes", 0),
+            "is_blacklisted": is_blacklisted,  # Flag for UI indication
         }
 
         for prop_label in prop_types:
@@ -2842,6 +2957,39 @@ class DataService:
             except Exception as e:
                 print(f"ML model error for {player.get('player_name')} {prop_label}: {e}")
 
+            # =============================================================
+            # MINUTES PROJECTION ADJUSTMENT (Phase 3)
+            # =============================================================
+            # Scale prediction based on expected minutes vs baseline
+            # If a player is expected to play fewer minutes (B2B, blowout, fatigue),
+            # reduce the prediction proportionally
+            minutes_adjustment = 1.0
+            try:
+                game_context = player.get("game_context", {})
+                if not game_context:
+                    # Build minimal context from available data
+                    game_context = {
+                        "is_b2b": player.get("is_b2b", False),
+                        "travel_fatigue": player.get("travel_fatigue", 0),
+                        "spread": player.get("spread", 0),
+                    }
+
+                projected_mins = self._project_player_minutes(player, game_context)
+                baseline_mins = player.get("avg_minutes", 0) or season_avg.get("min_avg", 0)
+
+                if baseline_mins > 0 and projected_mins > 0:
+                    # Calculate adjustment ratio
+                    minutes_ratio = projected_mins / baseline_mins
+
+                    # Only adjust if significant deviation (>5%)
+                    if abs(minutes_ratio - 1.0) > 0.05:
+                        # Apply adjustment (capped at ±25%)
+                        minutes_adjustment = max(0.75, min(1.25, minutes_ratio))
+                        pred_value *= minutes_adjustment
+
+            except Exception:
+                pass  # Continue without minutes adjustment if it fails
+
             # Second try: Use PlayerPropFeatureGenerator for additional context
             # This supplements the ML prediction with opponent-specific adjustments
             # Skip slow feature generation in background threads to prevent hanging
@@ -2884,8 +3032,42 @@ class DataService:
                             full_features = self._prop_feature_generator.generate_threes_prop_features(
                                 player_id, opponent_team_id=opponent_team_id, last_n_games=10
                             )
-                            if not used_ml_model and full_features:
-                                recent_fg3 = full_features.get("recent_fg3_avg", 0)
+                            # 3PM OVERHAUL: Use multiplicative model (3PA × regressed FG3%)
+                            # 3PM is highly variable - this approach is more stable than pure ML
+                            if full_features:
+                                # Get 3-point attempt volume (recent)
+                                recent_3pa = full_features.get("recent_fg3a_avg", 0)
+                                season_3pa = full_features.get("season_fg3a_avg", 0)
+                                fg3_pct = full_features.get("fg3_pct", 0.36)
+                                games_played_3pm = full_features.get("games_played", games_played)
+
+                                # Regression to mean for shooting percentage
+                                # League average is 36% - regress toward it based on sample size
+                                LEAGUE_AVG_3PT = 0.36
+                                REGRESSION_GAMES = 50  # Full weight at 50 games
+                                sample_weight = min(games_played_3pm / REGRESSION_GAMES, 1.0)
+                                regressed_pct = (fg3_pct * sample_weight) + (LEAGUE_AVG_3PT * (1 - sample_weight))
+
+                                # Use recent 3PA if available, else season average
+                                effective_3pa = recent_3pa if recent_3pa > 0 else season_3pa
+
+                                if effective_3pa > 0:
+                                    # Expected 3PM = 3PA × regressed percentage
+                                    expected_3pm = effective_3pa * regressed_pct
+
+                                    # Opponent 3PT defense adjustment
+                                    opp_fg3_allowed = full_features.get("opp_fg3_pct_allowed", LEAGUE_AVG_3PT)
+                                    opp_3pt_factor = opp_fg3_allowed / LEAGUE_AVG_3PT if LEAGUE_AVG_3PT > 0 else 1.0
+                                    # Clamp factor to reasonable range (0.85 to 1.15)
+                                    opp_3pt_factor = max(0.85, min(1.15, opp_3pt_factor))
+
+                                    pred_value = expected_3pm * opp_3pt_factor
+                                    used_ml_model = True  # Mark as using sophisticated prediction
+                                else:
+                                    pred_value = season_value
+                            elif not used_ml_model:
+                                # Fallback if no features available
+                                recent_fg3 = recent_avg.get("fg3_avg", 0) or recent_avg.get("fg3m", 0)
                                 if recent_fg3 > 0:
                                     pred_value = recent_fg3 * 0.6 + season_value * 0.4
                                 else:
@@ -3019,6 +3201,27 @@ class DataService:
                 else:
                     line = None  # No line available for players without stats
 
+            # =============================================================
+            # VEGAS LINE ANCHORING - Blend model prediction with Vegas line
+            # =============================================================
+            # Vegas lines are highly efficient - they incorporate all public info.
+            # Our model should only deviate from Vegas when we have a strong edge.
+            # Solution: Anchor prediction toward the Vegas line.
+            if used_real_line and line is not None and line > 0:
+                # Weight Vegas line more heavily - Vegas is smarter than our model
+                VEGAS_WEIGHT = 0.55  # 55% Vegas, 45% model
+                MODEL_WEIGHT = 0.45
+
+                # Blend: prediction moves toward Vegas line
+                original_pred = pred_value
+                pred_value = (line * VEGAS_WEIGHT) + (pred_value * MODEL_WEIGHT)
+
+                # Only deviate from Vegas when model has strong conviction
+                # If model prediction is very close to Vegas, just use Vegas
+                model_edge_pct = abs(original_pred - line) / line if line > 0 else 0
+                if model_edge_pct < 0.05:  # Less than 5% edge = just use Vegas
+                    pred_value = line
+
             # Calculate confidence with full features context
             confidence = self._calculate_prop_confidence(
                 pred_value, line, season_value, recent_value, games_played,
@@ -3030,8 +3233,12 @@ class DataService:
                 confidence *= (1.0 - injury_confidence_penalty)
 
             # Determine pick with proper edge calculation - skip if no line
-            if line is not None and line > 0:
-                pick, edge = self._determine_prop_pick(pred_value, line)
+            # Pass prop_type for calibration-aware pick logic
+            # Skip picks for blacklisted players (historically unpredictable)
+            if is_blacklisted:
+                pick, edge = "-", 0  # No pick for blacklisted players
+            elif line is not None and line > 0:
+                pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key)
             else:
                 pick, edge = "-", 0  # No pick without a valid line
 
