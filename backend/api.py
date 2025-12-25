@@ -489,46 +489,6 @@ def get_game_results(game_id: str):
                             "pick": player.get(f"{prop_key}_pick", "-"),
                         })
 
-    # FALLBACK 2: If still no predictions, generate from player stats
-    # This uses actual stats to create a comparison table (showing what happened)
-    if not predictions and player_stats_list:
-        home_team_id = game.get('home_team', {}).get('id')
-        for stat in player_stats_list:
-            player_info = stat.get('player', {})
-            player_id = player_info.get('id')
-            if not player_id:
-                continue
-
-            player_name = f"{player_info.get('first_name', '')} {player_info.get('last_name', '')}".strip()
-            team_data = stat.get('team', {})
-            team_abbrev = team_data.get('abbreviation', '')
-
-            # Get actual stats
-            pts = stat.get('pts', 0) or 0
-            reb = stat.get('reb', 0) or 0
-            ast = stat.get('ast', 0) or 0
-            fg3m = stat.get('fg3m', 0) or 0
-            pra = pts + reb + ast
-
-            # Only include players who actually played (have minutes or stats)
-            min_played = stat.get('min', '') or ''
-            if not min_played and pts == 0 and reb == 0 and ast == 0:
-                continue
-
-            # Create entries for each stat type (no predictions, just actuals)
-            for prop_type, actual_val in [('points', pts), ('rebounds', reb),
-                                          ('assists', ast), ('3pm', fg3m), ('pra', pra)]:
-                if actual_val > 0 or prop_type in ['points', 'rebounds', 'assists']:
-                    predictions.append({
-                        "player_id": player_id,
-                        "player_name": player_name,
-                        "team_abbrev": team_abbrev,
-                        "prop_type": prop_type,
-                        "predicted_value": actual_val,  # Use actual as "prediction" for display
-                        "market_line": None,
-                        "pick": "-",  # No pick since we didn't predict
-                    })
-
     # Get moneyline prediction for comparison
     analysis = service.get_game_analysis(game_id)
     moneyline_result = None

@@ -10,7 +10,7 @@ Automatically settles predictions with actual game results by:
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -124,56 +124,54 @@ class SettlementService:
             "skipped_games": skipped_games,
         }
 
-    def _fetch_box_score(self, game_id: int) -> Optional[Dict]:
-        """Fetch box score from Balldontlie API.
+    def _fetch_box_score(self, game_id: int) -> Optional[List]:
+        """Fetch player stats for a game from Balldontlie API.
 
         Args:
             game_id: Numeric game ID
 
         Returns:
-            Box score data or None if unavailable
+            List of player stats or None if unavailable
         """
         if not self.api:
             return None
 
         try:
-            return self.api.get_box_score(game_id)
+            # Use get_player_stats instead of non-existent get_box_score
+            # API returns a list directly, not a dict with 'data' key
+            stats = self.api.get_player_stats(game_ids=[game_id])
+            if stats and isinstance(stats, list) and len(stats) > 0:
+                return stats
+            return None
         except Exception as e:
-            print(f"Error fetching box score for game {game_id}: {e}")
+            print(f"Error fetching player stats for game {game_id}: {e}")
             return None
 
-    def _extract_player_stats(self, box_score: Dict) -> Dict[int, Dict]:
-        """Extract player stats from box score response.
+    def _extract_player_stats(self, stats_list: List) -> Dict[int, Dict]:
+        """Extract player stats from player stats API response.
 
         Args:
-            box_score: Box score data from API
+            stats_list: List of player stats from get_player_stats API
 
         Returns:
             Dict mapping player_id to their stats {pts, reb, ast, fg3m}
         """
         stats = {}
 
-        # Handle different response formats
-        data = box_score.get('data', box_score)
-
-        if isinstance(data, list):
-            players = data
-        elif isinstance(data, dict):
-            players = data.get('players', [])
-        else:
+        if not isinstance(stats_list, list):
             return stats
 
-        for player in players:
-            # Try different key formats
-            player_info = player.get('player', player)
-            player_id = player_info.get('id') or player.get('player_id')
+        for stat in stats_list:
+            # Player ID is nested in player object
+            player = stat.get('player', {})
+            player_id = player.get('id')
 
             if player_id:
                 stats[player_id] = {
-                    'pts': player.get('pts', 0) or 0,
-                    'reb': player.get('reb', 0) or 0,
-                    'ast': player.get('ast', 0) or 0,
-                    'fg3m': player.get('fg3m', player.get('fg3_made', 0)) or 0,
+                    'pts': stat.get('pts', 0) or 0,
+                    'reb': stat.get('reb', 0) or 0,
+                    'ast': stat.get('ast', 0) or 0,
+                    'fg3m': stat.get('fg3m', 0) or 0,
                 }
 
         return stats
