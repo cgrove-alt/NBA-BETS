@@ -1901,16 +1901,31 @@ class DataService:
                 return {}
 
             # Get unique player IDs from DraftKings over_under props
+            # MUST check both 'sportsbook' and 'vendor' fields (matches _get_real_prop_line logic)
             player_ids = set()
             for prop in props:
+                # Check both sportsbook and vendor fields for DraftKings
+                sportsbook = prop.get('sportsbook', {})
+                if isinstance(sportsbook, dict):
+                    book_name = sportsbook.get('name', '').lower()
+                else:
+                    book_name = str(sportsbook).lower()
+
                 vendor = prop.get('vendor', '').lower()
+
+                # Skip if neither field contains 'draftkings'
+                if 'draftkings' not in book_name and 'draftkings' not in vendor:
+                    continue
+
+                # Only include over_under market type (not milestone props)
                 market = prop.get('market', {})
                 market_type = market.get('type', '') if isinstance(market, dict) else ''
+                if market_type != 'over_under':
+                    continue
 
-                if 'draftkings' in vendor and market_type == 'over_under':
-                    pid = prop.get('player_id')
-                    if pid:
-                        player_ids.add(pid)
+                pid = prop.get('player_id')
+                if pid:
+                    player_ids.add(pid)
 
             # Fetch player details for each unique player
             for pid in player_ids:
