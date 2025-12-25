@@ -249,6 +249,26 @@ class PropTracker:
                 )
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_predictions_for_game(self, game_id: str) -> List[Dict]:
+        """Get all predictions for a specific game.
+
+        Args:
+            game_id: Game ID to look up
+
+        Returns:
+            List of prediction dicts with player_id, prop_type, predicted_value, etc.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT player_id, player_name, team_abbrev, prop_type,
+                       predicted_value, market_line, pick, confidence, edge_pct,
+                       actual_value, hit, is_settled
+                FROM prop_predictions
+                WHERE game_id = ?
+            """, (game_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
     def get_performance_summary(
         self,
         days: int = 30,

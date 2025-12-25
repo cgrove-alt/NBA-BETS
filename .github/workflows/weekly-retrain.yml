@@ -1,0 +1,108 @@
+name: Weekly Model Retrain
+
+on:
+  schedule:
+    # Every Sunday at 8 AM UTC (3 AM EST)
+    - cron: '0 8 * * 0'
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60  # Training can take 30-45 minutes
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create logs directory
+        run: mkdir -p logs
+
+      - name: Run scheduled retraining
+        env:
+          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: |
+          python scheduled_retrain.py --quick 2>&1 | tee logs/retrain_output.log
+
+      - name: Update retrain history
+        if: success()
+        run: |
+          python -c "
+          import json
+          from datetime import datetime
+          from pathlib import Path
+
+          history_file = Path('logs/retrain_history.json')
+          history = []
+          if history_file.exists():
+              try:
+                  with open(history_file) as f:
+                      history = json.load(f)
+              except:
+                  pass
+
+          history.append({
+              'timestamp': datetime.now().isoformat(),
+              'success': True,
+              'trigger': 'github_actions',
+              'run_id': '${{ github.run_id }}'
+          })
+
+          # Keep last 50 entries
+          history = history[-50:]
+
+          with open(history_file, 'w') as f:
+              json.dump(history, f, indent=2)
+          "
+
+      - name: Upload trained models as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-models-${{ github.run_id }}
+          path: models/*.pkl
+          retention-days: 30
+
+      - name: Upload training logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: training-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 14
+
+      - name: Commit and push updated models
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Add model files and logs
+          git add models/*.pkl logs/retrain_history.json || true
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Weekly model retrain $(date +%Y-%m-%d)
+
+            Automated retraining via GitHub Actions.
+            Run ID: ${{ github.run_id }}"
+            git push
+          fi
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "::error::Model retraining failed! Check the logs for details."
+          # Could add Slack/Discord notification here

@@ -153,6 +153,53 @@ export interface HealthResponse {
   models_loaded: boolean;
 }
 
+// ============== GAME RESULTS TYPES ==============
+
+export interface PlayerResult {
+  player_id: number;
+  player_name: string;
+  team: string;
+  prop_type: string;
+  predicted: number;
+  actual: number;
+  line?: number | null;
+  pick?: string | null;
+  hit?: boolean | null;
+  difference: number;
+}
+
+export interface FinalScore {
+  home_team: string;
+  home_score: number;
+  away_team: string;
+  away_score: number;
+}
+
+export interface MoneylineResultData {
+  predicted_winner: string;
+  actual_winner: string;
+  correct: boolean;
+  home_win_probability?: number;
+  away_win_probability?: number;
+}
+
+export interface ResultsSummary {
+  total_predictions: number;
+  total_picks: number;
+  total_hits: number;
+  hit_rate: number;
+}
+
+export interface GameResults {
+  game_id: string;
+  status: 'completed' | 'not_completed' | 'error';
+  message?: string;
+  final_score?: FinalScore;
+  moneyline_result?: MoneylineResultData;
+  player_results: PlayerResult[];
+  summary?: ResultsSummary;
+}
+
 // Prop types constant
 export const PROP_TYPES = ['Points', 'Rebounds', 'Assists', '3PM', 'PRA'] as const;
 export type PropType = (typeof PROP_TYPES)[number];

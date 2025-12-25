@@ -167,6 +167,53 @@ class BestBetsResponse(BaseModel):
     filters: Dict[str, Any]
 
 
+# ============== GAME RESULTS SCHEMAS ==============
+
+class PlayerResult(BaseModel):
+    player_id: int
+    player_name: str
+    team: str
+    prop_type: str
+    predicted: float
+    actual: float
+    line: Optional[float] = None
+    pick: Optional[str] = None
+    hit: Optional[bool] = None  # True = win, False = loss, None = no pick
+    difference: float  # actual - predicted
+
+
+class FinalScore(BaseModel):
+    home_team: str
+    home_score: int
+    away_team: str
+    away_score: int
+
+
+class MoneylineResult(BaseModel):
+    predicted_winner: str
+    actual_winner: str
+    correct: bool
+    home_win_probability: Optional[float] = None
+    away_win_probability: Optional[float] = None
+
+
+class ResultsSummary(BaseModel):
+    total_predictions: int
+    total_picks: int  # Predictions where a pick was made
+    total_hits: int
+    hit_rate: float
+
+
+class GameResults(BaseModel):
+    game_id: str
+    status: str  # "completed", "not_completed", "error"
+    message: Optional[str] = None
+    final_score: Optional[FinalScore] = None
+    moneyline_result: Optional[MoneylineResult] = None
+    player_results: List[PlayerResult] = []
+    summary: Optional[ResultsSummary] = None
+
+
 # ============== HEALTH CHECK ==============
 
 class HealthResponse(BaseModel):

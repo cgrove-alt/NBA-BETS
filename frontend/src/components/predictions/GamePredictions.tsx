@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { TrendingUp, Target, Loader2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { useGameAnalysis } from '../../hooks/useGameAnalysis';
+import { useGameResults } from '../../hooks/useGameResults';
+import { GameResultsDisplay } from './GameResults';
 import { cn } from '../../lib/utils';
 import type { Game } from '../../lib/types';
 
@@ -25,6 +27,8 @@ function ConfidenceIndicator({ confidence }: { confidence: number }) {
 }
 
 export function GamePredictions({ gameId, game }: GamePredictionsProps) {
+  const isCompleted = game.status === 'Final';
+
   const {
     status,
     statusData,
@@ -35,12 +39,18 @@ export function GamePredictions({ gameId, game }: GamePredictionsProps) {
     isStarting,
   } = useGameAnalysis(gameId, game);
 
+  // Fetch results for completed games
+  const { results, isLoading: resultsLoading } = useGameResults(
+    isCompleted ? gameId : null
+  );
+
   // Auto-start analysis when component mounts and status is not_started
+  // Only for non-completed games
   useEffect(() => {
-    if (status === 'not_started' && !isStarting) {
+    if (!isCompleted && status === 'not_started' && !isStarting) {
       startAnalysis();
     }
-  }, [status, isStarting, startAnalysis]);
+  }, [status, isStarting, startAnalysis, isCompleted]);
 
   const homeAbbrev = game.home_team.abbreviation;
   const awayAbbrev = game.visitor_team.abbreviation;
@@ -49,7 +59,35 @@ export function GamePredictions({ gameId, game }: GamePredictionsProps) {
   const moneyline = analysis?.moneyline_prediction || statusData?.moneyline;
   const spread = analysis?.spread_prediction || statusData?.spread;
 
-  // Loading state
+  // For completed games, show results
+  if (isCompleted) {
+    if (resultsLoading) {
+      return (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Target className="text-accent-primary" size={18} />
+              <CardTitle>Game Results</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-center py-8">
+              <div className="flex items-center gap-3 text-text-secondary">
+                <Loader2 className="animate-spin" size={20} />
+                <span>Loading results...</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (results) {
+      return <GameResultsDisplay results={results} />;
+    }
+  }
+
+  // Loading state for in-progress games
   if (isLoading || isPending || isStarting) {
     return (
       <Card>
@@ -71,7 +109,7 @@ export function GamePredictions({ gameId, game }: GamePredictionsProps) {
     );
   }
 
-  // No predictions available
+  // No predictions available (ML failed or game already completed)
   if (!moneyline && !spread) {
     return (
       <Card>
@@ -83,7 +121,8 @@ export function GamePredictions({ gameId, game }: GamePredictionsProps) {
         </CardHeader>
         <CardContent>
           <div className="text-center py-6 text-text-muted">
-            No game predictions available yet.
+            <p>ML predictions unavailable for this game.</p>
+            <p className="text-sm mt-2">This may happen for completed games or when models are loading.</p>
           </div>
         </CardContent>
       </Card>

@@ -970,12 +970,48 @@ class DataService:
             if status and "T" in status and status[0:4].isdigit():
                 # status is ISO datetime format (e.g., "2025-12-17T01:30:00Z")
                 full_datetime = status
+            elif status in ["Final", "In Progress"] or "Qtr" in status or "Half" in status:
+                # Game is completed or in-progress
+                # Try to construct ISO datetime from date + time if available
+                if game_time_str:
+                    try:
+                        from datetime import datetime as dt
+                        # Handle various time formats: "7:30 PM", "7:30PM", "19:30"
+                        time_clean = game_time_str.strip()
+                        for fmt in ["%Y-%m-%d %I:%M %p", "%Y-%m-%d %I:%M%p", "%Y-%m-%d %H:%M"]:
+                            try:
+                                parsed = dt.strptime(f"{game_date} {time_clean}", fmt)
+                                full_datetime = parsed.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+                                break
+                            except ValueError:
+                                continue
+                        else:
+                            # Couldn't parse time, use noon as fallback
+                            full_datetime = f"{game_date}T12:00:00Z"
+                    except Exception:
+                        full_datetime = f"{game_date}T12:00:00Z"
+                else:
+                    # No time available, use noon as fallback
+                    full_datetime = f"{game_date}T12:00:00Z" if game_date else ""
             elif game_time_str:
-                # Combine date and time fields: "2024-12-25" + "7:30 PM"
-                full_datetime = f"{game_date} {game_time_str}"
+                # Scheduled game with time but status isn't ISO
+                try:
+                    from datetime import datetime as dt
+                    time_clean = game_time_str.strip()
+                    for fmt in ["%Y-%m-%d %I:%M %p", "%Y-%m-%d %I:%M%p", "%Y-%m-%d %H:%M"]:
+                        try:
+                            parsed = dt.strptime(f"{game_date} {time_clean}", fmt)
+                            full_datetime = parsed.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        full_datetime = f"{game_date}T12:00:00Z"
+                except Exception:
+                    full_datetime = f"{game_date}T12:00:00Z"
             else:
-                # Fallback to just the date
-                full_datetime = game_date
+                # Fallback to noon on the game date
+                full_datetime = f"{game_date}T12:00:00Z" if game_date else ""
 
             formatted.append({
                 "game_id": str(game.get("id", "")),

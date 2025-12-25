@@ -10,6 +10,7 @@ import type {
   GameOdds,
   BestBetsResponse,
   HealthResponse,
+  GameResults,
 } from './types';
 
 // API base URL - uses environment variable in production, proxy in development
@@ -100,5 +101,11 @@ export async function getBestBets(params?: {
       pick_type: params?.pickType,
     },
   });
+  return data;
+}
+
+// Game Results
+export async function getGameResults(gameId: string): Promise<GameResults> {
+  const { data } = await api.get<GameResults>(`/games/${gameId}/results`);
   return data;
 }

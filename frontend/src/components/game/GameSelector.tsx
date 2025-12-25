@@ -35,7 +35,13 @@ export function GameSelector({ games, selectedGameId, onSelectGame, loading }: G
             {games.map((game) => (
               <option key={game.game_id} value={game.game_id}>
                 {formatMatchup(game.home_team.abbreviation, game.visitor_team.abbreviation)}
-                {game.game_time ? ` - ${formatGameTime(game.game_time)}` : ''}
+                {game.status === 'Final'
+                  ? ' - Final'
+                  : game.status?.includes('Qtr') || game.status?.includes('Half')
+                    ? ` - ${game.status}`
+                    : game.game_time
+                      ? ` - ${formatGameTime(game.game_time)}`
+                      : ''}
               </option>
             ))}
           </>

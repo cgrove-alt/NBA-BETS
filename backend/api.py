@@ -40,6 +40,11 @@ from backend.schemas import (
     TotalOdds,
     BestBetsResponse,
     BestBet,
+    GameResults,
+    PlayerResult,
+    FinalScore,
+    MoneylineResult,
+    ResultsSummary,
 )
 
 # Singleton data service instance
@@ -346,26 +351,30 @@ def get_game_analysis(game_id: str):
     if not analysis:
         raise HTTPException(status_code=404, detail=f"No analysis found for game {game_id}")
 
-    # Convert moneyline prediction
+    # Convert moneyline prediction - only if valid predictions exist
     moneyline = None
     ml_data = analysis.get("moneyline_prediction")
     if ml_data and isinstance(ml_data, dict):
-        moneyline = MoneylinePrediction(
-            home_win_probability=ml_data.get("home_win_probability", 0.5),
-            away_win_probability=ml_data.get("away_win_probability", 0.5),
-            predicted_winner=ml_data.get("predicted_winner", "home"),
-            confidence=ml_data.get("confidence", 0.5),
-            calibrated=ml_data.get("calibrated", False),
-        )
+        # Check if this is a real prediction (has probability) or just a status
+        if "home_win_probability" in ml_data and ml_data.get("status") != "unavailable":
+            moneyline = MoneylinePrediction(
+                home_win_probability=ml_data.get("home_win_probability", 0.5),
+                away_win_probability=ml_data.get("away_win_probability", 0.5),
+                predicted_winner=ml_data.get("predicted_winner", "home"),
+                confidence=ml_data.get("confidence", 0.5),
+                calibrated=ml_data.get("calibrated", False),
+            )
 
-    # Convert spread prediction
+    # Convert spread prediction - only if valid predictions exist
     spread = None
     sp_data = analysis.get("spread_prediction")
     if sp_data and isinstance(sp_data, dict):
-        spread = SpreadPrediction(
-            predicted_spread=sp_data.get("predicted_spread", 0.0),
-            confidence=sp_data.get("confidence", 0.5),
-        )
+        # Check if this is a real prediction or just a status
+        if "predicted_spread" in sp_data and sp_data.get("status") != "unavailable":
+            spread = SpreadPrediction(
+                predicted_spread=sp_data.get("predicted_spread", 0.0),
+                confidence=sp_data.get("confidence", 0.5),
+            )
 
     return GameAnalysis(
         game_id=game_id,
@@ -379,6 +388,203 @@ def get_game_analysis(game_id: str):
         spread_prediction=spread,
         market_odds=analysis.get("market_odds"),
         recommendations=analysis.get("recommendations", []),
+    )
+
+
+# ============== GAME RESULTS ENDPOINT ==============
+
+@app.get("/api/games/{game_id}/results", response_model=GameResults)
+def get_game_results(game_id: str):
+    """Get actual results for a completed game with prediction comparison."""
+    service = get_service()
+
+    # Find the game
+    games = service.get_todays_games()
+    game = next((g for g in games if str(g.get('game_id')) == game_id), None)
+
+    if not game:
+        return GameResults(
+            game_id=game_id,
+            status="error",
+            message="Game not found"
+        )
+
+    if game.get('status') != 'Final':
+        return GameResults(
+            game_id=game_id,
+            status="not_completed",
+            message="Game not yet completed"
+        )
+
+    # Fetch box score from Balldontlie API
+    try:
+        from balldontlie_api import BalldontlieAPI
+        api = BalldontlieAPI()
+        box_score = api.get_box_score(int(game_id))
+    except Exception as e:
+        return GameResults(
+            game_id=game_id,
+            status="error",
+            message=f"Could not fetch box score: {str(e)}"
+        )
+
+    if not box_score:
+        return GameResults(
+            game_id=game_id,
+            status="error",
+            message="Box score not available"
+        )
+
+    # Extract final score from box score
+    home_abbrev = game.get('home_team', {}).get('abbreviation', '')
+    away_abbrev = game.get('visitor_team', {}).get('abbreviation', '')
+
+    # The box_score response has different formats - handle both
+    box_data = box_score.get('data', box_score)
+    home_score = 0
+    away_score = 0
+
+    # Try to get scores from the game info
+    if isinstance(box_data, dict):
+        home_score = box_data.get('home_team_score', 0) or 0
+        away_score = box_data.get('away_team_score', 0) or 0
+
+        # If no scores in data, calculate from player stats
+        if home_score == 0 and away_score == 0:
+            players = box_data.get('players', [])
+            home_team_id = game.get('home_team', {}).get('id')
+            for player in players:
+                team_id = player.get('team', {}).get('id') or player.get('team_id')
+                pts = player.get('pts', 0) or 0
+                if team_id == home_team_id:
+                    home_score += pts
+                else:
+                    away_score += pts
+
+    final_score = FinalScore(
+        home_team=home_abbrev,
+        home_score=home_score,
+        away_team=away_abbrev,
+        away_score=away_score
+    )
+
+    # Determine actual winner for moneyline result
+    actual_winner = "home" if home_score > away_score else "away"
+
+    # Get stored predictions from prop_tracker
+    try:
+        from prop_tracker import PropTracker
+        tracker = PropTracker()
+        predictions = tracker.get_predictions_for_game(game_id)
+    except Exception as e:
+        predictions = []
+
+    # Get moneyline prediction for comparison
+    analysis = service.get_game_analysis(game_id)
+    moneyline_result = None
+    if analysis:
+        ml_data = analysis.get("moneyline_prediction")
+        if ml_data and isinstance(ml_data, dict) and "home_win_probability" in ml_data:
+            predicted_winner = ml_data.get("predicted_winner", "home")
+            moneyline_result = MoneylineResult(
+                predicted_winner=predicted_winner,
+                actual_winner=actual_winner,
+                correct=(predicted_winner == actual_winner),
+                home_win_probability=ml_data.get("home_win_probability"),
+                away_win_probability=ml_data.get("away_win_probability"),
+            )
+
+    # Extract player stats from box score for comparison
+    player_stats = {}
+    if isinstance(box_data, dict):
+        players_list = box_data.get('players', [])
+        for player in players_list:
+            player_info = player.get('player', player)
+            player_id = player_info.get('id') or player.get('player_id')
+            if player_id:
+                player_stats[player_id] = {
+                    'pts': player.get('pts', 0) or 0,
+                    'reb': player.get('reb', 0) or 0,
+                    'ast': player.get('ast', 0) or 0,
+                    'fg3m': player.get('fg3m', player.get('fg3_made', 0)) or 0,
+                }
+
+    # Build player results comparing predictions vs actuals
+    player_results = []
+    total_picks = 0
+    total_hits = 0
+
+    # Map prop types to stat keys
+    stat_map = {
+        "points": "pts",
+        "rebounds": "reb",
+        "assists": "ast",
+        "3pm": "fg3m",
+    }
+
+    for pred in predictions:
+        player_id = pred.get('player_id')
+        prop_type = pred.get('prop_type', '').lower()
+        predicted = pred.get('predicted_value', 0) or 0
+        line = pred.get('market_line')
+        pick = pred.get('pick')
+
+        # Get actual value
+        stats = player_stats.get(player_id, {})
+        if prop_type == "pra":
+            actual = stats.get('pts', 0) + stats.get('reb', 0) + stats.get('ast', 0)
+        else:
+            stat_key = stat_map.get(prop_type)
+            actual = stats.get(stat_key, 0) if stat_key else 0
+
+        # Determine hit/miss
+        hit = None
+        if pick and pick != "-" and line is not None:
+            total_picks += 1
+            if pick == "OVER" and actual > line:
+                hit = True
+                total_hits += 1
+            elif pick == "UNDER" and actual < line:
+                hit = True
+                total_hits += 1
+            else:
+                hit = False
+
+        # Format prop type for display
+        display_prop = prop_type.capitalize()
+        if prop_type == "3pm":
+            display_prop = "3PM"
+        elif prop_type == "pra":
+            display_prop = "PRA"
+
+        player_results.append(PlayerResult(
+            player_id=player_id,
+            player_name=pred.get('player_name', 'Unknown'),
+            team=pred.get('team_abbrev', ''),
+            prop_type=display_prop,
+            predicted=predicted,
+            actual=actual,
+            line=line,
+            pick=pick,
+            hit=hit,
+            difference=actual - predicted
+        ))
+
+    # Create summary
+    summary = ResultsSummary(
+        total_predictions=len(predictions),
+        total_picks=total_picks,
+        total_hits=total_hits,
+        hit_rate=total_hits / total_picks if total_picks > 0 else 0.0
+    )
+
+    return GameResults(
+        game_id=game_id,
+        status="completed",
+        final_score=final_score,
+        moneyline_result=moneyline_result,
+        player_results=player_results,
+        summary=summary
     )
 
 
@@ -551,6 +757,79 @@ def get_best_bets(
             "pick_type": pick_type,
         },
     )
+
+
+# ============== RETRAIN STATUS ENDPOINT ==============
+
+@app.get("/api/retrain/status")
+def get_retrain_status():
+    """Get status of last retrain and continuous learning system.
+
+    Returns information about:
+    - Last full model retrain (from Railway cron or manual)
+    - Continuous learning system status (settlements, drift detection)
+    - Model age in days
+    """
+    import json
+    from datetime import datetime
+
+    service = get_service()
+
+    # Get retrain history from log file
+    retrain_log = Path("logs/retrain_history.json")
+    last_retrain = None
+    retrain_history = []
+
+    if retrain_log.exists():
+        try:
+            with open(retrain_log) as f:
+                retrain_history = json.load(f)
+                if retrain_history:
+                    last_retrain = retrain_history[-1]
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # Calculate model age (days since last successful retrain)
+    model_age_days = None
+    if last_retrain and last_retrain.get("success"):
+        try:
+            last_ts = datetime.fromisoformat(last_retrain["timestamp"])
+            model_age_days = (datetime.now() - last_ts).days
+        except (ValueError, KeyError):
+            pass
+
+    # Get continuous learning status if available
+    cl_status = None
+    if hasattr(service, 'get_continuous_learning_status'):
+        cl_status = service.get_continuous_learning_status()
+    elif hasattr(service, 'orchestrator') and service.orchestrator:
+        cl_status = {
+            "enabled": True,
+            "message": "Continuous learning orchestrator active"
+        }
+
+    # Get model file ages
+    models_dir = Path("models")
+    model_files = {}
+    if models_dir.exists():
+        for pkl_file in models_dir.glob("*.pkl"):
+            try:
+                mtime = datetime.fromtimestamp(pkl_file.stat().st_mtime)
+                model_files[pkl_file.name] = {
+                    "last_modified": mtime.isoformat(),
+                    "age_days": (datetime.now() - mtime).days
+                }
+            except OSError:
+                pass
+
+    return {
+        "last_full_retrain": last_retrain,
+        "retrain_count": len(retrain_history),
+        "model_age_days": model_age_days,
+        "continuous_learning": cl_status,
+        "models": model_files,
+        "timestamp": datetime.now().isoformat(),
+    }
 
 
 # ============== RUN SERVER ==============
