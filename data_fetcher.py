@@ -238,6 +238,7 @@ def fetch_team_statistics(team_id, season="2025-26"):
     """
     _rate_limiter.wait()
 
+    # Fetch base stats
     team_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
         team_id=team_id,
         season=season,
@@ -248,8 +249,26 @@ def fetch_team_statistics(team_id, season="2025-26"):
     overall = stats_dict.get("OverallTeamDashboard", [{}])[0] if stats_dict.get("OverallTeamDashboard") else {}
     home_away = stats_dict.get("LocationTeamDashboard", [])
 
+    # Fetch advanced stats for ratings (OFF_RATING, DEF_RATING, NET_RATING, PACE)
+    _rate_limiter.wait()
+    try:
+        advanced_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
+            team_id=team_id,
+            season=season,
+            season_type_all_star="Regular Season",
+            measure_type_detailed_defense="Advanced"
+        )
+        advanced_dict = advanced_stats.get_normalized_dict()
+        advanced_overall = advanced_dict.get("OverallTeamDashboard", [{}])[0] if advanced_dict.get("OverallTeamDashboard") else {}
+    except Exception as e:
+        print(f"Warning: Could not fetch advanced stats for team {team_id}: {e}")
+        advanced_overall = {}
+
     home_stats = next((s for s in home_away if s.get("GROUP_VALUE") == "Home"), {})
     away_stats = next((s for s in home_away if s.get("GROUP_VALUE") == "Road"), {})
+
+    # Calculate games played for dividing totals into averages
+    gp = max(overall.get("GP") or 1, 1)  # Avoid division by zero
 
     return {
         "team_id": team_id,
@@ -259,20 +278,21 @@ def fetch_team_statistics(team_id, season="2025-26"):
             "wins": overall.get("W"),
             "losses": overall.get("L"),
             "win_pct": overall.get("W_PCT"),
-            "pts_avg": overall.get("PTS"),
-            "reb_avg": overall.get("REB"),
-            "ast_avg": overall.get("AST"),
-            "stl_avg": overall.get("STL"),
-            "blk_avg": overall.get("BLK"),
-            "tov_avg": overall.get("TOV"),
+            # NBA API returns season TOTALS, divide by GP for per-game averages
+            "pts_avg": (overall.get("PTS") or 0) / gp,
+            "reb_avg": (overall.get("REB") or 0) / gp,
+            "ast_avg": (overall.get("AST") or 0) / gp,
+            "stl_avg": (overall.get("STL") or 0) / gp,
+            "blk_avg": (overall.get("BLK") or 0) / gp,
+            "tov_avg": (overall.get("TOV") or 0) / gp,
             "fg_pct": overall.get("FG_PCT"),
             "fg3_pct": overall.get("FG3_PCT"),
             "ft_pct": overall.get("FT_PCT"),
-            "plus_minus": overall.get("PLUS_MINUS"),
-            "off_rating": overall.get("OFF_RATING"),
-            "def_rating": overall.get("DEF_RATING"),
-            "net_rating": overall.get("NET_RATING"),
-            "pace": overall.get("PACE"),
+            "plus_minus": (overall.get("PLUS_MINUS") or 0) / gp,
+            "off_rating": advanced_overall.get("OFF_RATING"),
+            "def_rating": advanced_overall.get("DEF_RATING"),
+            "net_rating": advanced_overall.get("NET_RATING"),
+            "pace": advanced_overall.get("PACE"),
         },
         "home": {
             "games_played": home_stats.get("GP"),

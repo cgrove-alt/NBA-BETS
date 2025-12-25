@@ -100,12 +100,19 @@ def validate_and_clip_feature(value: float, feature_name: str, warn: bool = True
     if value is None:
         return 0.0
 
-    # Look for matching range (check for partial matches too)
+    # Look for matching range - EXACT match first, then partial
     range_bounds = None
-    for key, bounds in NBA_VALUE_RANGES.items():
-        if key in feature_name.lower() or feature_name.lower() in key:
-            range_bounds = bounds
-            break
+    feature_lower = feature_name.lower()
+
+    # First try exact match
+    if feature_lower in NBA_VALUE_RANGES:
+        range_bounds = NBA_VALUE_RANGES[feature_lower]
+    else:
+        # Try partial match - but prefer longer (more specific) keys first
+        for key in sorted(NBA_VALUE_RANGES.keys(), key=len, reverse=True):
+            if key in feature_lower or feature_lower in key:
+                range_bounds = NBA_VALUE_RANGES[key]
+                break
 
     if range_bounds is None:
         return float(value)
