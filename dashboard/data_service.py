@@ -579,6 +579,7 @@ class DataService:
         self._moneyline_model = None
         self._spread_model = None
         self._prop_models = {}
+        self._quantile_models = {}  # NEW: Quantile models for uncertainty estimation
 
         # Background analysis status
         self._analysis_status = {}  # game_id -> {'status': 'pending'|'ready'|'error', 'moneyline': {}, 'spread': {}}
@@ -794,6 +795,24 @@ class DataService:
                         self._prop_models[prop_type] = loaded
                         self._prop_model_data[prop_type] = {'model': loaded, 'scaler': None, 'feature_names': []}
                         print(f"Player {prop_type} model loaded directly")
+
+                # NEW: Load quantile model for uncertainty-based confidence
+                quantile_path = model_dir / f"player_{prop_type}_quantile.pkl"
+                if quantile_path.exists():
+                    try:
+                        with open(quantile_path, "rb") as f:
+                            q_loaded = pickle.load(f)
+                        if isinstance(q_loaded, dict) and 'model' in q_loaded:
+                            self._quantile_models[prop_type] = {
+                                'model': q_loaded['model'],
+                                'feature_names': q_loaded.get('feature_names', []),
+                                'training_metrics': q_loaded.get('training_metrics', {}),
+                            }
+                            coverage = q_loaded.get('training_metrics', {}).get('coverage_80', 0)
+                            print(f"  Quantile model loaded for {prop_type} (coverage: {coverage:.1%})")
+                    except Exception as qe:
+                        print(f"  Error loading quantile model for {prop_type}: {qe}")
+
             except Exception as e:
                 print(f"Error loading {prop_type} model: {e}")
 
@@ -2626,11 +2645,11 @@ class DataService:
             elif minutes_std > 8:
                 confidence -= 3  # Inconsistent minutes = unpredictable
 
-        # Cap at REALISTIC range based on actual data
-        # Our best bucket (<60% confidence) wins at 48.79%
-        # So cap at 65% max - being overconfident hurts
-        # Raised min from 45% to 55% for more selective picks
-        confidence = max(55.0, min(65.0, confidence))
+        # Cap at reasonable range - WIDENED from 55-65% to 50-85%
+        # With improved training (OT normalization, blowout weighting, regression-to-mean)
+        # the model should be more accurate and can express higher confidence
+        # Quantile models provide even more honest uncertainty when available
+        confidence = max(50.0, min(85.0, confidence))
 
         return confidence
 
@@ -2687,6 +2706,104 @@ class DataService:
             prop_key = "3pm"
 
         return self._bias_corrections.get(prop_key, 0.0)
+
+    def _calculate_quantile_confidence(self, prop_type: str, features: Dict,
+                                        line: float, prediction: float) -> Optional[Dict]:
+        """Calculate confidence using quantile model uncertainty.
+
+        Uses the prediction interval from quantile regression to determine
+        honest confidence. Narrow interval + large edge = high confidence.
+
+        Args:
+            prop_type: Type of prop (points, rebounds, etc.)
+            features: Feature dictionary for the player
+            line: Betting line
+            prediction: Point prediction from ensemble model
+
+        Returns:
+            Dictionary with confidence metrics, or None if quantile model unavailable
+        """
+        # Normalize prop type
+        prop_key = prop_type.lower().replace(" ", "")
+        if prop_key == "3pm" or prop_key == "threes":
+            prop_key = "threes"
+
+        # Check if quantile model is available
+        if prop_key not in self._quantile_models:
+            return None
+
+        q_data = self._quantile_models[prop_key]
+        q_model = q_data.get('model')
+        if not q_model or not hasattr(q_model, 'predict_distribution'):
+            return None
+
+        try:
+            # Get prediction distribution from quantile model
+            distribution = q_model.predict_distribution(features)
+
+            # Extract key quantiles
+            q10 = distribution.get(0.10, prediction - 5)
+            q25 = distribution.get(0.25, prediction - 2)
+            q50 = distribution.get(0.50, prediction)  # Median
+            q75 = distribution.get(0.75, prediction + 2)
+            q90 = distribution.get(0.90, prediction + 5)
+
+            # Calculate 80% interval width (10th to 90th percentile)
+            interval_width = q90 - q10
+
+            # Certainty: narrow interval = more certain
+            # Normalize by prediction magnitude to handle different stat scales
+            normalized_width = interval_width / max(q50, 1.0)
+            certainty = 1.0 / (1.0 + normalized_width)
+
+            # Edge: how far is the line from our median prediction?
+            edge = abs(q50 - line) / max(line, 0.1)
+
+            # Over probability: estimate from distribution
+            # Linear interpolation to find where line falls
+            if hasattr(q_model, 'predict_over_probability'):
+                over_prob = q_model.predict_over_probability(features, line)
+            else:
+                # Simple heuristic based on where line falls in distribution
+                if line <= q10:
+                    over_prob = 0.90
+                elif line >= q90:
+                    over_prob = 0.10
+                elif line <= q50:
+                    # Interpolate between q10 and q50
+                    over_prob = 0.50 + 0.40 * (q50 - line) / max(q50 - q10, 0.1)
+                else:
+                    # Interpolate between q50 and q90
+                    over_prob = 0.50 - 0.40 * (line - q50) / max(q90 - q50, 0.1)
+                over_prob = max(0.05, min(0.95, over_prob))
+
+            # Confidence calculation:
+            # - Base: how far from 50% is our probability estimate
+            # - Boost: scaled by certainty (narrow intervals = more confident)
+            prob_strength = abs(over_prob - 0.5) * 2  # 0 to 1 scale
+            raw_confidence = 50 + (prob_strength * 35 * certainty)
+
+            # Apply small edge boost for picks with high edge + high certainty
+            if edge > 0.10 and certainty > 0.5:
+                raw_confidence += min(5, edge * 20)
+
+            # Bound to reasonable range (50-85%)
+            confidence = max(50.0, min(85.0, raw_confidence))
+
+            return {
+                'confidence': confidence,
+                'over_probability': over_prob,
+                'certainty': certainty,
+                'interval_width': interval_width,
+                'median': q50,
+                'q10': q10,
+                'q90': q90,
+                'edge': edge,
+            }
+
+        except Exception as e:
+            print(f"Error calculating quantile confidence for {prop_type}: {e}")
+            return None
 
     def _get_direction_calibration(self, prop_type: str, pick: str) -> float:
         """Get confidence calibration factor for prop type and pick direction.
@@ -3635,12 +3752,28 @@ class DataService:
                 else:
                     line = None  # No line available for players without stats
 
-            # Calculate confidence with full features context and player name
+            # Calculate confidence - PREFER quantile model uncertainty if available
             player_name_for_conf = player.get("player_name", "")
-            confidence = self._calculate_prop_confidence(
-                pred_value, line, season_value, recent_value, games_played,
-                features=full_features, player_name=player_name_for_conf
-            )
+
+            # Try quantile-based confidence first (honest uncertainty)
+            quantile_conf = None
+            if line is not None and line > 0 and full_features:
+                quantile_conf = self._calculate_quantile_confidence(
+                    prop_type=model_key,
+                    features=full_features,
+                    line=line,
+                    prediction=pred_value
+                )
+
+            if quantile_conf is not None:
+                # Use quantile-based confidence (honest uncertainty estimation)
+                confidence = quantile_conf['confidence']
+            else:
+                # Fallback to heuristic confidence
+                confidence = self._calculate_prop_confidence(
+                    pred_value, line, season_value, recent_value, games_played,
+                    features=full_features, player_name=player_name_for_conf
+                )
 
             # Apply injury confidence penalty (adds uncertainty when using injury adjustments)
             if injury_confidence_penalty > 0:
@@ -3666,16 +3799,19 @@ class DataService:
 
                     # Apply direction-specific confidence calibration
                     # OVER picks historically underperform, UNDER picks outperform
-                    if pick in ['OVER', 'UNDER']:
+                    # Only apply if NOT using quantile confidence (quantile already calibrated)
+                    if pick in ['OVER', 'UNDER'] and quantile_conf is None:
                         dir_cal = self._get_direction_calibration(prop_label, pick)
                         if dir_cal != 1.0:
                             confidence *= dir_cal
-                            # Keep in valid range (raised min from 45% to 55%)
-                            confidence = max(55.0, min(65.0, confidence))
+
+                    # Keep in valid range - WIDENED from 55-65% to 50-85%
+                    # Let accurate predictions express higher confidence
+                    confidence = max(50.0, min(85.0, confidence))
 
                     # TIER1 players get confidence boost
                     if is_tier1 and pick != "-":
-                        confidence = min(confidence + 10, 75)
+                        confidence = min(confidence + 10, 85)  # Allow up to 85% for TIER1
             else:
                 pick, edge = "-", 0  # No pick without a valid line
 

@@ -2158,6 +2158,40 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
                 actual_pra = actual_pts + actual_reb + actual_ast
                 actual_min = player_calc._parse_minutes(ps.get('min', '0'))  # TIER 2.3: Track actual minutes
 
+                # ============================================================
+                # CONFIDENCE FIX: Detect outlier games and apply corrections
+                # ============================================================
+
+                # Detect if this is an OT or blowout game
+                game_stats_for_outlier = {'pts': actual_pts, 'min': actual_min}
+                outlier_info = detect_outlier_game(game_stats_for_outlier, player_pre_stats)
+
+                # Calculate sample weight for this training example
+                # Default weight is 1.0, reduced for outliers
+                example_sample_weight = 1.0
+
+                # OT NORMALIZATION: Scale stats to regulation-equivalent
+                # If player played 53 minutes (5 min OT), normalize to 48 min equivalent
+                if outlier_info['outlier_type'] == 'overtime' and actual_min > 48:
+                    ot_factor = 48.0 / actual_min
+                    actual_pts = round(actual_pts * ot_factor, 1)
+                    actual_reb = round(actual_reb * ot_factor, 1)
+                    actual_ast = round(actual_ast * ot_factor, 1)
+                    actual_fg3m = round(actual_fg3m * ot_factor, 1)
+                    actual_pra = actual_pts + actual_reb + actual_ast
+                    # Also reduce weight since OT games are less representative
+                    example_sample_weight *= 0.7
+
+                # BLOWOUT DETECTION: Down-weight games with 20+ point differential
+                point_diff = abs(home_score - away_score)
+                if point_diff >= 25:
+                    example_sample_weight *= 0.5  # Heavy blowout - low weight
+                elif point_diff >= 20:
+                    example_sample_weight *= 0.7  # Moderate blowout
+
+                # Also apply adjustment factor from outlier detection
+                example_sample_weight *= outlier_info['adjustment_factor']
+
                 # ENHANCEMENT: Add opponent context features for better prop predictions
                 player_team_id = ps.get('team', {}).get('id')
                 is_home = player_team_id == home_team_id
@@ -2267,6 +2301,43 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
                 )
                 enhanced_features.update(vegas_total_features)
 
+                # ============================================================
+                # REGRESSION-TO-MEAN FEATURES
+                # Hot streaks cool off, cold streaks warm up
+                # ============================================================
+                games_played = enhanced_features.get('games_played', 10)
+
+                # Points regression
+                pts_season = enhanced_features.get('season_pts_avg', 15)
+                pts_recent = enhanced_features.get('recent_pts_avg', pts_season)
+                pts_deviation = pts_recent - pts_season
+                # More games = more stable, less regression needed
+                regression_weight = 0.4 * (1 - min(games_played, 50) / 50)
+                enhanced_features['pts_deviation_from_mean'] = round(pts_deviation, 2)
+                enhanced_features['pts_regression_adjustment'] = round(-pts_deviation * regression_weight, 2)
+                enhanced_features['pts_regressed_estimate'] = round(pts_recent - (pts_deviation * regression_weight), 2)
+
+                # Rebounds regression
+                reb_season = enhanced_features.get('season_reb_avg', 5)
+                reb_recent = enhanced_features.get('recent_reb_avg', reb_season)
+                reb_deviation = reb_recent - reb_season
+                enhanced_features['reb_deviation_from_mean'] = round(reb_deviation, 2)
+                enhanced_features['reb_regression_adjustment'] = round(-reb_deviation * regression_weight, 2)
+
+                # Assists regression
+                ast_season = enhanced_features.get('season_ast_avg', 3)
+                ast_recent = enhanced_features.get('recent_ast_avg', ast_season)
+                ast_deviation = ast_recent - ast_season
+                enhanced_features['ast_deviation_from_mean'] = round(ast_deviation, 2)
+                enhanced_features['ast_regression_adjustment'] = round(-ast_deviation * regression_weight, 2)
+
+                # 3PM regression (higher variance stat, more regression)
+                fg3_season = enhanced_features.get('season_fg3_avg', 1)
+                fg3_recent = enhanced_features.get('recent_fg3_avg', fg3_season)
+                fg3_deviation = fg3_recent - fg3_season
+                enhanced_features['fg3_deviation_from_mean'] = round(fg3_deviation, 2)
+                enhanced_features['fg3_regression_adjustment'] = round(-fg3_deviation * regression_weight * 1.2, 2)  # Extra regression for high-variance stat
+
                 player_data.append({
                     'player_id': player_id,
                     'player_name': f"{ps.get('player', {}).get('first_name', '')} {ps.get('player', {}).get('last_name', '')}",
@@ -2280,6 +2351,7 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
                     'actual_fg3m': actual_fg3m,
                     'actual_pra': actual_pra,
                     'actual_min': actual_min,  # TIER 2.3: For minutes model
+                    'sample_weight': example_sample_weight,  # NEW: For weighted training
                 })
 
         # Skip team example if insufficient history
@@ -4561,14 +4633,31 @@ def train_all_models(
     X_player = pd.DataFrame([d['features'] for d in player_data])
     player_feature_names = list(X_player.columns)
 
-    # Calculate player-specific sample weights if using time decay
+    # Calculate player-specific sample weights
+    # Combines: 1) Time decay (recent games weighted more)
+    #           2) Outlier/blowout weights (OT, blowout games weighted less)
     player_sample_weights = None
+
+    # Start with outlier weights from training data (OT normalization, blowout detection)
+    outlier_weights = np.array([d.get('sample_weight', 1.0) for d in player_data])
+
     if use_time_decay:
         player_dates = [d.get('game_date', '') for d in player_data]
-        player_sample_weights = calculate_time_decay_weights(player_dates, time_decay_half_life)
-        print(f"\n[Player Time-Decay Weighting]")
+        time_weights = calculate_time_decay_weights(player_dates, time_decay_half_life)
+        # Combine time decay with outlier weights
+        player_sample_weights = outlier_weights * time_weights
+        print(f"\n[Player Sample Weighting]")
+        print(f"  Time-decay range: {time_weights.min():.3f} - {time_weights.max():.3f}")
+        print(f"  Outlier weight range: {outlier_weights.min():.3f} - {outlier_weights.max():.3f}")
+        print(f"  Combined weight range: {player_sample_weights.min():.3f} - {player_sample_weights.max():.3f}")
+        print(f"  Avg combined weight: {player_sample_weights.mean():.3f}")
+        # Count how many samples were down-weighted due to outliers
+        downweighted = np.sum(outlier_weights < 1.0)
+        print(f"  Samples down-weighted (OT/blowout): {downweighted} ({downweighted/len(outlier_weights)*100:.1f}%)")
+    else:
+        player_sample_weights = outlier_weights
+        print(f"\n[Player Outlier Weighting Only]")
         print(f"  Weight range: {player_sample_weights.min():.3f} - {player_sample_weights.max():.3f}")
-        print(f"  Avg weight: {player_sample_weights.mean():.3f}")
 
     # ==========================================================================
     # TIER 2.3: MINUTES PREDICTION MODEL
@@ -4702,6 +4791,42 @@ def train_all_models(
             print(f"  Saved: models/player_{prop_name}.pkl")
 
             results[f'prop_{prop_name}'] = metrics
+
+    # ==========================================================================
+    # QUANTILE MODELS FOR UNCERTAINTY ESTIMATION
+    # These provide honest confidence through prediction intervals
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("TRAINING QUANTILE MODELS FOR UNCERTAINTY ESTIMATION")
+    print("="*60)
+
+    for prop_name, target_col in prop_types:
+        print(f"\n--- {prop_name.upper()} Quantile Model ---")
+
+        y = np.array([d[target_col] for d in player_data])
+
+        try:
+            quantile_model = QuantilePropModel(prop_name)
+            q_metrics = quantile_model.train(X_player, y, sample_weights=player_sample_weights)
+
+            # Save quantile model
+            quantile_path = MODEL_DIR / f'player_{prop_name}_quantile.pkl'
+            with open(quantile_path, 'wb') as f:
+                pickle.dump({
+                    'model': quantile_model,
+                    'training_metrics': q_metrics,
+                    'feature_names': player_feature_names,
+                }, f)
+            print(f"  Saved: models/player_{prop_name}_quantile.pkl")
+            print(f"  Coverage (80%): {q_metrics['coverage_80']:.1%}")
+
+            results[f'quantile_{prop_name}'] = {
+                'coverage_80': q_metrics['coverage_80'],
+                'pinball_losses': {k: v for k, v in q_metrics.items() if 'pinball' in k},
+            }
+        except Exception as e:
+            print(f"  Error training quantile model for {prop_name}: {e}")
+            results[f'quantile_{prop_name}'] = {'error': str(e)}
 
     return results
 
