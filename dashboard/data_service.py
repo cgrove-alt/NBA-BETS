@@ -465,7 +465,7 @@ class EnsembleMoneylineWrapper:
 # All real-time data now comes from Balldontlie API (faster, 600 req/min)
 # NBA API only used by feature_engineering.py for ML model features (OFF_RATING, DEF_RATING, PACE)
 from injury_fetcher import InjuryFetcher
-from feature_engineering import InjuryReportManager, PlayerPropFeatureGenerator
+from feature_engineering import InjuryReportManager, PlayerPropFeatureGenerator, calculate_travel_fatigue
 from prop_tracker import PropTracker
 
 
@@ -2629,7 +2629,8 @@ class DataService:
         # Cap at REALISTIC range based on actual data
         # Our best bucket (<60% confidence) wins at 48.79%
         # So cap at 65% max - being overconfident hurts
-        confidence = max(45.0, min(65.0, confidence))
+        # Raised min from 45% to 55% for more selective picks
+        confidence = max(55.0, min(65.0, confidence))
 
         return confidence
 
@@ -2713,6 +2714,91 @@ class DataService:
 
         prop_cal = self._direction_calibration.get(prop_key, {})
         return prop_cal.get(pick, 1.0)
+
+    def _get_injury_adjustment(self, player_name: str, player_team: str) -> float:
+        """Get prediction adjustment based on player injury status.
+
+        Returns:
+            Adjustment factor (1.0 = no adjustment, 0.0 = player out)
+            Players marked Questionable/Doubtful get reduced predictions.
+        """
+        if not self._injury_fetcher:
+            return 1.0
+
+        try:
+            team_injuries = self._injury_fetcher.get_team_injuries(player_team)
+            for injury in team_injuries:
+                # Match by name (case-insensitive)
+                if injury.player_name.lower() == player_name.lower():
+                    # Return availability probability (OUT=0, Questionable=0.5, etc.)
+                    return injury.availability_probability()
+            return 1.0  # Player not on injury report
+        except Exception:
+            return 1.0  # Default to no adjustment on error
+
+    def _get_teammate_injury_boost(self, player_name: str, player_team: str, prop_type: str) -> float:
+        """Get boost to prediction when key teammates are out.
+
+        When star players are injured, role players often see increased usage.
+
+        Returns:
+            Boost amount (0.0 = no boost, positive = expected increase)
+        """
+        if not self._injury_fetcher:
+            return 0.0
+
+        try:
+            impact = self._injury_fetcher.calculate_team_impact(player_team)
+
+            # If a star player is out, remaining players may see usage boost
+            if impact.star_player_out:
+                # Check if THIS player is the one who's out
+                for injury in impact.injuries:
+                    if injury.player_name.lower() == player_name.lower():
+                        return 0.0  # Don't boost the injured player
+
+                # Boost based on prop type and lost production
+                if prop_type in ["Points", "PRA"]:
+                    # Missing star means more shots for others
+                    return min(abs(impact.points_impact) * 2, 3.0)  # Cap at 3 pts
+                elif prop_type == "Assists":
+                    # More ball movement when playmaker is out
+                    return min(abs(impact.assists_impact) * 0.5, 1.0)
+                elif prop_type == "Rebounds":
+                    # Slightly more rebounds for remaining bigs
+                    return min(abs(impact.rebounds_impact) * 0.3, 0.5)
+
+            return 0.0
+        except Exception:
+            return 0.0
+
+    def _get_travel_fatigue_adjustment(self, team_abbrev: str, opponent_abbrev: str,
+                                        days_rest: int = 1, is_home: bool = True) -> float:
+        """Get prediction adjustment based on travel fatigue.
+
+        Returns:
+            Adjustment factor (1.0 = no fatigue, <1.0 = fatigued team)
+        """
+        if is_home:
+            return 1.0  # Home team doesn't have travel fatigue
+
+        try:
+            # For away team, calculate travel from their home to opponent's venue
+            fatigue = calculate_travel_fatigue(
+                last_venue=team_abbrev,  # Simplified: assume last game was at home
+                current_venue=opponent_abbrev,
+                days_rest=days_rest
+            )
+
+            fatigue_score = fatigue.get('travel_fatigue_score', 0)
+
+            # Convert fatigue score (0-1) to adjustment factor
+            # High fatigue = lower prediction (players perform worse)
+            # Max 10% reduction for extreme travel
+            return max(0.90, 1.0 - (fatigue_score * 0.10))
+
+        except Exception:
+            return 1.0
 
     def _predict_with_ml_model(self, prop_type: str, player_stats: Dict,
                                 opp_stats: Dict, is_home: bool) -> Optional[float]:
@@ -3440,6 +3526,40 @@ class DataService:
                     pass
 
             # =============================================================
+            # PLAYER INJURY & TRAVEL FATIGUE ADJUSTMENTS (New - Tier 1.2)
+            # =============================================================
+            player_name = player.get("player_name", "")
+            player_team = player.get("team", "") or player.get("team_abbreviation", "")
+            is_home = player.get("is_home", True)
+
+            # Check if THIS player is injured (reduce prediction or skip)
+            player_injury_factor = self._get_injury_adjustment(player_name, player_team)
+            if player_injury_factor < 1.0:
+                # Player is questionable/doubtful - reduce prediction
+                pred_value *= player_injury_factor
+                if player_injury_factor < 0.5:
+                    injury_notes.append(f"Player injury ({player_injury_factor*100:.0f}% avail)")
+
+            # Boost if teammate is out (more usage for remaining players)
+            teammate_boost = self._get_teammate_injury_boost(player_name, player_team, prop_label)
+            if teammate_boost > 0:
+                pred_value += teammate_boost
+                injury_notes.append(f"Teammate out (+{teammate_boost:.1f})")
+
+            # Apply travel fatigue (away teams only)
+            travel_factor = self._get_travel_fatigue_adjustment(
+                team_abbrev=player_team,
+                opponent_abbrev=opponent_abbrev,
+                days_rest=player.get("days_rest", 1),
+                is_home=is_home
+            )
+            if travel_factor < 1.0:
+                pred_value *= travel_factor
+                travel_pct = (1.0 - travel_factor) * 100
+                if travel_pct >= 3:  # Only note if significant
+                    injury_notes.append(f"Travel fatigue (-{travel_pct:.0f}%)")
+
+            # =============================================================
             # MATCHUP ADJUSTMENT - Adjust prediction based on player's history vs this team
             # =============================================================
             matchup_adjustment = 1.0
@@ -3540,8 +3660,8 @@ class DataService:
                 if form_unstable and not is_tier1:
                     pick, edge = "-", 0  # Skip unstable form players (unless TIER1)
                 else:
-                    # TIER1 players get 3% threshold, others get 5%
-                    threshold = 3.0 if is_tier1 else 5.0
+                    # TIER1 players get 5% threshold, others get 8% (raised for selectivity)
+                    threshold = 5.0 if is_tier1 else 8.0
                     pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key, threshold=threshold)
 
                     # Apply direction-specific confidence calibration
@@ -3550,8 +3670,8 @@ class DataService:
                         dir_cal = self._get_direction_calibration(prop_label, pick)
                         if dir_cal != 1.0:
                             confidence *= dir_cal
-                            # Keep in valid range
-                            confidence = max(45.0, min(65.0, confidence))
+                            # Keep in valid range (raised min from 45% to 55%)
+                            confidence = max(55.0, min(65.0, confidence))
 
                     # TIER1 players get confidence boost
                     if is_tier1 and pick != "-":

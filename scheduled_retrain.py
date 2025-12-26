@@ -13,8 +13,8 @@ Usage:
     python3 scheduled_retrain.py --quick      # Quick retrain (no backtest)
     python3 scheduled_retrain.py --check      # Check if retrain is needed
 
-Schedule with cron (run weekly on Sunday at 3am):
-    0 3 * * 0 cd /Users/sygrovefamily/NBA\ Betting\ Model && python3 scheduled_retrain.py >> logs/retrain.log 2>&1
+Schedule with cron (run daily at 3am):
+    0 3 * * * cd /Users/sygrovefamily/NBA\ Betting\ Model && python3 scheduled_retrain.py >> logs/retrain.log 2>&1
 
 Schedule with launchd (macOS):
     See the generated .plist file in this directory
@@ -37,9 +37,9 @@ DATA_DIR = PROJECT_DIR / "data" / "balldontlie_cache"
 BACKTEST_RESULTS = PROJECT_DIR / "backtest_results_2025.json"
 RETRAIN_LOG = LOGS_DIR / "retrain_history.json"
 
-# Thresholds
-MIN_DAYS_BETWEEN_RETRAINS = 3  # Don't retrain more often than this
-MIN_NEW_GAMES_FOR_RETRAIN = 15  # Minimum new games to trigger retrain
+# Thresholds (updated for daily retraining)
+MIN_DAYS_BETWEEN_RETRAINS = 1  # Allow daily retraining for fresher models
+MIN_NEW_GAMES_FOR_RETRAIN = 5  # Lower threshold to capture more recent games
 R2_DEGRADATION_THRESHOLD = 0.05  # Trigger retrain if R2 drops by this much
 
 

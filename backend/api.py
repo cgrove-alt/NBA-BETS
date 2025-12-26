@@ -717,7 +717,7 @@ def get_game_odds(game_id: str):
 @app.get("/api/best-bets", response_model=BestBetsResponse)
 def get_best_bets(
     min_confidence: float = Query(80.0, ge=0, le=100, description="Minimum confidence threshold"),
-    min_edge: float = Query(2.5, ge=0, description="Minimum edge threshold"),
+    min_edge: float = Query(5.0, ge=0, description="Minimum edge threshold (raised from 2.5% for selectivity)"),
     prop_types: Optional[str] = Query(None, description="Comma-separated prop types to filter"),
     pick_type: Optional[str] = Query(None, description="Filter by OVER or UNDER"),
 ):
