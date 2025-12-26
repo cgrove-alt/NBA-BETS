@@ -3393,37 +3393,20 @@ class DataService:
         # =============================================================
         # PLAYER BLACKLIST CHECK (Data-Driven)
         # =============================================================
-        # Based on historical analysis: Some players have 0-5% win rates
-        # Skip predictions entirely for these proven losers
-
-        # HARD BLACKLIST: Players with <10% win rate from historical analysis
-        # These players are fundamentally unpredictable - skip entirely
-        HARD_BLACKLIST_NAMES = {
-            # 0% win rate players
-            "Dean Wade", "James Harden", "Bradley Beal", "Josh Minott",
-            "Tristan Vukcevic", "Ryan Kalkbrenner",
-            # <5% win rate players
-            "Jalen Smith", "De'Andre Hunter", "Mike Conley", "Jaylen Clark",
-            "Ivica Zubac", "Donte DiVincenzo", "Donovan Mitchell",
-            # <15% win rate with high volume
-            "Collin Sexton", "John Collins", "Trey Murphy III",
-            "Onyeka Okongwu", "Bogdan Bogdanovic", "Clint Capela"
-        }
-
-        # TIER 1 PLAYERS: >80% historical win rate - lower threshold, boost confidence
-        TIER1_PLAYERS = {
-            "Jaren Jackson Jr.", "Payton Pritchard", "Isaiah Hartenstein",
-            "Kris Dunn", "Tyler Kolek", "Pascal Siakam", "Josh Giddey",
-            "Jaylen Wells", "Isaiah Jackson", "Kevin Huerter", "Miles McBride",
-            "Nikola Vucevic", "Jaden McDaniels", "Jock Landale", "Chet Holmgren"
-        }
+        # HARDCODED BLACKLIST REMOVED - now using only dynamic blacklist from PropTracker
+        # The dynamic blacklist updates based on recent model performance (last 60 days)
+        # This allows the improved models (OT normalization, quantile regression, etc.)
+        # to prove which players are truly unpredictable vs just hard for the old model
+        #
+        # TIER1 also removed - let the quantile models and direction calibration
+        # handle confidence dynamically based on actual prediction uncertainty
 
         player_name = player.get("player_name", "")
-        is_blacklisted = player_name in HARD_BLACKLIST_NAMES
-        is_tier1 = player_name in TIER1_PLAYERS
+        is_blacklisted = False  # No hardcoded blacklist - use dynamic only
+        is_tier1 = False  # No hardcoded tier1 - model earns confidence
 
-        # Also check dynamic blacklist from prop_tracker (for new bad performers)
-        if not is_blacklisted and player_id and self._prop_tracker:
+        # Check dynamic blacklist from prop_tracker (based on recent performance)
+        if player_id and self._prop_tracker:
             try:
                 # Cache blacklist to avoid repeated DB queries
                 if not hasattr(self, '_player_blacklist_cache'):
@@ -3837,11 +3820,12 @@ class DataService:
                 recency_ratio = recent_value / max(season_value, 0.1) if season_value > 0 else 1.0
                 form_unstable = recency_ratio < 0.6 or recency_ratio > 1.5
 
-                if form_unstable and not is_tier1:
-                    pick, edge = "-", 0  # Skip unstable form players (unless TIER1)
+                if form_unstable:
+                    pick, edge = "-", 0  # Skip unstable form players
                 else:
-                    # TIER1 players get 5% threshold, others get 8% (raised for selectivity)
-                    threshold = 5.0 if is_tier1 else 8.0
+                    # Use 8% threshold for all players (selectivity)
+                    # The quantile models and direction calibration handle confidence
+                    threshold = 8.0
                     pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key, threshold=threshold)
 
                     # Apply direction-specific confidence calibration
@@ -3855,10 +3839,6 @@ class DataService:
                     # Keep in valid range - WIDENED from 55-65% to 50-85%
                     # Let accurate predictions express higher confidence
                     confidence = max(50.0, min(85.0, confidence))
-
-                    # TIER1 players get confidence boost
-                    if is_tier1 and pick != "-":
-                        confidence = min(confidence + 10, 85)  # Allow up to 85% for TIER1
             else:
                 pick, edge = "-", 0  # No pick without a valid line
 
