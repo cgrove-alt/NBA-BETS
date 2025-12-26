@@ -116,6 +116,285 @@ from model_trainer import EnsembleMoneylineWrapper
 
 
 # =============================================================================
+# SMART IMPUTATION FOR MISSING VALUES
+# =============================================================================
+
+# Feature-specific defaults (much better than fillna(0))
+FEATURE_DEFAULTS = {
+    # Offensive/Defensive Ratings (league average ~114)
+    'off_rating': 114.0,
+    'def_rating': 114.0,
+    'home_off_rating': 114.0,
+    'away_off_rating': 114.0,
+    'home_def_rating': 114.0,
+    'away_def_rating': 114.0,
+    'net_rating': 0.0,
+
+    # Win percentages
+    'win_pct': 0.5,
+    'home_win_pct': 0.5,
+    'away_win_pct': 0.5,
+    'season_win_pct': 0.5,
+
+    # Shooting percentages
+    'fg_pct': 0.46,
+    'fg3_pct': 0.36,
+    'ft_pct': 0.78,
+    'ts_pct': 0.57,
+    'efg_pct': 0.53,
+
+    # Per-game stats (league averages 2024-25)
+    'pts_avg': 114.0,
+    'reb_avg': 44.0,
+    'ast_avg': 25.0,
+    'stl_avg': 7.5,
+    'blk_avg': 5.0,
+    'tov_avg': 13.5,
+
+    # Pace
+    'pace': 100.0,
+
+    # Rest days (reasonable default)
+    'rest_days': 1.0,
+    'home_rest_days': 1.0,
+    'away_rest_days': 1.0,
+}
+
+
+def smart_fillna(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply intelligent default values based on feature type.
+
+    Much better than fillna(0) which gives wrong values for:
+    - Ratings (league avg ~114, not 0)
+    - Percentages (0.5 is neutral, not 0)
+    - Per-game stats (league averages vary)
+    """
+    result = df.copy()
+
+    for col in result.columns:
+        if result[col].isna().any():
+            # Check for exact matches first
+            col_lower = col.lower()
+            if col in FEATURE_DEFAULTS:
+                result[col] = result[col].fillna(FEATURE_DEFAULTS[col])
+            elif col_lower in FEATURE_DEFAULTS:
+                result[col] = result[col].fillna(FEATURE_DEFAULTS[col_lower])
+            # Check for partial matches
+            elif 'off_rating' in col_lower or 'offensive_rating' in col_lower:
+                result[col] = result[col].fillna(114.0)
+            elif 'def_rating' in col_lower or 'defensive_rating' in col_lower:
+                result[col] = result[col].fillna(114.0)
+            elif 'net_rating' in col_lower:
+                result[col] = result[col].fillna(0.0)
+            elif 'rating' in col_lower:
+                result[col] = result[col].fillna(114.0)
+            elif 'win_pct' in col_lower or 'winpct' in col_lower:
+                result[col] = result[col].fillna(0.5)
+            elif 'pct' in col_lower or 'percentage' in col_lower:
+                result[col] = result[col].fillna(0.5)
+            elif 'pace' in col_lower:
+                result[col] = result[col].fillna(100.0)
+            elif '_diff' in col_lower or 'diff_' in col_lower:
+                result[col] = result[col].fillna(0.0)
+            elif 'rest' in col_lower:
+                result[col] = result[col].fillna(1.0)
+            elif 'pts' in col_lower or 'points' in col_lower:
+                result[col] = result[col].fillna(114.0)
+            elif 'reb' in col_lower or 'rebounds' in col_lower:
+                result[col] = result[col].fillna(44.0)
+            elif 'ast' in col_lower or 'assists' in col_lower:
+                result[col] = result[col].fillna(25.0)
+            else:
+                # Fall back to column median or 0
+                median = result[col].median()
+                result[col] = result[col].fillna(median if pd.notna(median) else 0.0)
+
+    return result
+
+
+# =============================================================================
+# HYPERPARAMETER TUNING FOR TEAM MODELS
+# =============================================================================
+
+def tune_moneyline_xgb(X_train, y_train, sample_weights=None, n_trials=50):
+    """
+    Hyperparameter tuning for XGBoost moneyline classifier using Optuna.
+
+    Returns optimal parameters for the model.
+    """
+    if not HAS_OPTUNA or not HAS_XGBOOST:
+        print("  Optuna or XGBoost not available, using defaults")
+        return None
+
+    tscv = TimeSeriesSplit(n_splits=5)
+
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 100, 400),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'gamma': trial.suggest_float('gamma', 0.0, 0.3),
+            'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 0.5),
+            'reg_lambda': trial.suggest_float('reg_lambda', 0.5, 2.0),
+        }
+
+        model = XGBClassifier(
+            **params,
+            random_state=42,
+            n_jobs=-1,
+            use_label_encoder=False,
+            eval_metric='logloss'
+        )
+
+        # Cross-validation with time series split
+        scores = []
+        for train_idx, val_idx in tscv.split(X_train):
+            X_tr, X_val = X_train[train_idx], X_train[val_idx]
+            y_tr, y_val = y_train[train_idx], y_train[val_idx]
+
+            if sample_weights is not None:
+                w_tr = sample_weights[train_idx]
+                model.fit(X_tr, y_tr, sample_weight=w_tr)
+            else:
+                model.fit(X_tr, y_tr)
+
+            # Use negative log loss (lower is better)
+            probs = model.predict_proba(X_val)[:, 1]
+            score = log_loss(y_val, probs)
+            scores.append(score)
+
+        return np.mean(scores)  # Minimize log loss
+
+    study = optuna.create_study(direction='minimize', sampler=TPESampler(seed=42))
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+    print(f"  Best log loss: {study.best_value:.4f}")
+    return study.best_params
+
+
+def tune_spread_xgb(X_train, y_train, sample_weights=None, n_trials=50):
+    """
+    Hyperparameter tuning for XGBoost spread regressor using Optuna.
+
+    Returns optimal parameters for the model.
+    """
+    if not HAS_OPTUNA or not HAS_XGBOOST:
+        print("  Optuna or XGBoost not available, using defaults")
+        return None
+
+    tscv = TimeSeriesSplit(n_splits=5)
+
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 100, 400),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'gamma': trial.suggest_float('gamma', 0.0, 0.3),
+            'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 0.5),
+            'reg_lambda': trial.suggest_float('reg_lambda', 0.5, 2.0),
+        }
+
+        model = XGBRegressor(
+            **params,
+            random_state=42,
+            n_jobs=-1
+        )
+
+        # Cross-validation with time series split
+        scores = []
+        for train_idx, val_idx in tscv.split(X_train):
+            X_tr, X_val = X_train[train_idx], X_train[val_idx]
+            y_tr, y_val = y_train[train_idx], y_train[val_idx]
+
+            if sample_weights is not None:
+                w_tr = sample_weights[train_idx]
+                model.fit(X_tr, y_tr, sample_weight=w_tr)
+            else:
+                model.fit(X_tr, y_tr)
+
+            preds = model.predict(X_val)
+            rmse = np.sqrt(mean_squared_error(y_val, preds))
+            scores.append(rmse)
+
+        return np.mean(scores)  # Minimize RMSE
+
+    study = optuna.create_study(direction='minimize', sampler=TPESampler(seed=42))
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+    print(f"  Best RMSE: {study.best_value:.4f}")
+    return study.best_params
+
+
+# =============================================================================
+# BETTING ROI SCORER
+# =============================================================================
+
+def betting_roi_scorer(y_true, y_proba, vegas_implied_probs, min_edge=0.05):
+    """
+    Calculate betting ROI based on edge over Vegas.
+
+    This measures what actually matters: BETTING PROFITABILITY.
+    A model could be 55% accurate but unprofitable if it loses on high-confidence bets.
+
+    Args:
+        y_true: Actual outcomes (0/1 for moneyline, 1=home win)
+        y_proba: Model predicted probabilities for home team
+        vegas_implied_probs: Vegas implied probabilities for home team
+        min_edge: Minimum edge required to place bet (default 5%)
+
+    Returns:
+        ROI as a decimal (0.08 = 8% profit)
+    """
+    total_wagered = 0
+    total_profit = 0
+
+    for actual, model_prob, vegas_prob in zip(y_true, y_proba, vegas_implied_probs):
+        # Skip if vegas_prob is invalid
+        if vegas_prob is None or vegas_prob <= 0 or vegas_prob >= 1:
+            continue
+
+        edge = model_prob - vegas_prob
+
+        if edge >= min_edge:  # Only bet when we have edge on home team
+            total_wagered += 1  # Unit bet
+
+            # American odds calculation from implied probability
+            # If prob < 0.5, odds are positive: (100/prob) - 100
+            # If prob >= 0.5, odds are negative: -100/(1-prob)
+            if actual == 1:  # Home team won
+                payout = (1 / vegas_prob) - 1  # Approximate odds conversion
+                total_profit += payout
+            else:
+                total_profit -= 1  # Lost the bet
+
+        # Also check for edge betting against home team
+        away_model_prob = 1 - model_prob
+        away_vegas_prob = 1 - vegas_prob
+        away_edge = away_model_prob - away_vegas_prob
+
+        if away_edge >= min_edge:
+            total_wagered += 1
+
+            if actual == 0:  # Away team won
+                payout = (1 / away_vegas_prob) - 1
+                total_profit += payout
+            else:
+                total_profit -= 1
+
+    if total_wagered == 0:
+        return 0.0, 0
+
+    return total_profit / total_wagered, total_wagered
+
+
+# =============================================================================
 # SPREAD ENSEMBLE WRAPPER (for pickling)
 # =============================================================================
 
@@ -1121,6 +1400,41 @@ class PlayerStatsCalculator:
         features['pos_reb_factor'] = pos_reb_factor
         features['pos_ast_factor'] = pos_ast_factor
 
+        # CRITICAL NEW FEATURES: Recency ratio, variance penalty, minutes stability
+        # These features are critical for predicting when players will under/over perform
+
+        # Points recency ratio (< 1 = slumping, > 1 = hot)
+        season_pts = features.get('season_pts_avg', 0)
+        recent_pts = features.get('recent_pts_avg', 0)
+        features['pts_recency_ratio'] = recent_pts / season_pts if season_pts > 0 else 1.0
+
+        # Rebounds recency ratio
+        season_reb = features.get('season_reb_avg', 0)
+        recent_reb = features.get('recent_reb_avg', 0)
+        features['reb_recency_ratio'] = recent_reb / season_reb if season_reb > 0 else 1.0
+
+        # Assists recency ratio
+        season_ast = features.get('season_ast_avg', 0)
+        recent_ast = features.get('recent_ast_avg', 0)
+        features['ast_recency_ratio'] = recent_ast / season_ast if season_ast > 0 else 1.0
+
+        # 3PM recency ratio
+        season_fg3 = features.get('season_fg3m_avg', 0)
+        recent_fg3 = features.get('recent_fg3m_avg', 0)
+        features['fg3_recency_ratio'] = recent_fg3 / season_fg3 if season_fg3 > 0 else 1.0
+
+        # Variance penalties (higher = less predictable)
+        features['pts_variance_penalty'] = features.get('season_pts_std', 0) / max(season_pts, 1)
+        features['reb_variance_penalty'] = features.get('season_reb_std', 0) / max(season_reb, 1)
+        features['ast_variance_penalty'] = features.get('season_ast_std', 0) / max(season_ast, 1)
+        features['fg3_variance_penalty'] = features.get('season_fg3m_std', 0) / max(season_fg3, 0.5)
+
+        # Minutes stability (coefficient of variation)
+        season_min = features.get('season_min_avg', 0)
+        recent_min = features.get('recent_min_avg', 0)
+        features['minutes_cv'] = abs(recent_min - season_min) / max(season_min, 1)
+        features['minutes_recency_ratio'] = recent_min / season_min if season_min > 0 else 1.0
+
         return features
 
     def _calc_ts_pct(self, games: List[Tuple[str, Dict]]) -> float:
@@ -1726,7 +2040,7 @@ class PropModel:
         from sklearn.model_selection import TimeSeriesSplit, KFold
 
         self.feature_names = list(X.columns)
-        X_filled = X.fillna(0).values
+        X_filled = smart_fillna(X).values
         y_arr = np.array(y)
 
         # Create CV splitter
@@ -1863,7 +2177,7 @@ class PropModel:
         for col in self.feature_names:
             if col not in X.columns:
                 X[col] = 0
-        X = X[self.feature_names].fillna(0)
+        X = smart_fillna(X[self.feature_names])
         X_scaled = self.scaler.transform(X)
 
         predicted = float(self.model.predict(X_scaled)[0])
@@ -1944,8 +2258,8 @@ class MinutesPredictionModel:
         # Store feature names
         self.feature_names = list(X.columns)
 
-        # Handle missing values
-        X_clean = X.fillna(0).values
+        # Handle missing values with smart imputation
+        X_clean = smart_fillna(X).values
         X_scaled = self.scaler.fit_transform(X_clean)
 
         # Stage 1: Binary classification - will player play?
@@ -2301,7 +2615,7 @@ class PropEnsembleModel:
         from sklearn.model_selection import TimeSeriesSplit
 
         self.feature_names = list(X.columns)
-        X_filled = X.fillna(0).values
+        X_filled = smart_fillna(X).values
         y_arr = np.array(y)
 
         # Chronological split (data assumed sorted by date)
@@ -2465,7 +2779,7 @@ class PropEnsembleModel:
         for col in self.feature_names:
             if col not in X.columns:
                 X[col] = 0
-        X = X[self.feature_names].fillna(0)
+        X = smart_fillna(X[self.feature_names])
         X_scaled = self.scaler.transform(X)
 
         # Get base model predictions
@@ -3110,6 +3424,8 @@ def train_all_models(
     use_ensemble_props: bool = True,  # Use ensemble models for props
     use_optuna: bool = False,  # NEW: Use Optuna hyperparameter optimization
     optuna_trials: int = 50,  # Number of Optuna trials per model
+    tune_team_models: bool = False,  # NEW: Use Optuna for team model tuning
+    team_tune_trials: int = 50,  # Number of Optuna trials for team models
 ) -> Dict:
     """
     Train all models with the prepared data.
@@ -3121,6 +3437,8 @@ def train_all_models(
         time_decay_half_life: Half-life in days for weight decay
         use_optuna: Whether to use Optuna for hyperparameter optimization
         optuna_trials: Number of trials per model for Optuna
+        tune_team_models: Whether to tune moneyline/spread team models
+        team_tune_trials: Number of Optuna trials for team model tuning
 
     Returns:
         Dictionary of training metrics
@@ -3151,6 +3469,10 @@ def train_all_models(
     # Train Ensemble Moneyline Model
     print("\n--- Enhanced Ensemble Moneyline Model ---")
     print("  Building diverse model ensemble for robust predictions...")
+
+    # Track tuned params for later use
+    xgb_ml_params = None
+    xgb_sp_params = None
 
     # Build diverse ensemble with multiple model families
     models = {
@@ -3276,8 +3598,25 @@ def train_all_models(
 
     feature_names = list(X_team.columns)
 
-    X_train_scaled = scaler_ml.fit_transform(X_train.fillna(0))
-    X_test_scaled = scaler_ml.transform(X_test.fillna(0))
+    X_train_scaled = scaler_ml.fit_transform(smart_fillna(X_train))
+    X_test_scaled = scaler_ml.transform(smart_fillna(X_test))
+
+    # Optuna hyperparameter tuning for XGBoost moneyline (if enabled)
+    if tune_team_models and HAS_OPTUNA and HAS_XGBOOST:
+        print("\n  [Optuna] Tuning XGBoost moneyline hyperparameters...")
+        xgb_ml_params = tune_moneyline_xgb(
+            X_train_scaled, y_train, sample_weights=w_train, n_trials=team_tune_trials
+        )
+        if xgb_ml_params:
+            print(f"  Optimized params: {xgb_ml_params}")
+            # Update XGBoost model with tuned params
+            models['xgb'] = XGBClassifier(
+                **xgb_ml_params,
+                random_state=42,
+                n_jobs=-1,
+                use_label_encoder=False,
+                eval_metric='logloss'
+            )
 
     # Models that support sample_weight parameter
     SUPPORTS_SAMPLE_WEIGHT = {'lr', 'rf', 'gb', 'xgb', 'lgb', 'catboost'}
@@ -3341,6 +3680,24 @@ def train_all_models(
     print(f"    Accuracy: {ml_metrics['accuracy']:.4f}")
     print(f"    Brier Score: {ml_metrics['brier_score']:.4f} (lower is better)")
     print(f"    Log Loss: {ml_metrics['log_loss']:.4f}")
+
+    # Calculate Betting ROI if we have Vegas implied probabilities
+    if 'vegas_implied_home_prob' in X_test.columns:
+        vegas_probs = X_test['vegas_implied_home_prob'].values
+        valid_mask = (vegas_probs > 0) & (vegas_probs < 1)
+        if valid_mask.sum() > 10:
+            roi, n_bets = betting_roi_scorer(
+                y_test[valid_mask],
+                y_proba_ensemble[valid_mask],
+                vegas_probs[valid_mask],
+                min_edge=0.05
+            )
+            ml_metrics['betting_roi'] = roi
+            ml_metrics['betting_n_bets'] = n_bets
+            print(f"    Betting ROI (5% edge): {roi:+.1%} on {n_bets} hypothetical bets")
+    else:
+        print(f"    Betting ROI: N/A (no Vegas odds in training data)")
+
     results['moneyline'] = ml_metrics
 
     # Save ensemble model
@@ -3446,8 +3803,23 @@ def train_all_models(
         )
         w_train_sp = None
 
-    X_train_sp_scaled = scaler_sp.fit_transform(X_train_sp.fillna(0))
-    X_test_sp_scaled = scaler_sp.transform(X_test_sp.fillna(0))
+    X_train_sp_scaled = scaler_sp.fit_transform(smart_fillna(X_train_sp))
+    X_test_sp_scaled = scaler_sp.transform(smart_fillna(X_test_sp))
+
+    # Optuna hyperparameter tuning for XGBoost spread (if enabled)
+    if tune_team_models and HAS_OPTUNA and HAS_XGBOOST:
+        print("\n  [Optuna] Tuning XGBoost spread hyperparameters...")
+        xgb_sp_params = tune_spread_xgb(
+            X_train_sp_scaled, y_train_sp, sample_weights=w_train_sp, n_trials=team_tune_trials
+        )
+        if xgb_sp_params:
+            print(f"  Optimized params: {xgb_sp_params}")
+            # Update XGBoost model with tuned params
+            spread_models['xgb'] = XGBRegressor(
+                **xgb_sp_params,
+                random_state=42,
+                n_jobs=-1
+            )
 
     # Models that support sample_weight
     SPREAD_SUPPORTS_WEIGHT = {'rf', 'gb', 'xgb', 'lgb'}
@@ -3639,7 +4011,7 @@ def train_all_models(
                     print(f"  Running Optuna hyperparameter optimization ({optuna_trials} trials)...")
                     # Scale features for Optuna tuning
                     temp_scaler = StandardScaler()
-                    X_scaled = temp_scaler.fit_transform(X_player.fillna(0).values)
+                    X_scaled = temp_scaler.fit_transform(smart_fillna(X_player).values)
 
                     tuner = OptunaHyperparameterTuner(n_trials=optuna_trials, cv_folds=3)
                     optimized_params = tuner.tune_all_models(X_scaled, y, prop_name)
@@ -3751,6 +4123,8 @@ def main():
     # Check for Optuna args from command line
     use_optuna = getattr(args, 'use_optuna', False) if args else False
     optuna_trials = getattr(args, 'optuna_trials', 50) if args else 50
+    tune_team_models = getattr(args, 'tune_team_models', False) if args else False
+    team_tune_trials = getattr(args, 'team_tune_trials', 50) if args else 50
 
     results = train_all_models(
         team_data,
@@ -3758,6 +4132,8 @@ def main():
         use_ensemble_props=True,
         use_optuna=use_optuna,
         optuna_trials=optuna_trials,
+        tune_team_models=tune_team_models,
+        team_tune_trials=team_tune_trials,
     )
 
     # Summary
@@ -3797,6 +4173,10 @@ if __name__ == "__main__":
                         help='Number of Optuna trials per model (default: 50)')
     parser.add_argument('--check-coverage', action='store_true',
                         help='Check player stats coverage and exit')
+    parser.add_argument('--tune-team-models', action='store_true',
+                        help='Enable Optuna hyperparameter tuning for moneyline/spread models')
+    parser.add_argument('--team-tune-trials', type=int, default=50,
+                        help='Number of Optuna trials for team model tuning (default: 50)')
 
     args = parser.parse_args()
 
