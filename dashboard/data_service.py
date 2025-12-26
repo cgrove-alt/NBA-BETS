@@ -1806,9 +1806,94 @@ class DataService:
             return cached
         return []
 
+    def _is_game_started(self, game_status: str, game_datetime: str = None) -> bool:
+        """
+        Check if a game has started and predictions should be locked.
+
+        Args:
+            game_status: Status string from API ("Final", "In Progress", "2025-12-17T01:30:00Z")
+            game_datetime: Optional ISO datetime string
+
+        Returns:
+            True if game has started (predictions should be locked)
+        """
+        # In-progress or completed games
+        if game_status in ["Final", "In Progress"]:
+            return True
+        if "Qtr" in game_status or "Half" in game_status or "OT" in game_status:
+            return True
+
+        # Check if scheduled start time has passed
+        if game_datetime or (game_status and "T" in game_status):
+            try:
+                from datetime import datetime, timezone
+                dt_str = game_datetime or game_status
+                game_time = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+                now = datetime.now(timezone.utc)
+                return now >= game_time
+            except Exception:
+                pass
+
+        return False
+
+    def _get_game_info(self, game_id: str, home_abbrev: str, away_abbrev: str) -> Optional[Dict]:
+        """Get game info including status from cache or API."""
+        # Try cache first
+        games = self.cache.get('games')
+        if games:
+            for game in games:
+                if (game.get('home_team', {}).get('abbreviation') == home_abbrev and
+                    game.get('visitor_team', {}).get('abbreviation') == away_abbrev):
+                    return {
+                        'status': game.get('status', ''),
+                        'datetime': game.get('datetime', ''),
+                        'id': game.get('id')
+                    }
+
+        # Fetch fresh if not in cache
+        if self.balldontlie:
+            try:
+                games = self.balldontlie.get_todays_games()
+                for game in games:
+                    if (game.get('home_team', {}).get('abbreviation') == home_abbrev and
+                        game.get('visitor_team', {}).get('abbreviation') == away_abbrev):
+                        return {
+                            'status': game.get('status', ''),
+                            'datetime': game.get('datetime', game.get('status', '')),
+                            'id': game.get('id')
+                        }
+            except Exception as e:
+                print(f"Error fetching game info: {e}")
+        return None
+
     def start_player_props_fetch(self, game_id: str, home_abbrev: str,
                                  away_abbrev: str, selected_props: List[str] = None):
-        """Start background thread to fetch player props."""
+        """Start background thread to fetch player props.
+
+        IMPORTANT: Predictions are LOCKED once a game has started to ensure
+        betting integrity. Pre-game predictions are preserved and returned.
+        """
+        # Check if game has already started - predictions should be locked
+        game_info = self._get_game_info(game_id, home_abbrev, away_abbrev)
+        if game_info and self._is_game_started(game_info.get('status', ''), game_info.get('datetime')):
+            print(f"Game {game_id} has already started - predictions locked")
+            with self._prop_status_lock:
+                existing = self._prop_fetch_status.get(game_id, {})
+                if existing.get('status') == 'ready':
+                    # Keep existing predictions, just mark as locked
+                    existing['locked'] = True
+                    return
+                else:
+                    # No predictions available - mark as locked with error
+                    self._prop_fetch_status[game_id] = {
+                        'status': 'locked',
+                        'error': 'Game has started - predictions locked for betting integrity',
+                        'home': [],
+                        'away': [],
+                        'locked': True
+                    }
+                    return
+
         with self._prop_status_lock:
             if game_id in self._fetch_threads and self._fetch_threads[game_id].is_alive():
                 return  # Already fetching
@@ -2092,6 +2177,105 @@ class DataService:
             status = self._prop_fetch_status.get(game_id, {'status': 'not_started', 'home': [], 'away': []})
             # Return a copy to prevent race conditions
             return status.copy()
+
+    def get_live_player_stats(self, game_id: str) -> Dict[int, Dict]:
+        """Fetch live player stats for an in-progress game.
+
+        Uses Balldontlie's live box scores endpoint (GOAT tier) to get
+        real-time player statistics during games.
+
+        Args:
+            game_id: Game ID (string or numeric)
+
+        Returns:
+            Dict keyed by player_id with current stats:
+            {player_id: {'pts': 15, 'reb': 5, 'ast': 3, 'fg3m': 2, 'pra': 23, 'min': '18:30'}}
+        """
+        if not self.balldontlie:
+            return {}
+
+        try:
+            # Use live box scores endpoint (GOAT tier)
+            live_data = self.balldontlie.get_live_box_scores()
+
+            for game in live_data:
+                if str(game.get('id')) == str(game_id):
+                    stats = {}
+                    # Extract player stats from home and away teams
+                    # The API returns stats in 'home_team' and 'away_team' with 'players' arrays
+                    for team_key in ['home_team', 'away_team']:
+                        team_data = game.get(team_key, {})
+                        players = team_data.get('players', [])
+                        for p in players:
+                            player_info = p.get('player', {})
+                            player_id = player_info.get('id')
+                            if player_id:
+                                pts = p.get('pts', 0) or 0
+                                reb = p.get('reb', 0) or 0
+                                ast = p.get('ast', 0) or 0
+                                fg3m = p.get('fg3m', 0) or 0
+                                stats[player_id] = {
+                                    'pts': pts,
+                                    'reb': reb,
+                                    'ast': ast,
+                                    'fg3m': fg3m,
+                                    'pra': pts + reb + ast,
+                                    'min': p.get('min', '0:00') or '0:00',
+                                    'player_name': f"{player_info.get('first_name', '')} {player_info.get('last_name', '')}".strip()
+                                }
+                    return stats
+            return {}
+        except Exception as e:
+            print(f"Error fetching live stats for game {game_id}: {e}")
+            return {}
+
+    def get_game_final_stats(self, game_id: str) -> Dict[int, Dict]:
+        """Fetch final player stats for a completed game.
+
+        Uses Balldontlie's box score endpoint (GOAT tier) to get
+        final player statistics after a game ends.
+
+        Args:
+            game_id: Game ID (string or numeric)
+
+        Returns:
+            Dict keyed by player_id with final stats (same format as live stats)
+        """
+        if not self.balldontlie:
+            return {}
+
+        try:
+            # Use box score endpoint for completed game
+            box_score = self.balldontlie.get_box_score(int(game_id))
+
+            if not box_score:
+                return {}
+
+            stats = {}
+            for team_key in ['home_team', 'away_team']:
+                team_data = box_score.get(team_key, {})
+                players = team_data.get('players', [])
+                for p in players:
+                    player_info = p.get('player', {})
+                    player_id = player_info.get('id')
+                    if player_id:
+                        pts = p.get('pts', 0) or 0
+                        reb = p.get('reb', 0) or 0
+                        ast = p.get('ast', 0) or 0
+                        fg3m = p.get('fg3m', 0) or 0
+                        stats[player_id] = {
+                            'pts': pts,
+                            'reb': reb,
+                            'ast': ast,
+                            'fg3m': fg3m,
+                            'pra': pts + reb + ast,
+                            'min': p.get('min', '0:00') or '0:00',
+                            'player_name': f"{player_info.get('first_name', '')} {player_info.get('last_name', '')}".strip()
+                        }
+            return stats
+        except Exception as e:
+            print(f"Error fetching final stats for game {game_id}: {e}")
+            return {}
 
     # _get_key_players method removed - replaced by Balldontlie API in _fetch_props_background()
 

@@ -1,20 +1,116 @@
 import { useState, useMemo } from 'react';
-import { ChevronUp, ChevronDown } from 'lucide-react';
+import { ChevronUp, ChevronDown, CheckCircle, XCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { ConfidenceBar } from './ConfidenceBar';
 import { EdgeBadge } from './EdgeBadge';
 import { cn, formatPrediction, formatLine, getPickColor, getPickBgClass } from '../../lib/utils';
-import type { PlayerProp, PropPrediction, PropType, FilterState } from '../../lib/types';
+import type { PlayerProp, PropPrediction, PropType, FilterState, PlayerLiveStats } from '../../lib/types';
 
 interface PropTableProps {
   propType: PropType;
   players: PlayerProp[];
   filters: FilterState;
+  liveStats?: Record<number, PlayerLiveStats>;
+  isLive?: boolean;
+  isFinal?: boolean;
 }
 
 type SortField = 'player' | 'team' | 'line' | 'prediction' | 'edge' | 'pick' | 'confidence';
 
-export function PropTable({ propType, players, filters }: PropTableProps) {
+/**
+ * Get the actual stat value from live stats for a given prop type
+ */
+function getActualStat(stats: PlayerLiveStats | undefined, propType: PropType): number | undefined {
+  if (!stats) return undefined;
+  switch (propType) {
+    case 'Points': return stats.pts;
+    case 'Rebounds': return stats.reb;
+    case 'Assists': return stats.ast;
+    case '3PM': return stats.fg3m;
+    case 'PRA': return stats.pra;
+    default: return undefined;
+  }
+}
+
+/**
+ * Determine if a pick is currently winning/won
+ */
+function isPickWinning(pick: string, actual: number, line: number | null | undefined): boolean | null {
+  if (line === null || line === undefined) return null;
+  if (pick === 'OVER') return actual > line;
+  if (pick === 'UNDER') return actual < line;
+  return null;
+}
+
+/**
+ * Status indicator component for actual stats
+ */
+function ActualStatDisplay({
+  actual,
+  pick,
+  line,
+  isLive,
+  isFinal,
+}: {
+  actual: number | undefined;
+  pick: string;
+  line: number | null | undefined;
+  isLive: boolean;
+  isFinal: boolean;
+}) {
+  // No stats yet (game hasn't started or no data)
+  if (actual === undefined) {
+    return <span className="text-text-muted">-</span>;
+  }
+
+  const winning = isPickWinning(pick, actual, line);
+
+  // Live game - show pulsing indicator
+  if (isLive) {
+    return (
+      <span className={cn(
+        'inline-flex items-center gap-1.5 font-medium',
+        winning === true ? 'text-green-500' : winning === false ? 'text-red-500' : 'text-text-primary'
+      )}>
+        <span className="relative flex h-2 w-2">
+          <span className={cn(
+            'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
+            winning === true ? 'bg-green-400' : winning === false ? 'bg-red-400' : 'bg-blue-400'
+          )} />
+          <span className={cn(
+            'relative inline-flex rounded-full h-2 w-2',
+            winning === true ? 'bg-green-500' : winning === false ? 'bg-red-500' : 'bg-blue-500'
+          )} />
+        </span>
+        {actual}
+      </span>
+    );
+  }
+
+  // Final game - show HIT/MISS indicator
+  if (isFinal) {
+    if (winning === true) {
+      return (
+        <span className="inline-flex items-center gap-1 text-green-500 font-medium">
+          <CheckCircle size={14} />
+          {actual}
+        </span>
+      );
+    } else if (winning === false) {
+      return (
+        <span className="inline-flex items-center gap-1 text-red-500 font-medium">
+          <XCircle size={14} />
+          {actual}
+        </span>
+      );
+    }
+  }
+
+  // No pick made or can't determine
+  return <span className="text-text-primary font-medium">{actual}</span>;
+}
+
+export function PropTable({ propType, players, filters, liveStats, isLive = false, isFinal = false }: PropTableProps) {
   const [sortField, setSortField] = useState<SortField>('confidence');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -124,6 +220,11 @@ export function PropTable({ propType, players, filters }: PropTableProps) {
                   <th className={headerClass} onClick={() => handleSort('pick')}>
                     Pick <SortIcon field="pick" />
                   </th>
+                  {(isLive || isFinal || liveStats) && (
+                    <th className={headerClass}>
+                      Actual {isLive && <span className="text-blue-400 text-[10px] ml-1">LIVE</span>}
+                    </th>
+                  )}
                   <th className={cn(headerClass, 'w-32')} onClick={() => handleSort('confidence')}>
                     Confidence <SortIcon field="confidence" />
                   </th>
@@ -161,6 +262,17 @@ export function PropTable({ propType, players, filters }: PropTableProps) {
                         {prop!.pick}
                       </span>
                     </td>
+                    {(isLive || isFinal || liveStats) && (
+                      <td className="px-3 py-3 text-sm">
+                        <ActualStatDisplay
+                          actual={getActualStat(liveStats?.[player.player_id], propType)}
+                          pick={prop!.pick}
+                          line={prop?.line}
+                          isLive={isLive}
+                          isFinal={isFinal}
+                        />
+                      </td>
+                    )}
                     <td className="px-3 py-3 w-32">
                       <ConfidenceBar confidence={prop!.confidence} size="sm" />
                     </td>

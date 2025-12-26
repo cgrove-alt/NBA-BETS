@@ -46,7 +46,8 @@ export interface PlayerProp {
 
 export interface PropsResponse {
   game_id: string;
-  status: 'pending' | 'ready' | 'error' | 'not_started';
+  status: 'pending' | 'ready' | 'error' | 'not_started' | 'locked';
+  error?: string;  // Error message for error/locked status
   home_team?: string;
   away_team?: string;
   home_props: PlayerProp[];
@@ -198,6 +199,25 @@ export interface GameResults {
   moneyline_result?: MoneylineResultData;
   player_results: PlayerResult[];
   summary?: ResultsSummary;
+}
+
+// ============== LIVE STATS TYPES ==============
+
+export interface PlayerLiveStats {
+  pts: number;
+  reb: number;
+  ast: number;
+  fg3m: number;
+  pra: number;
+  min: string;
+  player_name?: string;
+}
+
+export interface LiveStatsResponse {
+  game_id: string;
+  status: string;  // Game status: "Final", "In Progress", "1st Qtr", etc.
+  stats: Record<number, PlayerLiveStats>;  // Keyed by player_id
+  timestamp: string;
 }
 
 // Prop types constant

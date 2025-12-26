@@ -225,8 +225,21 @@ def get_props(game_id: str):
     status_data = service.get_props_fetch_status(game_id)
 
     status = status_data.get("status", "not_started")
+    error = status_data.get("error")
     home_props_raw = status_data.get("home", [])
     away_props_raw = status_data.get("away", [])
+
+    # Handle locked status - game has started, predictions are frozen
+    if status == "locked":
+        return PropsResponse(
+            game_id=game_id,
+            status="locked",
+            error=error or "Game has started - predictions locked for betting integrity",
+            home_props=[],
+            away_props=[],
+            all_props=[],
+            count=0,
+        )
 
     # Get team abbreviations from cache (set when props fetch was started)
     cached_teams = _game_teams_cache.get(game_id, {})
@@ -290,6 +303,40 @@ def start_props_fetch(
     )
 
     return {"message": "Props fetch started", "game_id": game_id}
+
+
+@app.get("/api/games/{game_id}/live-stats")
+def get_live_stats(game_id: str):
+    """Get live player stats for an in-progress or completed game.
+
+    Returns real-time player statistics during games (via Balldontlie GOAT tier).
+    For completed games, returns final box score stats.
+    """
+    from datetime import datetime
+    service = get_service()
+
+    # First check if we have a cached game status
+    games = service.get_todays_games()
+    game_status = None
+    for g in games:
+        if str(g.get('id')) == str(game_id):
+            game_status = g.get('status', '')
+            break
+
+    # Get stats based on game status
+    if game_status == 'Final':
+        # Use final box score for completed games
+        stats = service.get_game_final_stats(game_id)
+    else:
+        # Use live box scores for in-progress games
+        stats = service.get_live_player_stats(game_id)
+
+    return {
+        "game_id": game_id,
+        "status": game_status or "unknown",
+        "stats": stats,
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 # ============== ANALYSIS ENDPOINTS ==============

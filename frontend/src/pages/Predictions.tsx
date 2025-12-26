@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Lock, Radio } from 'lucide-react';
 import { GameSelector } from '../components/game/GameSelector';
 import { FilterPanel } from '../components/predictions/FilterPanel';
 import { PropTable } from '../components/predictions/PropTable';
@@ -8,6 +8,7 @@ import { GamePredictions } from '../components/predictions/GamePredictions';
 import { useGames } from '../hooks/useGames';
 import { usePredictions } from '../hooks/usePredictions';
 import { useFilters } from '../hooks/useFilters';
+import { useLiveStats } from '../hooks/useLiveStats';
 
 export function Predictions() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
@@ -25,12 +26,18 @@ export function Predictions() {
     isLoading: propsLoading,
     isPending,
     isReady,
+    isLocked,
+    lockedMessage,
+    gameStarted,
     startFetch,
     isStarting,
   } = usePredictions(selectedGameId, selectedGame);
 
   // Filters
   const { filters, updateFilters } = useFilters();
+
+  // Live stats tracking
+  const { liveStats, isLive, isFinal } = useLiveStats(selectedGameId, selectedGame?.status);
 
   // Auto-select first game
   useEffect(() => {
@@ -39,12 +46,12 @@ export function Predictions() {
     }
   }, [games, selectedGameId]);
 
-  // Auto-start fetch when game selected and not started
+  // Auto-start fetch when game selected and not started (only if game hasn't started)
   useEffect(() => {
-    if (selectedGameId && selectedGame && propsData?.status === 'not_started') {
+    if (selectedGameId && selectedGame && propsData?.status === 'not_started' && !gameStarted) {
       startFetch();
     }
-  }, [selectedGameId, selectedGame, propsData?.status, startFetch]);
+  }, [selectedGameId, selectedGame, propsData?.status, startFetch, gameStarted]);
 
   // All players from both teams
   const allPlayers = useMemo(() => {
@@ -111,6 +118,32 @@ export function Predictions() {
         <GamePredictions gameId={selectedGameId} game={selectedGame} />
       )}
 
+      {/* Live tracking banner */}
+      {isLive && selectedGameId && (
+        <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4 flex items-center gap-3">
+          <Radio className="text-blue-500 shrink-0 animate-pulse" size={20} />
+          <div>
+            <p className="text-blue-500 font-medium">Live Tracking Active</p>
+            <p className="text-blue-500/80 text-sm">
+              Tracking real-time stats against pre-game predictions. Stats update every 15 seconds.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Locked state - Game has started but not live tracking */}
+      {isLocked && !isLive && selectedGameId && (
+        <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4 flex items-center gap-3">
+          <Lock className="text-yellow-500 shrink-0" size={20} />
+          <div>
+            <p className="text-yellow-500 font-medium">Predictions Locked</p>
+            <p className="text-yellow-500/80 text-sm">
+              {lockedMessage || 'Game has started - predictions are locked for betting integrity. Pre-game predictions are preserved below if available.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Loading state */}
       {(propsLoading || isPending || isStarting) && selectedGameId && (
         <div className="flex items-center justify-center py-12">
@@ -145,6 +178,9 @@ export function Predictions() {
                 propType={propType}
                 players={allPlayers}
                 filters={filters}
+                liveStats={liveStats}
+                isLive={isLive}
+                isFinal={isFinal}
               />
             ))}
           </div>

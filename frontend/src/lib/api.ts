@@ -11,6 +11,7 @@ import type {
   BestBetsResponse,
   HealthResponse,
   GameResults,
+  LiveStatsResponse,
 } from './types';
 
 // API base URL - uses environment variable in production, proxy in development
@@ -107,5 +108,11 @@ export async function getBestBets(params?: {
 // Game Results
 export async function getGameResults(gameId: string): Promise<GameResults> {
   const { data } = await api.get<GameResults>(`/games/${gameId}/results`);
+  return data;
+}
+
+// Live Stats
+export async function getLiveStats(gameId: string): Promise<LiveStatsResponse> {
+  const { data } = await api.get<LiveStatsResponse>(`/games/${gameId}/live-stats`);
   return data;
 }

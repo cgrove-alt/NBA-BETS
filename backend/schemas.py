@@ -62,7 +62,8 @@ class PlayerProp(BaseModel):
 
 class PropsResponse(BaseModel):
     game_id: str
-    status: str  # "pending", "ready", "error", "not_started"
+    status: str  # "pending", "ready", "error", "not_started", "locked"
+    error: Optional[str] = None  # Error message for error/locked status
     home_team: Optional[str] = None
     away_team: Optional[str] = None
     home_props: List[PlayerProp] = []
