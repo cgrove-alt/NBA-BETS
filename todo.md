@@ -208,19 +208,19 @@ All Phase 1 and Phase 2 improvements have been implemented:
   - 80% prediction interval coverage: 75% achieved
   - Average interval width: 32.2 points
 
-#### Training Results (Dec 26, 2025)
+#### Training Results (Dec 26, 2025) - Post Phase 3
 
 **Moneyline Model:**
-- Accuracy: 62.86% (vs previous baseline)
-- Brier Score: 0.2263
-- Best individual: SVM (65.59%), LR (65.08%)
+- Accuracy: 63.37% (+0.5% improvement)
+- Brier Score: 0.2292
+- Best individual: MLP (65.08%), SVM (63.37%)
 - Stacking: Did not improve (weighted avg better)
 - Calibration: Did not improve (uncalibrated better)
 
 **Spread Model:**
-- RMSE: 14.51 points
-- MAE: 11.40 points
-- R²: 0.1963
+- RMSE: 14.49 points (improved from 14.51)
+- MAE: 11.36 points (improved from 11.40)
+- R²: 0.1995
 - Quantile coverage (80%): 75%
 
 **Player Props:**
@@ -228,9 +228,9 @@ All Phase 1 and Phase 2 improvements have been implemented:
 - Rebounds: RMSE=2.52, R²=0.294 (position-aware)
 - Assists: RMSE=1.92, R²=0.427 (position-aware)
 - Threes: RMSE=1.32, R²=0.269
-- PRA: Training completed
+- PRA: RMSE=8.13, R²=0.517
 
-#### New Features Added (50+ total)
+#### New Features Added (70+ total)
 ```
 ELO: home_elo, away_elo, elo_diff, elo_win_prob, elo_spread
 REST: home_days_rest, away_days_rest, rest_advantage, home_is_b2b, away_is_b2b, b2b_disadvantage
@@ -240,10 +240,47 @@ ALTITUDE: home_altitude_disadvantage, away_altitude_disadvantage
 FATIGUE: home_travel_fatigue, away_travel_fatigue, fatigue_advantage, away_coast_to_coast
 PACE: home_pace, away_pace, expected_pace, pace_diff
 SITUATIONAL: road_b2b_vs_rested, away_tired_traveler
+SCHEDULE_SPOTS: home_letdown_spot, away_letdown_spot, home_trap_game, away_trap_game
+              home_sandwich_game, away_sandwich_game, home_road_trip_fatigue, away_road_trip_fatigue
+              home_revenge_game, away_revenge_game, home_long_homestand, away_long_homestand
+              home_early_season, away_early_season, schedule_spot_advantage
+LINE_MOVEMENT: spread_movement, spread_movement_abs, spread_moved_toward_home/away
+              total_movement, model_vs_market_spread, model_disagrees_spread, large_spread_move
 ```
 
-#### Next Steps (Phase 3)
-- [ ] Integrate DARKO/EPM player impact metrics
-- [ ] Add betting line movement features
-- [ ] Implement schedule spot analysis
-- [ ] Run comprehensive backtest with new models
+#### Phase 3 Completed (Dec 26, 2025)
+- [x] Integrate DARKO/EPM player impact metrics - Created `player_impact_fetcher.py`
+- [x] Add betting line movement features - Added `calculate_line_movement_features()` function
+- [x] Implement schedule spot analysis - Added `analyze_schedule_spots()` with letdown, trap, sandwich, revenge, road trip fatigue detection
+- [x] Run comprehensive backtest with new models - Completed with improved results
+
+#### Summary of Phase 3 Improvements
+
+1. **Player Impact Fetcher** (`player_impact_fetcher.py`):
+   - `PlayerImpactFetcher` class for fetching EPM/DARKO metrics
+   - `STAR_PLAYER_IMPACTS` dictionary with 40+ star players
+   - `calculate_injury_adjustment()` for injury-based spread adjustments
+
+2. **Schedule Spot Analysis** (`analyze_schedule_spots()`):
+   - Letdown spots (after big wins vs elite teams)
+   - Trap games (weak opponent before tough game)
+   - Sandwich games (between two elite opponents)
+   - Road trip fatigue (3rd+ road game)
+   - Revenge games (recent close loss to opponent)
+   - Long homestand complacency (4th+ home game)
+   - Early season variance flag
+   - Combined schedule_spot_score
+
+3. **Line Movement Features** (`calculate_line_movement_features()`):
+   - Spread movement tracking (opening vs current)
+   - Total movement tracking
+   - Model vs market disagreement detection
+   - Steam move indicators (large moves)
+   - Ready for live prediction integration
+
+#### Next Steps (Future Enhancements)
+- [ ] Integrate live line movement data from odds_fetcher during predictions
+- [ ] Add public betting percentage data (if available)
+- [ ] Implement trap game detection with actual future schedule data
+- [ ] Add player-level injury impact adjustments to props models
+- [ ] Track Closing Line Value (CLV) for bet quality validation

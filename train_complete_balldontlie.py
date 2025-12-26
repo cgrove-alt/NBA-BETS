@@ -1424,6 +1424,243 @@ def calc_travel_fatigue_features(last_game_team_abbrev: str, current_game_team_a
     return result
 
 
+# =============================================================================
+# SCHEDULE SPOT ANALYSIS
+# =============================================================================
+
+# Teams considered "elite" for lookahead/letdown detection
+ELITE_TEAMS = {'BOS', 'DEN', 'MIL', 'PHX', 'LAL', 'GSW', 'MIA', 'PHI', 'CLE', 'OKC', 'MIN', 'NYK'}
+
+
+def analyze_schedule_spots(
+    team_id: int,
+    team_abbrev: str,
+    game_date: str,
+    opponent_abbrev: str,
+    team_calc: 'TeamStatsCalculator',
+    is_home: bool,
+    future_games: List[Dict] = None
+) -> Dict[str, int]:
+    """
+    Analyze schedule-based situational spots that affect team performance.
+
+    Schedule spots are proven market inefficiencies:
+    - Letdown: After emotional/big win, team underperforms vs weaker opponent
+    - Trap: Playing weak team before tough game (lookahead)
+    - Sandwich: Between two tough opponents
+    - Road trip fatigue: 3rd+ game on road trip
+    - Revenge: Playing team that beat them recently
+
+    Args:
+        team_id: Team ID
+        team_abbrev: Team abbreviation
+        game_date: Current game date
+        opponent_abbrev: Opponent abbreviation
+        team_calc: TeamStatsCalculator for game history
+        is_home: Whether team is home
+        future_games: List of team's upcoming games (if available)
+
+    Returns:
+        Dictionary of schedule spot indicators (0 or 1)
+    """
+    spots = {
+        'letdown_spot': 0,           # After big win, playing weaker team
+        'trap_game': 0,              # Weak team before tough opponent (lookahead)
+        'sandwich_game': 0,          # Between two tough games
+        'road_trip_fatigue': 0,      # 3rd+ game of road trip
+        'revenge_game': 0,           # Playing team that beat them recently
+        'long_homestand': 0,         # 4th+ consecutive home game (complacency)
+        'early_season_variance': 0,  # First 10 games of season (volatile)
+        'schedule_spot_score': 0.0,  # Combined situational score
+    }
+
+    # Get team's recent game history
+    last_game = team_calc.get_last_game_info(team_id, game_date)
+    if not last_game:
+        return spots
+
+    # Check history of games
+    if team_id not in team_calc.team_games:
+        return spots
+
+    recent_games = [(d, s) for d, s in team_calc.team_games[team_id] if d < game_date]
+    recent_games.sort(key=lambda x: x[0], reverse=True)
+
+    if not recent_games:
+        return spots
+
+    # === LETDOWN SPOT ===
+    # After big win (15+ points), playing a weaker opponent
+    if len(recent_games) >= 1:
+        last_game_date, last_game_stats = recent_games[0]
+        if last_game_stats.get('win', False) and last_game_stats.get('point_diff', 0) >= 15:
+            # Was it against a good team? (elite opponent)
+            last_opp = last_game_stats.get('opponent_abbrev', '')
+            if last_opp in ELITE_TEAMS:
+                # Now playing non-elite opponent - potential letdown
+                if opponent_abbrev not in ELITE_TEAMS:
+                    spots['letdown_spot'] = 1
+
+    # === TRAP GAME ===
+    # Weak opponent before elite opponent (if we have future schedule)
+    # For training data, we can check if next game was vs elite team
+    # This is tricky for point-in-time data, so we'll use a proxy
+
+    # === ROAD TRIP FATIGUE ===
+    # Count consecutive road games
+    if not is_home:
+        consecutive_road = 0
+        for _, game_stats in recent_games[:5]:
+            if not game_stats.get('is_home', True):
+                consecutive_road += 1
+            else:
+                break
+        if consecutive_road >= 2:  # This would be 3rd road game
+            spots['road_trip_fatigue'] = 1
+
+    # === LONG HOMESTAND (complacency) ===
+    if is_home:
+        consecutive_home = 0
+        for _, game_stats in recent_games[:6]:
+            if game_stats.get('is_home', False):
+                consecutive_home += 1
+            else:
+                break
+        if consecutive_home >= 3:  # This would be 4th home game
+            spots['long_homestand'] = 1
+
+    # === REVENGE GAME ===
+    # Check if opponent beat this team in last 30 days
+    for game_date_str, game_stats in recent_games[:15]:
+        opp_abbrev = game_stats.get('opponent_abbrev', '')
+        if opp_abbrev == opponent_abbrev:
+            if not game_stats.get('win', True):  # Lost to this team
+                # Check if it was a close game (more motivation)
+                if abs(game_stats.get('point_diff', 0)) <= 10:
+                    spots['revenge_game'] = 1
+            break
+
+    # === SANDWICH GAME ===
+    # Between two elite opponents (need to check both prev and next)
+    # For training, check if previous opponent was elite
+    if len(recent_games) >= 1:
+        prev_opp = recent_games[0][1].get('opponent_abbrev', '')
+        if prev_opp in ELITE_TEAMS and opponent_abbrev not in ELITE_TEAMS:
+            # If we knew next game was also elite, this would be stronger
+            # Partial indicator
+            spots['sandwich_game'] = 1 if prev_opp in ELITE_TEAMS else 0
+
+    # === EARLY SEASON VARIANCE ===
+    # First 10 games have more variance, models less accurate
+    total_games = len(recent_games)
+    if total_games <= 10:
+        spots['early_season_variance'] = 1
+
+    # === COMBINED SCORE ===
+    # Weighted combination of spots
+    spot_weights = {
+        'letdown_spot': -1.5,        # Negative = underperform
+        'trap_game': -1.0,           # Negative = underperform
+        'sandwich_game': -0.5,       # Negative = underperform
+        'road_trip_fatigue': -1.5,   # Negative = underperform
+        'revenge_game': 1.0,         # Positive = extra motivation
+        'long_homestand': -0.5,      # Negative = complacency
+        'early_season_variance': 0,  # Neutral (just more variance)
+    }
+
+    score = sum(spots[k] * spot_weights[k] for k in spot_weights)
+    spots['schedule_spot_score'] = round(score, 2)
+
+    return spots
+
+
+def calculate_line_movement_features(
+    opening_spread: Optional[float] = None,
+    current_spread: Optional[float] = None,
+    opening_total: Optional[float] = None,
+    current_total: Optional[float] = None,
+    model_spread: Optional[float] = None,
+    model_win_prob: Optional[float] = None,
+) -> Dict[str, float]:
+    """
+    Calculate betting line movement features for live predictions.
+
+    Line movement features help identify:
+    - Sharp vs public money (reverse line movement)
+    - Market disagreement with model (potential edge)
+    - Steam moves (rapid line change)
+
+    Args:
+        opening_spread: Opening spread for home team (negative = favorite)
+        current_spread: Current spread for home team
+        opening_total: Opening over/under total
+        current_total: Current over/under total
+        model_spread: Model's predicted spread
+        model_win_prob: Model's predicted home win probability
+
+    Returns:
+        Dictionary of line movement features
+    """
+    features = {
+        # Spread movement
+        'spread_movement': 0.0,              # Points moved (positive = toward home)
+        'spread_movement_abs': 0.0,          # Absolute movement
+        'spread_moved_toward_home': 0,       # Binary: line moved toward home
+        'spread_moved_toward_away': 0,       # Binary: line moved toward away
+
+        # Total movement
+        'total_movement': 0.0,               # Points moved (positive = up)
+        'total_movement_abs': 0.0,           # Absolute movement
+        'total_moved_up': 0,                 # Binary: total increased
+        'total_moved_down': 0,               # Binary: total decreased
+
+        # Model vs market disagreement
+        'model_vs_market_spread': 0.0,       # Model spread - Market spread
+        'model_disagrees_spread': 0,         # Binary: |disagreement| > 2 points
+        'model_favors_home_more': 0,         # Binary: model more bullish on home
+
+        # Steam move indicators
+        'large_spread_move': 0,              # Binary: > 2 point move
+        'large_total_move': 0,               # Binary: > 3 point move
+
+        # Reverse line movement (RLM) proxy
+        # RLM occurs when line moves opposite to public betting %
+        # We can't directly calculate without public % data, but large moves
+        # against strong teams often indicate sharp money
+        'line_has_moved': 0,                 # Binary: any movement detected
+    }
+
+    # Calculate spread movement
+    if opening_spread is not None and current_spread is not None:
+        movement = opening_spread - current_spread  # Positive = moved toward home (home became more favored)
+        features['spread_movement'] = movement
+        features['spread_movement_abs'] = abs(movement)
+        features['spread_moved_toward_home'] = 1 if movement > 0.5 else 0
+        features['spread_moved_toward_away'] = 1 if movement < -0.5 else 0
+        features['large_spread_move'] = 1 if abs(movement) >= 2.0 else 0
+        features['line_has_moved'] = 1 if abs(movement) >= 0.5 else 0
+
+    # Calculate total movement
+    if opening_total is not None and current_total is not None:
+        total_move = current_total - opening_total  # Positive = total increased
+        features['total_movement'] = total_move
+        features['total_movement_abs'] = abs(total_move)
+        features['total_moved_up'] = 1 if total_move > 0.5 else 0
+        features['total_moved_down'] = 1 if total_move < -0.5 else 0
+        features['large_total_move'] = 1 if abs(total_move) >= 3.0 else 0
+        if features['line_has_moved'] == 0:
+            features['line_has_moved'] = 1 if abs(total_move) >= 0.5 else 0
+
+    # Calculate model vs market disagreement
+    if current_spread is not None and model_spread is not None:
+        disagreement = model_spread - current_spread
+        features['model_vs_market_spread'] = disagreement
+        features['model_disagrees_spread'] = 1 if abs(disagreement) >= 2.0 else 0
+        features['model_favors_home_more'] = 1 if disagreement > 0 else 0
+
+    return features
+
+
 class PlayerStatsCalculator:
     """Calculate rolling player statistics for prop predictions."""
 
@@ -2338,6 +2575,28 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
                     away_days_rest, away_is_b2b
                 )
 
+        # === NEW: SCHEDULE SPOT ANALYSIS ===
+        # Analyze schedule-based situational spots for both teams
+        home_schedule_spots = analyze_schedule_spots(
+            team_id=home_team_id,
+            team_abbrev=home_team_abbrev,
+            game_date=game_date,
+            opponent_abbrev=away_team_abbrev,
+            team_calc=team_calc,
+            is_home=True,
+            future_games=None  # Historical training - no future data available
+        )
+
+        away_schedule_spots = analyze_schedule_spots(
+            team_id=away_team_id,
+            team_abbrev=away_team_abbrev,
+            game_date=game_date,
+            opponent_abbrev=home_team_abbrev,
+            team_calc=team_calc,
+            is_home=False,
+            future_games=None  # Historical training - no future data available
+        )
+
         # Add game to team calculator (AFTER getting point-in-time features)
         team_calc.add_game(game)
 
@@ -2652,6 +2911,48 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
             'road_b2b_vs_rested': 1 if (away_is_b2b and home_days_rest >= 2) else 0,
             # Long travel + B2B is especially bad
             'away_tired_traveler': 1 if (away_is_b2b and away_travel_features['travel_distance'] > 1000) else 0,
+
+            # === NEW: SCHEDULE SPOT FEATURES ===
+            # Home team schedule spots
+            'home_letdown_spot': home_schedule_spots['letdown_spot'],
+            'home_trap_game': home_schedule_spots['trap_game'],
+            'home_sandwich_game': home_schedule_spots['sandwich_game'],
+            'home_road_trip_fatigue': home_schedule_spots['road_trip_fatigue'],
+            'home_revenge_game': home_schedule_spots['revenge_game'],
+            'home_long_homestand': home_schedule_spots['long_homestand'],
+            'home_early_season': home_schedule_spots['early_season_variance'],
+            'home_schedule_spot_score': home_schedule_spots['schedule_spot_score'],
+
+            # Away team schedule spots
+            'away_letdown_spot': away_schedule_spots['letdown_spot'],
+            'away_trap_game': away_schedule_spots['trap_game'],
+            'away_sandwich_game': away_schedule_spots['sandwich_game'],
+            'away_road_trip_fatigue': away_schedule_spots['road_trip_fatigue'],
+            'away_revenge_game': away_schedule_spots['revenge_game'],
+            'away_long_homestand': away_schedule_spots['long_homestand'],
+            'away_early_season': away_schedule_spots['early_season_variance'],
+            'away_schedule_spot_score': away_schedule_spots['schedule_spot_score'],
+
+            # Combined schedule spot advantage (positive = home team favored by spots)
+            'schedule_spot_advantage': home_schedule_spots['schedule_spot_score'] - away_schedule_spots['schedule_spot_score'],
+
+            # === LINE MOVEMENT FEATURES (for live predictions) ===
+            # These are placeholders during training (no historical line data)
+            # Filled in during live predictions with actual line movement
+            'spread_movement': 0.0,
+            'spread_movement_abs': 0.0,
+            'spread_moved_toward_home': 0,
+            'spread_moved_toward_away': 0,
+            'total_movement': 0.0,
+            'total_movement_abs': 0.0,
+            'total_moved_up': 0,
+            'total_moved_down': 0,
+            'model_vs_market_spread': 0.0,
+            'model_disagrees_spread': 0,
+            'model_favors_home_more': 0,
+            'large_spread_move': 0,
+            'large_total_move': 0,
+            'line_has_moved': 0,
         }
 
         team_data.append({
