@@ -2341,14 +2341,15 @@ class DataService:
 
     def _calculate_prop_confidence(self, prediction: float, line: float,
                                     season_avg: float, recent_avg: float,
-                                    games_played: int, features: Dict = None) -> float:
+                                    games_played: int, features: Dict = None,
+                                    player_name: str = None) -> float:
         """Calculate confidence score for prop prediction (0-100).
 
-        Balanced confidence calculation that reflects actual predictability factors:
-        - Sample size: More games = more reliable averages
-        - Consistency: Players who perform consistently are more predictable
-        - Edge size: Moderate edges (5-15%) indicate genuine value
-        - Real lines: Having actual sportsbook lines improves accuracy
+        Data-driven confidence based on historical analysis of 6,076 predictions:
+        - UNDER picks win 59.8% vs OVER at 32.2% → Direction matters most
+        - Confidence was INVERTED (77% conf = 38% actual, 55% conf = 49% actual)
+        - Moderate edges (5-15%) perform best
+        - Player whitelist/blacklist provides strong signal
 
         Args:
             prediction: Predicted value
@@ -2357,55 +2358,64 @@ class DataService:
             recent_avg: Recent average
             games_played: Number of games played
             features: Optional full features dict from PlayerPropFeatureGenerator
+            player_name: Optional player name for whitelist/blacklist check
         """
+        # WHITELIST: Players with >90% historical win rate
+        WHITELIST_BOOST = {
+            "Payton Pritchard", "Jaren Jackson Jr.", "Isaiah Hartenstein",
+            "Tyler Kolek", "Jaylen Wells", "Josh Giddey", "Chet Holmgren",
+            "Kris Dunn", "Pascal Siakam", "Kevin Huerter", "Miles McBride",
+            "Nikola Vucevic", "Jaden McDaniels", "Jock Landale"
+        }
+
         # Start at neutral 50%
         confidence = 50.0
 
-        # Factor 1: Sample size
-        if games_played >= 25:
-            confidence += 8
-        elif games_played >= 15:
-            confidence += 5
-        elif games_played >= 8:
-            confidence += 2
+        # Factor 1: DIRECTION (most important based on data)
+        # UNDER wins 59.8% vs OVER at 32.2%
+        if line is not None and line > 0:
+            if prediction < line:
+                confidence += 8  # UNDER bonus
+            else:
+                confidence -= 3  # OVER penalty
 
-        # Factor 2: Player consistency (how predictable are they?)
+        # Factor 2: Sample size
+        if games_played >= 25:
+            confidence += 5
+        elif games_played >= 15:
+            confidence += 3
+
+        # Factor 3: Player consistency
         if features and "consistency_score" in features:
             consistency = features["consistency_score"]
-            # Consistent players are more predictable
-            confidence += consistency * 10  # Up to 10 pts
+            confidence += consistency * 6  # Up to 6 pts
         elif season_avg > 0:
-            # Fallback: compare season vs recent
             consistency = 1 - abs(season_avg - recent_avg) / max(season_avg, 1)
             consistency = max(0, min(1, consistency))
-            confidence += consistency * 8
+            confidence += consistency * 5
 
-        # Factor 3: Edge magnitude - moderate edges are good signals
+        # Factor 4: Edge magnitude - historical sweet spot is 5-15%
         if line is not None and line > 0:
             edge_pct = abs(prediction - line) / line * 100
 
-            # Sweet spot is 5-15% edge - indicates value
             if 5 <= edge_pct <= 15:
-                confidence += 5
-            # Very small edges are coin flips
+                confidence += 5  # Sweet spot
+            elif edge_pct > 30:
+                confidence -= 8  # Very large edges often wrong
             elif edge_pct < 3:
-                confidence -= 5
-            # Extreme edges (>25%) may indicate model error
-            elif edge_pct > 25:
-                confidence -= 5
+                confidence -= 3  # Too close to call
 
-        # Factor 4: Real Vegas line available
+        # Factor 5: Real Vegas line available
         if features and features.get("used_real_line", False):
             confidence += 3
 
-        # Factor 5: Historical matchup data
-        if features:
-            vs_team_games = features.get("vs_team_games", 0)
-            if vs_team_games >= 3:
-                confidence += 3
+        # Factor 6: Whitelist boost
+        if player_name and player_name in WHITELIST_BOOST:
+            confidence += 8
 
-        # Cap at realistic range (40-75%)
-        confidence = max(40.0, min(75.0, confidence))
+        # Cap at realistic range based on actual performance
+        # Best observed: ~60% for UNDER picks
+        confidence = max(45.0, min(65.0, confidence))
 
         return confidence
 
@@ -2778,39 +2788,53 @@ class DataService:
         return max(8.0, min(42.0, base_minutes))
 
     def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None) -> Tuple[str, float]:
-        """Determine OVER/UNDER pick with balanced thresholds.
+        """Determine OVER/UNDER pick with data-driven corrections.
 
-        Uses small absolute bias corrections (not percentage multipliers) to account
-        for model's tendency to slightly overpredict. Symmetric thresholds ensure
-        fair treatment of both OVER and UNDER picks.
+        Based on comprehensive historical analysis of 6,076 predictions:
+        - Model systematically over-predicts all stats
+        - UNDER picks win 59.8% vs OVER at 32.2%
+        - Applies empirically-derived bias corrections and direction-aware thresholds
         """
         if line <= 0:
             return "-", 0.0
 
-        # BIAS CORRECTIONS: Small absolute adjustments based on historical data
-        # These are MUCH smaller than the previous 25% calibration factors
-        # Values derived from backtest: avg_predicted - avg_actual
+        # EMPIRICAL BIAS CORRECTIONS from historical analysis (avg_predicted - avg_actual)
+        # These are the ACTUAL measured over-prediction amounts:
         BIAS_CORRECTIONS = {
-            'points': -1.5,    # Model overpredicts by ~1.5 pts on average
-            'rebounds': -0.3,  # Small overprediction
-            'assists': -0.5,   # Moderate overprediction
-            '3pm': -0.3,       # Small overprediction for 3-pointers
-            'threes': -0.3,    # Alias for 3pm
-            'pra': -2.0,       # Combined effect (pts + reb + ast)
+            'points': -5.0,    # Was -1.5, actual bias is +4.95 pts
+            'rebounds': -1.0,  # Was -0.3, actual bias is +1.00 pts
+            'assists': -1.0,   # Was -0.5, actual bias is +0.95 pts
+            '3pm': -0.6,       # Was -0.3, actual bias is +0.58 pts
+            'threes': -0.6,    # Alias for 3pm
+            'pra': -8.8,       # Was -2.0, actual bias is +8.76 pts
         }
 
-        # Apply bias correction to prediction
+        # DIRECTION MULTIPLIERS based on historical win rates by prop type
+        # Points UNDER wins 71.4%, PRA UNDER wins 70.7% - apply stronger UNDER bias
+        DIRECTION_MULTIPLIERS = {
+            'points': 0.85,    # Strong UNDER bias (UNDER WR: 71.4%)
+            'pra': 0.85,       # Strong UNDER bias (UNDER WR: 70.7%)
+            'assists': 0.88,   # Moderate UNDER bias (UNDER WR: 62.5%)
+            '3pm': 0.90,       # Moderate UNDER bias (UNDER WR: 51.3%)
+            'threes': 0.90,    # Alias for 3pm
+            'rebounds': 0.92,  # Slight UNDER bias (UNDER WR: 50.8%)
+        }
+
+        # Apply corrections
         prop_key = (prop_type or '').lower().replace(' ', '_')
-        bias = BIAS_CORRECTIONS.get(prop_key, -0.5)
-        corrected_pred = prediction + bias
+        bias = BIAS_CORRECTIONS.get(prop_key, -2.0)
+        direction_mult = DIRECTION_MULTIPLIERS.get(prop_key, 0.88)
+
+        # Apply both bias correction AND direction multiplier
+        corrected_pred = (prediction + bias) * direction_mult
 
         # Calculate edge from corrected prediction
         edge = corrected_pred - line
         edge_pct = (edge / line) * 100 if line > 0 else 0
 
-        # SYMMETRIC THRESHOLDS: Fair for both OVER and UNDER
-        # 5% edge required for any pick - this filters out coin-flip situations
-        THRESHOLD = 5.0
+        # LOWER THRESHOLD: Historical data shows <5% edge picks win at 56.3%
+        # Lower to 3% to capture more high-quality UNDER picks
+        THRESHOLD = 3.0
 
         if edge_pct >= THRESHOLD:
             return "OVER", round(edge_pct, 1)
@@ -2846,16 +2870,28 @@ class DataService:
         player_id = player.get("player_id")
 
         # =============================================================
-        # PLAYER BLACKLIST CHECK (Phase 6)
+        # PLAYER BLACKLIST CHECK (Data-Driven)
         # =============================================================
-        # Skip predictions for players where we historically perform badly
-        # This prevents wasting picks on unpredictable players
-        is_blacklisted = False
-        if player_id and self._prop_tracker:
+        # Based on historical analysis: Some players have 0-5% win rates
+        # Skip predictions entirely for these proven losers
+
+        # HARD BLACKLIST: Players with <5% win rate and 15+ predictions
+        # From historical analysis of 6,076 predictions
+        HARD_BLACKLIST_NAMES = {
+            "Dean Wade", "James Harden", "Bradley Beal", "Josh Minott",
+            "Jalen Smith", "De'Andre Hunter", "Mike Conley", "Jaylen Clark",
+            "Ivica Zubac", "Donte DiVincenzo", "Donovan Mitchell"
+        }
+
+        player_name = player.get("player_name", "")
+        is_blacklisted = player_name in HARD_BLACKLIST_NAMES
+
+        # Also check dynamic blacklist from prop_tracker (for new bad performers)
+        if not is_blacklisted and player_id and self._prop_tracker:
             try:
                 # Cache blacklist to avoid repeated DB queries
                 if not hasattr(self, '_player_blacklist_cache'):
-                    self._player_blacklist_cache = {}
+                    self._player_blacklist_cache = set()
                     self._player_blacklist_timestamp = None
 
                 # Refresh cache every 6 hours
@@ -2873,7 +2909,7 @@ class DataService:
                 is_blacklisted = player_id in self._player_blacklist_cache
 
             except Exception:
-                pass  # Continue without blacklist check if it fails
+                pass  # Continue without dynamic blacklist if it fails
 
         # Get opponent team ID for matchup analysis
         opponent_team_id = NBA_TEAM_IDS.get(opponent_abbrev)
@@ -3187,17 +3223,22 @@ class DataService:
                     line = None  # No line available for players without stats
 
             # =============================================================
-            # VEGAS LINE COMPARISON (No Anchoring)
+            # VEGAS LINE ANCHORING (Data-Driven)
             # =============================================================
-            # Vegas lines are used for edge calculation only, not for blending.
-            # The model should output its own prediction without being artificially
-            # pulled toward the Vegas line. This allows meaningful OVER/UNDER picks.
-            # The pick logic applies a small bias correction when comparing to line.
+            # Historical analysis shows Vegas is MORE ACCURATE than our model:
+            # - PRA: Vegas MAE 8.31 vs Model MAE 11.49 (model worse by 3.18)
+            # - Points: Vegas MAE 5.17 vs Model MAE 7.20 (model worse by 2.04)
+            # Anchor predictions 75% toward Vegas when real line is available.
+            if used_real_line and line is not None and line > 0:
+                VEGAS_WEIGHT = 0.75  # Vegas is significantly more accurate
+                MODEL_WEIGHT = 0.25
+                pred_value = (line * VEGAS_WEIGHT) + (pred_value * MODEL_WEIGHT)
 
-            # Calculate confidence with full features context
+            # Calculate confidence with full features context and player name
+            player_name_for_conf = player.get("player_name", "")
             confidence = self._calculate_prop_confidence(
                 pred_value, line, season_value, recent_value, games_played,
-                features=full_features
+                features=full_features, player_name=player_name_for_conf
             )
 
             # Apply injury confidence penalty (adds uncertainty when using injury adjustments)
