@@ -2345,11 +2345,9 @@ class DataService:
                                     player_name: str = None) -> float:
         """Calculate confidence score for prop prediction (0-100).
 
-        Confidence is based on:
-        - Edge size (larger edge = more confidence)
-        - Sample size (more games played = more reliable)
-        - Player consistency
-        - Whitelist players (historically accurate)
+        Data-driven confidence based on historical analysis of 6,076 predictions.
+        Key insight: Lower confidence predictions historically perform BETTER.
+        So we cap confidence and focus on factors that ACTUALLY correlate with wins.
 
         Args:
             prediction: Predicted value
@@ -2360,53 +2358,78 @@ class DataService:
             features: Optional full features dict from PlayerPropFeatureGenerator
             player_name: Optional player name for whitelist/blacklist check
         """
-        # WHITELIST: Players with >90% historical win rate
+        # WHITELIST: Players with >80% historical win rate
         WHITELIST_BOOST = {
             "Payton Pritchard", "Jaren Jackson Jr.", "Isaiah Hartenstein",
             "Tyler Kolek", "Jaylen Wells", "Josh Giddey", "Chet Holmgren",
             "Kris Dunn", "Pascal Siakam", "Kevin Huerter", "Miles McBride",
-            "Nikola Vucevic", "Jaden McDaniels", "Jock Landale"
+            "Nikola Vucevic", "Jaden McDaniels", "Jock Landale", "Isaiah Jackson"
         }
 
         # Start at neutral 50%
         confidence = 50.0
 
-        # Factor 1: Sample size
-        if games_played >= 25:
-            confidence += 5
-        elif games_played >= 15:
-            confidence += 3
+        # Factor 1: Sample size (more games = more reliable data)
+        if games_played >= 30:
+            confidence += 6
+        elif games_played >= 20:
+            confidence += 4
+        elif games_played >= 10:
+            confidence += 2
 
-        # Factor 3: Player consistency
+        # Factor 2: Form stability (recent matches season = predictable)
+        if season_avg > 0:
+            recency_ratio = recent_avg / max(season_avg, 0.1)
+            # Stable form (90-110% of season avg) gets boost
+            if 0.9 <= recency_ratio <= 1.1:
+                confidence += 5  # Very stable
+            elif 0.8 <= recency_ratio <= 1.2:
+                confidence += 2  # Moderately stable
+            else:
+                confidence -= 3  # Unstable form = less confidence
+
+        # Factor 3: Player consistency (low variance = predictable)
         if features and "consistency_score" in features:
             consistency = features["consistency_score"]
-            confidence += consistency * 6  # Up to 6 pts
-        elif season_avg > 0:
-            consistency = 1 - abs(season_avg - recent_avg) / max(season_avg, 1)
-            consistency = max(0, min(1, consistency))
-            confidence += consistency * 5
+            if consistency > 0.8:
+                confidence += 6
+            elif consistency > 0.6:
+                confidence += 3
+            elif consistency < 0.4:
+                confidence -= 4
 
-        # Factor 4: Edge magnitude - historical sweet spot is 5-15%
+        # Factor 4: Edge magnitude - CRITICAL: Historical sweet spot is 5-15%
+        # Very large edges (>30%) actually perform WORSE
         if line is not None and line > 0:
             edge_pct = abs(prediction - line) / line * 100
 
             if 5 <= edge_pct <= 15:
-                confidence += 5  # Sweet spot
+                confidence += 4  # Sweet spot - best historical performance
+            elif 15 < edge_pct <= 25:
+                confidence += 1  # Still okay
             elif edge_pct > 30:
-                confidence -= 8  # Very large edges often wrong
-            elif edge_pct < 3:
-                confidence -= 3  # Too close to call
+                confidence -= 6  # Large edges often wrong (38% WR historically)
 
-        # Factor 5: Real Vegas line available
+        # Factor 5: Real Vegas line available (better calibration target)
         if features and features.get("used_real_line", False):
-            confidence += 3
+            confidence += 2
 
-        # Factor 6: Whitelist boost
+        # Factor 6: Whitelist boost (historically accurate players)
         if player_name and player_name in WHITELIST_BOOST:
             confidence += 8
 
-        # Cap at realistic range
-        confidence = max(45.0, min(75.0, confidence))
+        # Factor 7: Minutes stability (from features if available)
+        if features:
+            minutes_std = features.get("minutes_std", 5)
+            if minutes_std < 3:
+                confidence += 3  # Very consistent minutes
+            elif minutes_std > 8:
+                confidence -= 3  # Inconsistent minutes = unpredictable
+
+        # Cap at REALISTIC range based on actual data
+        # Our best bucket (<60% confidence) wins at 48.79%
+        # So cap at 65% max - being overconfident hurts
+        confidence = max(45.0, min(65.0, confidence))
 
         return confidence
 
@@ -2778,11 +2801,17 @@ class DataService:
         # Clamp to reasonable range
         return max(8.0, min(42.0, base_minutes))
 
-    def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None) -> Tuple[str, float]:
+    def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None, threshold: float = 5.0) -> Tuple[str, float]:
         """Determine OVER/UNDER pick based on ML model prediction vs Vegas line.
 
         The ML model's prediction is compared directly to the Vegas line.
         No artificial bias corrections - let the model speak for itself.
+
+        Args:
+            prediction: ML model's predicted value
+            line: Vegas betting line
+            prop_type: Type of prop (points, rebounds, etc.)
+            threshold: Minimum edge % to make a pick (default 5%, TIER1 players use 3%)
 
         The model uses 50+ features including:
         - Season and recent averages
@@ -2797,12 +2826,9 @@ class DataService:
         edge = prediction - line
         edge_pct = (edge / line) * 100 if line > 0 else 0
 
-        # 5% threshold for making a pick
-        THRESHOLD = 5.0
-
-        if edge_pct >= THRESHOLD:
+        if edge_pct >= threshold:
             return "OVER", round(edge_pct, 1)
-        elif edge_pct <= -THRESHOLD:
+        elif edge_pct <= -threshold:
             return "UNDER", round(abs(edge_pct), 1)
         else:
             return "-", round(abs(edge_pct), 1)
@@ -2839,16 +2865,31 @@ class DataService:
         # Based on historical analysis: Some players have 0-5% win rates
         # Skip predictions entirely for these proven losers
 
-        # HARD BLACKLIST: Players with <5% win rate and 15+ predictions
-        # From historical analysis of 6,076 predictions
+        # HARD BLACKLIST: Players with <10% win rate from historical analysis
+        # These players are fundamentally unpredictable - skip entirely
         HARD_BLACKLIST_NAMES = {
+            # 0% win rate players
             "Dean Wade", "James Harden", "Bradley Beal", "Josh Minott",
+            "Tristan Vukcevic", "Ryan Kalkbrenner",
+            # <5% win rate players
             "Jalen Smith", "De'Andre Hunter", "Mike Conley", "Jaylen Clark",
-            "Ivica Zubac", "Donte DiVincenzo", "Donovan Mitchell"
+            "Ivica Zubac", "Donte DiVincenzo", "Donovan Mitchell",
+            # <15% win rate with high volume
+            "Collin Sexton", "John Collins", "Trey Murphy III",
+            "Onyeka Okongwu", "Bogdan Bogdanovic", "Clint Capela"
+        }
+
+        # TIER 1 PLAYERS: >80% historical win rate - lower threshold, boost confidence
+        TIER1_PLAYERS = {
+            "Jaren Jackson Jr.", "Payton Pritchard", "Isaiah Hartenstein",
+            "Kris Dunn", "Tyler Kolek", "Pascal Siakam", "Josh Giddey",
+            "Jaylen Wells", "Isaiah Jackson", "Kevin Huerter", "Miles McBride",
+            "Nikola Vucevic", "Jaden McDaniels", "Jock Landale", "Chet Holmgren"
         }
 
         player_name = player.get("player_name", "")
         is_blacklisted = player_name in HARD_BLACKLIST_NAMES
+        is_tier1 = player_name in TIER1_PLAYERS
 
         # Also check dynamic blacklist from prop_tracker (for new bad performers)
         if not is_blacklisted and player_id and self._prop_tracker:
@@ -3198,12 +3239,26 @@ class DataService:
                 confidence *= (1.0 - injury_confidence_penalty)
 
             # Determine pick with proper edge calculation - skip if no line
-            # Pass prop_type for calibration-aware pick logic
             # Skip picks for blacklisted players (historically unpredictable)
+            # Use lower threshold for TIER1 players (historically accurate)
             if is_blacklisted:
                 pick, edge = "-", 0  # No pick for blacklisted players
             elif line is not None and line > 0:
-                pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key)
+                # RECENCY FILTER: Skip picks where recent form differs >40% from season
+                # Historical data shows these are unreliable
+                recency_ratio = recent_value / max(season_value, 0.1) if season_value > 0 else 1.0
+                form_unstable = recency_ratio < 0.6 or recency_ratio > 1.5
+
+                if form_unstable and not is_tier1:
+                    pick, edge = "-", 0  # Skip unstable form players (unless TIER1)
+                else:
+                    # TIER1 players get 3% threshold, others get 5%
+                    threshold = 3.0 if is_tier1 else 5.0
+                    pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key, threshold=threshold)
+
+                    # TIER1 players get confidence boost
+                    if is_tier1 and pick != "-":
+                        confidence = min(confidence + 10, 75)
             else:
                 pick, edge = "-", 0  # No pick without a valid line
 
