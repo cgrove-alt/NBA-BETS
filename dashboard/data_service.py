@@ -2345,11 +2345,11 @@ class DataService:
                                     player_name: str = None) -> float:
         """Calculate confidence score for prop prediction (0-100).
 
-        Data-driven confidence based on historical analysis of 6,076 predictions:
-        - UNDER picks win 59.8% vs OVER at 32.2% → Direction matters most
-        - Confidence was INVERTED (77% conf = 38% actual, 55% conf = 49% actual)
-        - Moderate edges (5-15%) perform best
-        - Player whitelist/blacklist provides strong signal
+        Confidence is based on:
+        - Edge size (larger edge = more confidence)
+        - Sample size (more games played = more reliable)
+        - Player consistency
+        - Whitelist players (historically accurate)
 
         Args:
             prediction: Predicted value
@@ -2371,15 +2371,7 @@ class DataService:
         # Start at neutral 50%
         confidence = 50.0
 
-        # Factor 1: DIRECTION (most important based on data)
-        # UNDER wins 59.8% vs OVER at 32.2%
-        if line is not None and line > 0:
-            if prediction < line:
-                confidence += 8  # UNDER bonus
-            else:
-                confidence -= 3  # OVER penalty
-
-        # Factor 2: Sample size
+        # Factor 1: Sample size
         if games_played >= 25:
             confidence += 5
         elif games_played >= 15:
@@ -2413,9 +2405,8 @@ class DataService:
         if player_name and player_name in WHITELIST_BOOST:
             confidence += 8
 
-        # Cap at realistic range based on actual performance
-        # Best observed: ~60% for UNDER picks
-        confidence = max(45.0, min(65.0, confidence))
+        # Cap at realistic range
+        confidence = max(45.0, min(75.0, confidence))
 
         return confidence
 
@@ -2788,53 +2779,26 @@ class DataService:
         return max(8.0, min(42.0, base_minutes))
 
     def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None) -> Tuple[str, float]:
-        """Determine OVER/UNDER pick with data-driven corrections.
+        """Determine OVER/UNDER pick based on ML model prediction vs Vegas line.
 
-        Based on comprehensive historical analysis of 6,076 predictions:
-        - Model systematically over-predicts all stats
-        - UNDER picks win 59.8% vs OVER at 32.2%
-        - Applies empirically-derived bias corrections and direction-aware thresholds
+        The ML model's prediction is compared directly to the Vegas line.
+        No artificial bias corrections - let the model speak for itself.
+
+        The model uses 50+ features including:
+        - Season and recent averages
+        - Position encoding
+        - Advanced stats
+        - Opponent defensive metrics
         """
         if line <= 0:
             return "-", 0.0
 
-        # EMPIRICAL BIAS CORRECTIONS from historical analysis (avg_predicted - avg_actual)
-        # These are the ACTUAL measured over-prediction amounts:
-        BIAS_CORRECTIONS = {
-            'points': -5.0,    # Was -1.5, actual bias is +4.95 pts
-            'rebounds': -1.0,  # Was -0.3, actual bias is +1.00 pts
-            'assists': -1.0,   # Was -0.5, actual bias is +0.95 pts
-            '3pm': -0.6,       # Was -0.3, actual bias is +0.58 pts
-            'threes': -0.6,    # Alias for 3pm
-            'pra': -8.8,       # Was -2.0, actual bias is +8.76 pts
-        }
-
-        # DIRECTION MULTIPLIERS based on historical win rates by prop type
-        # Points UNDER wins 71.4%, PRA UNDER wins 70.7% - apply stronger UNDER bias
-        DIRECTION_MULTIPLIERS = {
-            'points': 0.85,    # Strong UNDER bias (UNDER WR: 71.4%)
-            'pra': 0.85,       # Strong UNDER bias (UNDER WR: 70.7%)
-            'assists': 0.88,   # Moderate UNDER bias (UNDER WR: 62.5%)
-            '3pm': 0.90,       # Moderate UNDER bias (UNDER WR: 51.3%)
-            'threes': 0.90,    # Alias for 3pm
-            'rebounds': 0.92,  # Slight UNDER bias (UNDER WR: 50.8%)
-        }
-
-        # Apply corrections
-        prop_key = (prop_type or '').lower().replace(' ', '_')
-        bias = BIAS_CORRECTIONS.get(prop_key, -2.0)
-        direction_mult = DIRECTION_MULTIPLIERS.get(prop_key, 0.88)
-
-        # Apply both bias correction AND direction multiplier
-        corrected_pred = (prediction + bias) * direction_mult
-
-        # Calculate edge from corrected prediction
-        edge = corrected_pred - line
+        # Use raw ML prediction - no bias corrections or direction multipliers
+        edge = prediction - line
         edge_pct = (edge / line) * 100 if line > 0 else 0
 
-        # LOWER THRESHOLD: Historical data shows <5% edge picks win at 56.3%
-        # Lower to 3% to capture more high-quality UNDER picks
-        THRESHOLD = 3.0
+        # 5% threshold for making a pick
+        THRESHOLD = 5.0
 
         if edge_pct >= THRESHOLD:
             return "OVER", round(edge_pct, 1)
@@ -3221,18 +3185,6 @@ class DataService:
                     line = round(line * 2) / 2
                 else:
                     line = None  # No line available for players without stats
-
-            # =============================================================
-            # VEGAS LINE ANCHORING (Data-Driven)
-            # =============================================================
-            # Historical analysis shows Vegas is MORE ACCURATE than our model:
-            # - PRA: Vegas MAE 8.31 vs Model MAE 11.49 (model worse by 3.18)
-            # - Points: Vegas MAE 5.17 vs Model MAE 7.20 (model worse by 2.04)
-            # Anchor predictions 75% toward Vegas when real line is available.
-            if used_real_line and line is not None and line > 0:
-                VEGAS_WEIGHT = 0.75  # Vegas is significantly more accurate
-                MODEL_WEIGHT = 0.25
-                pred_value = (line * VEGAS_WEIGHT) + (pred_value * MODEL_WEIGHT)
 
             # Calculate confidence with full features context and player name
             player_name_for_conf = player.get("player_name", "")
