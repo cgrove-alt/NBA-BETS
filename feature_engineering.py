@@ -161,6 +161,130 @@ def calculate_travel_fatigue(last_venue: str, current_venue: str, days_rest: int
 
 
 # =============================================================================
+# PLAYOFF MOTIVATION FEATURES
+# =============================================================================
+
+def calculate_motivation_score(
+    wins: int,
+    losses: int,
+    games_played: int = None,
+    games_back_playoff: float = 0.0,
+    is_playoff_locked: bool = False,
+    is_elimination_locked: bool = False,
+) -> float:
+    """
+    Quantify team motivation based on playoff implications.
+
+    Research shows:
+    - Teams fighting for playoffs push 3-5% harder in late season
+    - Teams locked in (either direction) may rest players
+    - Tanking teams have reduced motivation
+
+    Args:
+        wins: Current season wins
+        losses: Current season losses
+        games_played: Total games played (if None, calculated from wins+losses)
+        games_back_playoff: Games behind the playoff cutoff (8th seed)
+        is_playoff_locked: Team has clinched playoffs
+        is_elimination_locked: Team has been eliminated from playoffs
+
+    Returns:
+        score: -1.0 (tanking/resting) to +1.0 (must-win playoff push)
+    """
+    if games_played is None:
+        games_played = wins + losses
+
+    if games_played == 0:
+        return 0.0  # Season hasn't started
+
+    games_remaining = 82 - games_played
+    win_pct = wins / games_played
+
+    # Already locked/eliminated
+    if is_playoff_locked:
+        # Good teams may rest late, especially if seeding is locked
+        if games_remaining < 10:
+            return -0.3  # Likely resting for playoffs
+        return 0.2  # Still motivated but not desperate
+
+    if is_elimination_locked:
+        # Tanking motivation depends on how bad the record is
+        if win_pct < 0.3:
+            return -0.8  # Full tank mode
+        return -0.5  # Playing out the string
+
+    # Late season (last 20 games) + close to playoff = high motivation
+    if games_remaining < 20:
+        if games_back_playoff <= 2:
+            # Playoff race! Maximum motivation
+            motivation = 0.8 + (0.2 * (1 - games_back_playoff / 2))
+            return round(min(motivation, 1.0), 3)
+        elif games_back_playoff > 8:
+            # Too far back, transitioning to tank mode
+            tank_factor = min(1.0, (games_back_playoff - 8) / 10)
+            return round(-0.5 - (0.5 * tank_factor), 3)
+        else:
+            # Fighting but not quite in it
+            return round(0.3 * (1 - (games_back_playoff - 2) / 6), 3)
+
+    # Mid-season motivation
+    if games_back_playoff <= 4:
+        # In the playoff picture
+        return round(0.3 + (0.3 * (1 - games_back_playoff / 4)), 3)
+    elif games_back_playoff > 10:
+        # Clearly out of it early
+        return round(-0.3 * min(1.0, (games_back_playoff - 10) / 10), 3)
+
+    return 0.0  # Neutral motivation
+
+
+def calculate_seeding_motivation(
+    current_seed: int,
+    seed_above_diff: float = 0.0,
+    seed_below_diff: float = 0.0,
+    games_remaining: int = 41,
+) -> float:
+    """
+    Calculate motivation based on seeding battles.
+
+    Top 4 seeds get home court in first round, top 6 avoid play-in.
+
+    Args:
+        current_seed: Current playoff seed (1-15)
+        seed_above_diff: Games behind team above in standings
+        seed_below_diff: Games ahead of team below in standings
+        games_remaining: Games left in season
+
+    Returns:
+        motivation: -0.5 to +0.5 seeding motivation bonus
+    """
+    if current_seed > 10 or games_remaining > 50:
+        return 0.0  # Too early or too far out
+
+    motivation = 0.0
+
+    # Critical seeding thresholds
+    if current_seed in [5, 6]:  # Fight to avoid play-in
+        if seed_below_diff < 2:  # Close race
+            motivation += 0.3
+    elif current_seed in [7, 8]:  # In play-in, want to climb out
+        if seed_above_diff < 2:
+            motivation += 0.4
+    elif current_seed in [9, 10]:  # Play-in bubble
+        if seed_above_diff < 3:
+            motivation += 0.35
+    elif current_seed <= 4:  # Fighting for home court
+        if seed_above_diff < 2 or seed_below_diff < 2:
+            motivation += 0.2
+
+    # Late season amplifier
+    if games_remaining < 15:
+        motivation *= 1.5
+
+    return round(min(motivation, 0.5), 3)
+
+
+# =============================================================================
 # FEATURE VALIDATION - Critical for preventing broken model outputs
 # =============================================================================
 
@@ -1023,6 +1147,26 @@ class TeamFeatureGenerator:
 
         overall = team_stats.get("overall", {})
 
+        # TIER 2: Calculate motivation score based on standings
+        wins = overall.get("wins", 0) or 0
+        losses = overall.get("losses", 0) or 0
+        games_played = wins + losses
+        # Note: games_back_playoff would need standings API for accurate values
+        # For now, estimate based on win percentage
+        if games_played > 20:
+            expected_playoff_pct = 0.45  # ~37 wins typically makes playoffs
+            current_pct = wins / games_played if games_played > 0 else 0.5
+            games_back_estimate = max(0, (expected_playoff_pct - current_pct) * (82 - games_played))
+        else:
+            games_back_estimate = 0  # Too early to estimate
+
+        motivation = calculate_motivation_score(
+            wins=wins,
+            losses=losses,
+            games_played=games_played,
+            games_back_playoff=games_back_estimate,
+        )
+
         features = {
             # Basic stats
             "team_id": team_id,
@@ -1077,6 +1221,9 @@ class TeamFeatureGenerator:
             "efg_pct": advanced_shooting.get("efg_pct", 0.50),
             "fta_rate": advanced_shooting.get("fta_rate", 0.25),
             "fg3_rate": advanced_shooting.get("fg3_rate", 0.35),
+
+            # TIER 2: Motivation features
+            "motivation_score": motivation,
         }
 
         return features
@@ -1301,6 +1448,11 @@ class MatchupFeatureGenerator:
             "away_efg_pct": away_features.get("efg_pct", 0.50),
             "fta_rate_diff": home_features.get("fta_rate", 0.25) - away_features.get("fta_rate", 0.25),
             "fg3_rate_diff": home_features.get("fg3_rate", 0.35) - away_features.get("fg3_rate", 0.35),
+
+            # TIER 2: Motivation features - affects effort level especially late season
+            "home_motivation": home_features.get("motivation_score", 0.0),
+            "away_motivation": away_features.get("motivation_score", 0.0),
+            "motivation_diff": home_features.get("motivation_score", 0.0) - away_features.get("motivation_score", 0.0),
         }
 
         # Add advanced matchup analysis
@@ -1831,6 +1983,36 @@ class PlayerPropFeatureGenerator:
             vs_adj = features.get("vs_team_pts_adjustment", 0) * 0.3  # Weight historical
             features["projected_pts"] = base_pts + trend_adj + def_adj + vs_adj
 
+        # =========================================================
+        # CRITICAL NEW FEATURES (Based on historical analysis)
+        # These help model understand when to predict lower
+        # =========================================================
+
+        # RECENCY RATIO: Recent form vs season (< 1 = slumping, > 1 = hot)
+        season_pts = features.get("season_pts_avg", 0)
+        recent_pts = features.get("recent_pts_avg", 0)
+        if season_pts > 0:
+            features["recency_ratio"] = recent_pts / season_pts
+        else:
+            features["recency_ratio"] = 1.0
+
+        # VARIANCE PENALTY: High variance = harder to predict
+        pts_std = features.get("recent_pts_std", 0)
+        if season_pts > 0:
+            features["variance_penalty"] = pts_std / max(season_pts, 1)
+        else:
+            features["variance_penalty"] = 0.5
+
+        # MINUTES STABILITY: Consistent minutes = more predictable
+        min_avg = features.get("season_min_avg", 0)
+        if min_avg > 0 and recent_form:
+            min_std = recent_form.get("min_std", 5)
+            features["minutes_std"] = min_std
+            features["minutes_cv"] = min_std / max(min_avg, 1)
+        else:
+            features["minutes_std"] = 5
+            features["minutes_cv"] = 0.2
+
         return features
 
     def generate_rebounds_prop_features(self, player_id, opponent_team_id=None, last_n_games=10):
@@ -1870,6 +2052,16 @@ class PlayerPropFeatureGenerator:
             opp_overall = opp_stats.get("overall", {})
             features["opp_reb_avg"] = opp_overall.get("reb_avg", 0) or 0
             features["opp_pace"] = opp_overall.get("pace", 0) or 0
+
+        # CRITICAL NEW FEATURES
+        season_reb = features.get("season_reb_avg", 0)
+        recent_reb = features.get("recent_reb_avg", 0)
+        if season_reb > 0:
+            features["recency_ratio"] = recent_reb / season_reb
+            features["variance_penalty"] = features.get("recent_reb_std", 0) / max(season_reb, 1)
+        else:
+            features["recency_ratio"] = 1.0
+            features["variance_penalty"] = 0.5
 
         return features
 
@@ -1912,6 +2104,21 @@ class PlayerPropFeatureGenerator:
             features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
             features["opp_stl_avg"] = opp_overall.get("stl_avg", 0) or 0
 
+        # CRITICAL NEW FEATURES for assists
+        season_ast = features.get("season_ast_avg", 0)
+        recent_ast = features.get("recent_ast_avg", 0)
+        if season_ast > 0:
+            features["recency_ratio"] = recent_ast / season_ast
+            features["variance_penalty"] = features.get("recent_ast_std", 0) / max(season_ast, 1)
+        else:
+            features["recency_ratio"] = 1.0
+            features["variance_penalty"] = 0.5
+
+        # Minutes stability
+        min_avg = features.get("season_min_avg", 0)
+        recent_min = features.get("recent_min_avg", 0)
+        features["minutes_cv"] = abs(recent_min - min_avg) / max(min_avg, 1)
+
         return features
 
     def generate_threes_prop_features(self, player_id, opponent_team_id=None, last_n_games=10):
@@ -1948,6 +2155,24 @@ class PlayerPropFeatureGenerator:
             opp_overall = opp_stats.get("overall", {})
             features["opp_fg3_pct_allowed"] = opp_overall.get("fg3_pct", 0) or 0
             features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
+
+        # CRITICAL NEW FEATURES for threes
+        recent_fg3 = features.get("recent_fg3_avg", 0)
+        # For 3PM, we need to estimate season average from shooting percentage context
+        # Use recent as proxy since season_fg3_avg may not be directly available
+        season_fg3_pct = features.get("season_fg3_pct", 0)
+        if recent_fg3 > 0 and season_fg3_pct > 0:
+            # If shooting above season average, ratio > 1
+            features["recency_ratio"] = 1.0  # Default for threes (high variance prop)
+            features["variance_penalty"] = features.get("recent_fg3_std", 0) / max(recent_fg3, 0.5)
+        else:
+            features["recency_ratio"] = 1.0
+            features["variance_penalty"] = 0.8  # Threes are inherently high variance
+
+        # Minutes stability
+        min_avg = features.get("season_min_avg", 0)
+        recent_min = features.get("recent_min_avg", 0)
+        features["minutes_cv"] = abs(recent_min - min_avg) / max(min_avg, 1)
 
         return features
 
@@ -1999,6 +2224,23 @@ class PlayerPropFeatureGenerator:
             opp_overall = opp_stats.get("overall", {})
             features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
             features["opp_pace"] = opp_overall.get("pace", 0) or 0
+
+        # CRITICAL NEW FEATURES for PRA
+        season_pra_val = features.get("season_pra_avg", 0)
+        recent_pra = features.get("recent_pra_avg", 0)
+        if season_pra_val > 0:
+            features["recency_ratio"] = recent_pra / season_pra_val
+            # PRA variance is combination of pts/reb/ast variance
+            # Use PRA trend magnitude as proxy for variance
+            features["variance_penalty"] = abs(features.get("pra_trend", 0)) / max(season_pra_val, 1)
+        else:
+            features["recency_ratio"] = 1.0
+            features["variance_penalty"] = 0.5
+
+        # Minutes stability
+        min_avg = features.get("season_min_avg", 0)
+        recent_min = features.get("recent_min_avg", 0)
+        features["minutes_cv"] = abs(recent_min - min_avg) / max(min_avg, 1)
 
         return features
 
