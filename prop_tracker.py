@@ -500,6 +500,118 @@ class PropTracker:
         performance = self.get_player_performance(min_predictions, days)
         return performance['blacklist']
 
+    def calculate_bias_corrections(self, min_predictions: int = 100, days: int = 60) -> Dict[str, float]:
+        """Calculate bias corrections from settled predictions.
+
+        Computes the mean error (actual - predicted) for each prop type.
+        A negative value means the model over-predicts (predictions too high).
+        A positive value means the model under-predicts (predictions too low).
+
+        To correct: add the bias correction to the prediction.
+        Example: If points bias is -4.95, subtract 4.95 from predictions.
+
+        Args:
+            min_predictions: Minimum predictions required for a prop type
+            days: Number of days to look back
+
+        Returns:
+            Dict mapping prop_type to bias adjustment (add this to prediction)
+        """
+        cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT
+                    prop_type,
+                    AVG(actual_value - predicted_value) as mean_error,
+                    COUNT(*) as n
+                FROM prop_predictions
+                WHERE is_settled = 1
+                  AND actual_value IS NOT NULL
+                  AND game_date >= ?
+                GROUP BY prop_type
+                HAVING COUNT(*) >= ?
+            """, (cutoff_date, min_predictions))
+
+            corrections = {}
+            for row in cursor.fetchall():
+                prop_type, mean_error, n = row
+                if mean_error is not None:
+                    corrections[prop_type] = mean_error
+
+            return corrections
+
+    def get_direction_calibration(self, days: int = 60) -> Dict[str, Dict[str, float]]:
+        """Get confidence calibration by prop_type and pick direction.
+
+        Calculates how well-calibrated confidence scores are for OVER vs UNDER picks.
+        Returns a calibration factor: actual_win_rate / expected_win_rate.
+
+        A factor < 1.0 means overconfident (reduce confidence).
+        A factor > 1.0 means underconfident (increase confidence).
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            Dict: {prop_type: {pick_direction: calibration_factor}}
+        """
+        cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT
+                    prop_type,
+                    pick,
+                    AVG(confidence) / 100.0 as avg_conf,
+                    1.0 * SUM(CASE WHEN hit=1 THEN 1 ELSE 0 END) / COUNT(*) as actual_wr,
+                    COUNT(*) as n
+                FROM prop_predictions
+                WHERE is_settled = 1
+                  AND hit >= 0
+                  AND pick IN ('OVER', 'UNDER')
+                  AND game_date >= ?
+                GROUP BY prop_type, pick
+                HAVING COUNT(*) >= 50
+            """, (cutoff_date,))
+
+            calibration = {}
+            for row in cursor.fetchall():
+                prop_type, pick, avg_conf, actual_wr, n = row
+                if prop_type not in calibration:
+                    calibration[prop_type] = {}
+                if avg_conf > 0:
+                    # Calibration factor: actual performance / expected
+                    calibration[prop_type][pick] = actual_wr / avg_conf
+
+            return calibration
+
+    def print_bias_report(self):
+        """Print a report of bias corrections and calibration data."""
+        corrections = self.calculate_bias_corrections()
+        calibration = self.get_direction_calibration()
+
+        print(f"\n{'='*60}")
+        print("BIAS CORRECTIONS AND CALIBRATION REPORT")
+        print(f"{'='*60}")
+
+        print("\nBias Corrections (add to prediction):")
+        print(f"  {'Prop Type':>12} | {'Bias':>10} | {'Interpretation'}")
+        print(f"  {'-'*12}-+-{'-'*10}-+-{'-'*30}")
+        for prop_type, bias in sorted(corrections.items()):
+            direction = "over-predicts" if bias < 0 else "under-predicts"
+            print(f"  {prop_type:>12} | {bias:>+10.2f} | Model {direction} by {abs(bias):.2f}")
+
+        print("\nDirection Calibration (actual_wr / avg_conf):")
+        print(f"  {'Prop Type':>12} | {'OVER':>8} | {'UNDER':>8}")
+        print(f"  {'-'*12}-+-{'-'*8}-+-{'-'*8}")
+        for prop_type in sorted(calibration.keys()):
+            over = calibration[prop_type].get('OVER', 1.0)
+            under = calibration[prop_type].get('UNDER', 1.0)
+            print(f"  {prop_type:>12} | {over:>8.3f} | {under:>8.3f}")
+
+        print(f"\n{'='*60}\n")
+
 
 # Convenience function for quick reporting
 def print_prop_report(days: int = 30, db_path: str = None):

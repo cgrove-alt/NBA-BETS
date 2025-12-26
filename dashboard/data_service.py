@@ -619,6 +619,11 @@ class DataService:
         # Prop prediction tracker for performance analysis
         self._prop_tracker = PropTracker()
 
+        # Bias corrections from settled predictions (loaded lazily)
+        self._bias_corrections = None
+        self._direction_calibration = None
+        self._bias_corrections_loaded = False
+
         # Continuous learning orchestrator (auto-settlement, drift detection, retraining)
         self._continuous_learning = None
 
@@ -2628,6 +2633,87 @@ class DataService:
 
         return confidence
 
+    def _load_bias_corrections(self):
+        """Load bias corrections and direction calibration from PropTracker.
+
+        Called lazily on first use. Caches results for the session.
+        Bias corrections are computed from the last 60 days of settled predictions.
+        """
+        if self._bias_corrections_loaded:
+            return
+
+        try:
+            if self._prop_tracker:
+                self._bias_corrections = self._prop_tracker.calculate_bias_corrections(
+                    min_predictions=100,
+                    days=60
+                )
+                self._direction_calibration = self._prop_tracker.get_direction_calibration(
+                    days=60
+                )
+                if self._bias_corrections:
+                    print(f"Loaded bias corrections: {self._bias_corrections}")
+                if self._direction_calibration:
+                    print(f"Loaded direction calibration for prop types: {list(self._direction_calibration.keys())}")
+        except Exception as e:
+            print(f"Could not load bias corrections: {e}")
+            self._bias_corrections = {}
+            self._direction_calibration = {}
+
+        self._bias_corrections_loaded = True
+
+    def _get_bias_correction(self, prop_type: str) -> float:
+        """Get bias correction for a prop type.
+
+        Args:
+            prop_type: Type of prop (points, rebounds, assists, 3pm, pra)
+
+        Returns:
+            Bias correction to add to prediction. Negative values mean model
+            over-predicts, so adding the correction lowers the prediction.
+        """
+        if not self._bias_corrections_loaded:
+            self._load_bias_corrections()
+
+        if not self._bias_corrections:
+            return 0.0
+
+        # Normalize prop type name
+        prop_key = prop_type.lower().replace(" ", "")
+        if prop_key == "3pm":
+            prop_key = "3pm"
+        elif prop_key == "threes":
+            prop_key = "3pm"
+
+        return self._bias_corrections.get(prop_key, 0.0)
+
+    def _get_direction_calibration(self, prop_type: str, pick: str) -> float:
+        """Get confidence calibration factor for prop type and pick direction.
+
+        Args:
+            prop_type: Type of prop (points, rebounds, assists, 3pm, pra)
+            pick: Pick direction (OVER or UNDER)
+
+        Returns:
+            Calibration factor to multiply confidence by. Values < 1 mean
+            the model is overconfident for that direction.
+        """
+        if not self._bias_corrections_loaded:
+            self._load_bias_corrections()
+
+        if not self._direction_calibration:
+            return 1.0
+
+        # Normalize prop type name
+        prop_key = prop_type.lower().replace(" ", "")
+        if prop_key == "3pm":
+            prop_key = "3pm"
+        elif prop_key == "threes":
+            prop_key = "3pm"
+
+        prop_cal = self._direction_calibration.get(prop_key, {})
+        return prop_cal.get(pick, 1.0)
+
     def _predict_with_ml_model(self, prop_type: str, player_stats: Dict,
                                 opp_stats: Dict, is_home: bool) -> Optional[float]:
         """Use trained ML model to predict player prop value.
@@ -3173,7 +3259,14 @@ class DataService:
                 if ml_prediction is not None and ml_prediction > 0:
                     pred_value = ml_prediction
                     used_ml_model = True
-                    # print(f"  ML model prediction for {player.get('player_name')} {prop_label}: {ml_prediction:.1f}")
+
+                    # Apply bias correction from settled predictions
+                    # Negative bias = model over-predicts, so we add the negative correction
+                    bias_correction = self._get_bias_correction(prop_label)
+                    if bias_correction != 0:
+                        pred_value += bias_correction
+                        # Ensure prediction doesn't go negative
+                        pred_value = max(0.1, pred_value)
 
             except Exception as e:
                 print(f"ML model error for {player.get('player_name')} {prop_label}: {e}")
@@ -3450,6 +3543,15 @@ class DataService:
                     # TIER1 players get 3% threshold, others get 5%
                     threshold = 3.0 if is_tier1 else 5.0
                     pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key, threshold=threshold)
+
+                    # Apply direction-specific confidence calibration
+                    # OVER picks historically underperform, UNDER picks outperform
+                    if pick in ['OVER', 'UNDER']:
+                        dir_cal = self._get_direction_calibration(prop_label, pick)
+                        if dir_cal != 1.0:
+                            confidence *= dir_cal
+                            # Keep in valid range
+                            confidence = max(45.0, min(65.0, confidence))
 
                     # TIER1 players get confidence boost
                     if is_tier1 and pick != "-":
