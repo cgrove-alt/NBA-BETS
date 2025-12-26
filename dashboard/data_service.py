@@ -333,6 +333,17 @@ except ImportError:
     HAS_CALIBRATION = False
     print("Warning: calibration module not available, using raw probabilities")
 
+# Load prop prediction calibrator for confidence adjustment
+PROP_CALIBRATOR = None
+try:
+    if HAS_CALIBRATION:
+        _prop_cal = ModelCalibrator('prop_predictions')
+        _prop_cal.load('models/calibration')
+        PROP_CALIBRATOR = _prop_cal
+        print(f"Prop calibrator loaded (method: {_prop_cal.best_method})")
+except Exception as e:
+    print(f"Warning: Could not load prop calibrator: {e}")
+
 
 # Model wrapper classes for unpickling
 class SpreadEnsembleWrapper:
@@ -3262,12 +3273,24 @@ class DataService:
             else:
                 pick, edge = "-", 0  # No pick without a valid line
 
+            # Apply calibration to confidence if available
+            # This converts raw confidence to calibrated probability based on historical accuracy
+            calibrated_confidence = confidence
+            if PROP_CALIBRATOR is not None and confidence > 0:
+                try:
+                    # Confidence is 0-100, calibrator expects 0-1
+                    calibrated_prob = PROP_CALIBRATOR.calibrate(confidence / 100.0)
+                    calibrated_confidence = calibrated_prob * 100.0
+                except Exception:
+                    pass  # Use uncalibrated if calibration fails
+
             prop_key = prop_label.lower().replace(" ", "_")
             result[f"{prop_key}_line"] = line
             result[f"{prop_key}_pred"] = round(pred_value, 1)
             result[f"{prop_key}_pick"] = pick
             result[f"{prop_key}_edge"] = edge
-            result[f"{prop_key}_confidence"] = round(confidence, 0)
+            result[f"{prop_key}_confidence"] = round(calibrated_confidence, 0)
+            result[f"{prop_key}_raw_confidence"] = round(confidence, 0)  # Keep raw for debugging
             result[f"{prop_key}_real_line"] = used_real_line  # Indicates if sportsbook line was used
             result[f"{prop_key}_ml_model"] = used_ml_model    # Indicates if ML model was used
 
