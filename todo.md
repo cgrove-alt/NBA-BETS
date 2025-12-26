@@ -278,6 +278,32 @@ LINE_MOVEMENT: spread_movement, spread_movement_abs, spread_moved_toward_home/aw
    - Steam move indicators (large moves)
    - Ready for live prediction integration
 
+#### Tier 1 Architectural Upgrades (Dec 26, 2025)
+
+- [x] **1. Quantile Regression for Player Props** (`model_trainer.py`)
+  - Added `QuantilePropModel` class using GradientBoostingRegressor with quantile loss
+  - Trains 3 models: 0.45, 0.50 (median), 0.55 quantiles
+  - Generates implied Over/Under probabilities from quantile positions
+  - More accurate for betting than simple mean prediction
+
+- [x] **2. Dynamic Imputation with Rolling Averages** (`train_complete_balldontlie.py`)
+  - Added `DynamicLeagueAverages` class
+  - Calculates rolling 7-day league averages for each stat
+  - Adapts to season-long scoring trends automatically
+  - Replaces static defaults (114.0 for ratings) with dynamic values
+
+- [x] **3. Neural Network in Ensemble** (`model_trainer.py`)
+  - Added MLPClassifier to `EnsembleMoneylineModel`
+  - Config: hidden_layer_sizes=(64, 32), activation='relu', solver='adam', alpha=0.0001
+  - Early stopping enabled with validation fraction 0.1
+  - Captures non-linear patterns that tree-based models miss
+
+- [x] **4. Automated Feature Selection with RFECV** (`feature_engineering.py`)
+  - Added `FeatureSelector` class using sklearn's RFECV
+  - Uses XGBoost as base estimator for feature importance
+  - Automatically identifies and drops 0-importance features
+  - Saves selected features to JSON for consistent training/inference
+
 #### Next Steps (Future Enhancements)
 - [ ] Integrate live line movement data from odds_fetcher during predictions
 - [ ] Add public betting percentage data (if available)

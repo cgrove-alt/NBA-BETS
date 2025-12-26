@@ -20,6 +20,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVR, SVC
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, VotingClassifier, StackingClassifier
+from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -665,6 +666,276 @@ class SpreadModel(BaseModelTrainer):
             return result
 
 
+class QuantilePropModel(BaseModelTrainer):
+    """
+    TIER 1 UPGRADE: Quantile Regression model for player prop predictions.
+
+    Uses GradientBoostingRegressor with quantile loss to predict:
+    - 0.45 quantile (lower bound)
+    - 0.50 quantile (median)
+    - 0.55 quantile (upper bound)
+
+    This generates implied probabilities for Over/Under betting that are
+    more accurate than simple mean prediction because it captures the
+    asymmetric uncertainty around the prediction.
+    """
+
+    def __init__(self, prop_type: str = "points"):
+        """
+        Initialize quantile prop model.
+
+        Args:
+            prop_type: Type of prop ("points", "rebounds", "assists", "threes", "pra")
+        """
+        self.prop_type = prop_type
+        model_name = f"player_{prop_type}_quantile"
+        super().__init__(model_name)
+
+        # Three quantile models for implied probability calculation
+        self.quantile_models = {
+            0.45: GradientBoostingRegressor(
+                loss='quantile', alpha=0.45,
+                n_estimators=100, max_depth=5,
+                learning_rate=0.1, min_samples_split=10,
+                random_state=42
+            ),
+            0.50: GradientBoostingRegressor(
+                loss='quantile', alpha=0.50,
+                n_estimators=100, max_depth=5,
+                learning_rate=0.1, min_samples_split=10,
+                random_state=42
+            ),
+            0.55: GradientBoostingRegressor(
+                loss='quantile', alpha=0.55,
+                n_estimators=100, max_depth=5,
+                learning_rate=0.1, min_samples_split=10,
+                random_state=42
+            ),
+        }
+        self.model = self.quantile_models[0.50]  # Default median model for compatibility
+
+    def prepare_training_data(
+        self,
+        player_data: List[Dict],
+        prop_line: Optional[float] = None,
+    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        """Prepare training data from historical player games."""
+        prop_feature_map = {
+            "points": "points_features",
+            "rebounds": "rebounds_features",
+            "assists": "assists_features",
+            "threes": "threes_features",
+            "pra": "pra_features",
+        }
+        stat_key_map = {
+            "points": "pts",
+            "rebounds": "reb",
+            "assists": "ast",
+            "threes": "fg3_made",
+            "pra": "pra",
+        }
+
+        feature_key = prop_feature_map.get(self.prop_type, "points_features")
+        stat_key = stat_key_map.get(self.prop_type, "pts")
+
+        features_list = []
+        labels = []
+        game_dates = []
+
+        for game in player_data:
+            features = game.get(feature_key, {})
+            actual_value = game.get("actual_stats", {}).get(stat_key, None)
+
+            if self.prop_type == "pra" and actual_value is None:
+                stats = game.get("actual_stats", {})
+                pts = stats.get("pts", 0) or 0
+                reb = stats.get("reb", 0) or 0
+                ast = stats.get("ast", 0) or 0
+                actual_value = pts + reb + ast
+
+            if features and actual_value is not None:
+                numeric_features = {
+                    k: v for k, v in features.items()
+                    if isinstance(v, (int, float)) and k != "player_id"
+                }
+                features_list.append(numeric_features)
+                labels.append(actual_value)
+                game_dates.append(game.get("game_date", "1900-01-01"))
+
+        X = pd.DataFrame(features_list)
+        y = np.array(labels)
+
+        if game_dates and len(game_dates) == len(X):
+            date_series = pd.Series(game_dates)
+            sort_indices = date_series.argsort().values
+            X = X.iloc[sort_indices].reset_index(drop=True)
+            y = y[sort_indices]
+
+        return X, y
+
+    def train(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        test_size: float = 0.2,
+        cv_folds: int = 5,
+    ) -> Dict[str, Any]:
+        """Train all three quantile models."""
+        # Time-series split
+        n_samples = len(X)
+        test_samples = int(n_samples * test_size)
+        X_train = X.iloc[:-test_samples]
+        X_test = X.iloc[-test_samples:]
+        y_train = y[:-test_samples]
+        y_test = y[-test_samples:]
+
+        X_train_scaled = self.preprocess_features(X_train, fit=True)
+        X_test_scaled = self.preprocess_features(X_test, fit=False)
+
+        print(f"\n  Training Quantile Prop Model ({self.prop_type})...")
+        print(f"  Training samples: {len(X_train)}, Test samples: {len(X_test)}")
+
+        # Train all three quantile models
+        predictions = {}
+        for quantile, model in self.quantile_models.items():
+            print(f"    Training quantile {quantile}...")
+            model.fit(X_train_scaled, y_train)
+            predictions[quantile] = model.predict(X_test_scaled)
+
+        self.is_fitted = True
+
+        # Calculate metrics using median prediction
+        y_pred_median = predictions[0.50]
+
+        # Check quantile crossing (lower should be <= median <= upper)
+        crossings = np.sum(predictions[0.45] > predictions[0.55])
+
+        self.training_metrics = {
+            "mse": mean_squared_error(y_test, y_pred_median),
+            "rmse": np.sqrt(mean_squared_error(y_test, y_pred_median)),
+            "mae": mean_absolute_error(y_test, y_pred_median),
+            "r2": r2_score(y_test, y_pred_median),
+            "train_size": len(X_train),
+            "test_size": len(X_test),
+            "quantile_crossings": int(crossings),
+            "quantiles_trained": list(self.quantile_models.keys()),
+        }
+
+        print(f"  Quantile {self.prop_type.title()} Model Results:")
+        print(f"    RMSE: {self.training_metrics['rmse']:.2f}")
+        print(f"    MAE: {self.training_metrics['mae']:.2f}")
+        print(f"    R²: {self.training_metrics['r2']:.4f}")
+        print(f"    Quantile crossings: {crossings} (should be 0)")
+
+        return self.training_metrics
+
+    def predict(self, features: Dict, prop_line: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Predict with quantile-based implied probability.
+
+        Uses the spread between quantiles to estimate Over/Under probability.
+        """
+        if not self.is_fitted:
+            raise ValueError("Model not fitted. Train or load a model first.")
+
+        numeric_features = {
+            k: v for k, v in features.items()
+            if isinstance(v, (int, float)) and k != "player_id"
+        }
+
+        X = pd.DataFrame([numeric_features])
+        for col in self.feature_names:
+            if col not in X.columns:
+                X[col] = 0
+        X = X[self.feature_names]
+        X_scaled = self.preprocess_features(X, fit=False)
+
+        # Get predictions from all quantiles
+        q45 = self.quantile_models[0.45].predict(X_scaled)[0]
+        q50 = self.quantile_models[0.50].predict(X_scaled)[0]  # Median
+        q55 = self.quantile_models[0.55].predict(X_scaled)[0]
+
+        result = {
+            "predicted_value": float(q50),  # Use median as main prediction
+            "q45": float(q45),
+            "q50": float(q50),
+            "q55": float(q55),
+            "prediction_spread": float(q55 - q45),  # Uncertainty width
+            "prop_type": self.prop_type,
+        }
+
+        if prop_line is not None:
+            result["prop_line"] = prop_line
+
+            # Calculate implied probability using quantile positions
+            # If line is below q45, strong over
+            # If line is above q55, strong under
+            # If line is between q45-q55, interpolate
+            if prop_line <= q45:
+                over_prob = 0.55 + 0.35 * (q45 - prop_line) / max(q50 - q45 + 1, 1)
+            elif prop_line >= q55:
+                over_prob = 0.45 - 0.35 * (prop_line - q55) / max(q55 - q50 + 1, 1)
+            else:
+                # Linear interpolation between q45 and q55
+                range_width = q55 - q45
+                if range_width > 0:
+                    position = (prop_line - q45) / range_width
+                    over_prob = 0.55 - 0.10 * position  # 0.55 at q45, 0.45 at q55
+                else:
+                    over_prob = 0.50
+
+            # Clip to valid probability range
+            over_prob = float(np.clip(over_prob, 0.05, 0.95))
+
+            result["over_probability"] = over_prob
+            result["under_probability"] = 1.0 - over_prob
+            result["prediction"] = "over" if over_prob > 0.5 else "under"
+            result["edge"] = q50 - prop_line
+            result["confidence"] = abs(over_prob - 0.5) * 2  # 0 to 1 scale
+
+        return result
+
+    def save_model(self, filepath: Optional[Path] = None):
+        """Save all quantile models, scaler, and metadata."""
+        if filepath is None:
+            filepath = MODEL_DIR / f"{self.model_name}.pkl"
+
+        model_data = {
+            "quantile_models": self.quantile_models,
+            "model": self.quantile_models[0.50],  # For compatibility
+            "scaler": self.scaler,
+            "feature_names": self.feature_names,
+            "training_metrics": self.training_metrics,
+            "model_name": self.model_name,
+            "prop_type": self.prop_type,
+            "saved_at": datetime.now().isoformat(),
+        }
+
+        with open(filepath, "wb") as f:
+            pickle.dump(model_data, f)
+
+        print(f"Quantile model saved to {filepath}")
+        return filepath
+
+    def load_model(self, filepath: Optional[Path] = None):
+        """Load quantile models from disk."""
+        if filepath is None:
+            filepath = MODEL_DIR / f"{self.model_name}.pkl"
+
+        with open(filepath, "rb") as f:
+            model_data = pickle.load(f)
+
+        self.quantile_models = model_data.get("quantile_models", {})
+        self.model = model_data.get("model")
+        self.scaler = model_data["scaler"]
+        self.feature_names = model_data["feature_names"]
+        self.training_metrics = model_data["training_metrics"]
+        self.is_fitted = True
+
+        print(f"Quantile model loaded from {filepath}")
+        return self
+
+
 class PlayerPropModel(BaseModelTrainer):
     """
     Random Forest model for player prop predictions.
@@ -1217,20 +1488,43 @@ class LightGBMSpreadModel(BaseModelTrainer):
 
 class EnsembleMoneylineModel(BaseModelTrainer):
     """
-    Ensemble model combining multiple classifiers for moneyline predictions.
+    TIER 1 UPGRADE: Ensemble model with Neural Network for moneyline predictions.
 
-    Uses stacking with Logistic Regression, Random Forest, and Gradient Boosting.
-    Optional: XGBoost and LightGBM if installed.
+    Uses stacking with:
+    - Logistic Regression
+    - Random Forest
+    - Gradient Boosting
+    - MLPClassifier (Neural Network) - NEW
+    - XGBoost (if installed)
+    - LightGBM (if installed)
+
+    The MLPClassifier adds non-linear pattern recognition that tree-based
+    models may miss, improving overall ensemble diversity and accuracy.
     """
 
     def __init__(self):
         super().__init__("moneyline_ensemble")
 
-        # Base estimators
+        # Base estimators - TIER 1 UPGRADE: Now includes Neural Network
         estimators = [
             ('lr', LogisticRegression(max_iter=1000, random_state=42)),
             ('rf', RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)),
             ('gb', GradientBoostingClassifier(n_estimators=100, max_depth=5, random_state=42)),
+            # TIER 1: Neural Network for capturing complex non-linear patterns
+            ('mlp', MLPClassifier(
+                hidden_layer_sizes=(64, 32),  # Two hidden layers
+                activation='relu',
+                solver='adam',
+                alpha=0.0001,  # L2 regularization
+                batch_size='auto',
+                learning_rate='adaptive',
+                learning_rate_init=0.001,
+                max_iter=500,
+                early_stopping=True,
+                validation_fraction=0.1,
+                n_iter_no_change=10,
+                random_state=42,
+            )),
         ]
 
         if HAS_XGBOOST:

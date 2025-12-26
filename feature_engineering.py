@@ -3897,6 +3897,278 @@ class MomentumCalculator:
         return features
 
 
+# =============================================================================
+# TIER 1: AUTOMATED FEATURE SELECTION WITH RFECV
+# =============================================================================
+
+class FeatureSelector:
+    """
+    TIER 1 UPGRADE: Automated feature selection using RFECV.
+
+    Uses Recursive Feature Elimination with Cross-Validation to:
+    1. Identify features with 0 importance in XGBoost
+    2. Automatically drop low-value features
+    3. Save selected features to JSON for consistent training/inference
+
+    This improves model performance by:
+    - Reducing overfitting from irrelevant features
+    - Speeding up training and inference
+    - Improving interpretability
+    """
+
+    def __init__(self, min_features: int = 10, cv_folds: int = 5):
+        """
+        Initialize the feature selector.
+
+        Args:
+            min_features: Minimum number of features to keep
+            cv_folds: Number of cross-validation folds for RFECV
+        """
+        self.min_features = min_features
+        self.cv_folds = cv_folds
+        self.selected_features: List[str] = []
+        self.feature_importances: Dict[str, float] = {}
+        self.elimination_history: List[Dict] = []
+        self.is_fitted = False
+
+    def fit(self, X: 'pd.DataFrame', y: 'np.ndarray', model_type: str = 'classification') -> 'FeatureSelector':
+        """
+        Fit the feature selector using RFECV.
+
+        Args:
+            X: Feature DataFrame
+            y: Target variable
+            model_type: 'classification' or 'regression'
+
+        Returns:
+            self (for chaining)
+        """
+        try:
+            from sklearn.feature_selection import RFECV
+            from sklearn.model_selection import TimeSeriesSplit
+            import xgboost as xgb
+        except ImportError as e:
+            print(f"  [FeatureSelector] Required package not installed: {e}")
+            # Fall back to keeping all features
+            self.selected_features = list(X.columns)
+            self.is_fitted = True
+            return self
+
+        print(f"\n  [FeatureSelector] Running RFECV with {len(X.columns)} features...")
+
+        # Use XGBoost as the base estimator (good feature importance)
+        if model_type == 'classification':
+            estimator = xgb.XGBClassifier(
+                n_estimators=50,
+                max_depth=4,
+                learning_rate=0.1,
+                random_state=42,
+                use_label_encoder=False,
+                eval_metric='logloss',
+                n_jobs=-1,
+            )
+        else:
+            estimator = xgb.XGBRegressor(
+                n_estimators=50,
+                max_depth=4,
+                learning_rate=0.1,
+                random_state=42,
+                n_jobs=-1,
+            )
+
+        # Time-series CV for sports data
+        cv = TimeSeriesSplit(n_splits=self.cv_folds)
+
+        # RFECV with XGBoost
+        selector = RFECV(
+            estimator=estimator,
+            step=1,  # Remove 1 feature at a time
+            cv=cv,
+            scoring='accuracy' if model_type == 'classification' else 'neg_mean_squared_error',
+            min_features_to_select=self.min_features,
+            n_jobs=-1,
+        )
+
+        # Handle any remaining NaN/inf values
+        X_clean = X.replace([float('inf'), float('-inf')], 0).fillna(0)
+
+        try:
+            selector.fit(X_clean, y)
+        except Exception as e:
+            print(f"  [FeatureSelector] RFECV failed: {e}")
+            print(f"  [FeatureSelector] Falling back to all features")
+            self.selected_features = list(X.columns)
+            self.is_fitted = True
+            return self
+
+        # Get selected features
+        feature_mask = selector.support_
+        self.selected_features = list(X.columns[feature_mask])
+
+        # Get feature importances from the final fitted estimator
+        if hasattr(selector.estimator_, 'feature_importances_'):
+            importances = selector.estimator_.feature_importances_
+            # Map importances to selected features only
+            self.feature_importances = {}
+            for feat, imp in zip(self.selected_features, importances):
+                self.feature_importances[feat] = float(imp)
+
+        # Track elimination history
+        self.elimination_history = []
+        if hasattr(selector, 'cv_results_'):
+            for i, (n_feat, mean_score) in enumerate(zip(
+                range(len(X.columns), self.min_features - 1, -1),
+                selector.cv_results_['mean_test_score']
+            )):
+                self.elimination_history.append({
+                    'n_features': n_feat,
+                    'cv_score': float(mean_score),
+                })
+
+        self.is_fitted = True
+
+        # Report results
+        n_removed = len(X.columns) - len(self.selected_features)
+        print(f"  [FeatureSelector] Selected {len(self.selected_features)}/{len(X.columns)} features")
+        print(f"  [FeatureSelector] Removed {n_removed} low-importance features")
+
+        if self.feature_importances:
+            # Show top 10 most important features
+            sorted_features = sorted(
+                self.feature_importances.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:10]
+            print(f"  [FeatureSelector] Top 10 features:")
+            for feat, imp in sorted_features:
+                print(f"    - {feat}: {imp:.4f}")
+
+        return self
+
+    def transform(self, X: 'pd.DataFrame') -> 'pd.DataFrame':
+        """
+        Transform X to only include selected features.
+
+        Args:
+            X: Feature DataFrame
+
+        Returns:
+            DataFrame with only selected features
+        """
+        if not self.is_fitted:
+            raise ValueError("FeatureSelector not fitted. Call fit() first.")
+
+        # Handle case where some selected features might not be in X
+        available_features = [f for f in self.selected_features if f in X.columns]
+
+        if len(available_features) < len(self.selected_features):
+            missing = set(self.selected_features) - set(available_features)
+            print(f"  [FeatureSelector] Warning: {len(missing)} selected features not in X")
+
+        return X[available_features]
+
+    def fit_transform(self, X: 'pd.DataFrame', y: 'np.ndarray', model_type: str = 'classification') -> 'pd.DataFrame':
+        """Fit and transform in one step."""
+        self.fit(X, y, model_type)
+        return self.transform(X)
+
+    def save(self, filepath: str = 'models/selected_features.json'):
+        """
+        Save selected features to JSON file.
+
+        Args:
+            filepath: Path to save JSON file
+        """
+        import json
+        from pathlib import Path
+
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+
+        data = {
+            'selected_features': self.selected_features,
+            'feature_importances': self.feature_importances,
+            'n_original_features': len(self.selected_features) + len(self.elimination_history),
+            'elimination_history': self.elimination_history,
+            'saved_at': datetime.now().isoformat(),
+        }
+
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        print(f"  [FeatureSelector] Saved {len(self.selected_features)} features to {filepath}")
+
+    def load(self, filepath: str = 'models/selected_features.json') -> 'FeatureSelector':
+        """
+        Load selected features from JSON file.
+
+        Args:
+            filepath: Path to JSON file
+
+        Returns:
+            self (for chaining)
+        """
+        import json
+
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+
+        self.selected_features = data.get('selected_features', [])
+        self.feature_importances = data.get('feature_importances', {})
+        self.elimination_history = data.get('elimination_history', [])
+        self.is_fitted = True
+
+        print(f"  [FeatureSelector] Loaded {len(self.selected_features)} features from {filepath}")
+        return self
+
+    def get_zero_importance_features(self, threshold: float = 0.0001) -> List[str]:
+        """
+        Get features with importance below threshold.
+
+        Args:
+            threshold: Importance threshold (default 0.0001)
+
+        Returns:
+            List of feature names with low importance
+        """
+        if not self.feature_importances:
+            return []
+
+        return [
+            feat for feat, imp in self.feature_importances.items()
+            if imp < threshold
+        ]
+
+
+# Global feature selector instance
+_feature_selector: Optional[FeatureSelector] = None
+
+
+def get_feature_selector() -> Optional[FeatureSelector]:
+    """Get the global feature selector instance."""
+    return _feature_selector
+
+
+def set_feature_selector(selector: FeatureSelector):
+    """Set the global feature selector instance."""
+    global _feature_selector
+    _feature_selector = selector
+
+
+def apply_feature_selection(X: 'pd.DataFrame') -> 'pd.DataFrame':
+    """
+    Apply feature selection using the global selector if available.
+
+    Args:
+        X: Feature DataFrame
+
+    Returns:
+        Transformed DataFrame (or original if no selector)
+    """
+    if _feature_selector is not None and _feature_selector.is_fitted:
+        return _feature_selector.transform(X)
+    return X
+
+
 if __name__ == "__main__":
     # Example usage
     print("NBA Feature Engineering Module")

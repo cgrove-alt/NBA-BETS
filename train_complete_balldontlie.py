@@ -162,56 +162,224 @@ FEATURE_DEFAULTS = {
 }
 
 
-def smart_fillna(df: pd.DataFrame) -> pd.DataFrame:
+class DynamicLeagueAverages:
     """
-    Apply intelligent default values based on feature type.
+    TIER 1 UPGRADE: Dynamic imputation using rolling 7-day league averages.
 
-    Much better than fillna(0) which gives wrong values for:
-    - Ratings (league avg ~114, not 0)
-    - Percentages (0.5 is neutral, not 0)
-    - Per-game stats (league averages vary)
+    Instead of static defaults (like 114.0 for ratings), this class:
+    1. Tracks historical league averages by date
+    2. Uses rolling 7-day windows for recent averages
+    3. Adapts to season-long scoring trends automatically
+
+    This is more accurate because:
+    - League pace changes year-to-year (100 possessions in 2020, 98 in 2024)
+    - Scoring trends vary (era of 3-point shooting = higher points)
+    - Mid-season rule changes affect stats
+    """
+
+    def __init__(self):
+        self.daily_averages: Dict[str, Dict[str, float]] = {}  # date -> {stat: value}
+        self.rolling_window = 7  # days
+        self.min_games_for_average = 5  # Minimum games to compute average
+
+    def update_from_games(self, games: List[Dict]):
+        """
+        Build daily league averages from historical games.
+
+        Args:
+            games: List of game dictionaries with dates and stats
+        """
+        from collections import defaultdict
+
+        # Group games by date
+        daily_stats = defaultdict(lambda: defaultdict(list))
+
+        for game in games:
+            game_date = game.get('game_date', '')
+            if not game_date:
+                continue
+
+            # Team stats
+            home_score = game.get('home_score', 0) or 0
+            away_score = game.get('away_score', 0) or 0
+
+            if home_score > 0 and away_score > 0:
+                daily_stats[game_date]['pts'].append(home_score)
+                daily_stats[game_date]['pts'].append(away_score)
+                daily_stats[game_date]['total_pts'].append(home_score + away_score)
+
+            # Extract additional stats if available
+            for stat in ['off_rating', 'def_rating', 'pace', 'reb', 'ast']:
+                home_val = game.get(f'home_{stat}')
+                away_val = game.get(f'away_{stat}')
+                if home_val is not None:
+                    daily_stats[game_date][stat].append(home_val)
+                if away_val is not None:
+                    daily_stats[game_date][stat].append(away_val)
+
+        # Compute daily averages
+        for date, stats in daily_stats.items():
+            self.daily_averages[date] = {}
+            for stat, values in stats.items():
+                if len(values) >= 2:  # At least one game (home + away)
+                    self.daily_averages[date][stat] = np.mean(values)
+
+        print(f"  [DynamicLeagueAverages] Built averages for {len(self.daily_averages)} dates")
+
+    def get_rolling_average(self, target_date: str, stat: str) -> Optional[float]:
+        """
+        Get rolling 7-day average for a stat as of target_date.
+
+        Args:
+            target_date: Date string (YYYY-MM-DD)
+            stat: Stat name to average
+
+        Returns:
+            Rolling average or None if insufficient data
+        """
+        try:
+            target = datetime.strptime(target_date, '%Y-%m-%d')
+        except (ValueError, TypeError):
+            return None
+
+        values = []
+        for i in range(1, self.rolling_window + 1):
+            check_date = (target - timedelta(days=i)).strftime('%Y-%m-%d')
+            if check_date in self.daily_averages:
+                if stat in self.daily_averages[check_date]:
+                    values.append(self.daily_averages[check_date][stat])
+
+        if len(values) >= self.min_games_for_average:
+            return np.mean(values)
+        return None
+
+    def get_default_for_stat(self, stat: str, game_date: str = None) -> float:
+        """
+        Get the best available default for a stat.
+
+        Priority:
+        1. Rolling 7-day average if game_date provided
+        2. Season average if available
+        3. Static fallback
+
+        Args:
+            stat: Stat name
+            game_date: Optional game date for rolling average
+
+        Returns:
+            Best available default value
+        """
+        # Try rolling average first
+        if game_date:
+            rolling = self.get_rolling_average(game_date, stat)
+            if rolling is not None:
+                return rolling
+
+        # Fall back to season average
+        all_values = []
+        for date_stats in self.daily_averages.values():
+            if stat in date_stats:
+                all_values.append(date_stats[stat])
+
+        if all_values:
+            return np.mean(all_values)
+
+        # Static fallbacks (worst case)
+        static_defaults = {
+            'pts': 114.0,
+            'off_rating': 114.0,
+            'def_rating': 114.0,
+            'pace': 100.0,
+            'reb': 44.0,
+            'ast': 25.0,
+            'total_pts': 228.0,
+        }
+        return static_defaults.get(stat, 0.0)
+
+
+# Global instance for dynamic league averages
+_league_avg_tracker = DynamicLeagueAverages()
+
+
+def smart_fillna(df: pd.DataFrame, game_date: str = None) -> pd.DataFrame:
+    """
+    TIER 1 UPGRADE: Apply dynamic imputation using rolling league averages.
+
+    Now uses DynamicLeagueAverages to adapt to:
+    - Season-long scoring trends
+    - Pace changes across eras
+    - Mid-season rule adjustments
+
+    Args:
+        df: DataFrame with missing values
+        game_date: Optional game date for rolling averages (YYYY-MM-DD)
+
+    Returns:
+        DataFrame with imputed values
     """
     result = df.copy()
 
     for col in result.columns:
         if result[col].isna().any():
-            # Check for exact matches first
             col_lower = col.lower()
-            if col in FEATURE_DEFAULTS:
-                result[col] = result[col].fillna(FEATURE_DEFAULTS[col])
-            elif col_lower in FEATURE_DEFAULTS:
-                result[col] = result[col].fillna(FEATURE_DEFAULTS[col_lower])
-            # Check for partial matches
-            elif 'off_rating' in col_lower or 'offensive_rating' in col_lower:
-                result[col] = result[col].fillna(114.0)
+
+            # Try to get dynamic average first
+            default_value = None
+
+            # Map column names to stat types
+            if 'off_rating' in col_lower or 'offensive_rating' in col_lower:
+                default_value = _league_avg_tracker.get_default_for_stat('off_rating', game_date)
             elif 'def_rating' in col_lower or 'defensive_rating' in col_lower:
-                result[col] = result[col].fillna(114.0)
-            elif 'net_rating' in col_lower:
-                result[col] = result[col].fillna(0.0)
-            elif 'rating' in col_lower:
-                result[col] = result[col].fillna(114.0)
-            elif 'win_pct' in col_lower or 'winpct' in col_lower:
-                result[col] = result[col].fillna(0.5)
-            elif 'pct' in col_lower or 'percentage' in col_lower:
-                result[col] = result[col].fillna(0.5)
+                default_value = _league_avg_tracker.get_default_for_stat('def_rating', game_date)
             elif 'pace' in col_lower:
-                result[col] = result[col].fillna(100.0)
-            elif '_diff' in col_lower or 'diff_' in col_lower:
-                result[col] = result[col].fillna(0.0)
-            elif 'rest' in col_lower:
-                result[col] = result[col].fillna(1.0)
+                default_value = _league_avg_tracker.get_default_for_stat('pace', game_date)
             elif 'pts' in col_lower or 'points' in col_lower:
-                result[col] = result[col].fillna(114.0)
+                default_value = _league_avg_tracker.get_default_for_stat('pts', game_date)
             elif 'reb' in col_lower or 'rebounds' in col_lower:
-                result[col] = result[col].fillna(44.0)
+                default_value = _league_avg_tracker.get_default_for_stat('reb', game_date)
             elif 'ast' in col_lower or 'assists' in col_lower:
-                result[col] = result[col].fillna(25.0)
-            else:
-                # Fall back to column median or 0
-                median = result[col].median()
-                result[col] = result[col].fillna(median if pd.notna(median) else 0.0)
+                default_value = _league_avg_tracker.get_default_for_stat('ast', game_date)
+
+            # Fall back to static logic if dynamic average not available
+            if default_value is None:
+                if col in FEATURE_DEFAULTS:
+                    default_value = FEATURE_DEFAULTS[col]
+                elif col_lower in FEATURE_DEFAULTS:
+                    default_value = FEATURE_DEFAULTS[col_lower]
+                elif 'net_rating' in col_lower:
+                    default_value = 0.0
+                elif 'rating' in col_lower:
+                    default_value = 114.0
+                elif 'win_pct' in col_lower or 'winpct' in col_lower:
+                    default_value = 0.5
+                elif 'pct' in col_lower or 'percentage' in col_lower:
+                    default_value = 0.5
+                elif '_diff' in col_lower or 'diff_' in col_lower:
+                    default_value = 0.0
+                elif 'rest' in col_lower:
+                    default_value = 1.0
+                else:
+                    # Fall back to column median or 0
+                    median = result[col].median()
+                    default_value = median if pd.notna(median) else 0.0
+
+            result[col] = result[col].fillna(default_value)
 
     return result
+
+
+def initialize_league_averages(games: List[Dict]):
+    """
+    Initialize the global league average tracker with historical games.
+
+    Call this at the start of training to enable dynamic imputation.
+
+    Args:
+        games: List of historical game dictionaries
+    """
+    global _league_avg_tracker
+    _league_avg_tracker = DynamicLeagueAverages()
+    _league_avg_tracker.update_from_games(games)
 
 
 # =============================================================================
