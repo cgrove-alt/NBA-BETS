@@ -372,16 +372,20 @@ except ImportError:
     HAS_CALIBRATION = False
     print("Warning: calibration module not available, using raw probabilities")
 
-# Load prop prediction calibrator for confidence adjustment
+# Prop calibrator DISABLED - the old calibrator was trained on stale data (39% win rate)
+# and flattens all confidence to 39%. Direction calibration from PropTracker now handles
+# confidence adjustment dynamically based on recent model performance.
+# To re-enable: uncomment the calibrator loading code below
 PROP_CALIBRATOR = None
-try:
-    if HAS_CALIBRATION:
-        _prop_cal = ModelCalibrator('prop_predictions')
-        _prop_cal.load('models/calibration')
-        PROP_CALIBRATOR = _prop_cal
-        print(f"Prop calibrator loaded (method: {_prop_cal.best_method})")
-except Exception as e:
-    print(f"Warning: Could not load prop calibrator: {e}")
+# try:
+#     if HAS_CALIBRATION:
+#         _prop_cal = ModelCalibrator('prop_predictions')
+#         _prop_cal.load('models/calibration')
+#         PROP_CALIBRATOR = _prop_cal
+#         print(f"Prop calibrator loaded (method: {_prop_cal.best_method})")
+# except Exception as e:
+#     print(f"Warning: Could not load prop calibrator: {e}")
+print("Prop calibrator disabled - using direction calibration from PropTracker")
 
 
 # Model wrapper classes for unpickling
