@@ -20,6 +20,45 @@ import concurrent.futures
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Import model classes for pickle compatibility
+# These classes must be imported before loading pickled models
+try:
+    import train_complete_balldontlie as training_module
+    from train_complete_balldontlie import (
+        QuantilePropModel,
+        PropEnsembleModel,
+        PositionAwarePropEnsemble,
+    )
+    TRAINING_MODULE_AVAILABLE = True
+except ImportError:
+    # Fallback: models will fail to load but won't crash
+    training_module = None
+    QuantilePropModel = None
+    PropEnsembleModel = None
+    PositionAwarePropEnsemble = None
+    TRAINING_MODULE_AVAILABLE = False
+
+
+class ModelUnpickler(pickle.Unpickler):
+    """Custom unpickler that remaps __main__ to training module.
+
+    When models are trained by running train_complete_balldontlie.py directly,
+    pickle saves class references as __main__.ClassName. This unpickler
+    remaps those to train_complete_balldontlie.ClassName for proper loading.
+    """
+    def find_class(self, module, name):
+        if module == '__main__' and TRAINING_MODULE_AVAILABLE:
+            # Try to get class from training module
+            if hasattr(training_module, name):
+                return getattr(training_module, name)
+        return super().find_class(module, name)
+
+
+def load_model_pickle(filepath):
+    """Load a pickled model with __main__ module remapping."""
+    with open(filepath, 'rb') as f:
+        return ModelUnpickler(f).load()
+
 
 # =============================================================================
 # TIER 1.1: Position Encoding Helpers
@@ -707,7 +746,7 @@ class DataService:
                     fb_path = model_dir / fallback
                     if fb_path.exists():
                         with open(fb_path, "rb") as f:
-                            loaded = pickle.load(f)
+                            loaded = ModelUnpickler(f).load()
                         if isinstance(loaded, dict) and 'model' in loaded:
                             self._moneyline_model = loaded['model']
                             self._moneyline_scaler = loaded.get('scaler')
@@ -763,18 +802,22 @@ class DataService:
             try:
                 # TIER 1.4: Try to load position-aware model first for rebounds/assists
                 if prop_type in POSITION_AWARE_PROPS:
-                    position_aware_path = model_dir / f"player_{prop_type}_position_aware.pkl"
-                    if position_aware_path.exists():
-                        with open(position_aware_path, "rb") as f:
-                            loaded = ModelUnpickler(f).load()
-                        # Position-aware model is pickled as a dict with position_models and general_model
-                        if isinstance(loaded, dict) and 'position_models' in loaded:
-                            self._position_aware_models[prop_type] = loaded
-                            print(f"TIER 1.4: Loaded position-aware {prop_type} model with "
-                                  f"{len(loaded.get('position_models', {}))} position-specific models")
-                        else:
-                            # Fallback to regular ensemble
-                            self._position_aware_models[prop_type] = None
+                    try:
+                        position_aware_path = model_dir / f"player_{prop_type}_position_aware.pkl"
+                        if position_aware_path.exists():
+                            with open(position_aware_path, "rb") as f:
+                                loaded = ModelUnpickler(f).load()
+                            # Position-aware model is pickled as a dict with position_models and general_model
+                            if isinstance(loaded, dict) and 'position_models' in loaded:
+                                self._position_aware_models[prop_type] = loaded
+                                print(f"TIER 1.4: Loaded position-aware {prop_type} model with "
+                                      f"{len(loaded.get('position_models', {}))} position-specific models")
+                            else:
+                                # Fallback to regular ensemble
+                                self._position_aware_models[prop_type] = None
+                    except Exception as pa_e:
+                        print(f"  Position-aware model for {prop_type} failed, using fallback: {pa_e}")
+                        self._position_aware_models[prop_type] = None
 
                 # Load regular ensemble/pkl model as backup
                 prop_path = model_dir / f"player_{prop_type}.pkl"
@@ -800,8 +843,8 @@ class DataService:
                 quantile_path = model_dir / f"player_{prop_type}_quantile.pkl"
                 if quantile_path.exists():
                     try:
-                        with open(quantile_path, "rb") as f:
-                            q_loaded = pickle.load(f)
+                        # Use custom unpickler to handle __main__ module remapping
+                        q_loaded = load_model_pickle(quantile_path)
                         if isinstance(q_loaded, dict) and 'model' in q_loaded:
                             self._quantile_models[prop_type] = {
                                 'model': q_loaded['model'],
