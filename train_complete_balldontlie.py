@@ -214,6 +214,92 @@ def smart_fillna(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================================================================
+# EXPANDING WINDOW CROSS-VALIDATION
+# =============================================================================
+
+class ExpandingWindowCV:
+    """
+    Expanding window cross-validation for time series data.
+
+    Unlike TimeSeriesSplit which uses fixed-size folds, this approach:
+    1. Always includes ALL available history in each training fold
+    2. Uses a fixed-size test window
+    3. Better mimics real betting scenarios where we train on all past data
+
+    Example with 1000 samples and 5 splits:
+    - Fold 1: Train on [0:600], Test on [600:680]
+    - Fold 2: Train on [0:680], Test on [680:760]
+    - Fold 3: Train on [0:760], Test on [760:840]
+    - Fold 4: Train on [0:840], Test on [840:920]
+    - Fold 5: Train on [0:920], Test on [920:1000]
+    """
+
+    def __init__(self, n_splits: int = 5, min_train_size: int = 500, test_size: int = None):
+        """
+        Initialize the cross-validator.
+
+        Args:
+            n_splits: Number of CV splits
+            min_train_size: Minimum samples in first training fold
+            test_size: Fixed test size (if None, calculated automatically)
+        """
+        self.n_splits = n_splits
+        self.min_train_size = min_train_size
+        self.test_size = test_size
+
+    def split(self, X, y=None, groups=None):
+        """
+        Generate train/test indices for expanding window CV.
+
+        Args:
+            X: Feature array or DataFrame
+            y: Target array (optional, for API compatibility)
+            groups: Group labels (optional, for API compatibility)
+
+        Yields:
+            Tuple of (train_indices, test_indices)
+        """
+        n_samples = len(X)
+
+        # Calculate test size if not specified
+        if self.test_size is None:
+            # Divide remaining samples after min_train equally among folds
+            remaining = n_samples - self.min_train_size
+            test_size = max(50, remaining // self.n_splits)
+        else:
+            test_size = self.test_size
+
+        # Ensure we have enough samples
+        if n_samples < self.min_train_size + test_size:
+            raise ValueError(
+                f"Not enough samples ({n_samples}) for min_train_size={self.min_train_size} "
+                f"and test_size={test_size}"
+            )
+
+        for i in range(self.n_splits):
+            # Training set: all data from start to train_end
+            train_end = self.min_train_size + (i * test_size)
+            if train_end >= n_samples:
+                break
+
+            # Test set: next test_size samples
+            test_start = train_end
+            test_end = min(test_start + test_size, n_samples)
+
+            if test_start >= n_samples:
+                break
+
+            train_indices = np.arange(train_end)
+            test_indices = np.arange(test_start, test_end)
+
+            yield train_indices, test_indices
+
+    def get_n_splits(self, X=None, y=None, groups=None):
+        """Return the number of splits."""
+        return self.n_splits
+
+
+# =============================================================================
 # HYPERPARAMETER TUNING FOR TEAM MODELS
 # =============================================================================
 
@@ -1746,6 +1832,245 @@ class PlayerStatsCalculator:
 
 
 # =============================================================================
+# NEW FEATURE HELPER FUNCTIONS
+# =============================================================================
+
+def calculate_blowout_risk_features(home_stats: Dict, away_stats: Dict, vegas_spread: float = None) -> Dict:
+    """
+    Calculate blowout risk features that predict when starters may get pulled early.
+
+    Research shows:
+    - Vegas spreads > 10 points have ~35% blowout chance
+    - Spreads > 15 points have ~50% blowout chance
+    - Blowouts typically result in 5-7 minute reduction for starters
+
+    Args:
+        home_stats: Home team statistics
+        away_stats: Away team statistics
+        vegas_spread: Vegas spread if available (positive = home favored)
+
+    Returns:
+        Dictionary of blowout risk features
+    """
+    # Estimate spread from team strength if Vegas line not available
+    if vegas_spread is not None:
+        spread_magnitude = abs(vegas_spread)
+    else:
+        # Estimate from net ratings: each point of net rating diff ~= 2.5 point spread
+        home_net = home_stats.get('net_rating', 0) if home_stats else 0
+        away_net = away_stats.get('net_rating', 0) if away_stats else 0
+        net_diff = (home_net - away_net) + 3.5  # Home court advantage ~3.5 pts
+        spread_magnitude = abs(net_diff) / 2.5 * 2.5  # Rough conversion
+
+    # Blowout probability calculation
+    # Based on historical data: P(blowout) = min(0.7, spread / 25)
+    blowout_prob = min(0.70, max(0.05, spread_magnitude / 25))
+
+    # Expected minutes reduction for starters in blowout scenario
+    # Stars typically play 34-36 min, reduced to 26-30 in blowouts
+    expected_min_reduction = blowout_prob * 7  # Up to 7 minutes reduction
+
+    # Projected minutes factor (multiply by expected minutes)
+    # 1.0 = full minutes, 0.82 = 18% reduction in blowout
+    projected_min_factor = 1.0 - (blowout_prob * 0.20)
+
+    return {
+        'blowout_probability': round(blowout_prob, 3),
+        'expected_min_reduction': round(expected_min_reduction, 2),
+        'projected_min_factor': round(projected_min_factor, 3),
+        'is_likely_blowout': 1 if spread_magnitude >= 12 else 0,
+        'spread_magnitude': round(spread_magnitude, 1),
+    }
+
+
+def calculate_pace_adjusted_features(player_features: Dict, team_pace: float,
+                                      opp_pace: float, league_avg_pace: float = 100.0) -> Dict:
+    """
+    Calculate pace-adjusted per-100-possession stats.
+
+    This normalizes stats to account for different team tempos, which is critical
+    because a fast-paced game (110 poss) has ~10% more scoring opportunities than
+    a slow-paced game (100 poss).
+
+    Args:
+        player_features: Player's raw stat averages
+        team_pace: Player's team pace (possessions per 48 min)
+        opp_pace: Opponent's pace
+        league_avg_pace: League average pace (default 100)
+
+    Returns:
+        Dictionary of pace-adjusted features
+    """
+    # Expected game pace (average of both teams)
+    expected_game_pace = (team_pace + opp_pace) / 2
+
+    # Pace multiplier relative to league average
+    # > 1.0 means more possessions than average (boost to stats)
+    pace_multiplier = expected_game_pace / league_avg_pace
+
+    # Get player's raw averages
+    pts_avg = player_features.get('season_pts_avg', 0) or 0
+    reb_avg = player_features.get('season_reb_avg', 0) or 0
+    ast_avg = player_features.get('season_ast_avg', 0) or 0
+    fg3m_avg = player_features.get('season_fg3m_avg', 0) or 0
+    min_avg = player_features.get('season_min_avg', 30) or 30
+
+    # Estimate possessions played (player's share of team possessions)
+    # Roughly: possessions = minutes * (team_pace / 48)
+    player_poss = (min_avg / 48) * team_pace if team_pace > 0 else min_avg * 2
+
+    # Per-100-possession stats (normalized)
+    # This allows fair comparison across different team tempos
+    poss_factor = 100 / max(player_poss, 50)  # Avoid division issues
+
+    return {
+        'expected_game_pace': round(expected_game_pace, 1),
+        'pace_multiplier': round(pace_multiplier, 3),
+        'pace_vs_average': round(expected_game_pace - league_avg_pace, 1),
+        'is_high_pace_game': 1 if expected_game_pace >= 103 else 0,
+        'is_low_pace_game': 1 if expected_game_pace <= 97 else 0,
+        # Pace-adjusted predictions (expected boost/reduction from pace)
+        'pace_pts_adjustment': round((pace_multiplier - 1) * pts_avg, 2),
+        'pace_reb_adjustment': round((pace_multiplier - 1) * reb_avg * 0.5, 2),  # Rebounds less affected
+        'pace_ast_adjustment': round((pace_multiplier - 1) * ast_avg, 2),
+        'pace_fg3_adjustment': round((pace_multiplier - 1) * fg3m_avg, 2),
+        # Per-100-possession normalized stats
+        'pts_per_100_poss': round(pts_avg * poss_factor, 1),
+        'reb_per_100_poss': round(reb_avg * poss_factor, 1),
+        'ast_per_100_poss': round(ast_avg * poss_factor, 1),
+    }
+
+
+def detect_outlier_game(game_stats: Dict, player_avg: Dict, threshold: float = 2.5) -> Dict:
+    """
+    Detect if a game is an outlier based on player performance vs their averages.
+
+    This helps identify:
+    1. OT games (inflated stats due to extra playing time)
+    2. Blowouts (deflated stats due to garbage time)
+    3. Statistical anomalies (injury exits, foul trouble, etc.)
+
+    Args:
+        game_stats: Stats from this specific game
+        player_avg: Player's season/recent averages
+        threshold: Z-score threshold for outlier detection
+
+    Returns:
+        Dictionary with outlier flags and adjustment factors
+    """
+    outlier_flags = {
+        'is_outlier': 0,
+        'outlier_type': 'normal',
+        'adjustment_factor': 1.0,
+        'z_score_pts': 0.0,
+        'z_score_min': 0.0,
+    }
+
+    # Get actual vs expected values
+    actual_pts = game_stats.get('pts', 0) or 0
+    actual_min = game_stats.get('min', 0) or 0
+
+    # Handle string minutes like "32:15"
+    if isinstance(actual_min, str):
+        try:
+            parts = actual_min.split(':')
+            actual_min = float(parts[0]) + float(parts[1]) / 60 if len(parts) == 2 else float(parts[0])
+        except:
+            actual_min = 25
+
+    expected_pts = player_avg.get('season_pts_avg', actual_pts) or actual_pts
+    expected_min = player_avg.get('season_min_avg', actual_min) or actual_min
+    pts_std = player_avg.get('season_pts_std', expected_pts * 0.3) or (expected_pts * 0.3)
+    min_std = player_avg.get('recent_min_avg', expected_min * 0.15) or (expected_min * 0.15)
+
+    # Calculate z-scores
+    if pts_std > 0:
+        z_score_pts = (actual_pts - expected_pts) / pts_std
+    else:
+        z_score_pts = 0
+
+    if min_std > 0:
+        z_score_min = (actual_min - expected_min) / max(min_std, 3)
+    else:
+        z_score_min = 0
+
+    outlier_flags['z_score_pts'] = round(z_score_pts, 2)
+    outlier_flags['z_score_min'] = round(z_score_min, 2)
+
+    # Detect OT game (minutes significantly above expected)
+    if actual_min > expected_min + 8:  # 8+ extra minutes suggests OT
+        outlier_flags['is_outlier'] = 1
+        outlier_flags['outlier_type'] = 'overtime'
+        # OT inflates stats - apply reduction factor for future predictions
+        outlier_flags['adjustment_factor'] = expected_min / max(actual_min, 1)
+
+    # Detect blowout (minutes significantly below expected for starters)
+    elif actual_min < expected_min - 10 and expected_min >= 25:  # 10+ fewer minutes
+        outlier_flags['is_outlier'] = 1
+        outlier_flags['outlier_type'] = 'blowout'
+        # Blowout deflates stats - don't heavily weight this game
+        outlier_flags['adjustment_factor'] = 0.7
+
+    # Detect statistical anomaly (points way off from expected)
+    elif abs(z_score_pts) > threshold:
+        outlier_flags['is_outlier'] = 1
+        outlier_flags['outlier_type'] = 'anomaly_high' if z_score_pts > 0 else 'anomaly_low'
+        # Reduce weight of anomalous games in training
+        outlier_flags['adjustment_factor'] = 0.8
+
+    return outlier_flags
+
+
+def calculate_vegas_total_features(vegas_total: float, player_features: Dict,
+                                    league_avg_total: float = 225.0) -> Dict:
+    """
+    Use Vegas game total to improve individual prop predictions.
+
+    Logic: Higher game totals = more possessions = more stats for everyone
+    - Game total of 235 (10 above average) suggests ~4.4% more scoring
+    - This impacts all prop types, not just points
+
+    Args:
+        vegas_total: Vegas over/under line for total points
+        player_features: Player's stat averages
+        league_avg_total: League average game total (default 225)
+
+    Returns:
+        Dictionary of Vegas total features
+    """
+    if vegas_total is None or vegas_total <= 0:
+        return {
+            'vegas_total': 225.0,
+            'total_vs_average': 0.0,
+            'total_multiplier': 1.0,
+            'is_high_total_game': 0,
+            'is_low_total_game': 0,
+            'total_pts_boost': 0.0,
+        }
+
+    # Total multiplier (1.0 = average scoring environment)
+    total_multiplier = vegas_total / league_avg_total
+    total_vs_average = vegas_total - league_avg_total
+
+    # Get player's scoring share approximation
+    pts_avg = player_features.get('season_pts_avg', 15) or 15
+    usage = player_features.get('usage_rate', 0.20) or 0.20
+
+    # Expected points boost from high/low total
+    # Higher usage players benefit more from high-scoring games
+    total_pts_boost = (total_multiplier - 1) * pts_avg * (1 + usage)
+
+    return {
+        'vegas_total': round(vegas_total, 1),
+        'total_vs_average': round(total_vs_average, 1),
+        'total_multiplier': round(total_multiplier, 3),
+        'is_high_total_game': 1 if vegas_total >= 235 else 0,
+        'is_low_total_game': 1 if vegas_total <= 215 else 0,
+        'total_pts_boost': round(total_pts_boost, 2),
+    }
+
+
+# =============================================================================
 # DATA PROCESSING
 # =============================================================================
 
@@ -1913,6 +2238,34 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
                     player_position=player_position
                 )
                 enhanced_features.update(pos_defense_features)
+
+                # NEW: Add blowout risk features (predicts when starters get pulled early)
+                blowout_features = calculate_blowout_risk_features(
+                    home_stats=home_stats,
+                    away_stats=away_stats,
+                    vegas_spread=None  # Historical training - no Vegas data available
+                )
+                enhanced_features.update(blowout_features)
+
+                # NEW: Add pace-adjusted features (normalizes for team tempo)
+                team_pace = enhanced_features.get('team_pace', 100)
+                opp_pace = enhanced_features.get('opp_pace', 100)
+                pace_features = calculate_pace_adjusted_features(
+                    player_features=enhanced_features,
+                    team_pace=team_pace,
+                    opp_pace=opp_pace,
+                    league_avg_pace=100.0
+                )
+                enhanced_features.update(pace_features)
+
+                # NEW: Vegas total features (placeholder for historical training)
+                # In live predictions, this will use actual Vegas totals
+                vegas_total_features = calculate_vegas_total_features(
+                    vegas_total=None,  # Not available in historical data
+                    player_features=enhanced_features,
+                    league_avg_total=225.0
+                )
+                enhanced_features.update(vegas_total_features)
 
                 player_data.append({
                     'player_id': player_id,
@@ -2157,15 +2510,39 @@ class PropModel:
             'model_type': 'XGBoost' if self.use_xgboost else 'GradientBoosting',
         }
 
+        # Calculate dynamic bias correction from holdout predictions
+        self._calculate_dynamic_bias(y_test, y_pred)
+
         return self.training_metrics
 
-    # Bias corrections calibrated on 2025-26 season data (with DNP filtering)
-    BIAS_CORRECTIONS = {
-        'points': 0.94,      # Model underpredicts by ~0.94
-        'rebounds': -0.21,   # Model slightly overpredicts
-        'assists': 0.43,     # Model underpredicts by ~0.43
-        'threes': 0.70,      # Model underpredicts by ~0.70
-        'pra': -0.82,        # Model slightly overpredicts
+    def _calculate_dynamic_bias(self, y_actual: np.ndarray, y_predicted: np.ndarray):
+        """
+        Calculate dynamic bias correction from recent predictions.
+
+        This replaces hard-coded bias corrections with data-driven values.
+        Bias = mean(actual) - mean(predicted)
+        Positive bias means model underpredicts, negative means overpredicts.
+        """
+        if len(y_actual) < 50:
+            # Not enough data - use fallback defaults
+            self.dynamic_bias = 0.0
+            return
+
+        bias = np.mean(y_actual) - np.mean(y_predicted)
+
+        # Clip extreme bias values (model shouldn't be off by more than 3 points)
+        self.dynamic_bias = np.clip(bias, -3.0, 3.0)
+
+        print(f"    Dynamic bias correction for {self.prop_type}: {self.dynamic_bias:.3f}")
+
+    # DEPRECATED: Legacy hard-coded bias corrections (kept for reference only)
+    # These are now replaced by dynamic bias calculation in train()
+    LEGACY_BIAS_CORRECTIONS = {
+        'points': 0.94,      # Historical: Model underpredicted by ~0.94
+        'rebounds': -0.21,   # Historical: Model slightly overpredicted
+        'assists': 0.43,     # Historical: Model underpredicted by ~0.43
+        'threes': 0.70,      # Historical: Model underpredicted by ~0.70
+        'pra': -0.82,        # Historical: Model slightly overpredicted
     }
 
     def predict(self, features: Dict, prop_line: float = None, apply_bias_correction: bool = True) -> Dict:
@@ -2182,10 +2559,9 @@ class PropModel:
 
         predicted = float(self.model.predict(X_scaled)[0])
 
-        # Apply bias correction based on backtest analysis
-        if apply_bias_correction and self.prop_type in self.BIAS_CORRECTIONS:
-            bias_correction = self.BIAS_CORRECTIONS[self.prop_type]
-            predicted += bias_correction
+        # Apply dynamic bias correction (calculated during training)
+        if apply_bias_correction and hasattr(self, 'dynamic_bias') and self.dynamic_bias != 0:
+            predicted += self.dynamic_bias
 
         result = {
             'predicted_value': predicted,
@@ -2200,7 +2576,7 @@ class PropModel:
         return result
 
     def save(self, filepath: Path):
-        """Save model to disk with CV scores."""
+        """Save model to disk with CV scores and dynamic bias."""
         data = {
             'model': self.model,
             'scaler': self.scaler,
@@ -2209,9 +2585,26 @@ class PropModel:
             'cv_scores': self.cv_scores,
             'prop_type': self.prop_type,
             'model_type': 'XGBoost' if self.use_xgboost else 'GradientBoosting',
+            'dynamic_bias': getattr(self, 'dynamic_bias', 0.0),  # NEW: Save dynamic bias
         }
         with open(filepath, 'wb') as f:
             pickle.dump(data, f)
+
+    @classmethod
+    def load(cls, filepath: Path) -> 'PropModel':
+        """Load model from disk with dynamic bias support."""
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+
+        model = cls(data['prop_type'])
+        model.model = data['model']
+        model.scaler = data['scaler']
+        model.feature_names = data['feature_names']
+        model.training_metrics = data.get('training_metrics', {})
+        model.cv_scores = data.get('cv_scores', {})
+        model.dynamic_bias = data.get('dynamic_bias', 0.0)  # NEW: Load dynamic bias
+        model.is_fitted = True
+        return model
 
 
 # =============================================================================
@@ -2563,6 +2956,12 @@ class PropEnsembleModel:
             'n_estimators': 200, 'max_depth': 5, 'learning_rate': 0.05,
             'subsample': 0.8, 'random_state': 42,
         }
+        # NEW: CatBoost defaults (good for handling categorical features like position)
+        catboost_defaults = {
+            'iterations': 300, 'depth': 5, 'learning_rate': 0.03,
+            'l2_leaf_reg': 3.0, 'random_seed': 42,
+            'verbose': False, 'thread_count': -1,
+        }
 
         # Merge with optimized params if provided
         if optimized_params:
@@ -2571,9 +2970,11 @@ class PropEnsembleModel:
             rf_params = {**rf_defaults, **optimized_params.get('random_forest', {})}
             ridge_params = {**ridge_defaults, **optimized_params.get('ridge', {})}
             gb_params = {**gb_defaults, **optimized_params.get('gradient_boosting', {})}
+            catboost_params = {**catboost_defaults, **optimized_params.get('catboost', {})}
         else:
             xgb_params, lgb_params, rf_params = xgb_defaults, lgb_defaults, rf_defaults
             ridge_params, gb_params = ridge_defaults, gb_defaults
+            catboost_params = catboost_defaults
 
         # XGBoost (primary)
         if HAS_XGBOOST:
@@ -2582,6 +2983,11 @@ class PropEnsembleModel:
         # LightGBM (fast)
         if HAS_LIGHTGBM:
             self.models['lightgbm'] = LGBMRegressor(**lgb_params)
+
+        # NEW: CatBoost (excellent for categorical features like position, handles missing values)
+        if HAS_CATBOOST:
+            from catboost import CatBoostRegressor
+            self.models['catboost'] = CatBoostRegressor(**catboost_params)
 
         # Random Forest (diverse)
         self.models['random_forest'] = RandomForestRegressor(**rf_params)
@@ -2864,6 +3270,245 @@ class PropEnsembleModel:
         model.over_under_classifier = data.get('over_under_classifier')
         model.is_fitted = True
 
+        return model
+
+
+# =============================================================================
+# QUANTILE REGRESSION FOR UNCERTAINTY ESTIMATION
+# =============================================================================
+
+class QuantilePropModel:
+    """
+    Quantile regression model for uncertainty estimation in prop predictions.
+
+    Instead of predicting a single point estimate, this model predicts the
+    full distribution of possible outcomes by training separate models at
+    different quantiles (10th, 25th, 50th, 75th, 90th percentiles).
+
+    This enables:
+    1. Better probability estimation for OVER/UNDER decisions
+    2. Confidence intervals for predictions
+    3. Risk-adjusted betting recommendations
+    """
+
+    QUANTILES = [0.10, 0.25, 0.50, 0.75, 0.90]
+
+    def __init__(self, prop_type: str):
+        self.prop_type = prop_type
+        self.quantile_models = {}
+        self.scaler = StandardScaler()
+        self.feature_names = []
+        self.is_fitted = False
+        self.training_metrics = {}
+
+    def train(self, X: pd.DataFrame, y: np.ndarray,
+              sample_weights: np.ndarray = None, test_size: float = 0.2) -> Dict:
+        """
+        Train quantile regression models at each percentile.
+
+        Args:
+            X: Feature DataFrame
+            y: Target values
+            sample_weights: Optional time-decay weights
+            test_size: Holdout test size
+
+        Returns:
+            Dictionary of training metrics
+        """
+        print(f"\n    Training quantile regression for {self.prop_type}...")
+
+        # Prepare data
+        self.feature_names = list(X.columns)
+        X_filled = smart_fillna(X)
+        y_arr = np.array(y)
+
+        # Chronological split
+        split_idx = int(len(X_filled) * (1 - test_size))
+        X_train, X_test = X_filled[:split_idx], X_filled[split_idx:]
+        y_train, y_test = y_arr[:split_idx], y_arr[split_idx:]
+
+        # Fit scaler
+        self.scaler.fit(X_train)
+        X_train_scaled = self.scaler.transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+
+        # Train a model for each quantile
+        quantile_metrics = {}
+
+        for q in self.QUANTILES:
+            print(f"      Quantile {q:.0%}...")
+
+            # Use GradientBoostingRegressor with quantile loss
+            model = GradientBoostingRegressor(
+                loss='quantile',
+                alpha=q,
+                n_estimators=150,
+                max_depth=5,
+                learning_rate=0.05,
+                min_samples_split=10,
+                min_samples_leaf=5,
+                subsample=0.8,
+                random_state=42,
+            )
+
+            model.fit(X_train_scaled, y_train)
+            self.quantile_models[q] = model
+
+            # Evaluate on test set
+            y_pred = model.predict(X_test_scaled)
+
+            # Calculate pinball loss (proper scoring rule for quantiles)
+            pinball_loss = self._pinball_loss(y_test, y_pred, q)
+            quantile_metrics[f'q{int(q*100)}_pinball'] = pinball_loss
+
+        self.is_fitted = True
+
+        # Calculate coverage metrics
+        y_pred_10 = self.quantile_models[0.10].predict(X_test_scaled)
+        y_pred_90 = self.quantile_models[0.90].predict(X_test_scaled)
+
+        # 80% prediction interval coverage
+        in_interval = np.sum((y_test >= y_pred_10) & (y_test <= y_pred_90))
+        coverage_80 = in_interval / len(y_test)
+
+        self.training_metrics = {
+            **quantile_metrics,
+            'coverage_80': coverage_80,
+            'train_size': len(X_train),
+            'test_size': len(X_test),
+        }
+
+        print(f"      80% interval coverage: {coverage_80:.1%}")
+
+        return self.training_metrics
+
+    def _pinball_loss(self, y_true: np.ndarray, y_pred: np.ndarray, q: float) -> float:
+        """Calculate pinball (quantile) loss."""
+        errors = y_true - y_pred
+        return float(np.mean(np.where(errors >= 0, q * errors, (q - 1) * errors)))
+
+    def predict_distribution(self, features: Dict) -> Dict[float, float]:
+        """
+        Predict the full distribution of outcomes.
+
+        Returns:
+            Dictionary mapping quantile to predicted value
+        """
+        if not self.is_fitted:
+            raise ValueError("Model not fitted")
+
+        X = pd.DataFrame([features])
+        for col in self.feature_names:
+            if col not in X.columns:
+                X[col] = 0
+        X = smart_fillna(X[self.feature_names])
+        X_scaled = self.scaler.transform(X)
+
+        return {q: float(model.predict(X_scaled)[0])
+                for q, model in self.quantile_models.items()}
+
+    def predict_over_probability(self, features: Dict, line: float) -> float:
+        """
+        Estimate probability of actual value being OVER the line.
+
+        Uses linear interpolation between quantile predictions.
+
+        Args:
+            features: Player/game features
+            line: The prop line to compare against
+
+        Returns:
+            Estimated probability (0-1) of OVER hitting
+        """
+        quantile_preds = self.predict_distribution(features)
+
+        # Sort quantiles and predictions
+        quantiles = sorted(quantile_preds.keys())
+        predictions = [quantile_preds[q] for q in quantiles]
+
+        # Find where the line falls in the distribution
+        # If line < lowest prediction, high probability of OVER
+        # If line > highest prediction, low probability of OVER
+        if line <= predictions[0]:  # Below 10th percentile
+            return 0.95  # Very high OVER probability
+
+        if line >= predictions[-1]:  # Above 90th percentile
+            return 0.05  # Very low OVER probability
+
+        # Linear interpolation to find probability
+        for i in range(len(predictions) - 1):
+            if predictions[i] <= line <= predictions[i + 1]:
+                # Interpolate probability between quantiles
+                lower_q = quantiles[i]
+                upper_q = quantiles[i + 1]
+                lower_pred = predictions[i]
+                upper_pred = predictions[i + 1]
+
+                # Position within this interval
+                if upper_pred == lower_pred:
+                    pos = 0.5
+                else:
+                    pos = (line - lower_pred) / (upper_pred - lower_pred)
+
+                # Interpolate the cumulative probability
+                prob_below_line = lower_q + pos * (upper_q - lower_q)
+
+                # OVER probability = 1 - P(below line)
+                return 1 - prob_below_line
+
+        return 0.50  # Default to 50% if something goes wrong
+
+    def predict(self, features: Dict, prop_line: float = None) -> Dict:
+        """
+        Make a prediction with uncertainty estimates.
+
+        Returns:
+            Dictionary with median prediction and uncertainty metrics
+        """
+        quantile_preds = self.predict_distribution(features)
+
+        result = {
+            'predicted_value': quantile_preds[0.50],  # Median
+            'prediction_10th': quantile_preds[0.10],
+            'prediction_25th': quantile_preds[0.25],
+            'prediction_75th': quantile_preds[0.75],
+            'prediction_90th': quantile_preds[0.90],
+            'prediction_std': (quantile_preds[0.75] - quantile_preds[0.25]) / 1.35,  # IQR-based std
+            'prop_type': self.prop_type,
+        }
+
+        if prop_line is not None:
+            result['prop_line'] = prop_line
+            result['over_probability'] = self.predict_over_probability(features, prop_line)
+            result['prediction'] = 'over' if result['over_probability'] > 0.5 else 'under'
+            result['edge'] = result['predicted_value'] - prop_line
+
+        return result
+
+    def save(self, filepath: Path):
+        """Save model to disk."""
+        data = {
+            'quantile_models': self.quantile_models,
+            'scaler': self.scaler,
+            'feature_names': self.feature_names,
+            'training_metrics': self.training_metrics,
+            'prop_type': self.prop_type,
+        }
+        with open(filepath, 'wb') as f:
+            pickle.dump(data, f)
+
+    @classmethod
+    def load(cls, filepath: Path) -> 'QuantilePropModel':
+        """Load model from disk."""
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+
+        model = cls(data['prop_type'])
+        model.quantile_models = data['quantile_models']
+        model.scaler = data['scaler']
+        model.feature_names = data['feature_names']
+        model.training_metrics = data.get('training_metrics', {})
+        model.is_fitted = True
         return model
 
 

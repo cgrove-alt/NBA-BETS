@@ -1240,6 +1240,244 @@ def evaluate_calibration(
     return metrics
 
 
+# =============================================================================
+# STAT-TYPE SPECIFIC CALIBRATORS FOR PLAYER PROPS
+# =============================================================================
+
+class PropEdgeCalibrator:
+    """
+    Calibrator that maps model edge (predicted - line) to OVER probability.
+
+    For player props, we predict a value (e.g., 24.5 points) against a line (e.g., 22.5).
+    The edge is +2.0 points. But what's the actual probability of OVER hitting?
+
+    This calibrator learns from historical predictions:
+    - Input: edge_percentage = (predicted - line) / line
+    - Output: calibrated probability of OVER hitting
+
+    Critical for converting regression outputs to betting probabilities.
+    """
+
+    def __init__(self, prop_type: str):
+        """
+        Args:
+            prop_type: The prop type ('points', 'rebounds', 'assists', 'threes', 'pra')
+        """
+        self.prop_type = prop_type
+        self.calibrator = IsotonicRegression(y_min=0.01, y_max=0.99, out_of_bounds='clip')
+        self._fitted = False
+        self._n_samples = 0
+        self._edge_range = (None, None)
+
+    def fit(self, edges: np.ndarray, hit_over: np.ndarray) -> "PropEdgeCalibrator":
+        """
+        Fit the calibrator on historical prediction data.
+
+        Args:
+            edges: Array of edge percentages: (predicted - line) / line
+            hit_over: Binary array: 1 if actual > line, 0 otherwise
+
+        Returns:
+            self
+        """
+        edges = np.asarray(edges).flatten()
+        hit_over = np.asarray(hit_over).flatten().astype(float)
+
+        # Filter out any NaN values
+        valid_mask = ~(np.isnan(edges) | np.isnan(hit_over))
+        edges = edges[valid_mask]
+        hit_over = hit_over[valid_mask]
+
+        if len(edges) < 50:
+            logger.warning(f"Only {len(edges)} samples for {self.prop_type} - may be unreliable")
+
+        # Sort by edge (required for isotonic regression)
+        sort_idx = np.argsort(edges)
+        edges_sorted = edges[sort_idx]
+        hit_over_sorted = hit_over[sort_idx]
+
+        self.calibrator.fit(edges_sorted, hit_over_sorted)
+
+        self._fitted = True
+        self._n_samples = len(edges)
+        self._edge_range = (float(np.min(edges)), float(np.max(edges)))
+
+        logger.info(f"PropEdgeCalibrator fitted for {self.prop_type} on {self._n_samples} samples")
+        logger.info(f"  Edge range: [{self._edge_range[0]:.2%}, {self._edge_range[1]:.2%}]")
+
+        return self
+
+    def calibrate(self, edge: float) -> float:
+        """
+        Convert edge to calibrated OVER probability.
+
+        Args:
+            edge: Edge percentage (predicted - line) / line
+
+        Returns:
+            Calibrated probability of OVER hitting (0-1)
+        """
+        if not self._fitted:
+            # Fallback: simple sigmoid mapping
+            return 1 / (1 + np.exp(-edge * 10))
+
+        return float(self.calibrator.predict([[edge]])[0])
+
+    def calibrate_array(self, edges: np.ndarray) -> np.ndarray:
+        """Calibrate an array of edges."""
+        if not self._fitted:
+            return 1 / (1 + np.exp(-np.asarray(edges) * 10))
+
+        return self.calibrator.predict(np.asarray(edges).reshape(-1, 1))
+
+    def save(self, path: Path) -> None:
+        """Save calibrator to disk."""
+        data = {
+            'calibrator': self.calibrator,
+            'prop_type': self.prop_type,
+            'n_samples': self._n_samples,
+            'edge_range': self._edge_range,
+            'fitted': self._fitted,
+        }
+        with open(path, 'wb') as f:
+            pickle.dump(data, f)
+
+    @classmethod
+    def load(cls, path: Path) -> "PropEdgeCalibrator":
+        """Load calibrator from disk."""
+        with open(path, 'rb') as f:
+            data = pickle.load(f)
+
+        calibrator = cls(data['prop_type'])
+        calibrator.calibrator = data['calibrator']
+        calibrator._n_samples = data['n_samples']
+        calibrator._edge_range = data['edge_range']
+        calibrator._fitted = data['fitted']
+        return calibrator
+
+
+class StatTypeCalibrator:
+    """
+    Manages separate calibrators for each prop stat type.
+
+    Different stats have different calibration patterns:
+    - Points: Higher volume, more predictable
+    - Rebounds: Position-dependent, moderate variance
+    - Assists: Playmaker-dependent, team-context sensitive
+    - 3PM: High variance, regression to mean important
+    - PRA: Combined stat, smooths individual variance
+
+    This class:
+    1. Maintains separate PropEdgeCalibrators for each stat type
+    2. Provides unified interface for calibration
+    3. Supports auto-training from PropTracker data
+    """
+
+    STAT_TYPES = ['points', 'rebounds', 'assists', 'threes', 'pra']
+
+    def __init__(self):
+        self.calibrators: Dict[str, PropEdgeCalibrator] = {}
+        self._global_fallback = None  # Used when stat-specific not available
+
+    def fit(self, prop_data: Dict[str, Dict[str, np.ndarray]]) -> "StatTypeCalibrator":
+        """
+        Fit calibrators for each stat type.
+
+        Args:
+            prop_data: Dictionary mapping stat_type to {'edges': array, 'hit_over': array}
+
+        Returns:
+            self
+        """
+        # Collect all data for global fallback
+        all_edges = []
+        all_hits = []
+
+        for stat_type in self.STAT_TYPES:
+            if stat_type in prop_data:
+                data = prop_data[stat_type]
+                edges = np.asarray(data['edges'])
+                hit_over = np.asarray(data['hit_over'])
+
+                if len(edges) >= 30:
+                    calibrator = PropEdgeCalibrator(stat_type)
+                    calibrator.fit(edges, hit_over)
+                    self.calibrators[stat_type] = calibrator
+                    logger.info(f"Fitted calibrator for {stat_type}: {len(edges)} samples")
+                else:
+                    logger.warning(f"Insufficient data for {stat_type}: {len(edges)} samples")
+
+                all_edges.extend(edges)
+                all_hits.extend(hit_over)
+
+        # Fit global fallback
+        if len(all_edges) >= 50:
+            self._global_fallback = PropEdgeCalibrator('global')
+            self._global_fallback.fit(np.array(all_edges), np.array(all_hits))
+            logger.info(f"Fitted global fallback calibrator: {len(all_edges)} samples")
+
+        return self
+
+    def calibrate(self, edge: float, stat_type: str) -> float:
+        """
+        Get calibrated OVER probability for a specific stat type.
+
+        Args:
+            edge: Edge percentage (predicted - line) / line
+            stat_type: The prop type ('points', 'rebounds', etc.)
+
+        Returns:
+            Calibrated probability (0-1)
+        """
+        # Normalize stat type
+        stat_type = stat_type.lower()
+        if stat_type == '3pm' or stat_type == 'fg3m':
+            stat_type = 'threes'
+
+        # Try stat-specific calibrator first
+        if stat_type in self.calibrators:
+            return self.calibrators[stat_type].calibrate(edge)
+
+        # Fall back to global calibrator
+        if self._global_fallback is not None:
+            return self._global_fallback.calibrate(edge)
+
+        # Last resort: simple sigmoid
+        return 1 / (1 + np.exp(-edge * 10))
+
+    def save(self, directory: Path) -> None:
+        """Save all calibrators to directory."""
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        for stat_type, calibrator in self.calibrators.items():
+            calibrator.save(directory / f"prop_{stat_type}_calibrator.pkl")
+
+        if self._global_fallback:
+            self._global_fallback.save(directory / "prop_global_calibrator.pkl")
+
+        logger.info(f"Saved {len(self.calibrators)} stat-specific calibrators to {directory}")
+
+    @classmethod
+    def load(cls, directory: Path) -> "StatTypeCalibrator":
+        """Load all calibrators from directory."""
+        directory = Path(directory)
+        instance = cls()
+
+        for stat_type in cls.STAT_TYPES:
+            path = directory / f"prop_{stat_type}_calibrator.pkl"
+            if path.exists():
+                instance.calibrators[stat_type] = PropEdgeCalibrator.load(path)
+                logger.info(f"Loaded calibrator for {stat_type}")
+
+        global_path = directory / "prop_global_calibrator.pkl"
+        if global_path.exists():
+            instance._global_fallback = PropEdgeCalibrator.load(global_path)
+            logger.info("Loaded global fallback calibrator")
+
+        return instance
+
+
 if __name__ == "__main__":
     # Example usage and demonstration
     print("=" * 60)
