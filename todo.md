@@ -447,3 +447,131 @@ Added ability for users to select games from today + 3 days into the future.
 - Timezone: Uses local timezone for date generation
 - Cache: Each date has its own cache key (`games_{date}`)
 - Auto-reset: Selected game resets to null when date changes
+
+---
+
+### Model Upgrade Plan v2.0 (December 26, 2025)
+
+Comprehensive upgrade to improve accuracy, eliminate remaining temporal leakage, and enhance live betting validity.
+
+#### Goals
+1. Remove temporal leakage in train_models.py API path
+2. Expand training data with API safeguards
+3. Wire LineAwarePropClassifier into ModelTrainingPipeline
+4. Apply calibration to moneyline/spread outputs and save during training
+5. Add robust time-series evaluation with betting ROI backtest
+6. Integrate market data with CLV calculation
+
+#### Task List
+
+**1. Remove Temporal Leakage in train_models.py**
+- [x] 1.1 Replace "current stats as proxy" (line 169-171) with `as_of_date` parameter
+- [x] 1.2 Update `generate_game_features()` calls to pass `game_date` for temporal lookups
+- [x] 1.3 Add `get_team_stats_as_of()` helper in feature_engineering.py (already existed)
+
+**2. Expand Training Data with API Safeguards**
+- [x] 2.1 Add `MAX_API_GAMES = 20` constant to warn when using slow API path
+- [x] 2.2 Print prominent warning when using API path instead of Kaggle/CSV
+- [x] 2.3 Set `--kaggle` as the implicit default in help text
+
+**3. Wire LineAwarePropClassifier into ModelTrainingPipeline**
+- [x] 3.1 Add `use_line_aware=True` parameter to `train_all_models()`
+- [x] 3.2 Train LineAwarePropClassifier for all prop types when enabled
+- [x] 3.3 Save line-aware models with proper naming (`player_{type}_line_classifier.pkl`)
+- [x] 3.4 Keep backward compatibility with PlayerPropModel when `use_line_aware=False`
+
+**4. Improve Calibration for Moneyline and Spread**
+- [x] 4.1 Add calibration training step after moneyline ensemble training
+- [x] 4.2 Add calibration training step after spread model training
+- [x] 4.3 Save calibrators to `models/calibration/` with model-specific names
+- [x] 4.4 Add `load_calibrators()` helper in app.py for inference
+- [x] 4.5 Apply calibration to moneyline/spread probabilities in app.py predictions
+
+**5. Add Robust Time-Series Evaluation**
+- [x] 5.1 Create `TrainingMetricsLogger` class to save all metrics with timestamps
+- [x] 5.2 Track log loss, Brier score, ECE for all model types
+- [x] 5.3 Add betting ROI backtest simulation with Kelly betting
+- [x] 5.4 Save metrics to `training_metrics/{model}_{timestamp}.json`
+
+**6. Integrate Market Data for CLV Tracking**
+- [x] 6.1 Add `store_opening_line()` and `store_closing_line()` to odds tracking (already existed)
+- [x] 6.2 Create `calculate_clv()` function in feature_engineering.py
+- [x] 6.3 Add CLV metrics to TrainingMetricsLogger
+- [x] 6.4 Line movement features already included in training data
+
+#### Files to Modify
+| File | Changes |
+|------|---------|
+| `train_models.py` | Temporal leakage fix, API safeguards |
+| `model_trainer.py` | Wire LineAwarePropClassifier, add calibration post-training |
+| `feature_engineering.py` | Add `as_of_date` param, CLV calculation |
+| `app.py` | Load calibrators, apply during inference |
+| `calibration.py` | Add training pipeline helpers |
+
+#### Success Criteria
+- No temporal leakage: All features computed from pre-game data only
+- Calibrated probabilities: ECE < 0.05 for moneyline/spread
+- Line-aware props: Brier score < 0.24 for prop classifiers
+- Documented metrics: All training runs save metrics with timestamps
+
+---
+
+#### Implementation Summary (December 26, 2025)
+
+All tasks completed successfully. Here's a summary of changes:
+
+**1. Temporal Leakage Fix (train_models.py)**
+- Updated `generate_game_features()` call to pass `game_date` parameter
+- Comment updated to clarify point-in-time feature generation
+- The full feature generation stack already supported `game_date` - just needed to pass it
+
+**2. API Safeguards (train_models.py)**
+- Added `MAX_API_GAMES = 20` constant
+- Added prominent warning banner when using API path
+- API calls now limited to 20 games max to prevent long waits
+- Updated help text with clear examples recommending --kaggle
+
+**3. LineAwarePropClassifier Integration (model_trainer.py)**
+- Added `use_line_aware=True` parameter to `train_all_models()`
+- Pipeline now trains LineAwarePropClassifier by default for all prop types
+- Backward compatible - set `use_line_aware=False` for regression models
+- Updated `load_all_models()` to properly detect and load line-aware classifiers
+
+**4. Calibration Training (model_trainer.py, app.py)**
+- Added calibration step after moneyline training with auto-method selection
+- Added calibration step after spread training (cover probability)
+- Calibrators saved to `models/calibration/` directory
+- Added `_load_calibrators()`, `_calibrate_moneyline()`, `_calibrate_spread()` to Orchestrator
+- Predictions now include `calibrated=True` flag and `raw_probability` for comparison
+
+**5. TrainingMetricsLogger (model_trainer.py)**
+- New class with comprehensive metric tracking:
+  - `log_classification_metrics()`: accuracy, precision, recall, F1, log loss, Brier, AUC-ROC
+  - `log_regression_metrics()`: RMSE, MAE, R², MSE
+  - `log_calibration_metrics()`: ECE, MCE
+  - `log_betting_roi()`: Simulated Kelly betting with ROI, win rate
+  - `log_time_series_split()`: Cross-validation metrics across folds
+  - `log_clv_metrics()`: Closing Line Value tracking
+- Metrics saved as JSON with timestamps to `training_metrics/`
+- Integrated into pipeline after moneyline and spread training
+
+**6. CLV Tracking (feature_engineering.py, model_trainer.py)**
+- Added `calculate_clv_metrics()` function for batch CLV calculation
+- Added `calculate_clv_from_bets()` for bet record processing
+- Added `log_clv_metrics()` to TrainingMetricsLogger
+- Line movement features already existed in `LineMovementFeatureGenerator`
+
+**Files Modified:**
+| File | Lines Changed | Key Changes |
+|------|---------------|-------------|
+| `train_models.py` | ~30 | Temporal leakage fix, API safeguards |
+| `model_trainer.py` | ~300 | TrainingMetricsLogger, pipeline updates, calibration |
+| `feature_engineering.py` | ~100 | CLV calculation utilities |
+| `app.py` | ~80 | Calibrator loading and application |
+
+**New Capabilities:**
+1. Run `python3 train_models.py --kaggle --live` for best results
+2. Metrics automatically saved to `training_metrics/` with timestamps
+3. Calibrators saved to `models/calibration/` and applied during inference
+4. Line-aware prop classifiers output P(Over) directly
+5. CLV tracking for bet quality validation

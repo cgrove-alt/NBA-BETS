@@ -475,9 +475,13 @@ class Orchestrator:
         self.current_odds = {}  # Cache for real odds
         self.injuries_cache = []  # Balldontlie injuries cache
 
+        # Probability calibrators for improved betting edge calculation
+        self.moneyline_calibrator = None
+        self.spread_calibrator = None
+
     def load_models(self) -> bool:
         """
-        Load trained ML models.
+        Load trained ML models and calibrators.
 
         Returns:
             True if models loaded successfully
@@ -493,11 +497,116 @@ class Orchestrator:
             else:
                 print("No trained models found. Using feature-based predictions.")
 
+            # Load probability calibrators for improved edge calculation
+            self._load_calibrators()
+
             return self.models_loaded
         except Exception as e:
             print(f"Error loading models: {e}")
             print("Falling back to feature-based predictions.")
             return False
+
+    def _load_calibrators(self):
+        """Load probability calibrators for moneyline and spread models."""
+        try:
+            from calibration import ModelCalibrator
+            calibration_dir = Path("models/calibration")
+
+            if calibration_dir.exists():
+                # Load moneyline calibrator
+                try:
+                    self.moneyline_calibrator = ModelCalibrator("moneyline")
+                    self.moneyline_calibrator.load(str(calibration_dir))
+                    print(f"  - moneyline calibrator ({self.moneyline_calibrator.best_method})")
+                except Exception as e:
+                    print(f"  - moneyline calibrator not available: {e}")
+                    self.moneyline_calibrator = None
+
+                # Load spread calibrator
+                try:
+                    self.spread_calibrator = ModelCalibrator("spread")
+                    self.spread_calibrator.load(str(calibration_dir))
+                    print(f"  - spread calibrator ({self.spread_calibrator.best_method})")
+                except Exception as e:
+                    print(f"  - spread calibrator not available: {e}")
+                    self.spread_calibrator = None
+            else:
+                print("  No calibrators found (models/calibration/ not present)")
+        except ImportError:
+            print("  Calibration module not available")
+        except Exception as e:
+            print(f"  Error loading calibrators: {e}")
+
+    def _calibrate_moneyline(self, prediction: Dict) -> Dict:
+        """
+        Apply calibration to moneyline probability prediction.
+
+        Calibration improves betting edge calculation by correcting for
+        model overconfidence/underconfidence.
+
+        Args:
+            prediction: Model prediction with home_win_probability
+
+        Returns:
+            Prediction with calibrated probability
+        """
+        if self.moneyline_calibrator is None:
+            return prediction
+
+        try:
+            raw_prob = prediction.get("home_win_probability", 0.5)
+            calibrated_prob = self.moneyline_calibrator.calibrate(raw_prob)
+
+            # Update prediction with calibrated probability
+            prediction["home_win_probability"] = float(calibrated_prob)
+            prediction["away_win_probability"] = 1.0 - float(calibrated_prob)
+            prediction["predicted_winner"] = "home" if calibrated_prob > 0.5 else "away"
+            prediction["confidence"] = float(max(calibrated_prob, 1 - calibrated_prob))
+            prediction["calibrated"] = True
+            prediction["raw_probability"] = raw_prob
+        except Exception:
+            pass  # Return original prediction if calibration fails
+
+        return prediction
+
+    def _calibrate_spread(self, prediction: Dict) -> Dict:
+        """
+        Apply calibration to spread prediction.
+
+        For spread models, we calibrate the cover probability derived from
+        the predicted point differential.
+
+        Args:
+            prediction: Model prediction with predicted_spread and cover_probability
+
+        Returns:
+            Prediction with calibrated cover probability
+        """
+        if self.spread_calibrator is None:
+            return prediction
+
+        try:
+            # Get cover probability if available, otherwise compute from predicted spread
+            cover_prob = prediction.get("cover_probability")
+            if cover_prob is None:
+                # Estimate cover probability from predicted spread vs market spread
+                predicted = prediction.get("predicted_spread", 0)
+                spread_line = prediction.get("spread_line", 0)
+                edge = predicted - spread_line
+                # Simple sigmoid: edge -> probability
+                import math
+                cover_prob = 1 / (1 + math.exp(-edge / 5.0))
+
+            calibrated_prob = self.spread_calibrator.calibrate(cover_prob)
+
+            # Update prediction with calibrated probability
+            prediction["cover_probability"] = float(calibrated_prob)
+            prediction["calibrated"] = True
+            prediction["raw_cover_probability"] = cover_prob
+        except Exception:
+            pass  # Return original prediction if calibration fails
+
+        return prediction
 
     def set_injuries(self, injury_data: List[Dict]):
         """
@@ -894,6 +1003,8 @@ class Orchestrator:
         if self.models_loaded and "moneyline" in self.pipeline.models:
             try:
                 analysis.moneyline_prediction = self.pipeline.models["moneyline"].predict(moneyline_features)
+                # Apply calibration for more accurate probabilities
+                analysis.moneyline_prediction = self._calibrate_moneyline(analysis.moneyline_prediction)
             except Exception:
                 analysis.moneyline_prediction = self._feature_based_moneyline(moneyline_features)
         else:
@@ -903,6 +1014,8 @@ class Orchestrator:
         if self.models_loaded and "spread" in self.pipeline.models:
             try:
                 analysis.spread_prediction = self.pipeline.models["spread"].predict(spread_features)
+                # Apply calibration for more accurate cover probabilities
+                analysis.spread_prediction = self._calibrate_spread(analysis.spread_prediction)
             except Exception:
                 analysis.spread_prediction = self._feature_based_spread(spread_features)
         else:

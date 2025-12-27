@@ -8,14 +8,23 @@ Fetches historical NBA game data and trains all ML models:
 - XGBoost Moneyline Model
 - Ensemble Models
 
-Usage:
-    python3 train_models.py --kaggle --live   # RECOMMENDED: CSV + live API data (all recent seasons)
-    python3 train_models.py --kaggle          # CSV data only (2010-2023)
+Usage (RECOMMENDED: Use Kaggle/CSV data for best results):
+    python3 train_models.py --kaggle --live   # BEST: CSV + live API data (all recent seasons)
+    python3 train_models.py --kaggle          # CSV data only (2010-2023) - fast, reliable
     python3 train_models.py --kaggle --seasons 2021-22,2022-23  # Specific CSV seasons
     python3 train_models.py --use-database    # Use collected database data
     python3 train_models.py --fast            # Use synthetic data (for testing only)
-    python3 train_models.py [--games 100]     # Slow: Fetch from NBA API with rate limits
+    python3 train_models.py [--games 100]     # SLOW: Fetch from NBA API (rate limited, not recommended)
+
+Data Source Hierarchy (fastest to slowest):
+    1. Kaggle/CSV (--kaggle) - 33K+ games, instant loading, RECOMMENDED
+    2. Database (--use-database) - Point-in-time safe, requires prior collection
+    3. NBA API (default) - Rate limited, slow, use only for testing
 """
+
+# API safeguard: Limit games when using slow API path
+MAX_API_GAMES = 20  # Maximum games to fetch via API (prevents long waits)
+API_WARNING_THRESHOLD = 50  # Warn if user requests more than this via API
 
 import argparse
 import json
@@ -165,14 +174,14 @@ def fetch_historical_games(
                 print(f"  Processing: {away_abbrev} @ {home_abbrev} ({game_date})")
 
                 try:
-                    # Generate features for this game
-                    # Note: We're using current stats as proxy for pre-game stats
-                    # In production, you'd want point-in-time historical stats
+                    # Generate features for this game with point-in-time stats
+                    # Pass as_of_date to ensure we only use data available before game
                     features = generate_game_features(
                         home_abbrev,
                         away_abbrev,
                         season=season,
                         include_advanced=False,  # Faster
+                        game_date=game_date,  # CRITICAL: Prevents temporal leakage
                     )
                     rate_limit()
 
@@ -542,9 +551,19 @@ def train_models(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train NBA betting models")
-    parser.add_argument("--games", type=int, default=50, help="Number of games to fetch")
-    parser.add_argument("--players", type=int, default=20, help="Number of players to fetch")
+    parser = argparse.ArgumentParser(
+        description="Train NBA betting models. Use --kaggle for best results.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python3 train_models.py --kaggle --live    # RECOMMENDED: CSV + live data
+  python3 train_models.py --kaggle           # CSV data only (fast)
+  python3 train_models.py --use-database     # Pre-collected database
+  python3 train_models.py --fast             # Synthetic data (testing)
+        """
+    )
+    parser.add_argument("--games", type=int, default=50, help="Number of games (API mode only, max 20)")
+    parser.add_argument("--players", type=int, default=20, help="Number of players (API mode only)")
     parser.add_argument("--season", type=str, default="2025-26", help="NBA season")
     parser.add_argument("--load-games", type=str, help="Load games from JSON file")
     parser.add_argument("--load-players", type=str, help="Load players from JSON file")
@@ -603,19 +622,32 @@ def main():
         games_data = generate_synthetic_training_data(args.games)
         player_data = None
     else:
-        print("\nFetching data from NBA API...")
-        print("This will take several minutes due to API rate limiting.\n")
+        # API PATH - Rate limited and slow, not recommended for production training
+        print("\n" + "=" * 70)
+        print("WARNING: Using NBA API for data fetching (SLOW - rate limited)")
+        print("=" * 70)
+        print("\nRECOMMENDED: Use --kaggle flag for faster, more reliable training:")
+        print("  python3 train_models.py --kaggle --live")
+        print("\nProceeding with API fetch (this will take several minutes)...")
+        print("=" * 70 + "\n")
+
+        # Limit games when using API to prevent very long waits
+        actual_games = min(args.games, MAX_API_GAMES)
+        if args.games > MAX_API_GAMES:
+            print(f"NOTE: Limiting API fetch to {MAX_API_GAMES} games (requested: {args.games})")
+            print(f"      Use --kaggle for full historical data\n")
 
         # Fetch historical games
         games_data = fetch_historical_games(
-            num_games=args.games,
+            num_games=actual_games,
             season=args.season,
         )
 
         # Fetch player data (optional)
         if not args.skip_players:
+            actual_players = min(args.players, MAX_API_GAMES)
             player_data = fetch_player_data(
-                num_players=args.players,
+                num_players=actual_players,
                 season=args.season,
             )
         else:

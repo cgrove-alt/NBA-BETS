@@ -4205,7 +4205,124 @@ lm_features = lm_gen.calculate_line_movement_features(
     model_spread_prediction=-6.0
 )
 print(f"Sharp Score: {lm_features['sharp_score']}")
-print(f"RLM Detected: {lm_features['is_rlm']}")
+print(f"RLM Detected: {lm_features['is_rlm']}")''')
+
+
+# =============================================================================
+# CLV (CLOSING LINE VALUE) CALCULATION UTILITIES
+# =============================================================================
+
+def calculate_clv_metrics(
+    bet_odds: List[float],
+    closing_odds: List[float],
+    outcomes: List[int] = None
+) -> Dict:
+    """
+    Calculate Closing Line Value metrics for a series of bets.
+
+    CLV is the most reliable predictor of long-term betting edge.
+    Sharp bettors consistently beat the closing line.
+
+    Args:
+        bet_odds: American odds at time of bet (e.g., [-150, +130, -110])
+        closing_odds: Closing odds before game start
+        outcomes: Optional binary outcomes (1=win, 0=loss) for additional analysis
+
+    Returns:
+        Dictionary with CLV metrics:
+        - avg_clv_pct: Average CLV in percentage points
+        - positive_clv_rate: % of bets that beat closing line
+        - clv_roi_estimate: Estimated ROI from CLV alone
+        - total_bets: Number of bets analyzed
+    """
+    if len(bet_odds) != len(closing_odds):
+        raise ValueError("bet_odds and closing_odds must have same length")
+
+    def american_to_prob(odds: float) -> float:
+        """Convert American odds to implied probability."""
+        if odds > 0:
+            return 100 / (odds + 100)
+        else:
+            return abs(odds) / (abs(odds) + 100)
+
+    clv_values = []
+    for bet, closing in zip(bet_odds, closing_odds):
+        bet_prob = american_to_prob(bet)
+        closing_prob = american_to_prob(closing)
+        # CLV = closing implied - bet implied (positive = beat the line)
+        clv = (closing_prob - bet_prob) * 100  # Convert to percentage points
+        clv_values.append(clv)
+
+    clv_array = np.array(clv_values)
+
+    metrics = {
+        "avg_clv_pct": float(np.mean(clv_array)),
+        "median_clv_pct": float(np.median(clv_array)),
+        "std_clv_pct": float(np.std(clv_array)),
+        "positive_clv_rate": float(np.mean(clv_array > 0)),
+        "total_bets": len(clv_array),
+        # Rule of thumb: Each 1% CLV ~ 1% ROI at standard -110 juice
+        "clv_roi_estimate": float(np.mean(clv_array) * 1.05),
+    }
+
+    if outcomes is not None and len(outcomes) == len(clv_array):
+        outcomes = np.array(outcomes)
+        # Compare CLV vs actual outcomes
+        positive_clv_bets = clv_array > 0
+        metrics["positive_clv_win_rate"] = float(np.mean(outcomes[positive_clv_bets])) if np.sum(positive_clv_bets) > 0 else None
+        metrics["negative_clv_win_rate"] = float(np.mean(outcomes[~positive_clv_bets])) if np.sum(~positive_clv_bets) > 0 else None
+
+    return metrics
+
+
+def calculate_clv_from_bets(bets: List[Dict]) -> Dict:
+    """
+    Calculate CLV from a list of bet records.
+
+    Each bet should have:
+    - bet_odds: Odds at time of bet
+    - closing_odds: Odds at game start
+    - outcome: 1=win, 0=loss (optional)
+
+    Args:
+        bets: List of bet dictionaries
+
+    Returns:
+        CLV metrics dictionary
+    """
+    bet_odds = []
+    closing_odds = []
+    outcomes = []
+
+    for bet in bets:
+        if bet.get("bet_odds") and bet.get("closing_odds"):
+            bet_odds.append(bet["bet_odds"])
+            closing_odds.append(bet["closing_odds"])
+            if bet.get("outcome") is not None:
+                outcomes.append(bet["outcome"])
+
+    if not bet_odds:
+        return {"error": "No valid bets with closing line data"}
+
+    return calculate_clv_metrics(
+        bet_odds, closing_odds,
+        outcomes if len(outcomes) == len(bet_odds) else None
+    )
+
+
+print("\n# Calculate CLV metrics from bet history:")
+print('''
+from feature_engineering import calculate_clv_metrics
+
+# Example: 5 bets with their closing lines
+clv_metrics = calculate_clv_metrics(
+    bet_odds=[-150, +130, -110, -120, +150],
+    closing_odds=[-170, +120, -115, -110, +145],  # Closing lines
+    outcomes=[1, 0, 1, 1, 0]  # Optional: actual results
+)
+print(f"Average CLV: {clv_metrics['avg_clv_pct']:.2f}%")
+print(f"Beat Closing Line: {clv_metrics['positive_clv_rate']:.1%}")
+print(f"Estimated ROI: {clv_metrics['clv_roi_estimate']:.2f}%")
 ''')
     print("\n# Generate travel fatigue features:")
     print('''

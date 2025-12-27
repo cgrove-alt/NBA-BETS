@@ -102,6 +102,312 @@ except (ImportError, OSError) as e:
 MODEL_DIR = Path("models")
 MODEL_DIR.mkdir(exist_ok=True)
 
+# Metrics directory
+METRICS_DIR = Path("training_metrics")
+METRICS_DIR.mkdir(exist_ok=True)
+
+
+class TrainingMetricsLogger:
+    """
+    Logs and saves training metrics for model evaluation and tracking.
+
+    Saves comprehensive metrics with timestamps to training_metrics/ directory,
+    including:
+    - Accuracy, precision, recall, F1 for classifiers
+    - RMSE, MAE, R² for regressors
+    - Brier score, log loss, ECE for calibrated probabilities
+    - Betting ROI simulation results
+
+    Usage:
+        logger = TrainingMetricsLogger("moneyline")
+        logger.log_classification_metrics(y_true, y_pred, y_prob)
+        logger.log_calibration_metrics(y_prob, y_true)
+        logger.log_betting_roi(predictions, outcomes, odds)
+        logger.save()
+    """
+
+    def __init__(self, model_name: str, model_type: str = "classifier"):
+        """
+        Initialize metrics logger.
+
+        Args:
+            model_name: Name of the model (e.g., "moneyline", "spread", "prop_points")
+            model_type: Type of model ("classifier" or "regressor")
+        """
+        self.model_name = model_name
+        self.model_type = model_type
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.metrics = {
+            "model_name": model_name,
+            "model_type": model_type,
+            "timestamp": self.timestamp,
+            "training_date": datetime.now().isoformat(),
+        }
+
+    def log_classification_metrics(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        y_prob: np.ndarray = None
+    ) -> Dict:
+        """Log classification metrics."""
+        self.metrics["accuracy"] = float(accuracy_score(y_true, y_pred))
+        self.metrics["precision"] = float(precision_score(y_true, y_pred, zero_division=0))
+        self.metrics["recall"] = float(recall_score(y_true, y_pred, zero_division=0))
+        self.metrics["f1"] = float(f1_score(y_true, y_pred, zero_division=0))
+
+        if y_prob is not None:
+            from sklearn.metrics import log_loss, brier_score_loss, roc_auc_score
+            self.metrics["log_loss"] = float(log_loss(y_true, y_prob))
+            self.metrics["brier_score"] = float(brier_score_loss(y_true, y_prob))
+            try:
+                self.metrics["auc_roc"] = float(roc_auc_score(y_true, y_prob))
+            except ValueError:
+                self.metrics["auc_roc"] = None
+
+        return self.metrics
+
+    def log_regression_metrics(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray
+    ) -> Dict:
+        """Log regression metrics."""
+        self.metrics["rmse"] = float(np.sqrt(mean_squared_error(y_true, y_pred)))
+        self.metrics["mae"] = float(mean_absolute_error(y_true, y_pred))
+        self.metrics["r2"] = float(r2_score(y_true, y_pred))
+        self.metrics["mse"] = float(mean_squared_error(y_true, y_pred))
+        return self.metrics
+
+    def log_calibration_metrics(
+        self,
+        y_prob: np.ndarray,
+        y_true: np.ndarray,
+        n_bins: int = 10
+    ) -> Dict:
+        """
+        Log calibration metrics (ECE, MCE).
+
+        Args:
+            y_prob: Predicted probabilities
+            y_true: True binary labels
+            n_bins: Number of bins for calibration
+        """
+        y_prob = np.asarray(y_prob).flatten()
+        y_true = np.asarray(y_true).flatten()
+
+        # Expected Calibration Error
+        bin_edges = np.linspace(0, 1, n_bins + 1)
+        ece = 0.0
+        mce = 0.0
+
+        for i in range(n_bins):
+            mask = (y_prob >= bin_edges[i]) & (y_prob < bin_edges[i + 1])
+            if np.sum(mask) > 0:
+                bin_accuracy = np.mean(y_true[mask])
+                bin_confidence = np.mean(y_prob[mask])
+                bin_weight = np.sum(mask) / len(y_prob)
+                ece += np.abs(bin_accuracy - bin_confidence) * bin_weight
+                mce = max(mce, np.abs(bin_accuracy - bin_confidence))
+
+        self.metrics["ece"] = float(ece)
+        self.metrics["mce"] = float(mce)
+        return self.metrics
+
+    def log_betting_roi(
+        self,
+        predicted_probs: np.ndarray,
+        actual_outcomes: np.ndarray,
+        odds: np.ndarray = None,
+        min_edge: float = 0.03,
+        kelly_fraction: float = 0.25
+    ) -> Dict:
+        """
+        Simulate betting ROI with Kelly criterion.
+
+        Args:
+            predicted_probs: Model's predicted probabilities
+            actual_outcomes: Actual binary outcomes
+            odds: American odds for each bet (default -110)
+            min_edge: Minimum edge to place bet
+            kelly_fraction: Fractional Kelly for bet sizing
+        """
+        predicted_probs = np.asarray(predicted_probs).flatten()
+        actual_outcomes = np.asarray(actual_outcomes).flatten()
+
+        if odds is None:
+            odds = np.full_like(predicted_probs, -110.0)
+
+        # Convert American odds to decimal
+        def american_to_decimal(american: float) -> float:
+            if american > 0:
+                return (american / 100) + 1
+            else:
+                return (100 / abs(american)) + 1
+
+        # Simulate betting
+        bankroll = 1000.0
+        initial_bankroll = bankroll
+        bets_placed = 0
+        bets_won = 0
+
+        for i, (prob, outcome, odd) in enumerate(zip(predicted_probs, actual_outcomes, odds)):
+            # Calculate implied probability from odds
+            decimal_odd = american_to_decimal(odd)
+            implied_prob = 1 / decimal_odd
+
+            # Calculate edge
+            edge = prob - implied_prob
+
+            if edge >= min_edge and prob >= 0.52:
+                # Kelly bet sizing
+                kelly = (prob * (decimal_odd - 1) - (1 - prob)) / (decimal_odd - 1)
+                bet_size = max(0, min(kelly * kelly_fraction, 0.05)) * bankroll
+
+                if bet_size > 0:
+                    bets_placed += 1
+                    if outcome == 1:
+                        bets_won += 1
+                        bankroll += bet_size * (decimal_odd - 1)
+                    else:
+                        bankroll -= bet_size
+
+        roi = (bankroll - initial_bankroll) / initial_bankroll * 100
+        win_rate = bets_won / bets_placed if bets_placed > 0 else 0
+
+        self.metrics["betting_roi_pct"] = float(roi)
+        self.metrics["bets_placed"] = int(bets_placed)
+        self.metrics["bets_won"] = int(bets_won)
+        self.metrics["bet_win_rate"] = float(win_rate)
+        self.metrics["final_bankroll"] = float(bankroll)
+        self.metrics["min_edge_threshold"] = float(min_edge)
+
+        return self.metrics
+
+    def log_time_series_split(
+        self,
+        n_splits: int,
+        train_sizes: List[int],
+        test_sizes: List[int],
+        fold_metrics: List[Dict]
+    ) -> Dict:
+        """Log time-series cross-validation results."""
+        self.metrics["cv_n_splits"] = n_splits
+        self.metrics["cv_train_sizes"] = train_sizes
+        self.metrics["cv_test_sizes"] = test_sizes
+        self.metrics["cv_fold_metrics"] = fold_metrics
+
+        # Calculate mean and std across folds
+        for key in fold_metrics[0].keys():
+            values = [f[key] for f in fold_metrics if key in f and f[key] is not None]
+            if values:
+                self.metrics[f"cv_{key}_mean"] = float(np.mean(values))
+                self.metrics[f"cv_{key}_std"] = float(np.std(values))
+
+        return self.metrics
+
+    def add_custom_metric(self, name: str, value: Any) -> None:
+        """Add a custom metric."""
+        self.metrics[name] = value
+
+    def log_clv_metrics(
+        self,
+        bet_odds: List[float],
+        closing_odds: List[float],
+        outcomes: List[int] = None
+    ) -> Dict:
+        """
+        Log Closing Line Value metrics.
+
+        CLV is the most reliable predictor of long-term betting edge.
+        Sharp bettors consistently beat the closing line.
+
+        Args:
+            bet_odds: American odds at time of bet
+            closing_odds: Closing odds before game start
+            outcomes: Optional binary outcomes (1=win, 0=loss)
+        """
+        try:
+            from feature_engineering import calculate_clv_metrics
+            clv_metrics = calculate_clv_metrics(bet_odds, closing_odds, outcomes)
+            self.metrics["clv"] = clv_metrics
+            return clv_metrics
+        except ImportError:
+            # Calculate CLV inline if feature_engineering not available
+            def american_to_prob(odds: float) -> float:
+                if odds > 0:
+                    return 100 / (odds + 100)
+                else:
+                    return abs(odds) / (abs(odds) + 100)
+
+            clv_values = []
+            for bet, closing in zip(bet_odds, closing_odds):
+                bet_prob = american_to_prob(bet)
+                closing_prob = american_to_prob(closing)
+                clv = (closing_prob - bet_prob) * 100
+                clv_values.append(clv)
+
+            clv_array = np.array(clv_values)
+            self.metrics["clv"] = {
+                "avg_clv_pct": float(np.mean(clv_array)),
+                "positive_clv_rate": float(np.mean(clv_array > 0)),
+                "clv_roi_estimate": float(np.mean(clv_array) * 1.05),
+                "total_bets": len(clv_array),
+            }
+            return self.metrics["clv"]
+
+    def save(self, directory: Path = None) -> Path:
+        """
+        Save metrics to JSON file.
+
+        Args:
+            directory: Directory to save to (default: training_metrics/)
+
+        Returns:
+            Path to saved file
+        """
+        if directory is None:
+            directory = METRICS_DIR
+
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        filename = f"{self.model_name}_{self.timestamp}.json"
+        filepath = directory / filename
+
+        with open(filepath, "w") as f:
+            json.dump(self.metrics, f, indent=2, default=str)
+
+        print(f"  Metrics saved to {filepath}")
+        return filepath
+
+    def get_summary(self) -> str:
+        """Get a formatted summary of key metrics."""
+        lines = [f"\n  {self.model_name} Training Metrics:"]
+
+        if self.model_type == "classifier":
+            if "accuracy" in self.metrics:
+                lines.append(f"    Accuracy: {self.metrics['accuracy']:.2%}")
+            if "brier_score" in self.metrics:
+                lines.append(f"    Brier Score: {self.metrics['brier_score']:.4f}")
+            if "auc_roc" in self.metrics and self.metrics["auc_roc"]:
+                lines.append(f"    AUC-ROC: {self.metrics['auc_roc']:.4f}")
+            if "ece" in self.metrics:
+                lines.append(f"    ECE: {self.metrics['ece']:.4f}")
+        else:
+            if "rmse" in self.metrics:
+                lines.append(f"    RMSE: {self.metrics['rmse']:.4f}")
+            if "mae" in self.metrics:
+                lines.append(f"    MAE: {self.metrics['mae']:.4f}")
+            if "r2" in self.metrics:
+                lines.append(f"    R²: {self.metrics['r2']:.4f}")
+
+        if "betting_roi_pct" in self.metrics:
+            lines.append(f"    Betting ROI: {self.metrics['betting_roi_pct']:+.2f}%")
+            lines.append(f"    Bets: {self.metrics['bets_placed']} ({self.metrics['bet_win_rate']:.1%} win rate)")
+
+        return "\n".join(lines)
+
 
 class BaseModelTrainer:
     """Base class for model trainers with common functionality."""
@@ -2792,6 +3098,7 @@ class ModelTrainingPipeline:
         save_models: bool = True,
         use_ensemble: bool = True,
         use_tuned_ensemble: bool = True,
+        use_line_aware: bool = True,
     ) -> Dict[str, Dict]:
         """
         Train all models with provided data.
@@ -2803,6 +3110,9 @@ class ModelTrainingPipeline:
             use_ensemble: If True, use Ensemble model for maximum accuracy (default: True)
             use_tuned_ensemble: If True with use_ensemble, use TunedEnsembleMoneylineModel
                                with GridSearchCV hyperparameter optimization (default: True)
+            use_line_aware: If True, use LineAwarePropClassifier for props (default: True)
+                           These classifiers take the prop line as input and output P(Over)
+                           directly, which is better for betting than regression models.
 
         Returns:
             Dictionary with all training metrics
@@ -2837,6 +3147,55 @@ class ModelTrainingPipeline:
             if save_models:
                 moneyline_model.save_model()
 
+            # CALIBRATION: Fit and save calibrators for moneyline probabilities
+            if HAS_CALIBRATION:
+                try:
+                    print("\n  Fitting moneyline calibrator...")
+                    # Get predictions on training data for calibration
+                    X_scaled = moneyline_model.preprocess_features(X_ml, fit=False)
+                    if hasattr(moneyline_model.model, 'predict_proba'):
+                        y_prob = moneyline_model.model.predict_proba(X_scaled)[:, 1]
+                    else:
+                        # For ensemble wrappers
+                        y_prob = np.array([
+                            moneyline_model.predict(dict(zip(moneyline_model.feature_names, x)))["home_win_probability"]
+                            for x in X_ml.values
+                        ])
+
+                    # Fit calibrator
+                    from calibration import ModelCalibrator
+                    ml_calibrator = ModelCalibrator("moneyline", include_advanced=True)
+                    ml_calibrator.fit(y_prob, y_ml, method="auto")
+
+                    if save_models:
+                        calibration_dir = MODEL_DIR / "calibration"
+                        calibration_dir.mkdir(exist_ok=True)
+                        ml_calibrator.save(str(calibration_dir))
+
+                    results["moneyline"]["calibration"] = {
+                        "best_method": ml_calibrator.best_method,
+                        "ece": ml_calibrator.metrics.get(ml_calibrator.best_method, {}).ece if ml_calibrator.metrics.get(ml_calibrator.best_method) else None,
+                    }
+                    print(f"  Moneyline calibrator saved (method: {ml_calibrator.best_method})")
+
+                    # LOG COMPREHENSIVE METRICS with TrainingMetricsLogger
+                    try:
+                        logger = TrainingMetricsLogger("moneyline", model_type="classifier")
+                        y_pred = (y_prob > 0.5).astype(int)
+                        logger.log_classification_metrics(y_ml, y_pred, y_prob)
+                        logger.log_calibration_metrics(y_prob, y_ml)
+                        logger.log_betting_roi(y_prob, y_ml)
+                        logger.add_custom_metric("train_size", len(X_ml))
+                        logger.add_custom_metric("calibration_method", ml_calibrator.best_method)
+                        if save_models:
+                            logger.save()
+                        print(logger.get_summary())
+                    except Exception as e:
+                        print(f"  Warning: Metrics logging failed: {e}")
+
+                except Exception as e:
+                    print(f"  Warning: Calibration failed: {e}")
+
         # Train Spread Model (Regressor)
         print("\n" + "=" * 50)
         print("Training Spread Model (SVM Regressor)")
@@ -2849,22 +3208,100 @@ class ModelTrainingPipeline:
             if save_models:
                 spread_model.save_model()
 
+            # CALIBRATION: For spread, we calibrate cover probabilities
+            # We need to convert spread predictions to cover probability
+            if HAS_CALIBRATION:
+                try:
+                    print("\n  Fitting spread cover calibrator...")
+                    X_scaled = spread_model.preprocess_features(X_sp, fit=False)
+                    y_pred = spread_model.model.predict(X_scaled)
+
+                    # Convert predictions to cover probabilities
+                    # Using sigmoid transformation: edge -> probability
+                    # Positive edge (predicted > actual) = more likely to cover
+                    from scipy.special import expit
+
+                    # Extract spread lines from game data
+                    spread_lines = []
+                    for game in games_data:
+                        spread_lines.append(game.get("spread_line", 0))
+                    spread_lines = np.array(spread_lines[:len(y_pred)])
+
+                    # Edge = predicted - spread_line, convert to probability
+                    edges = y_pred - spread_lines if len(spread_lines) == len(y_pred) else y_pred
+                    y_prob_cover = expit(edges / 5.0)  # Scale factor of 5 points
+
+                    # Create cover labels (home team covers if actual > spread)
+                    y_cover = (y_sp > spread_lines).astype(int) if len(spread_lines) == len(y_sp) else (y_sp > 0).astype(int)
+
+                    # Fit calibrator
+                    from calibration import ModelCalibrator
+                    sp_calibrator = ModelCalibrator("spread", include_advanced=True)
+                    sp_calibrator.fit(y_prob_cover, y_cover, method="auto")
+
+                    if save_models:
+                        calibration_dir = MODEL_DIR / "calibration"
+                        calibration_dir.mkdir(exist_ok=True)
+                        sp_calibrator.save(str(calibration_dir))
+
+                    results["spread"]["calibration"] = {
+                        "best_method": sp_calibrator.best_method,
+                        "ece": sp_calibrator.metrics.get(sp_calibrator.best_method, {}).ece if sp_calibrator.metrics.get(sp_calibrator.best_method) else None,
+                    }
+                    print(f"  Spread calibrator saved (method: {sp_calibrator.best_method})")
+
+                    # LOG COMPREHENSIVE METRICS with TrainingMetricsLogger
+                    try:
+                        logger = TrainingMetricsLogger("spread", model_type="regressor")
+                        logger.log_regression_metrics(y_sp, y_pred)
+                        logger.log_calibration_metrics(y_prob_cover, y_cover)
+                        logger.log_betting_roi(y_prob_cover, y_cover)
+                        logger.add_custom_metric("train_size", len(X_sp))
+                        logger.add_custom_metric("calibration_method", sp_calibrator.best_method)
+                        if save_models:
+                            logger.save()
+                        print(logger.get_summary())
+                    except Exception as e:
+                        print(f"  Warning: Metrics logging failed: {e}")
+
+                except Exception as e:
+                    print(f"  Warning: Spread calibration failed: {e}")
+
         # Train Player Prop Models
         if player_data:
             prop_types = ["points", "rebounds", "assists", "threes", "pra"]
             for prop_type in prop_types:
                 print("\n" + "=" * 50)
-                print(f"Training {prop_type.title()} Prop Model (Random Forest)")
-                print("=" * 50)
 
-                prop_model = PlayerPropModel(prop_type=prop_type, use_classifier=False)
-                X_prop, y_prop = prop_model.prepare_training_data(player_data)
+                if use_line_aware:
+                    # LINE-AWARE CLASSIFIER: Takes prop line as input, outputs P(Over) directly
+                    # This is better for betting because it directly predicts betting outcomes
+                    print(f"Training {prop_type.title()} Prop Model (LINE-AWARE CLASSIFIER)")
+                    print("  - Takes prop line as input feature")
+                    print("  - Outputs calibrated P(Over) probability")
+                    print("=" * 50)
 
-                if len(X_prop) > 0:
-                    results[f"prop_{prop_type}"] = prop_model.train(X_prop, y_prop)
-                    self.models[f"prop_{prop_type}"] = prop_model
-                    if save_models:
-                        prop_model.save_model()
+                    line_classifier = LineAwarePropClassifier(prop_type=prop_type)
+                    X_prop, y_prop = line_classifier.prepare_training_data(player_data)
+
+                    if len(X_prop) > 0:
+                        results[f"prop_{prop_type}_line_aware"] = line_classifier.train(X_prop, y_prop)
+                        self.models[f"prop_{prop_type}_line_aware"] = line_classifier
+                        if save_models:
+                            line_classifier.save_model()
+                else:
+                    # REGRESSION MODEL: Predicts stat value, requires conversion to probability
+                    print(f"Training {prop_type.title()} Prop Model (Random Forest Regressor)")
+                    print("=" * 50)
+
+                    prop_model = PlayerPropModel(prop_type=prop_type, use_classifier=False)
+                    X_prop, y_prop = prop_model.prepare_training_data(player_data)
+
+                    if len(X_prop) > 0:
+                        results[f"prop_{prop_type}"] = prop_model.train(X_prop, y_prop)
+                        self.models[f"prop_{prop_type}"] = prop_model
+                        if save_models:
+                            prop_model.save_model()
 
         return results
 
@@ -2927,8 +3364,13 @@ class ModelTrainingPipeline:
                 # Extract prop type
                 parts = model_name.split("_")
                 prop_type = parts[1] if len(parts) > 1 else "points"
-                use_classifier = "classifier" in model_name
-                model = PlayerPropModel(prop_type=prop_type, use_classifier=use_classifier)
+
+                # Check if this is a line-aware classifier
+                if "line_classifier" in model_name or "line_aware" in model_name:
+                    model = LineAwarePropClassifier(prop_type=prop_type)
+                else:
+                    use_classifier = "classifier" in model_name
+                    model = PlayerPropModel(prop_type=prop_type, use_classifier=use_classifier)
             else:
                 continue
 
