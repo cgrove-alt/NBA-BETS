@@ -1573,11 +1573,22 @@ class LineAwarePropClassifier(BaseModelTrainer):
 
         brier_final = brier_score_loss(y_test, y_prob_final)
 
+        # Calculate ECE and MCE for calibration metrics
+        from calibration import CalibrationEvaluator
+        ece = CalibrationEvaluator.expected_calibration_error(y_prob_final, y_test)
+        mce = CalibrationEvaluator.maximum_calibration_error(y_prob_final, y_test)
+
+        # Store test data for external calibrator saving
+        self.y_test_final = y_test
+        self.y_prob_final = y_prob_final
+
         self.is_fitted = True
         self.training_metrics = {
             "accuracy": float(accuracy),
             "brier_score": float(brier_final),
             "auc_roc": float(auc),
+            "ece": float(ece),
+            "mce": float(mce),
             "train_size": len(X_train),
             "test_size": len(X_test),
             "over_rate_test": float(y_test.mean()),
@@ -1588,6 +1599,7 @@ class LineAwarePropClassifier(BaseModelTrainer):
         print(f"  Line-Aware Classifier Results:")
         print(f"    Accuracy: {accuracy:.2%}")
         print(f"    Brier Score: {brier_final:.4f}")
+        print(f"    ECE: {ece:.4f}")
         print(f"    AUC-ROC: {auc:.4f}")
 
         return self.training_metrics
@@ -3301,6 +3313,8 @@ class ModelTrainingPipeline:
                         prop_logger.metrics["accuracy"] = train_result.get("accuracy", 0)
                         prop_logger.metrics["brier_score"] = train_result.get("brier_score", 0)
                         prop_logger.metrics["auc_roc"] = train_result.get("auc_roc", 0)
+                        prop_logger.metrics["ece"] = train_result.get("ece", 0)
+                        prop_logger.metrics["mce"] = train_result.get("mce", 0)
                         prop_logger.metrics["train_size"] = train_result.get("train_size", 0)
                         prop_logger.metrics["test_size"] = train_result.get("test_size", 0)
                         prop_logger.metrics["over_rate_test"] = train_result.get("over_rate_test", 0)
@@ -3310,6 +3324,21 @@ class ModelTrainingPipeline:
                         prop_logger.metrics["model_architecture"] = "LineAwarePropClassifier"
                         prop_logger.save()
                         print(f"  Metrics saved to training_metrics/prop_{prop_type}_line_aware_{prop_logger.timestamp}.json")
+
+                        # Save separate prop calibrator for consistency with moneyline/spread
+                        if hasattr(line_classifier, 'y_prob_final') and hasattr(line_classifier, 'y_test_final'):
+                            try:
+                                from calibration import ModelCalibrator
+                                prop_calibrator = ModelCalibrator(f"prop_{prop_type}", include_advanced=False)
+                                prop_calibrator.fit(
+                                    line_classifier.y_prob_final,
+                                    line_classifier.y_test_final,
+                                    method="isotonic"
+                                )
+                                prop_calibrator.save(str(calibration_dir))
+                                print(f"  Prop calibrator saved to models/calibration/prop_{prop_type}_*.pkl")
+                            except Exception as e:
+                                print(f"  Warning: Could not save prop calibrator: {e}")
                 else:
                     # REGRESSION MODEL: Predicts stat value, requires conversion to probability
                     print(f"Training {prop_type.title()} Prop Model (Random Forest Regressor)")

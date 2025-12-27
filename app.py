@@ -478,6 +478,7 @@ class Orchestrator:
         # Probability calibrators for improved betting edge calculation
         self.moneyline_calibrator = None
         self.spread_calibrator = None
+        self.prop_calibrators = {}  # Dict of prop_type -> ModelCalibrator
 
     def load_models(self) -> bool:
         """
@@ -507,7 +508,9 @@ class Orchestrator:
             return False
 
     def _load_calibrators(self):
-        """Load probability calibrators for moneyline and spread models."""
+        """Load probability calibrators for moneyline, spread, and prop models."""
+        import logging
+
         try:
             from calibration import ModelCalibrator
             calibration_dir = Path("models/calibration")
@@ -519,7 +522,8 @@ class Orchestrator:
                     self.moneyline_calibrator.load(str(calibration_dir))
                     print(f"  - moneyline calibrator ({self.moneyline_calibrator.best_method})")
                 except Exception as e:
-                    print(f"  - moneyline calibrator not available: {e}")
+                    logging.warning(f"Moneyline calibrator not loaded: {e}")
+                    print(f"  - moneyline calibrator not available (using uncalibrated)")
                     self.moneyline_calibrator = None
 
                 # Load spread calibrator
@@ -528,14 +532,37 @@ class Orchestrator:
                     self.spread_calibrator.load(str(calibration_dir))
                     print(f"  - spread calibrator ({self.spread_calibrator.best_method})")
                 except Exception as e:
-                    print(f"  - spread calibrator not available: {e}")
+                    logging.warning(f"Spread calibrator not loaded: {e}")
+                    print(f"  - spread calibrator not available (using uncalibrated)")
                     self.spread_calibrator = None
+
+                # Load prop calibrators (per type)
+                self.prop_calibrators = {}
+                prop_types = ["points", "rebounds", "assists", "threes", "pra"]
+                for prop_type in prop_types:
+                    try:
+                        cal = ModelCalibrator(f"prop_{prop_type}")
+                        cal.load(str(calibration_dir))
+                        self.prop_calibrators[prop_type] = cal
+                        print(f"  - prop_{prop_type} calibrator ({cal.best_method})")
+                    except Exception:
+                        logging.warning(f"Prop {prop_type} calibrator not found - using uncalibrated")
+                        # Don't print for each missing prop calibrator to reduce noise
+
+                if not self.prop_calibrators:
+                    print(f"  - prop calibrators not available (using uncalibrated)")
             else:
+                logging.warning("No calibrators found (models/calibration/ not present)")
                 print("  No calibrators found (models/calibration/ not present)")
+                self.prop_calibrators = {}
         except ImportError:
+            logging.warning("Calibration module not available")
             print("  Calibration module not available")
+            self.prop_calibrators = {}
         except Exception as e:
+            logging.warning(f"Error loading calibrators: {e}")
             print(f"  Error loading calibrators: {e}")
+            self.prop_calibrators = {}
 
     def _calibrate_moneyline(self, prediction: Dict) -> Dict:
         """
@@ -1329,21 +1356,44 @@ class Orchestrator:
 
             # Get predicted value - prefer line-aware classifiers
             prop_model = self._get_prop_model(prop_type)
+            pred = None
+            over_prob = None
+
             if prop_model is not None:
                 try:
                     pred = prop_model.predict(prop_features, prop_line=line)
                     predicted_value = pred.get("predicted_value", line)
+                    # Line-aware classifiers return over_probability directly
+                    over_prob = pred.get("over_probability")
                 except Exception:
                     predicted_value = self._feature_based_prop(prop_features, prop_type)
             else:
                 predicted_value = self._feature_based_prop(prop_features, prop_type)
 
-            # Calculate edge
+            # Calculate edge and probability
             edge = predicted_value - line
             edge_pct = edge / line if line > 0 else 0
 
-            # Convert edge to probability estimate
-            if abs(edge_pct) >= 0.05:  # 5% edge minimum for props
+            # Use line-aware probability if available, otherwise convert from edge
+            if over_prob is not None:
+                # Line-aware classifier output - apply external calibration if available
+                if prop_type in self.prop_calibrators:
+                    try:
+                        over_prob = float(self.prop_calibrators[prop_type].calibrate(over_prob))
+                    except Exception:
+                        pass  # Use uncalibrated probability
+
+                if over_prob >= 0.5:
+                    selection = "over"
+                    prob = over_prob
+                else:
+                    selection = "under"
+                    prob = 1 - over_prob
+
+                # Check minimum edge for props (5%)
+                if abs(over_prob - 0.5) < 0.05:
+                    continue  # Skip if edge too small
+            elif abs(edge_pct) >= 0.05:  # 5% edge minimum for props
                 if edge > 0:
                     selection = "over"
                     prob = 0.5 + abs(edge_pct) * 2  # Rough conversion
@@ -1352,23 +1402,26 @@ class Orchestrator:
                     prob = 0.5 + abs(edge_pct) * 2
 
                 prob = min(0.75, prob)  # Cap probability
+            else:
+                continue  # Skip if edge too small
 
-                prop_eval = self.strategy.evaluate_bet(prob, 0.524, "prop")
-                if prop_eval["is_recommended"]:
-                    stake = self.strategy.calculate_kelly_stake(prob, -110, prop_eval["confidence"])
-                    recommendations.append(BetRecommendation(
-                        bet_type="prop",
-                        description=f"{player_name} {selection.upper()} {line} {prop_type}",
-                        selection=selection,
-                        line=line,
-                        probability=prob,
-                        confidence=prop_eval["confidence"],
-                        edge=prop_eval["edge"],
-                        expected_value=prop_eval["expected_value"],
-                        recommended_stake=stake,
-                        reasoning=f"Model predicts {predicted_value:.1f} vs line {line}",
-                        game_info={"player": player_name, "opponent": opponent_team},
-                    ))
+            # Evaluate bet and add recommendation
+            prop_eval = self.strategy.evaluate_bet(prob, 0.524, "prop")
+            if prop_eval["is_recommended"]:
+                stake = self.strategy.calculate_kelly_stake(prob, -110, prop_eval["confidence"])
+                recommendations.append(BetRecommendation(
+                    bet_type="prop",
+                    description=f"{player_name} {selection.upper()} {line} {prop_type}",
+                    selection=selection,
+                    line=line,
+                    probability=prob,
+                    confidence=prop_eval["confidence"],
+                    edge=prop_eval["edge"],
+                    expected_value=prop_eval["expected_value"],
+                    recommended_stake=stake,
+                    reasoning=f"Model predicts {predicted_value:.1f} vs line {line}",
+                    game_info={"player": player_name, "opponent": opponent_team},
+                ))
 
         return recommendations
 
