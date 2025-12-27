@@ -2647,7 +2647,7 @@ class TunedEnsembleMoneylineModel(BaseModelTrainer):
         self.model = StackingClassifier(
             estimators=estimators,
             final_estimator=final_estimator,
-            cv=TimeSeriesSplit(n_splits=3),  # Time-series CV for stacking
+            cv=5,  # Standard CV for stacking (TimeSeriesSplit not compatible)
             n_jobs=-1,
         )
 

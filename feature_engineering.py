@@ -4324,8 +4324,8 @@ print(f"Average CLV: {clv_metrics['avg_clv_pct']:.2f}%")
 print(f"Beat Closing Line: {clv_metrics['positive_clv_rate']:.1%}")
 print(f"Estimated ROI: {clv_metrics['clv_roi_estimate']:.2f}%")
 ''')
-    print("\n# Generate travel fatigue features:")
-    print('''
+print("\n# Generate travel fatigue features:")
+print('''
 travel_gen = TravelFatigueFeatureGenerator()
 travel_features = travel_gen.generate_travel_features(
     team_abbrev="LAL",
