@@ -990,22 +990,35 @@ class DataService:
             "method": "feature_based_vegas" if vegas_spread != 0 else "feature_based"
         }
 
-    def get_todays_games(self, force_refresh: bool = False) -> List[Dict]:
-        """Get today's scheduled NBA games.
+    def get_todays_games(self, force_refresh: bool = False, date: str = None) -> List[Dict]:
+        """Get scheduled NBA games for a specific date.
 
         OPTIMIZATION: Uses Balldontlie API only (fast, no rate limiting).
         NBA API fallback removed to improve performance.
 
         NOTE: Uses US Eastern timezone (where NBA schedules games) to ensure
         correct date regardless of server timezone.
+
+        Args:
+            force_refresh: If True, bypass cache and fetch fresh data
+            date: Optional date string in YYYY-MM-DD format. Defaults to today (Eastern)
         """
-        print("[DEBUG] get_todays_games called", flush=True)
-        cache_key = "todays_games"
+        from zoneinfo import ZoneInfo
+        eastern = ZoneInfo("America/New_York")
+
+        # Use provided date or default to today (Eastern timezone)
+        if date:
+            target_date = date
+        else:
+            target_date = datetime.now(eastern).strftime("%Y-%m-%d")
+
+        print(f"[DEBUG] get_todays_games called for date={target_date}", flush=True)
+        cache_key = f"games_{target_date}"
 
         if not force_refresh:
             cached = self.cache.get(cache_key)
             if cached:
-                print(f"[DEBUG] Returning {len(cached)} cached games", flush=True)
+                print(f"[DEBUG] Returning {len(cached)} cached games for {target_date}", flush=True)
                 return cached
 
         games = []
@@ -1013,13 +1026,8 @@ class DataService:
         # Use Balldontlie API only (fast, 600 req/min limit)
         if self.balldontlie:
             try:
-                # Use US Eastern timezone (NBA schedules games based on ET)
-                # This fixes the bug where UTC servers fetch wrong date
-                from zoneinfo import ZoneInfo
-                eastern = ZoneInfo("America/New_York")
-                today = datetime.now(eastern).strftime("%Y-%m-%d")
-                print(f"[DEBUG] Fetching games for {today} (Eastern time)", flush=True)
-                bdl_games = self.balldontlie.get_games(dates=[today])
+                print(f"[DEBUG] Fetching games for {target_date} (Eastern time)", flush=True)
+                bdl_games = self.balldontlie.get_games(dates=[target_date])
                 print(f"[DEBUG] API returned {len(bdl_games) if bdl_games else 0} games", flush=True)
                 if bdl_games:
                     games = self._format_balldontlie_games(bdl_games)

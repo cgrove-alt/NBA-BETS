@@ -27,10 +27,12 @@ export async function checkHealth(): Promise<HealthResponse> {
 }
 
 // Games
-export async function getGames(forceRefresh = false): Promise<GamesResponse> {
-  const { data } = await api.get<GamesResponse>('/games', {
-    params: { force_refresh: forceRefresh },
-  });
+export async function getGames(date?: string, forceRefresh = false): Promise<GamesResponse> {
+  const params: Record<string, string | boolean> = { force_refresh: forceRefresh };
+  if (date) {
+    params.date = date;
+  }
+  const { data } = await api.get<GamesResponse>('/games', { params });
   return data;
 }
 

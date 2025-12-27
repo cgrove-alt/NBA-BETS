@@ -412,3 +412,38 @@ results = backtester.backtest_props(
 )
 # Returns: metrics with real ROI using actual odds
 ```
+
+---
+
+### Day Selection Feature (December 26, 2025)
+
+Added ability for users to select games from today + 3 days into the future.
+
+#### Changes Made
+
+**Backend:**
+- [x] `backend/api.py` - Added optional `date` query parameter to `/api/games` endpoint
+- [x] `dashboard/data_service.py` - Updated `get_todays_games()` to accept date parameter, changed cache key to `games_{date}`
+
+**Frontend:**
+- [x] `frontend/src/lib/api.ts` - Added `date` parameter to `getGames()` function
+- [x] `frontend/src/hooks/useGames.ts` - Updated hook to accept date and include in query key
+- [x] `frontend/src/components/game/DateSelector.tsx` - NEW: Button-style date selector component
+- [x] `frontend/src/pages/Predictions.tsx` - Integrated DateSelector, added date state, reset game on date change
+
+#### UI Design
+```
+┌─────────────────────────────────────────────────────┐
+│  [Thu 26 Today] [Fri 27] [Sat 28] [Sun 29]         │  ← Date buttons
+│         ●active                                      │
+├─────────────────────────────────────────────────────┤
+│  Select Game: [▼ LAL @ LAC - 10:30 PM           ]  │  ← Game dropdown
+└─────────────────────────────────────────────────────┘
+```
+
+#### Technical Details
+- Date format for API: `YYYY-MM-DD` (e.g., "2025-12-26")
+- Date format for display: `ddd DD` (e.g., "Thu 26")
+- Timezone: Uses local timezone for date generation
+- Cache: Each date has its own cache key (`games_{date}`)
+- Auto-reset: Selected game resets to null when date changes

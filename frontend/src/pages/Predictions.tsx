@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Loader2, Lock, Radio } from 'lucide-react';
 import { GameSelector } from '../components/game/GameSelector';
+import { DateSelector, getTodayDate } from '../components/game/DateSelector';
 import { FilterPanel } from '../components/predictions/FilterPanel';
 import { PropTable } from '../components/predictions/PropTable';
 import { BestBets } from '../components/predictions/BestBets';
@@ -11,10 +12,11 @@ import { useFilters } from '../hooks/useFilters';
 import { useLiveStats } from '../hooks/useLiveStats';
 
 export function Predictions() {
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayDate());
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
 
-  // Fetch games
-  const { data: gamesData, isLoading: gamesLoading, error: gamesError } = useGames();
+  // Fetch games for selected date
+  const { data: gamesData, isLoading: gamesLoading, error: gamesError } = useGames(selectedDate);
   const games = gamesData?.games || [];
 
   // Get selected game
@@ -91,10 +93,19 @@ export function Predictions() {
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Player Props</h1>
           <p className="text-sm text-text-secondary mt-1">
-            ML-powered predictions for today's games
+            ML-powered predictions for NBA games
           </p>
         </div>
       </div>
+
+      {/* Date Selector */}
+      <DateSelector
+        selectedDate={selectedDate}
+        onSelectDate={(date) => {
+          setSelectedDate(date);
+          setSelectedGameId(null);
+        }}
+      />
 
       {/* Game Selector */}
       <div className="max-w-md">
@@ -201,10 +212,10 @@ export function Predictions() {
         </div>
       )}
 
-      {/* No games today */}
+      {/* No games for selected date */}
       {!gamesLoading && games.length === 0 && !gamesError && (
         <div className="text-center py-12">
-          <p className="text-text-muted">No NBA games scheduled for today.</p>
+          <p className="text-text-muted">No NBA games scheduled for this date.</p>
         </div>
       )}
     </div>

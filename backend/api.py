@@ -122,10 +122,18 @@ def health_check():
 # ============== GAMES ENDPOINTS ==============
 
 @app.get("/api/games", response_model=GamesResponse)
-def get_games(force_refresh: bool = Query(False, description="Force refresh from API")):
-    """Get today's NBA games."""
+def get_games(
+    date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format (defaults to today Eastern)"),
+    force_refresh: bool = Query(False, description="Force refresh from API")
+):
+    """Get NBA games for a specific date.
+
+    Args:
+        date: Date string in YYYY-MM-DD format. Defaults to today (Eastern timezone).
+        force_refresh: If True, bypass cache and fetch fresh data.
+    """
     service = get_service()
-    games_data = service.get_todays_games(force_refresh=force_refresh)
+    games_data = service.get_todays_games(force_refresh=force_refresh, date=date)
 
     games = []
     for g in games_data:
