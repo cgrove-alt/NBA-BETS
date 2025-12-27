@@ -106,6 +106,312 @@ MODEL_DIR.mkdir(exist_ok=True)
 METRICS_DIR = Path("training_metrics")
 METRICS_DIR.mkdir(exist_ok=True)
 
+# Backtest results directory
+BACKTEST_DIR = Path("backtest_results")
+BACKTEST_DIR.mkdir(exist_ok=True)
+
+# =============================================================================
+# BACKTEST THRESHOLDS FOR MODEL PROMOTION
+# =============================================================================
+# Models must meet these thresholds in walk-forward backtesting before being
+# promoted to production. This ensures we only deploy profitable models.
+
+BACKTEST_THRESHOLDS = {
+    "moneyline": {
+        "min_roi": 0.0,           # Must be profitable (ROI >= 0%)
+        "min_win_rate": 52.0,     # Above break-even at -110 odds
+        "max_ece": 0.10,          # Expected Calibration Error < 10%
+        "min_sharpe": 0.3,        # Risk-adjusted return threshold
+    },
+    "spread": {
+        "min_roi": 0.0,
+        "min_win_rate": 52.0,
+        "max_ece": 0.10,
+        "min_sharpe": 0.3,
+    },
+    "prop": {
+        "min_roi": 0.0,
+        "min_win_rate": 52.0,
+        "max_ece": 0.15,          # Props can be noisier
+        "min_sharpe": 0.2,
+    }
+}
+
+
+def check_improvement_thresholds(
+    results: Dict,
+    bet_type: str
+) -> Tuple[bool, List[str]]:
+    """
+    Check if backtest results meet promotion thresholds.
+
+    Args:
+        results: Backtest results dictionary with metrics
+        bet_type: Type of bet ("moneyline", "spread", "prop")
+
+    Returns:
+        Tuple of (passed: bool, failures: List[str])
+    """
+    thresholds = BACKTEST_THRESHOLDS.get(bet_type, BACKTEST_THRESHOLDS["moneyline"])
+    failures = []
+
+    # Check ROI
+    roi = results.get("overall_roi", results.get("roi", -100))
+    if roi < thresholds["min_roi"]:
+        failures.append(f"ROI {roi:.2f}% < {thresholds['min_roi']}%")
+
+    # Check win rate
+    win_rate = results.get("overall_win_rate", results.get("win_rate", 0))
+    if win_rate < thresholds["min_win_rate"]:
+        failures.append(f"Win rate {win_rate:.1f}% < {thresholds['min_win_rate']}%")
+
+    # Check ECE (if available)
+    ece = results.get("ece", results.get("metrics", {}).get("ece"))
+    if ece is not None and ece > thresholds["max_ece"]:
+        failures.append(f"ECE {ece:.3f} > {thresholds['max_ece']}")
+
+    # Check Sharpe ratio
+    sharpe = results.get("sharpe_ratio", results.get("sharpe", 0))
+    if sharpe < thresholds["min_sharpe"]:
+        failures.append(f"Sharpe {sharpe:.2f} < {thresholds['min_sharpe']}")
+
+    return len(failures) == 0, failures
+
+
+class BacktestReporter:
+    """
+    Run walk-forward backtests and save JSON reports.
+
+    Integrates with ModelBacktester from backtesting.py to evaluate model
+    performance using realistic betting simulation with walk-forward validation.
+
+    Usage:
+        reporter = BacktestReporter()
+        results = reporter.run_moneyline_backtest(model, games_data)
+        report_path = reporter.save_report(results, "moneyline", "moneyline")
+        passed, failures = check_improvement_thresholds(results, "moneyline")
+    """
+
+    def __init__(self, output_dir: str = "backtest_results"):
+        """Initialize BacktestReporter with output directory."""
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(exist_ok=True)
+
+    def run_moneyline_backtest(
+        self,
+        model,
+        games_data: List[Dict],
+        initial_bankroll: float = 10000.0,
+        min_edge: float = 0.02,
+    ) -> Dict:
+        """
+        Run walk-forward backtest for moneyline model.
+
+        Args:
+            model: Trained moneyline model with predict() method
+            games_data: Historical games with outcomes
+            initial_bankroll: Starting bankroll for simulation
+            min_edge: Minimum edge to place bet
+
+        Returns:
+            Backtest results dictionary
+        """
+        try:
+            from backtesting import ModelBacktester, BetType
+        except ImportError:
+            return {"error": "backtesting module not found"}
+
+        backtester = ModelBacktester(
+            model_name="moneyline_backtest",
+            initial_bankroll=initial_bankroll,
+            staking_strategy="kelly",
+            min_edge=min_edge,
+        )
+
+        # Define predict function for backtester
+        def model_predict_fn(features):
+            """Predict home/away probabilities from features."""
+            try:
+                prediction = model.predict(features)
+                home_prob = prediction.get("home_win_probability", 0.5)
+                return home_prob, 1 - home_prob
+            except Exception:
+                return 0.5, 0.5
+
+        # Format games for backtester
+        formatted_games = []
+        for game in games_data:
+            # Get features from game data
+            features = game.get("moneyline_features", {})
+            if not features:
+                continue
+
+            formatted_game = {
+                "game_id": f"{game.get('game_date', '')}_{game.get('home_team', '')}_{game.get('away_team', '')}",
+                "date": datetime.strptime(game.get("game_date", "2024-01-01"), "%Y-%m-%d") if isinstance(game.get("game_date"), str) else datetime.now(),
+                "home_team": game.get("home_team", "HOM"),
+                "away_team": game.get("away_team", "AWY"),
+                "home_odds": game.get("home_odds", -110),
+                "away_odds": game.get("away_odds", -110),
+                "home_score": game.get("home_score", 0),
+                "away_score": game.get("away_score", 0),
+                "features": features,
+            }
+            formatted_games.append(formatted_game)
+
+        if len(formatted_games) < 20:
+            return {"error": f"Not enough games for backtest ({len(formatted_games)} < 20)"}
+
+        # Run backtest
+        result = backtester.backtest_moneyline(formatted_games, model_predict_fn)
+
+        # Convert to dict with additional metrics
+        result_dict = result.to_dict()
+        result_dict["games_tested"] = len(formatted_games)
+
+        return result_dict
+
+    def run_spread_backtest(
+        self,
+        model,
+        games_data: List[Dict],
+        initial_bankroll: float = 10000.0,
+        min_edge: float = 0.02,
+    ) -> Dict:
+        """
+        Run walk-forward backtest for spread model.
+
+        Args:
+            model: Trained spread model with predict() method
+            games_data: Historical games with outcomes and spread lines
+            initial_bankroll: Starting bankroll for simulation
+            min_edge: Minimum edge to place bet
+
+        Returns:
+            Backtest results dictionary
+        """
+        try:
+            from backtesting import ModelBacktester, BetType
+        except ImportError:
+            return {"error": "backtesting module not found"}
+
+        backtester = ModelBacktester(
+            model_name="spread_backtest",
+            initial_bankroll=initial_bankroll,
+            staking_strategy="kelly",
+            min_edge=min_edge,
+        )
+
+        # Define predict function for backtester
+        def model_predict_fn(features):
+            """Predict spread and cover probability from features."""
+            try:
+                prediction = model.predict(features)
+                predicted_spread = prediction.get("predicted_spread", 0)
+                cover_prob = prediction.get("home_cover_probability", 0.5)
+                return predicted_spread, cover_prob
+            except Exception:
+                return 0, 0.5
+
+        # Format games for backtester
+        formatted_games = []
+        for game in games_data:
+            features = game.get("spread_features", game.get("moneyline_features", {}))
+            if not features:
+                continue
+
+            formatted_game = {
+                "game_id": f"{game.get('game_date', '')}_{game.get('home_team', '')}_{game.get('away_team', '')}",
+                "date": datetime.strptime(game.get("game_date", "2024-01-01"), "%Y-%m-%d") if isinstance(game.get("game_date"), str) else datetime.now(),
+                "home_team": game.get("home_team", "HOM"),
+                "away_team": game.get("away_team", "AWY"),
+                "spread_line": game.get("spread_line", 0),
+                "home_odds_spread": game.get("home_odds_spread", -110),
+                "home_score": game.get("home_score", 0),
+                "away_score": game.get("away_score", 0),
+                "features": features,
+            }
+            formatted_games.append(formatted_game)
+
+        if len(formatted_games) < 20:
+            return {"error": f"Not enough games for backtest ({len(formatted_games)} < 20)"}
+
+        # Run backtest
+        result = backtester.backtest_spread(formatted_games, model_predict_fn)
+
+        # Convert to dict
+        result_dict = result.to_dict()
+        result_dict["games_tested"] = len(formatted_games)
+
+        return result_dict
+
+    def save_report(
+        self,
+        results: Dict,
+        model_name: str,
+        bet_type: str,
+    ) -> Path:
+        """
+        Save backtest report to JSON file.
+
+        Args:
+            results: Backtest results dictionary
+            model_name: Name of the model
+            bet_type: Type of bet (moneyline, spread, prop)
+
+        Returns:
+            Path to saved report file
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{model_name}_{bet_type}_{timestamp}.json"
+        filepath = self.output_dir / filename
+
+        # Add metadata
+        report = {
+            "model_name": model_name,
+            "bet_type": bet_type,
+            "timestamp": timestamp,
+            "report_date": datetime.now().isoformat(),
+            "thresholds": BACKTEST_THRESHOLDS.get(bet_type, {}),
+            "results": results,
+        }
+
+        # Check thresholds
+        passed, failures = check_improvement_thresholds(results, bet_type)
+        report["thresholds_passed"] = passed
+        report["threshold_failures"] = failures
+
+        with open(filepath, 'w') as f:
+            json.dump(report, f, indent=2, default=str)
+
+        return filepath
+
+    def print_summary(self, results: Dict, bet_type: str) -> None:
+        """Print backtest summary to console."""
+        print(f"\n  {'='*50}")
+        print(f"  BACKTEST RESULTS: {bet_type.upper()}")
+        print(f"  {'='*50}")
+
+        if "error" in results:
+            print(f"  Error: {results['error']}")
+            return
+
+        print(f"  Total Bets: {results.get('total_bets', 0)}")
+        print(f"  Win Rate: {results.get('overall_win_rate', 0):.1f}%")
+        print(f"  ROI: {results.get('overall_roi', 0):+.2f}%")
+        print(f"  Sharpe Ratio: {results.get('sharpe_ratio', 0):.2f}")
+        print(f"  Max Drawdown: {results.get('max_drawdown_pct', 0):.1f}%")
+
+        # Check thresholds
+        passed, failures = check_improvement_thresholds(results, bet_type)
+        if passed:
+            print(f"\n  ✓ Model PASSES promotion thresholds")
+        else:
+            print(f"\n  ✗ Model FAILS promotion thresholds:")
+            for failure in failures:
+                print(f"    - {failure}")
+        print(f"  {'='*50}")
+
 
 class TrainingMetricsLogger:
     """
@@ -3111,6 +3417,8 @@ class ModelTrainingPipeline:
         use_ensemble: bool = True,
         use_tuned_ensemble: bool = True,
         use_line_aware: bool = True,
+        run_backtest: bool = False,
+        backtest_min_games: int = 100,
     ) -> Dict[str, Dict]:
         """
         Train all models with provided data.
@@ -3125,6 +3433,8 @@ class ModelTrainingPipeline:
             use_line_aware: If True, use LineAwarePropClassifier for props (default: True)
                            These classifiers take the prop line as input and output P(Over)
                            directly, which is better for betting than regression models.
+            run_backtest: If True, run walk-forward backtest after training (default: False)
+            backtest_min_games: Minimum games required for backtesting (default: 100)
 
         Returns:
             Dictionary with all training metrics
@@ -3208,6 +3518,30 @@ class ModelTrainingPipeline:
                 except Exception as e:
                     print(f"  Warning: Calibration failed: {e}")
 
+            # BACKTEST: Run walk-forward backtest for moneyline model
+            if run_backtest and len(games_data) >= backtest_min_games:
+                print("\n  Running walk-forward backtest for moneyline...")
+                try:
+                    reporter = BacktestReporter()
+                    backtest_results = reporter.run_moneyline_backtest(
+                        model=moneyline_model,
+                        games_data=games_data,
+                        initial_bankroll=10000.0,
+                        min_edge=0.02,
+                    )
+
+                    # Save report
+                    report_path = reporter.save_report(backtest_results, "moneyline_ensemble", "moneyline")
+                    print(f"  Backtest report saved to {report_path}")
+
+                    # Print summary
+                    reporter.print_summary(backtest_results, "moneyline")
+
+                    # Store results
+                    results["moneyline"]["backtest"] = backtest_results
+                except Exception as e:
+                    print(f"  Warning: Moneyline backtest failed: {e}")
+
         # Train Spread Model (Regressor)
         print("\n" + "=" * 50)
         print("Training Spread Model (SVM Regressor)")
@@ -3278,6 +3612,30 @@ class ModelTrainingPipeline:
 
                 except Exception as e:
                     print(f"  Warning: Spread calibration failed: {e}")
+
+            # BACKTEST: Run walk-forward backtest for spread model
+            if run_backtest and len(games_data) >= backtest_min_games:
+                print("\n  Running walk-forward backtest for spread...")
+                try:
+                    reporter = BacktestReporter()
+                    backtest_results = reporter.run_spread_backtest(
+                        model=spread_model,
+                        games_data=games_data,
+                        initial_bankroll=10000.0,
+                        min_edge=0.02,
+                    )
+
+                    # Save report
+                    report_path = reporter.save_report(backtest_results, "spread_svm", "spread")
+                    print(f"  Backtest report saved to {report_path}")
+
+                    # Print summary
+                    reporter.print_summary(backtest_results, "spread")
+
+                    # Store results
+                    results["spread"]["backtest"] = backtest_results
+                except Exception as e:
+                    print(f"  Warning: Spread backtest failed: {e}")
 
         # Train Player Prop Models
         if player_data:

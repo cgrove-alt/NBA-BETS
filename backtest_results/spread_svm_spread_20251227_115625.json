@@ -1,0 +1,42 @@
+{
+  "model_name": "spread_svm",
+  "bet_type": "spread",
+  "timestamp": "20251227_115625",
+  "report_date": "2025-12-27T11:56:25.316799",
+  "thresholds": {
+    "min_roi": 0.0,
+    "min_win_rate": 52.0,
+    "max_ece": 0.1,
+    "min_sharpe": 0.3
+  },
+  "results": {
+    "model_name": "spread_backtest",
+    "bet_type": "spread",
+    "start_date": "2025-12-27T11:56:25.316592",
+    "end_date": "2025-12-27T11:56:25.316597",
+    "total_bets": 0,
+    "total_wins": 0,
+    "total_losses": 0,
+    "total_staked": 0.0,
+    "total_pnl": 0.0,
+    "overall_roi": 0.0,
+    "overall_win_rate": 0.0,
+    "max_drawdown": 0.0,
+    "max_drawdown_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "profit_factor": 0.0,
+    "avg_clv": null,
+    "periods_profitable": 0,
+    "longest_winning_streak": 0,
+    "longest_losing_streak": 0,
+    "ece": null,
+    "avg_ev": null,
+    "periods": [],
+    "games_tested": 1548
+  },
+  "thresholds_passed": false,
+  "threshold_failures": [
+    "Win rate 0.0% < 52.0%",
+    "Sharpe 0.00 < 0.3"
+  ]
+}

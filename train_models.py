@@ -498,6 +498,8 @@ def train_models(
     player_data: Optional[List[Dict]] = None,
     season: str = "2025-26",
     use_ensemble: bool = True,
+    run_backtest: bool = False,
+    backtest_min_games: int = 100,
 ) -> Dict:
     """
     Train all models with the provided data.
@@ -507,6 +509,8 @@ def train_models(
         player_data: Historical player data
         season: Season string
         use_ensemble: Use ensemble model for maximum accuracy (default: True)
+        run_backtest: Run walk-forward backtest after training (default: False)
+        backtest_min_games: Minimum games required for backtesting (default: 100)
 
     Returns:
         Training results dictionary
@@ -517,6 +521,7 @@ def train_models(
     print(f"Games: {len(games_data)}")
     print(f"Player records: {len(player_data) if player_data else 0}")
     print(f"Using Ensemble: {use_ensemble}")
+    print(f"Run Backtest: {run_backtest}")
 
     if len(games_data) < 20:
         print("\nWarning: Less than 20 games. Models may not perform well.")
@@ -529,6 +534,8 @@ def train_models(
         player_data=player_data,
         save_models=True,
         use_ensemble=use_ensemble,
+        run_backtest=run_backtest,
+        backtest_min_games=backtest_min_games,
     )
 
     print(f"\n{'='*60}")
@@ -579,6 +586,10 @@ Examples:
     parser.add_argument("--data-dir", type=str, help="Directory containing CSV data files")
     parser.add_argument("--unsafe-api", action="store_true",
         help="Enable direct API training (NOT RECOMMENDED - temporal leakage risk)")
+    parser.add_argument("--run-backtest", action="store_true",
+        help="Run walk-forward backtest after training to evaluate model profitability")
+    parser.add_argument("--backtest-min-games", type=int, default=100,
+        help="Minimum games required for backtesting (default: 100)")
 
     args = parser.parse_args()
 
@@ -682,6 +693,8 @@ Examples:
             games_data=games_data,
             player_data=player_data,
             season=args.season,
+            run_backtest=args.run_backtest,
+            backtest_min_games=args.backtest_min_games,
         )
 
         print("\n" + "="*60)

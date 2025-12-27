@@ -1,0 +1,57 @@
+{
+  "model_name": "moneyline_ensemble",
+  "bet_type": "moneyline",
+  "timestamp": "20251227_115623",
+  "report_date": "2025-12-27T11:56:23.166088",
+  "thresholds": {
+    "min_roi": 0.0,
+    "min_win_rate": 52.0,
+    "max_ece": 0.1,
+    "min_sharpe": 0.3
+  },
+  "results": {
+    "model_name": "moneyline_backtest",
+    "bet_type": "moneyline",
+    "start_date": "2024-10-28T00:00:00",
+    "end_date": "2025-12-12T00:00:00",
+    "total_bets": 1336,
+    "total_wins": 792,
+    "total_losses": 544,
+    "total_staked": 171855588.45,
+    "total_pnl": 52175819.85000001,
+    "overall_roi": 30.360269526632326,
+    "overall_win_rate": 59.2814371257485,
+    "max_drawdown": 6854325.505454548,
+    "max_drawdown_pct": 12.075724100679402,
+    "sharpe_ratio": 3.4965872673514187,
+    "profit_factor": 1.9572525645831167,
+    "avg_clv": null,
+    "periods_profitable": 1,
+    "longest_winning_streak": 14,
+    "longest_losing_streak": 8,
+    "ece": 0.10958397283057073,
+    "avg_ev": 24966.840822367285,
+    "periods": [
+      {
+        "start_date": "2024-10-28T00:00:00",
+        "end_date": "2025-12-12T00:00:00",
+        "num_bets": 1336,
+        "num_wins": 792,
+        "num_losses": 544,
+        "num_pushes": 0,
+        "total_staked": 171855588.45,
+        "total_pnl": 52175819.85000001,
+        "roi": 30.360269526632326,
+        "win_rate": 59.2814371257485,
+        "avg_odds": -110.0,
+        "avg_edge": 0.17739131303048938,
+        "avg_clv": null
+      }
+    ],
+    "games_tested": 1548
+  },
+  "thresholds_passed": false,
+  "threshold_failures": [
+    "ECE 0.110 > 0.1"
+  ]
+}

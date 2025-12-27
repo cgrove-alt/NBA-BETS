@@ -1,0 +1,20 @@
+{
+  "model_name": "spread",
+  "model_type": "regressor",
+  "timestamp": "20251227_115623",
+  "training_date": "2025-12-27T11:56:23.418292",
+  "rmse": 14.110062896497512,
+  "mae": 11.011548211322044,
+  "r2": 0.19753950296847655,
+  "mse": 199.09387494311574,
+  "ece": 0.052053583840551795,
+  "mce": 0.08677571746512547,
+  "betting_roi_pct": 49729869.02187291,
+  "bets_placed": 878,
+  "bets_won": 604,
+  "bet_win_rate": 0.6879271070615034,
+  "final_bankroll": 497299690.2187291,
+  "min_edge_threshold": 0.03,
+  "train_size": 1548,
+  "calibration_method": "isotonic"
+}

@@ -218,6 +218,10 @@ class BacktestResult:
     longest_winning_streak: int = 0
     longest_losing_streak: int = 0
 
+    # Calibration & EV metrics
+    ece: Optional[float] = None  # Expected Calibration Error
+    avg_ev: Optional[float] = None  # Average Expected Value per bet
+
     def calculate_aggregate_metrics(self) -> None:
         """Calculate aggregate metrics from all periods."""
         if not self.periods:
@@ -260,6 +264,9 @@ class BacktestResult:
 
         # Streaks
         self._calculate_streaks(all_bets)
+
+        # ECE and EV
+        self._calculate_calibration_metrics(all_bets)
 
     def _calculate_drawdown(self, bets: List[Bet]) -> None:
         """Calculate maximum drawdown."""
@@ -319,6 +326,48 @@ class BacktestResult:
 
         self.longest_winning_streak = max_win_streak
         self.longest_losing_streak = max_loss_streak
+
+    def _calculate_calibration_metrics(self, bets: List[Bet]) -> None:
+        """
+        Calculate Expected Calibration Error (ECE) and Average Expected Value.
+
+        ECE measures how well-calibrated the model's probabilities are.
+        A perfectly calibrated model has ECE = 0.
+
+        EV (Expected Value) measures the average expected profit per bet
+        based on model probability vs implied probability.
+        """
+        if not bets:
+            self.ece = None
+            self.avg_ev = None
+            return
+
+        # Calculate ECE using binned probabilities
+        n_bins = 10
+        bin_edges = np.linspace(0, 1, n_bins + 1)
+
+        predicted_probs = np.array([b.predicted_probability for b in bets])
+        actual_outcomes = np.array([1 if b.outcome == BetOutcome.WIN else 0 for b in bets])
+
+        ece_sum = 0.0
+        total_samples = len(bets)
+
+        for i in range(n_bins):
+            mask = (predicted_probs >= bin_edges[i]) & (predicted_probs < bin_edges[i + 1])
+            bin_count = np.sum(mask)
+
+            if bin_count > 0:
+                bin_confidence = np.mean(predicted_probs[mask])
+                bin_accuracy = np.mean(actual_outcomes[mask])
+                ece_sum += bin_count * abs(bin_accuracy - bin_confidence)
+
+        self.ece = ece_sum / total_samples if total_samples > 0 else None
+
+        # Calculate Average EV (Expected Value per bet)
+        # EV = predicted_prob * potential_win - (1 - predicted_prob) * stake
+        # Simplified: EV = edge * stake (where edge = pred_prob - implied_prob)
+        total_ev = sum(b.edge * b.stake for b in bets)
+        self.avg_ev = total_ev / len(bets) if bets else None
 
     def summary(self) -> str:
         """Generate human-readable summary."""
@@ -396,6 +445,8 @@ class BacktestResult:
             "periods_profitable": self.periods_profitable,
             "longest_winning_streak": self.longest_winning_streak,
             "longest_losing_streak": self.longest_losing_streak,
+            "ece": self.ece,  # Expected Calibration Error
+            "avg_ev": self.avg_ev,  # Average Expected Value per bet
             "periods": [p.to_dict() for p in self.periods],
         }
 
