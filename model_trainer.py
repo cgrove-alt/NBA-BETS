@@ -37,6 +37,43 @@ from sklearn.metrics import (
 
 warnings.filterwarnings('ignore')
 
+# PRODUCTION FIX: Smart feature defaults for predictions (not zeros)
+PREDICTION_FEATURE_DEFAULTS = {
+    # Player averages (conservative estimates)
+    'season_pts_avg': 10.0, 'recent_pts_avg': 10.0,
+    'season_reb_avg': 4.0, 'recent_reb_avg': 4.0,
+    'season_ast_avg': 2.5, 'recent_ast_avg': 2.5,
+    'season_fg3m_avg': 1.0, 'recent_fg3m_avg': 1.0,
+    'season_min_avg': 20.0, 'recent_min_avg': 20.0,
+    'pra_avg': 16.5,
+    # Team stats (league average)
+    'off_rating': 114.0, 'def_rating': 114.0, 'net_rating': 0.0, 'pace': 100.0,
+    # Game context
+    'days_rest': 2, 'is_home': 0.5, 'is_back_to_back': 0,
+    # Elo ratings
+    'elo_diff': 0.0, 'home_elo': 1500.0, 'away_elo': 1500.0,
+}
+
+
+def smart_fillna_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply smart defaults for missing features instead of zeros."""
+    result = df.copy()
+    for col in result.columns:
+        if result[col].isna().any():
+            if col in PREDICTION_FEATURE_DEFAULTS:
+                default = PREDICTION_FEATURE_DEFAULTS[col]
+            elif 'rating' in col.lower():
+                default = 114.0
+            elif 'elo' in col.lower():
+                default = 0.0 if 'diff' in col.lower() else 1500.0
+            elif 'pct' in col.lower() or 'rate' in col.lower():
+                default = 0.5
+            else:
+                default = 0.0
+            result[col] = result[col].fillna(default)
+    return result
+
+
 # Try to import XGBoost and LightGBM (optional but recommended)
 try:
     import xgboost as xgb
@@ -92,8 +129,8 @@ class BaseModelTrainer:
         if fit:
             self.feature_names = list(X.columns)
 
-        # Handle missing values
-        X_clean = X.fillna(0)
+        # Handle missing values with smart defaults (not zeros)
+        X_clean = smart_fillna_features(X)
 
         # Scale features
         if fit:
@@ -933,6 +970,461 @@ class QuantilePropModel(BaseModelTrainer):
         self.is_fitted = True
 
         print(f"Quantile model loaded from {filepath}")
+        return self
+
+
+class LineAwarePropClassifier(BaseModelTrainer):
+    """
+    PRODUCTION UPGRADE: Line-aware prop classifier that predicts Over/Under probability.
+
+    Unlike regression models that predict a value, this classifier takes the prop line
+    as an INPUT FEATURE and directly outputs P(Over). This is more accurate for betting
+    because:
+    1. The line is known at prediction time and contains market information
+    2. Different lines require different decision boundaries
+    3. Outputs calibrated probabilities, not raw point predictions
+
+    Training:
+    - For each historical game, generates training samples at multiple prop lines
+    - Labels are binary: 1 if actual > line, 0 if actual <= line
+    - Line is included as a feature to learn the decision boundary
+
+    Inference:
+    - Given player features + prop line, outputs P(Over) directly
+    - No need to convert predicted value to probability
+    """
+
+    def __init__(self, prop_type: str = "points"):
+        """
+        Initialize line-aware prop classifier.
+
+        Args:
+            prop_type: Type of prop ("points", "rebounds", "assists", "threes", "pra")
+        """
+        self.prop_type = prop_type
+        model_name = f"player_{prop_type}_line_classifier"
+        super().__init__(model_name)
+
+        # Use gradient boosting for calibrated probabilities
+        try:
+            from xgboost import XGBClassifier
+            self.model = XGBClassifier(
+                n_estimators=200,
+                max_depth=6,
+                learning_rate=0.05,
+                min_child_weight=10,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                reg_alpha=0.5,
+                reg_lambda=2.0,
+                random_state=42,
+                n_jobs=-1,
+                eval_metric='logloss',
+            )
+            self.use_xgboost = True
+        except ImportError:
+            from sklearn.ensemble import GradientBoostingClassifier
+            self.model = GradientBoostingClassifier(
+                n_estimators=200,
+                max_depth=6,
+                learning_rate=0.05,
+                min_samples_leaf=10,
+                random_state=42,
+            )
+            self.use_xgboost = False
+
+        # For probability calibration
+        self.calibrator = None
+        self.line_stats = {}  # Store stats about training lines for validation
+
+    def prepare_training_data(
+        self,
+        player_data: List[Dict],
+        line_range: Tuple[float, float] = None,
+        n_lines_per_game: int = 5,
+    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        """
+        Prepare training data with prop line as a feature.
+
+        For each game, generates multiple training samples at different prop lines.
+        This teaches the model how the decision boundary changes with the line.
+
+        Args:
+            player_data: List of player game dictionaries
+            line_range: (min, max) prop line range. If None, uses stat-specific defaults
+            n_lines_per_game: Number of line samples per game
+
+        Returns:
+            Tuple of (features DataFrame with 'prop_line' column, binary labels)
+        """
+        stat_key_map = {
+            "points": "pts",
+            "rebounds": "reb",
+            "assists": "ast",
+            "threes": "fg3_made",
+            "pra": "pra",
+        }
+
+        feature_key_map = {
+            "points": "points_features",
+            "rebounds": "rebounds_features",
+            "assists": "assists_features",
+            "threes": "threes_features",
+            "pra": "pra_features",
+        }
+
+        # Default line ranges by prop type
+        default_ranges = {
+            "points": (5.5, 45.5),
+            "rebounds": (2.5, 15.5),
+            "assists": (1.5, 12.5),
+            "threes": (0.5, 8.5),
+            "pra": (10.5, 60.5),
+        }
+
+        stat_key = stat_key_map.get(self.prop_type, "pts")
+        feature_key = feature_key_map.get(self.prop_type, "points_features")
+
+        if line_range is None:
+            line_range = default_ranges.get(self.prop_type, (5.5, 35.5))
+
+        features_list = []
+        labels = []
+        game_dates = []
+
+        for game in player_data:
+            features = game.get(feature_key, {})
+            actual_value = game.get("actual_stats", {}).get(stat_key)
+            game_date = game.get("game_date", "1900-01-01")
+
+            # Handle PRA calculation
+            if self.prop_type == "pra" and actual_value is None:
+                stats = game.get("actual_stats", {})
+                pts = stats.get("pts", 0) or 0
+                reb = stats.get("reb", 0) or 0
+                ast = stats.get("ast", 0) or 0
+                actual_value = pts + reb + ast
+
+            if not features or actual_value is None:
+                continue
+
+            # Extract numeric features
+            numeric_features = {
+                k: v for k, v in features.items()
+                if isinstance(v, (int, float)) and k != "player_id"
+            }
+
+            if not numeric_features:
+                continue
+
+            # Generate training samples at multiple lines around actual value
+            # Focus lines around player's expected range for better learning
+            player_avg = features.get(f'season_{stat_key}_avg', actual_value)
+            if player_avg is None:
+                player_avg = actual_value
+
+            # Sample lines: some around the actual value, some around expected
+            lines_to_sample = set()
+
+            # Around actual value (±3 points for points, less for other stats)
+            spread = 3.0 if self.prop_type == "points" else 1.5
+            for offset in np.linspace(-spread, spread, 3):
+                line = actual_value + offset + 0.5  # Standard half-point lines
+                if line_range[0] <= line <= line_range[1]:
+                    lines_to_sample.add(round(line * 2) / 2)  # Round to 0.5
+
+            # Around player average
+            for offset in np.linspace(-spread, spread, 3):
+                line = player_avg + offset + 0.5
+                if line_range[0] <= line <= line_range[1]:
+                    lines_to_sample.add(round(line * 2) / 2)
+
+            # Add some random lines in the range
+            random_lines = np.random.uniform(line_range[0], line_range[1], n_lines_per_game)
+            for line in random_lines:
+                lines_to_sample.add(round(line * 2) / 2)
+
+            # Create training sample for each line
+            for prop_line in lines_to_sample:
+                sample_features = numeric_features.copy()
+                sample_features['prop_line'] = prop_line
+
+                # Binary label: 1 if actual > line (over hit), 0 otherwise
+                label = 1 if actual_value > prop_line else 0
+
+                features_list.append(sample_features)
+                labels.append(label)
+                game_dates.append(game_date)
+
+        # Create DataFrame and sort by date
+        X = pd.DataFrame(features_list)
+        y = np.array(labels)
+
+        if game_dates:
+            date_series = pd.Series(game_dates)
+            sort_indices = date_series.argsort().values
+            X = X.iloc[sort_indices].reset_index(drop=True)
+            y = y[sort_indices]
+
+        # Store line statistics
+        if 'prop_line' in X.columns:
+            self.line_stats = {
+                'min_line': X['prop_line'].min(),
+                'max_line': X['prop_line'].max(),
+                'mean_line': X['prop_line'].mean(),
+                'n_samples': len(X),
+                'over_rate': y.mean(),
+            }
+
+        return X, y
+
+    def train(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        test_size: float = 0.2,
+        calibrate: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Train the line-aware classifier with temporal split.
+
+        Args:
+            X: Features including 'prop_line' column
+            y: Binary labels (1=over, 0=under)
+            test_size: Fraction for test set
+            calibrate: Whether to apply isotonic calibration
+
+        Returns:
+            Training metrics dictionary
+        """
+        from sklearn.calibration import CalibratedClassifierCV
+        from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+
+        # Temporal split (data should be sorted by date)
+        n_samples = len(X)
+        split_idx = int(n_samples * (1 - test_size))
+
+        X_train = X.iloc[:split_idx]
+        X_test = X.iloc[split_idx:]
+        y_train = y[:split_idx]
+        y_test = y[split_idx:]
+
+        # Preprocess
+        X_train_scaled = self.preprocess_features(X_train, fit=True)
+        X_test_scaled = self.preprocess_features(X_test, fit=False)
+
+        print(f"\n  Training Line-Aware Prop Classifier ({self.prop_type})...")
+        print(f"  Training samples: {len(X_train)}, Test samples: {len(X_test)}")
+        print(f"  Over rate: {y.mean():.1%} (train: {y_train.mean():.1%}, test: {y_test.mean():.1%})")
+
+        # Train base model
+        self.model.fit(X_train_scaled, y_train)
+
+        # Get probabilities
+        y_prob_train = self.model.predict_proba(X_train_scaled)[:, 1]
+        y_prob_test = self.model.predict_proba(X_test_scaled)[:, 1]
+
+        # Calculate pre-calibration metrics
+        brier_uncalibrated = brier_score_loss(y_test, y_prob_test)
+
+        # Apply calibration if requested
+        if calibrate:
+            try:
+                from sklearn.isotonic import IsotonicRegression
+
+                # Fit calibrator on training data
+                self.calibrator = IsotonicRegression(out_of_bounds='clip')
+                self.calibrator.fit(y_prob_train, y_train)
+
+                # Calibrate test probabilities
+                y_prob_test_cal = self.calibrator.predict(y_prob_test)
+                brier_calibrated = brier_score_loss(y_test, y_prob_test_cal)
+
+                # Only use calibrator if it improves Brier score
+                if brier_calibrated < brier_uncalibrated:
+                    print(f"  Calibration improved Brier: {brier_uncalibrated:.4f} -> {brier_calibrated:.4f}")
+                    y_prob_final = y_prob_test_cal
+                else:
+                    print(f"  Calibration did not improve: {brier_uncalibrated:.4f} vs {brier_calibrated:.4f}")
+                    self.calibrator = None
+                    y_prob_final = y_prob_test
+            except Exception as e:
+                print(f"  Calibration failed: {e}")
+                self.calibrator = None
+                y_prob_final = y_prob_test
+        else:
+            y_prob_final = y_prob_test
+
+        # Final predictions
+        y_pred = (y_prob_final > 0.5).astype(int)
+
+        # Calculate metrics
+        accuracy = (y_pred == y_test).mean()
+        try:
+            auc = roc_auc_score(y_test, y_prob_final)
+        except:
+            auc = 0.5
+
+        brier_final = brier_score_loss(y_test, y_prob_final)
+
+        self.is_fitted = True
+        self.training_metrics = {
+            "accuracy": float(accuracy),
+            "brier_score": float(brier_final),
+            "auc_roc": float(auc),
+            "train_size": len(X_train),
+            "test_size": len(X_test),
+            "over_rate_test": float(y_test.mean()),
+            "calibrated": self.calibrator is not None,
+            "line_stats": self.line_stats,
+        }
+
+        print(f"  Line-Aware Classifier Results:")
+        print(f"    Accuracy: {accuracy:.2%}")
+        print(f"    Brier Score: {brier_final:.4f}")
+        print(f"    AUC-ROC: {auc:.4f}")
+
+        return self.training_metrics
+
+    def predict(self, features: Dict, prop_line: float) -> Dict[str, Any]:
+        """
+        Predict Over probability for a given prop line.
+
+        Args:
+            features: Player/game features (without prop_line)
+            prop_line: The betting line to evaluate
+
+        Returns:
+            Dictionary with over_probability, under_probability, prediction
+        """
+        if not self.is_fitted:
+            raise ValueError("Model not fitted. Train or load a model first.")
+
+        # Add prop_line to features
+        numeric_features = {
+            k: v for k, v in features.items()
+            if isinstance(v, (int, float)) and k != "player_id"
+        }
+        numeric_features['prop_line'] = prop_line
+
+        # Build feature array
+        X = pd.DataFrame([numeric_features])
+        for col in self.feature_names:
+            if col not in X.columns:
+                X[col] = 0
+        X = X[self.feature_names]
+
+        X_scaled = self.preprocess_features(X, fit=False)
+
+        # Get probability
+        prob_raw = self.model.predict_proba(X_scaled)[0, 1]
+
+        # Apply calibration if available
+        if self.calibrator is not None:
+            over_prob = float(self.calibrator.predict([prob_raw])[0])
+        else:
+            over_prob = float(prob_raw)
+
+        # Clip to valid range
+        over_prob = np.clip(over_prob, 0.01, 0.99)
+
+        return {
+            "over_probability": over_prob,
+            "under_probability": 1.0 - over_prob,
+            "prediction": "over" if over_prob > 0.5 else "under",
+            "prop_line": prop_line,
+            "prop_type": self.prop_type,
+            "confidence": abs(over_prob - 0.5) * 2,
+            "raw_probability": float(prob_raw),
+        }
+
+    def predict_multiple_lines(
+        self,
+        features: Dict,
+        lines: List[float]
+    ) -> List[Dict[str, Any]]:
+        """
+        Predict Over probabilities for multiple lines efficiently.
+
+        Useful for finding the line where P(Over) = 0.5 (fair line).
+        """
+        results = []
+        for line in lines:
+            results.append(self.predict(features, line))
+        return results
+
+    def find_fair_line(
+        self,
+        features: Dict,
+        search_range: Tuple[float, float] = None
+    ) -> float:
+        """
+        Find the prop line where P(Over) = 50%.
+
+        This is the model's estimate of the "fair" line.
+        """
+        if search_range is None:
+            default_ranges = {
+                "points": (5.5, 45.5),
+                "rebounds": (2.5, 15.5),
+                "assists": (1.5, 12.5),
+                "threes": (0.5, 8.5),
+                "pra": (10.5, 60.5),
+            }
+            search_range = default_ranges.get(self.prop_type, (5.5, 35.5))
+
+        # Binary search for line where P(Over) = 0.5
+        low, high = search_range
+        while high - low > 0.5:
+            mid = (low + high) / 2
+            pred = self.predict(features, mid)
+            if pred['over_probability'] > 0.5:
+                low = mid
+            else:
+                high = mid
+
+        return round((low + high) / 2 * 2) / 2  # Round to 0.5
+
+    def save_model(self, filepath: Optional[Path] = None):
+        """Save the line-aware classifier."""
+        if filepath is None:
+            filepath = MODEL_DIR / f"{self.model_name}.pkl"
+
+        model_data = {
+            "model": self.model,
+            "calibrator": self.calibrator,
+            "scaler": self.scaler,
+            "feature_names": self.feature_names,
+            "training_metrics": self.training_metrics,
+            "model_name": self.model_name,
+            "prop_type": self.prop_type,
+            "line_stats": self.line_stats,
+            "saved_at": datetime.now().isoformat(),
+        }
+
+        with open(filepath, "wb") as f:
+            pickle.dump(model_data, f)
+
+        print(f"Line-aware classifier saved to {filepath}")
+        return filepath
+
+    def load_model(self, filepath: Optional[Path] = None):
+        """Load a saved line-aware classifier."""
+        if filepath is None:
+            filepath = MODEL_DIR / f"{self.model_name}.pkl"
+
+        with open(filepath, "rb") as f:
+            model_data = pickle.load(f)
+
+        self.model = model_data["model"]
+        self.calibrator = model_data.get("calibrator")
+        self.scaler = model_data["scaler"]
+        self.feature_names = model_data["feature_names"]
+        self.training_metrics = model_data["training_metrics"]
+        self.line_stats = model_data.get("line_stats", {})
+        self.is_fitted = True
+
+        print(f"Line-aware classifier loaded from {filepath}")
         return self
 
 

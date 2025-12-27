@@ -3510,13 +3510,17 @@ class MinutesPredictionModel:
                     random_state=42,
                 )
 
-            # Train classifier
-            X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(
-                X_scaled, y_will_play, test_size=0.2, random_state=42
-            )
+            # FIXED: Use temporal split instead of random split to prevent data leakage
+            # Data should already be sorted by date from process_games_for_training()
+            split_idx = int(len(X_scaled) * 0.8)
+            X_train_c = X_scaled[:split_idx]
+            X_test_c = X_scaled[split_idx:]
+            y_train_c = y_will_play[:split_idx]
+            y_test_c = y_will_play[split_idx:]
 
             if sample_weights is not None:
-                sw_train, sw_test = train_test_split(sample_weights, test_size=0.2, random_state=42)
+                sw_train = sample_weights[:split_idx]
+                sw_test = sample_weights[split_idx:]
                 self.will_play_classifier.fit(X_train_c, y_train_c, sample_weight=sw_train)
             else:
                 self.will_play_classifier.fit(X_train_c, y_train_c)
@@ -3574,13 +3578,15 @@ class MinutesPredictionModel:
                 random_state=42,
             )
 
-        # Train regressor
-        X_train_r, X_test_r, y_train_r, y_test_r = train_test_split(
-            X_played, y_played, test_size=0.2, random_state=42
-        )
+        # FIXED: Use temporal split instead of random split to prevent data leakage
+        split_idx_r = int(len(X_played) * 0.8)
+        X_train_r = X_played[:split_idx_r]
+        X_test_r = X_played[split_idx_r:]
+        y_train_r = y_played[:split_idx_r]
+        y_test_r = y_played[split_idx_r:]
 
         if sw_played is not None:
-            sw_train_r, _ = train_test_split(sw_played, test_size=0.2, random_state=42)
+            sw_train_r = sw_played[:split_idx_r]
             self.minutes_regressor.fit(X_train_r, y_train_r, sample_weight=sw_train_r)
         else:
             self.minutes_regressor.fit(X_train_r, y_train_r)
@@ -5734,7 +5740,8 @@ def main():
     print(f"  Found {len(teams)} teams")
 
     # Fetch games from multiple seasons (including current 2025-26)
-    seasons = [2023, 2024, 2025]  # 2023-24, 2024-25, 2025-26 (current)
+    # EXPANDED: Added 2022 for more historical data (4 seasons total)
+    seasons = [2022, 2023, 2024, 2025]  # 2022-23, 2023-24, 2024-25, 2025-26 (current)
     all_games = []
 
     print("\nFetching game data...")

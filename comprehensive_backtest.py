@@ -30,6 +30,95 @@ MODEL_DIR = Path("models")
 CACHE_DIR = Path("data/balldontlie_cache")
 
 
+# PRODUCTION FIX: Smart feature defaults for fillna (not zeros)
+# These are NBA-realistic defaults that prevent model degradation
+PREDICTION_FEATURE_DEFAULTS = {
+    # Player averages (conservative estimates)
+    'season_pts_avg': 10.0,
+    'recent_pts_avg': 10.0,
+    'season_reb_avg': 4.0,
+    'recent_reb_avg': 4.0,
+    'season_ast_avg': 2.5,
+    'recent_ast_avg': 2.5,
+    'season_fg3m_avg': 1.0,
+    'recent_fg3m_avg': 1.0,
+    'season_min_avg': 20.0,
+    'recent_min_avg': 20.0,
+    'pra_avg': 16.5,
+
+    # Team stats (league average)
+    'off_rating': 114.0,
+    'def_rating': 114.0,
+    'net_rating': 0.0,
+    'pace': 100.0,
+    'pts_avg': 114.0,
+
+    # Game context
+    'days_rest': 2,
+    'is_home': 0.5,
+    'is_back_to_back': 0,
+
+    # Consistency/variance
+    'pts_std': 6.0,
+    'reb_std': 2.5,
+    'ast_std': 1.5,
+    'min_consistency': 0.5,
+
+    # Opponent defense (league average)
+    'opp_pts_allowed_to_guards': 14.5,
+    'opp_pts_allowed_to_forwards': 12.8,
+    'opp_pts_allowed_to_centers': 11.2,
+    'opp_def_rating': 114.0,
+
+    # Usage and efficiency
+    'usage_rate': 20.0,
+    'ts_pct': 0.56,
+
+    # Elo ratings
+    'elo_diff': 0.0,
+    'home_elo': 1500.0,
+    'away_elo': 1500.0,
+}
+
+
+def smart_fillna_prediction(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply smart default values for missing features at prediction time.
+
+    Uses NBA-realistic defaults instead of zeros, which can cause
+    prediction issues when features are missing.
+    """
+    result = df.copy()
+
+    for col in result.columns:
+        if result[col].isna().any():
+            # Check for exact match in defaults
+            if col in PREDICTION_FEATURE_DEFAULTS:
+                default = PREDICTION_FEATURE_DEFAULTS[col]
+            # Check for partial matches
+            elif any(key in col.lower() for key in ['pts', 'point']):
+                default = PREDICTION_FEATURE_DEFAULTS.get('season_pts_avg', 10.0)
+            elif any(key in col.lower() for key in ['reb', 'rebound']):
+                default = PREDICTION_FEATURE_DEFAULTS.get('season_reb_avg', 4.0)
+            elif any(key in col.lower() for key in ['ast', 'assist']):
+                default = PREDICTION_FEATURE_DEFAULTS.get('season_ast_avg', 2.5)
+            elif any(key in col.lower() for key in ['min', 'minute']):
+                default = PREDICTION_FEATURE_DEFAULTS.get('season_min_avg', 20.0)
+            elif 'rating' in col.lower():
+                default = 114.0  # League average
+            elif 'elo' in col.lower():
+                default = 1500.0 if 'diff' not in col.lower() else 0.0
+            elif 'pct' in col.lower() or 'rate' in col.lower():
+                default = 0.5
+            else:
+                # Fall back to 0 for unknown features
+                default = 0.0
+
+            result[col] = result[col].fillna(default)
+
+    return result
+
+
 class PositionDefenseCalculator:
     """
     Calculate team defensive efficiency by opponent position.
@@ -1016,7 +1105,7 @@ class SeasonBacktester:
                     for col in feature_names:
                         if col not in X.columns:
                             X[col] = 0
-                    X = X[feature_names].fillna(0)
+                    X = smart_fillna_prediction(X[feature_names])
 
                     if scaler:
                         X_scaled = scaler.transform(X)
@@ -1034,7 +1123,7 @@ class SeasonBacktester:
                     for col in feature_names:
                         if col not in X.columns:
                             X[col] = 0
-                    X = X[feature_names].fillna(0)
+                    X = smart_fillna_prediction(X[feature_names])
 
                     if scaler:
                         X_scaled = scaler.transform(X)
@@ -1088,7 +1177,7 @@ class SeasonBacktester:
             for col in feature_names:
                 if col not in X.columns:
                     X[col] = 0
-            X = X[feature_names].fillna(0)
+            X = smart_fillna_prediction(X[feature_names])
 
             X_scaled = scaler.transform(X)
 
@@ -1122,7 +1211,7 @@ class SeasonBacktester:
             for col in feature_names:
                 if col not in X.columns:
                     X[col] = 0
-            X = X[feature_names].fillna(0)
+            X = smart_fillna_prediction(X[feature_names])
 
             X_scaled = scaler.transform(X)
             predicted = float(model.predict(X_scaled)[0])

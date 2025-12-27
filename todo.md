@@ -310,3 +310,105 @@ LINE_MOVEMENT: spread_movement, spread_movement_abs, spread_moved_toward_home/aw
 - [ ] Implement trap game detection with actual future schedule data
 - [ ] Add player-level injury impact adjustments to props models
 - [ ] Track Closing Line Value (CLV) for bet quality validation
+
+---
+
+### Production Accuracy Upgrades (December 26, 2025)
+
+Major refactoring to eliminate data leakage and improve production accuracy.
+
+#### Problem Analysis
+
+Before these changes, several issues could inflate model performance:
+1. **Random train/test splits** for MinutesPredictionModel used `train_test_split(random_state=42)` instead of temporal splits
+2. **fillna(0)** at prediction time could cause issues for features where 0 is not sensible
+3. **No line-aware prop classifiers** - models predicted values, not O/U probabilities
+4. **No walk-forward backtesting** for realistic performance estimation
+5. **Fixed -110 odds** for ROI instead of real market odds
+
+#### Completed Fixes
+
+- [x] **1. Temporal Train/Test Splits for Player Models** (`train_complete_balldontlie.py`)
+  - Fixed `MinutesPredictionModel.train()` at lines 3513-3523, 3581-3592
+  - Changed from `train_test_split(random_state=42)` to temporal split
+  - Now uses `split_idx = int(len(X_scaled) * 0.8)` for chronological separation
+  - Prevents future data leakage in classifier and regressor training
+
+- [x] **2. Line-Aware Prop Classifiers** (`model_trainer.py`)
+  - Added new `LineAwarePropClassifier` class (lines 939-1391)
+  - Takes prop line as INPUT FEATURE, outputs P(Over) directly
+  - Generates training samples at multiple lines per game
+  - Includes isotonic calibration for probability accuracy
+  - Methods: `prepare_training_data()`, `train()`, `predict()`, `find_fair_line()`
+  - Better for betting than converting point predictions to probabilities
+
+- [x] **3. Walk-Forward Prop Backtester with Real Odds** (`backtesting.py`)
+  - Added `WalkForwardPropBacktester` class (lines 1302-1704)
+  - Periodic retraining every N predictions
+  - Uses actual market odds for ROI calculation
+  - Calculates proper profit/loss with varying juice
+  - Tracks calibration, Sharpe ratio, and betting metrics
+  - Added `calculate_real_odds_roi()` utility function
+
+- [x] **4. Smart fillna for Predictions** (`model_trainer.py`, `comprehensive_backtest.py`)
+  - Added `PREDICTION_FEATURE_DEFAULTS` dict with NBA-realistic values
+  - Created `smart_fillna_features()` and `smart_fillna_prediction()` functions
+  - Replaced all `.fillna(0)` calls at prediction time
+  - Uses league averages (114.0 for ratings, 1500 for Elo, etc.)
+
+- [x] **5. Expanded Historical Training Data** (`train_complete_balldontlie.py`)
+  - Changed from 3 seasons to 4 seasons (added 2022-23)
+  - Seasons now: `[2022, 2023, 2024, 2025]`
+  - More training data improves model robustness
+
+#### Code Changes Summary
+
+| File | Changes |
+|------|---------|
+| `train_complete_balldontlie.py` | Fixed temporal splits for MinutesPredictionModel, expanded seasons |
+| `model_trainer.py` | Added LineAwarePropClassifier, smart_fillna_features |
+| `backtesting.py` | Added WalkForwardPropBacktester, calculate_real_odds_roi |
+| `comprehensive_backtest.py` | Added smart_fillna_prediction, fixed fillna(0) calls |
+
+#### Expected Impact
+
+1. **More realistic performance metrics** - walk-forward backtesting prevents overfitting
+2. **Better probability calibration** - line-aware classifiers output true P(Over)
+3. **Accurate ROI estimation** - uses real odds, not fixed -110
+4. **Reduced prediction errors** - smart defaults instead of zeros
+5. **More robust models** - 4 seasons of training data
+
+#### Usage Examples
+
+**Line-Aware Prop Classifier:**
+```python
+from model_trainer import LineAwarePropClassifier
+
+# Train
+classifier = LineAwarePropClassifier(prop_type="points")
+X, y = classifier.prepare_training_data(player_data)
+classifier.train(X, y)
+
+# Predict at specific line
+result = classifier.predict(features, prop_line=25.5)
+# Returns: {"over_probability": 0.58, "under_probability": 0.42, ...}
+```
+
+**Walk-Forward Backtesting:**
+```python
+from backtesting import WalkForwardPropBacktester
+
+backtester = WalkForwardPropBacktester(
+    initial_train_size=500,
+    retrain_frequency=100,
+    min_edge=0.03
+)
+
+results = backtester.backtest_props(
+    player_data,
+    prop_type="points",
+    train_model_fn=my_train_fn,
+    predict_fn=my_predict_fn
+)
+# Returns: metrics with real ROI using actual odds
+```

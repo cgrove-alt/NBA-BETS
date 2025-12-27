@@ -1293,3 +1293,466 @@ if __name__ == "__main__":
     # Save results
     filepath = backtester.save_results(result)
     print(f"\nResults saved to: {filepath}")
+
+
+# =============================================================================
+# PRODUCTION UPGRADE: Walk-Forward Prop Backtester with Real Odds
+# =============================================================================
+
+class WalkForwardPropBacktester:
+    """
+    Production-grade walk-forward backtester for player props with periodic retraining.
+
+    Key Features:
+    1. Walk-forward validation: trains on past, predicts on future
+    2. Periodic retraining: retrains model every N games to adapt to player changes
+    3. Real odds: uses actual market odds for ROI calculation, not fixed -110
+    4. Line-aware: evaluates at actual betting lines, not predicted values
+
+    This is the gold standard for evaluating prop model profitability.
+    """
+
+    def __init__(
+        self,
+        initial_train_size: int = 500,
+        retrain_frequency: int = 100,
+        test_batch_size: int = 50,
+        min_edge: float = 0.03,
+        min_confidence: float = 0.55,
+        use_expanding_window: bool = True,
+    ):
+        """
+        Initialize walk-forward backtester.
+
+        Args:
+            initial_train_size: Minimum samples before first prediction
+            retrain_frequency: Retrain model every N predictions
+            test_batch_size: Number of predictions per walk-forward step
+            min_edge: Minimum edge to place a bet
+            min_confidence: Minimum P(Over) or P(Under) to bet
+            use_expanding_window: If True, use all past data; if False, rolling window
+        """
+        self.initial_train_size = initial_train_size
+        self.retrain_frequency = retrain_frequency
+        self.test_batch_size = test_batch_size
+        self.min_edge = min_edge
+        self.min_confidence = min_confidence
+        self.use_expanding_window = use_expanding_window
+
+        # Results storage
+        self.predictions = []
+        self.bets_placed = []
+        self.training_history = []
+
+    def calculate_roi_with_real_odds(
+        self,
+        predicted_prob: float,
+        actual_hit: bool,
+        american_odds: float
+    ) -> Tuple[float, float]:
+        """
+        Calculate profit/loss using real American odds.
+
+        Args:
+            predicted_prob: Model's P(Over)
+            actual_hit: Whether the over hit
+            american_odds: Actual betting odds (e.g., -110, +100)
+
+        Returns:
+            Tuple of (profit_loss, roi) where stake is normalized to 1.0
+        """
+        # Convert American odds to decimal
+        if american_odds > 0:
+            decimal_odds = 1 + (american_odds / 100)
+        else:
+            decimal_odds = 1 + (100 / abs(american_odds))
+
+        # Profit/loss for $1 stake
+        if actual_hit:
+            profit = decimal_odds - 1  # Won: get back stake + profit
+        else:
+            profit = -1  # Lost: lose stake
+
+        roi = profit * 100  # As percentage
+
+        return profit, roi
+
+    def should_bet(
+        self,
+        predicted_prob: float,
+        american_odds: float,
+        selection: str = "over"
+    ) -> Tuple[bool, float]:
+        """
+        Determine if we should place a bet based on edge.
+
+        Args:
+            predicted_prob: P(Over) from model
+            american_odds: Odds for the selection
+            selection: "over" or "under"
+
+        Returns:
+            Tuple of (should_bet, edge)
+        """
+        # Get probability for the selection we're considering
+        if selection == "over":
+            model_prob = predicted_prob
+        else:
+            model_prob = 1 - predicted_prob
+
+        # Calculate implied probability from odds
+        if american_odds > 0:
+            implied_prob = 100 / (american_odds + 100)
+        else:
+            implied_prob = abs(american_odds) / (abs(american_odds) + 100)
+
+        # Edge is model_prob - implied_prob
+        edge = model_prob - implied_prob
+
+        # Should bet if edge > threshold and confidence is high enough
+        should = (
+            edge >= self.min_edge and
+            model_prob >= self.min_confidence
+        )
+
+        return should, edge
+
+    def backtest_props(
+        self,
+        player_data: List[Dict],
+        prop_type: str = "points",
+        train_model_fn: Callable = None,
+        predict_fn: Callable = None,
+    ) -> Dict[str, Any]:
+        """
+        Run walk-forward backtest on player prop data.
+
+        Args:
+            player_data: List of game dicts with:
+                - game_date: Date of game
+                - features: Feature dict for prediction
+                - actual_value: Actual stat achieved
+                - prop_line: Betting line (if available)
+                - over_odds: Odds for over (default -110)
+                - under_odds: Odds for under (default -110)
+            prop_type: Type of prop being tested
+            train_model_fn: Function(data) -> model to train model
+            predict_fn: Function(model, features, line) -> P(Over)
+
+        Returns:
+            Comprehensive backtest results dict
+        """
+        # Sort by date
+        data = sorted(player_data, key=lambda x: x.get("game_date", "1900-01-01"))
+
+        if len(data) < self.initial_train_size + self.test_batch_size:
+            raise ValueError(
+                f"Not enough data. Need {self.initial_train_size + self.test_batch_size}, got {len(data)}"
+            )
+
+        results = {
+            "prop_type": prop_type,
+            "total_samples": len(data),
+            "predictions": [],
+            "bets": [],
+            "training_periods": [],
+            "metrics": {},
+        }
+
+        current_model = None
+        predictions_since_retrain = 0
+        train_end = self.initial_train_size
+
+        print(f"\nWalk-Forward Backtest: {prop_type}")
+        print(f"Total samples: {len(data)}")
+        print(f"Initial training size: {self.initial_train_size}")
+        print(f"Retrain every: {self.retrain_frequency} predictions")
+        print("=" * 60)
+
+        while train_end < len(data):
+            # Determine training window
+            if self.use_expanding_window:
+                train_start = 0
+            else:
+                train_start = max(0, train_end - self.initial_train_size)
+
+            train_data = data[train_start:train_end]
+
+            # Retrain if needed
+            if current_model is None or predictions_since_retrain >= self.retrain_frequency:
+                if train_model_fn is not None:
+                    print(f"  Training on {len(train_data)} samples (dates: {train_data[0].get('game_date')} to {train_data[-1].get('game_date')})")
+                    current_model = train_model_fn(train_data)
+                    predictions_since_retrain = 0
+
+                    results["training_periods"].append({
+                        "train_start": train_data[0].get("game_date"),
+                        "train_end": train_data[-1].get("game_date"),
+                        "train_size": len(train_data),
+                    })
+
+            # Determine test window
+            test_end = min(train_end + self.test_batch_size, len(data))
+            test_data = data[train_end:test_end]
+
+            # Make predictions on test data
+            for sample in test_data:
+                features = sample.get("features", {})
+                actual_value = sample.get("actual_value")
+                prop_line = sample.get("prop_line")
+                over_odds = sample.get("over_odds", -110)
+                under_odds = sample.get("under_odds", -110)
+                game_date = sample.get("game_date")
+
+                # Skip if no line available
+                if prop_line is None or actual_value is None:
+                    continue
+
+                # Get prediction
+                if predict_fn is not None and current_model is not None:
+                    predicted_over_prob = predict_fn(current_model, features, prop_line)
+                else:
+                    # Default: 50/50
+                    predicted_over_prob = 0.5
+
+                # Determine actual outcome
+                actual_over = actual_value > prop_line
+
+                # Record prediction
+                prediction = {
+                    "game_date": game_date,
+                    "prop_line": prop_line,
+                    "actual_value": actual_value,
+                    "actual_over": actual_over,
+                    "predicted_over_prob": predicted_over_prob,
+                    "over_odds": over_odds,
+                    "under_odds": under_odds,
+                }
+                results["predictions"].append(prediction)
+
+                # Evaluate betting decisions
+                for selection in ["over", "under"]:
+                    odds = over_odds if selection == "over" else under_odds
+                    prob = predicted_over_prob if selection == "over" else (1 - predicted_over_prob)
+
+                    should_bet, edge = self.should_bet(
+                        predicted_over_prob, odds, selection
+                    )
+
+                    if should_bet:
+                        actual_hit = (selection == "over" and actual_over) or \
+                                    (selection == "under" and not actual_over)
+
+                        profit, roi = self.calculate_roi_with_real_odds(
+                            prob, actual_hit, odds
+                        )
+
+                        bet = {
+                            "game_date": game_date,
+                            "selection": selection,
+                            "prop_line": prop_line,
+                            "odds": odds,
+                            "predicted_prob": prob,
+                            "edge": edge,
+                            "actual_hit": actual_hit,
+                            "profit": profit,
+                            "roi": roi,
+                        }
+                        results["bets"].append(bet)
+
+                predictions_since_retrain += 1
+
+            # Move forward
+            train_end = test_end
+
+        # Calculate summary metrics
+        results["metrics"] = self._calculate_metrics(results)
+
+        print("\nBacktest Complete!")
+        print(f"Total predictions: {len(results['predictions'])}")
+        print(f"Total bets placed: {len(results['bets'])}")
+        self._print_metrics(results["metrics"])
+
+        return results
+
+    def _calculate_metrics(self, results: Dict) -> Dict[str, Any]:
+        """Calculate comprehensive backtest metrics."""
+        predictions = results["predictions"]
+        bets = results["bets"]
+
+        if not predictions:
+            return {"error": "No predictions"}
+
+        # Prediction accuracy
+        correct_over = sum(1 for p in predictions if p["predicted_over_prob"] > 0.5 and p["actual_over"])
+        correct_under = sum(1 for p in predictions if p["predicted_over_prob"] <= 0.5 and not p["actual_over"])
+        total_predictions = len(predictions)
+        overall_accuracy = (correct_over + correct_under) / total_predictions if total_predictions > 0 else 0
+
+        # Calibration: compare predicted probs to actual hit rates
+        from collections import defaultdict
+        calibration_buckets = defaultdict(lambda: {"predicted": 0, "actual": 0, "count": 0})
+
+        for p in predictions:
+            bucket = int(p["predicted_over_prob"] * 10) / 10  # Round to 0.1
+            calibration_buckets[bucket]["predicted"] += p["predicted_over_prob"]
+            calibration_buckets[bucket]["actual"] += 1 if p["actual_over"] else 0
+            calibration_buckets[bucket]["count"] += 1
+
+        # Betting metrics
+        if bets:
+            total_staked = len(bets)  # Each bet is $1
+            total_profit = sum(b["profit"] for b in bets)
+            wins = sum(1 for b in bets if b["actual_hit"])
+            losses = len(bets) - wins
+
+            roi = (total_profit / total_staked * 100) if total_staked > 0 else 0
+            win_rate = (wins / len(bets) * 100) if bets else 0
+
+            # Average edge on bets placed
+            avg_edge = np.mean([b["edge"] for b in bets])
+
+            # Edge when winning vs losing
+            winning_bets = [b for b in bets if b["actual_hit"]]
+            losing_bets = [b for b in bets if not b["actual_hit"]]
+            avg_edge_winners = np.mean([b["edge"] for b in winning_bets]) if winning_bets else 0
+            avg_edge_losers = np.mean([b["edge"] for b in losing_bets]) if losing_bets else 0
+
+            # CLV approximation (edge - actual)
+            # Not exact without closing odds, but edge serves as proxy
+
+            # Sharpe ratio (annualized, assuming ~1000 bets/year)
+            daily_returns = []
+            current_day = None
+            day_profit = 0
+            for b in bets:
+                if b["game_date"] != current_day:
+                    if current_day is not None:
+                        daily_returns.append(day_profit)
+                    current_day = b["game_date"]
+                    day_profit = 0
+                day_profit += b["profit"]
+            if day_profit != 0:
+                daily_returns.append(day_profit)
+
+            if len(daily_returns) > 1 and np.std(daily_returns) > 0:
+                sharpe = np.mean(daily_returns) / np.std(daily_returns) * np.sqrt(252)
+            else:
+                sharpe = 0
+
+            betting_metrics = {
+                "total_bets": len(bets),
+                "wins": wins,
+                "losses": losses,
+                "win_rate": win_rate,
+                "total_profit": total_profit,
+                "roi": roi,
+                "avg_edge": avg_edge,
+                "avg_edge_winners": avg_edge_winners,
+                "avg_edge_losers": avg_edge_losers,
+                "sharpe_ratio": sharpe,
+            }
+        else:
+            betting_metrics = {
+                "total_bets": 0,
+                "message": "No bets placed (edge threshold not met)"
+            }
+
+        return {
+            "prediction_accuracy": overall_accuracy,
+            "total_predictions": total_predictions,
+            "calibration": dict(calibration_buckets),
+            "betting": betting_metrics,
+            "training_periods": len(results["training_periods"]),
+        }
+
+    def _print_metrics(self, metrics: Dict):
+        """Print formatted metrics."""
+        print("\n" + "=" * 60)
+        print("BACKTEST RESULTS")
+        print("=" * 60)
+
+        print(f"\nPrediction Performance:")
+        print(f"  Accuracy: {metrics['prediction_accuracy']:.1%}")
+        print(f"  Total Predictions: {metrics['total_predictions']}")
+        print(f"  Training Periods: {metrics['training_periods']}")
+
+        if "betting" in metrics and metrics["betting"].get("total_bets", 0) > 0:
+            b = metrics["betting"]
+            print(f"\nBetting Performance:")
+            print(f"  Total Bets: {b['total_bets']}")
+            print(f"  Win Rate: {b['win_rate']:.1f}%")
+            print(f"  ROI: {b['roi']:+.2f}%")
+            print(f"  Total Profit: ${b['total_profit']:+.2f} (per $1 bets)")
+            print(f"  Avg Edge: {b['avg_edge']:.1%}")
+            print(f"  Sharpe Ratio: {b['sharpe_ratio']:.2f}")
+
+            # Interpretation
+            print("\nInterpretation:")
+            if b["roi"] > 5:
+                print("  ✓ Strong positive ROI - model has edge")
+            elif b["roi"] > 0:
+                print("  ~ Marginal positive ROI - possible edge")
+            else:
+                print("  ✗ Negative ROI - no profitable edge")
+
+            if b["win_rate"] > 52.4:  # Breakeven at -110
+                print("  ✓ Win rate above breakeven")
+            else:
+                print("  ✗ Win rate below breakeven")
+
+        print("=" * 60)
+
+
+def calculate_real_odds_roi(
+    predictions: List[Dict],
+    default_odds: float = -110
+) -> Dict[str, float]:
+    """
+    Calculate ROI using real market odds from predictions.
+
+    Each prediction dict should have:
+    - predicted_prob: Model probability
+    - actual_hit: Whether bet won
+    - odds: American odds (optional, defaults to -110)
+
+    Returns:
+        Dict with ROI metrics
+    """
+    total_staked = 0
+    total_returned = 0
+    wins = 0
+    losses = 0
+
+    for pred in predictions:
+        odds = pred.get("odds", default_odds)
+        actual_hit = pred.get("actual_hit", False)
+
+        # Convert to decimal for payout calculation
+        if odds > 0:
+            decimal_odds = 1 + (odds / 100)
+        else:
+            decimal_odds = 1 + (100 / abs(odds))
+
+        stake = 1.0  # Normalize to $1 bets
+        total_staked += stake
+
+        if actual_hit:
+            total_returned += stake * decimal_odds
+            wins += 1
+        else:
+            losses += 1
+
+    profit = total_returned - total_staked
+    roi = (profit / total_staked * 100) if total_staked > 0 else 0
+    win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
+
+    return {
+        "total_staked": total_staked,
+        "total_returned": total_returned,
+        "profit": profit,
+        "roi": roi,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+    }
