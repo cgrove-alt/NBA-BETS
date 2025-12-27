@@ -575,3 +575,55 @@ All tasks completed successfully. Here's a summary of changes:
 3. Calibrators saved to `models/calibration/` and applied during inference
 4. Line-aware prop classifiers output P(Over) directly
 5. CLV tracking for bet quality validation
+
+---
+
+### Temporal Discipline - Point-in-Time Feature Functions (December 27, 2025)
+
+Added new functions and parameters to ensure all features are computed from data available BEFORE the game being predicted, preventing temporal leakage during training.
+
+#### Changes Made
+
+**data_fetcher.py:**
+- [x] Added TEMPORAL DISCIPLINE documentation header explaining leakage-safe vs current-state functions
+- [x] Added `fetch_team_statistics_before_date(team_id, season, before_date)` function
+  - Computes team stats from games BEFORE specified date only
+  - Returns same structure as `fetch_team_statistics()` for drop-in replacement
+  - Returns zero/empty stats if no games exist before date
+- [x] Added `date_to` parameter to `fetch_head_to_head()` function
+  - Accepts YYYY-MM-DD format (auto-converts for API)
+  - Returns only H2H games BEFORE the specified date
+
+**feature_engineering.py:**
+- [x] Added TEMPORAL DISCIPLINE documentation header
+- [x] Updated import to include `fetch_team_statistics_before_date`
+- [x] Added `before_date` parameter to `HeadToHeadAnalyzer.analyze_h2h()`
+- [x] Added `game_date` parameter to `TeamFeatureGenerator.calculate_home_advantage()`
+  - Uses `fetch_team_statistics_before_date()` when game_date provided
+- [x] Added `game_date` parameter to `MatchupFeatureGenerator.analyze_head_to_head()`
+  - Passes through to `analyze_h2h()` for point-in-time H2H features
+- [x] Updated `generate_team_features()` to pass `game_date` to `calculate_home_advantage()`
+
+**train_models.py:**
+- [x] Added `--unsafe-api` flag requirement for direct API training
+- [x] Added error message explaining temporal leakage risk
+- [x] Recommends `--kaggle --live` as the safe default
+
+#### Test Results
+
+```python
+from data_fetcher import fetch_team_statistics_before_date
+
+# Lakers before Dec 26, 2025
+stats = fetch_team_statistics_before_date(1610612747, '2025-26', '2025-12-26')
+# Games before date: 29
+# Win%: 0.655
+# Pts avg: 116.9
+```
+
+#### Impact
+
+1. **Training safety** - Direct API path now requires explicit opt-in
+2. **Feature purity** - All team stats, H2H, and home advantage features can use point-in-time data
+3. **Documentation** - Clear headers in both files explain temporal discipline principles
+4. **Backward compatible** - All parameters are optional; existing code works unchanged

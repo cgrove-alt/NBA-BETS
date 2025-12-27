@@ -8,6 +8,26 @@ Processes NBA data to generate features for betting predictions:
 - Head-to-head matchup analysis
 - Positional strengths/weaknesses
 - Injury impact analysis
+
+=============================================================================
+TEMPORAL DISCIPLINE
+=============================================================================
+When training on historical games, ALL feature generators must respect the
+game_date parameter to prevent temporal leakage. Key principles:
+
+1. ALWAYS pass game_date when generating features for historical games
+2. Use fetch_team_statistics_before_date() instead of fetch_team_statistics()
+3. Use date_to parameter with fetch_historical_games() and fetch_head_to_head()
+4. Never include the target game's data in its own features
+
+Functions that support temporal discipline (pass game_date):
+- generate_game_features(home, away, game_date=...)
+- generate_team_features(team_id, game_date=...)
+- calculate_home_advantage(team_id, game_date=...)
+- calculate_rest_and_fatigue(team_id, game_date=...)
+- analyze_h2h(team1, team2, before_date=...)
+- analyze_head_to_head(home, away, game_date=...)
+=============================================================================
 """
 
 import numpy as np
@@ -18,6 +38,7 @@ from typing import Optional, Dict, List, Tuple
 
 from data_fetcher import (
     fetch_team_statistics,
+    fetch_team_statistics_before_date,
     fetch_historical_games,
     fetch_player_stats,
     fetch_league_team_stats,
@@ -630,14 +651,19 @@ class HeadToHeadAnalyzer:
     def __init__(self, season="2025-26"):
         self.season = season
 
-    def analyze_h2h(self, team1_id: int, team2_id: int, include_previous_season: bool = True) -> Dict:
+    def analyze_h2h(self, team1_id: int, team2_id: int, include_previous_season: bool = True, before_date: str = None) -> Dict:
         """
         Analyze head-to-head history between two teams.
+
+        TEMPORAL DISCIPLINE: Use before_date to prevent temporal leakage
+        when computing H2H features for historical games.
 
         Args:
             team1_id: First team NBA ID
             team2_id: Second team NBA ID
             include_previous_season: Include previous season games
+            before_date: Optional date string (YYYY-MM-DD). Only uses H2H games
+                         BEFORE this date to prevent temporal leakage.
 
         Returns:
             Dictionary with H2H analysis
@@ -649,7 +675,8 @@ class HeadToHeadAnalyzer:
             prev_season = f"{current_year - 1}-{str(current_year)[-2:]}"
             seasons = f"{prev_season},{self.season}"
 
-        h2h_games = fetch_head_to_head(team1_id, team2_id, seasons, last_n_games=10)
+        # TEMPORAL DISCIPLINE: Pass date_to to prevent leakage
+        h2h_games = fetch_head_to_head(team1_id, team2_id, seasons, last_n_games=10, date_to=before_date)
 
         if not h2h_games:
             return {
@@ -897,14 +924,26 @@ class TeamFeatureGenerator:
 
         return streak if streak_type == "W" else -streak
 
-    def calculate_home_advantage(self, team_id):
+    def calculate_home_advantage(self, team_id, game_date=None):
         """
         Calculate home court advantage metrics.
+
+        TEMPORAL DISCIPLINE: When game_date is provided, uses only games BEFORE
+        that date to prevent temporal leakage.
+
+        Args:
+            team_id: NBA team ID
+            game_date: Optional date string (YYYY-MM-DD). If provided, only uses
+                       games before this date for calculating home advantage.
 
         Returns:
             Dictionary with home vs away performance differential
         """
-        team_stats = fetch_team_statistics(team_id, self.season)
+        if game_date:
+            # Use point-in-time stats to prevent leakage
+            team_stats = fetch_team_statistics_before_date(team_id, self.season, game_date)
+        else:
+            team_stats = fetch_team_statistics(team_id, self.season)
 
         home = team_stats.get("home", {})
         away = team_stats.get("away", {})
@@ -978,8 +1017,14 @@ class TeamFeatureGenerator:
             except ValueError:
                 game_date = datetime.now()
 
+        # TEMPORAL DISCIPLINE: Convert game_date to API format and use date_to
+        # to only fetch games BEFORE the current game (prevents leakage)
+        date_to_str = game_date.strftime("%m/%d/%Y")
+
         # Fetch recent games to find last game date and venue
-        games = fetch_historical_games(team_id=team_id, season=self.season, last_n_games=5)
+        games = fetch_historical_games(
+            team_id=team_id, season=self.season, last_n_games=5, date_to=date_to_str
+        )
 
         default_result = {
             "days_rest": 2,  # Default to 2 days rest
@@ -1135,10 +1180,14 @@ class TeamFeatureGenerator:
         Returns:
             Dictionary with all team features
         """
-        team_stats = fetch_team_statistics(team_id, self.season)
+        # TEMPORAL DISCIPLINE: Use point-in-time stats when game_date provided
+        if game_date:
+            team_stats = fetch_team_statistics_before_date(team_id, self.season, game_date)
+        else:
+            team_stats = fetch_team_statistics(team_id, self.season)
         # CRITICAL: Pass game_date to prevent data leakage
         recent_form = self.calculate_recent_form(team_id, last_n_games, before_date=game_date)
-        home_advantage = self.calculate_home_advantage(team_id)
+        home_advantage = self.calculate_home_advantage(team_id, game_date=game_date)
         offensive = self.calculate_offensive_rating(team_stats)
         defensive = self.calculate_defensive_rating(team_stats)
         # TIER 1.2: Pass current_venue for travel fatigue calculation
@@ -1256,20 +1305,26 @@ class MatchupFeatureGenerator:
             )
         return self._team_features_cache[cache_key]
 
-    def analyze_head_to_head(self, home_team_id: int, away_team_id: int) -> Dict:
+    def analyze_head_to_head(self, home_team_id: int, away_team_id: int, game_date: str = None) -> Dict:
         """
         Analyze head-to-head history for matchup features.
+
+        TEMPORAL DISCIPLINE: Use game_date to prevent temporal leakage
+        when computing H2H features for historical games.
 
         Args:
             home_team_id: Home team NBA ID
             away_team_id: Away team NBA ID
+            game_date: Optional date string (YYYY-MM-DD). Only uses H2H games
+                       BEFORE this date to prevent temporal leakage.
 
         Returns:
             Dictionary with H2H features
         """
         # Cache H2H results to avoid duplicate API calls
+        # Note: cache is per-instance, so same game_date context is assumed
         if self._h2h_cache is None:
-            self._h2h_cache = self.h2h_analyzer.analyze_h2h(home_team_id, away_team_id)
+            self._h2h_cache = self.h2h_analyzer.analyze_h2h(home_team_id, away_team_id, before_date=game_date)
         h2h = self._h2h_cache
 
         return {
@@ -1457,8 +1512,8 @@ class MatchupFeatureGenerator:
 
         # Add advanced matchup analysis
         if include_advanced:
-            # Head-to-head analysis
-            h2h_features = self.analyze_head_to_head(home_team_id, away_team_id)
+            # Head-to-head analysis - TEMPORAL DISCIPLINE: pass game_date
+            h2h_features = self.analyze_head_to_head(home_team_id, away_team_id, game_date=game_date)
             features.update(h2h_features)
 
             # Positional matchup analysis

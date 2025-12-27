@@ -577,6 +577,8 @@ Examples:
     parser.add_argument("--live", action="store_true", help="Include live API data (2024-25, 2025-26)")
     parser.add_argument("--include-playoffs", action="store_true", help="Include playoff games in training data")
     parser.add_argument("--data-dir", type=str, help="Directory containing CSV data files")
+    parser.add_argument("--unsafe-api", action="store_true",
+        help="Enable direct API training (NOT RECOMMENDED - temporal leakage risk)")
 
     args = parser.parse_args()
 
@@ -623,8 +625,25 @@ Examples:
         player_data = None
     else:
         # API PATH - Rate limited and slow, not recommended for production training
+        # TEMPORAL DISCIPLINE: Require explicit --unsafe-api flag
+        if not args.unsafe_api:
+            print("\n" + "=" * 70)
+            print("ERROR: Direct API training requires --unsafe-api flag")
+            print("=" * 70)
+            print("\nDirect API training is disabled by default because it risks")
+            print("temporal leakage (using future data to predict past games).")
+            print("\nRECOMMENDED approaches (point-in-time safe):")
+            print("  python3 train_models.py --kaggle --live   # Best: CSV + live data")
+            print("  python3 train_models.py --kaggle          # CSV data only")
+            print("  python3 train_models.py --use-database    # Pre-collected data")
+            print("\nIf you understand the risks and need API mode anyway:")
+            print("  python3 train_models.py --unsafe-api --games 20")
+            print("=" * 70 + "\n")
+            sys.exit(1)
+
         print("\n" + "=" * 70)
         print("WARNING: Using NBA API for data fetching (SLOW - rate limited)")
+        print("CAUTION: API mode may cause temporal leakage in features!")
         print("=" * 70)
         print("\nRECOMMENDED: Use --kaggle flag for faster, more reliable training:")
         print("  python3 train_models.py --kaggle --live")

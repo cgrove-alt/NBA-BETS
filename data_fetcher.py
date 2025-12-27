@@ -2,6 +2,26 @@
 NBA Data Fetcher
 
 Fetches NBA schedules, historical game data, team statistics, and player stats.
+
+=============================================================================
+TEMPORAL DISCIPLINE
+=============================================================================
+When training ML models, it is CRITICAL to avoid temporal leakage - using data
+from the future to predict the past. This module provides two approaches:
+
+1. LEAKAGE-SAFE functions (use these for training):
+   - fetch_team_statistics_before_date(team_id, season, before_date)
+   - fetch_head_to_head(..., date_to=game_date)
+   - fetch_historical_games(..., date_to=game_date)
+
+2. CURRENT-STATE functions (use only for live predictions):
+   - fetch_team_statistics(team_id, season) - returns full-season stats
+   - fetch_head_to_head(...) without date_to - includes all games
+
+When building features for historical games during training, ALWAYS use the
+leakage-safe variants with the game's date to ensure you only use data that
+was available at the time of the game.
+=============================================================================
 """
 
 import json
@@ -229,6 +249,10 @@ def fetch_team_statistics(team_id, season="2025-26"):
     """
     Fetch comprehensive team statistics.
 
+    WARNING: This function returns CURRENT (full-season) stats, which may cause
+    TEMPORAL LEAKAGE when used for training on historical games. For training,
+    use fetch_team_statistics_before_date() instead.
+
     Args:
         team_id: NBA team ID
         season: NBA season (e.g., "2025-26")
@@ -311,6 +335,148 @@ def fetch_team_statistics(team_id, season="2025-26"):
             # PTS is total points, divide by GP for average
             "pts_avg": (away_stats.get("PTS") or 0) / max(away_stats.get("GP") or 1, 1),
             "plus_minus": away_stats.get("PLUS_MINUS"),
+        },
+    }
+
+
+def fetch_team_statistics_before_date(team_id, season="2025-26", before_date=None):
+    """
+    TEMPORAL DISCIPLINE: Compute team stats from games BEFORE the specified date only.
+
+    This function prevents temporal leakage by only using data that would have been
+    available at the time of the game being predicted.
+
+    Args:
+        team_id: NBA team ID
+        season: NBA season (e.g., "2025-26")
+        before_date: Date string (YYYY-MM-DD format). Only include games BEFORE this date.
+                     If None, returns empty/zero stats.
+
+    Returns:
+        Dictionary with team statistics (same structure as fetch_team_statistics)
+    """
+    if before_date is None:
+        # No date specified - return empty stats to avoid leakage
+        return {
+            "team_id": team_id,
+            "season": season,
+            "overall": {
+                "games_played": 0,
+                "wins": 0,
+                "losses": 0,
+                "win_pct": 0.0,
+                "pts_avg": 0.0,
+                "reb_avg": 0.0,
+                "ast_avg": 0.0,
+                "stl_avg": 0.0,
+                "blk_avg": 0.0,
+                "tov_avg": 0.0,
+                "fg_pct": 0.0,
+                "fg3_pct": 0.0,
+                "ft_pct": 0.0,
+                "plus_minus": 0.0,
+                "off_rating": None,
+                "def_rating": None,
+                "net_rating": None,
+                "pace": None,
+            },
+            "home": {
+                "games_played": 0, "wins": 0, "losses": 0, "win_pct": 0.0,
+                "pts_avg": 0.0, "plus_minus": 0.0,
+            },
+            "away": {
+                "games_played": 0, "wins": 0, "losses": 0, "win_pct": 0.0,
+                "pts_avg": 0.0, "plus_minus": 0.0,
+            },
+        }
+
+    # Convert date to MM/DD/YYYY format for API
+    try:
+        date_obj = datetime.strptime(before_date, "%Y-%m-%d")
+        # Use day before to get games STRICTLY before this date
+        day_before = date_obj - timedelta(days=1)
+        date_to = day_before.strftime("%m/%d/%Y")
+    except ValueError:
+        # If date parsing fails, return empty stats
+        return fetch_team_statistics_before_date(team_id, season, None)
+
+    # Fetch games using date_to filter
+    games = fetch_historical_games(team_id=team_id, season=season, date_to=date_to)
+
+    if not games:
+        return fetch_team_statistics_before_date(team_id, season, None)
+
+    # Calculate averages from game-by-game data
+    total_games = len(games)
+    home_games = []
+    away_games = []
+
+    for g in games:
+        matchup = g.get("matchup", "")
+        is_home = " vs. " in matchup
+        if is_home:
+            home_games.append(g)
+        else:
+            away_games.append(g)
+
+    def calc_avg(game_list, key):
+        values = [g.get(key) for g in game_list if g.get(key) is not None]
+        return sum(values) / len(values) if values else 0.0
+
+    def count_wins(game_list):
+        return sum(1 for g in game_list if g.get("wl") == "W")
+
+    # Overall stats
+    overall_wins = count_wins(games)
+    overall_losses = total_games - overall_wins
+
+    # Home stats
+    home_wins = count_wins(home_games)
+    home_losses = len(home_games) - home_wins
+
+    # Away stats
+    away_wins = count_wins(away_games)
+    away_losses = len(away_games) - away_wins
+
+    return {
+        "team_id": team_id,
+        "season": season,
+        "overall": {
+            "games_played": total_games,
+            "wins": overall_wins,
+            "losses": overall_losses,
+            "win_pct": overall_wins / total_games if total_games > 0 else 0.0,
+            "pts_avg": calc_avg(games, "pts"),
+            "reb_avg": calc_avg(games, "reb"),
+            "ast_avg": calc_avg(games, "ast"),
+            "stl_avg": calc_avg(games, "stl"),
+            "blk_avg": calc_avg(games, "blk"),
+            "tov_avg": calc_avg(games, "tov"),
+            "fg_pct": calc_avg(games, "fg_pct"),
+            "fg3_pct": calc_avg(games, "fg3_pct"),
+            "ft_pct": calc_avg(games, "ft_pct"),
+            "plus_minus": calc_avg(games, "plus_minus"),
+            # Advanced stats not available from game logs - use None
+            "off_rating": None,
+            "def_rating": None,
+            "net_rating": None,
+            "pace": None,
+        },
+        "home": {
+            "games_played": len(home_games),
+            "wins": home_wins,
+            "losses": home_losses,
+            "win_pct": home_wins / len(home_games) if home_games else 0.0,
+            "pts_avg": calc_avg(home_games, "pts"),
+            "plus_minus": calc_avg(home_games, "plus_minus"),
+        },
+        "away": {
+            "games_played": len(away_games),
+            "wins": away_wins,
+            "losses": away_losses,
+            "win_pct": away_wins / len(away_games) if away_games else 0.0,
+            "pts_avg": calc_avg(away_games, "pts"),
+            "plus_minus": calc_avg(away_games, "plus_minus"),
         },
     }
 
@@ -510,20 +676,39 @@ def fetch_player_info(player_id):
     }
 
 
-def fetch_head_to_head(team1_id, team2_id, season="2025-26", last_n_games=10):
+def fetch_head_to_head(team1_id, team2_id, season="2025-26", last_n_games=10, date_to=None):
     """
     Fetch head-to-head game history between two teams.
+
+    TEMPORAL DISCIPLINE: Use date_to parameter to prevent temporal leakage
+    when computing H2H features for historical games.
 
     Args:
         team1_id: First team NBA ID
         team2_id: Second team NBA ID
         season: NBA season (can include multiple seasons like "2023-24,2025-26")
         last_n_games: Maximum number of games to return
+        date_to: Optional date cutoff (MM/DD/YYYY or YYYY-MM-DD format).
+                 Only returns games BEFORE this date.
 
     Returns:
         List of head-to-head game results
     """
     _rate_limiter.wait()
+
+    # Convert date format if needed (YYYY-MM-DD -> MM/DD/YYYY)
+    date_to_api = None
+    if date_to:
+        try:
+            if "-" in date_to and len(date_to) == 10:  # YYYY-MM-DD format
+                date_obj = datetime.strptime(date_to, "%Y-%m-%d")
+                # Use day before to get games STRICTLY before this date
+                day_before = date_obj - timedelta(days=1)
+                date_to_api = day_before.strftime("%m/%d/%Y")
+            else:
+                date_to_api = date_to
+        except ValueError:
+            pass  # Use None if parsing fails
 
     # Get team1's games
     game_finder = leaguegamefinder.LeagueGameFinder(
@@ -531,6 +716,7 @@ def fetch_head_to_head(team1_id, team2_id, season="2025-26", last_n_games=10):
         vs_team_id_nullable=team2_id,
         season_nullable=season,
         season_type_nullable="Regular Season",
+        date_to_nullable=date_to_api,
     )
     games_dict = game_finder.get_normalized_dict()
     games = games_dict.get("LeagueGameFinderResults", [])
