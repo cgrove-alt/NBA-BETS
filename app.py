@@ -1327,11 +1327,11 @@ class Orchestrator:
 
             prop_features = features.get(feature_key, {})
 
-            # Get predicted value
-            model_key = f"prop_{prop_type}"
-            if self.models_loaded and model_key in self.pipeline.models:
+            # Get predicted value - prefer line-aware classifiers
+            prop_model = self._get_prop_model(prop_type)
+            if prop_model is not None:
                 try:
-                    pred = self.pipeline.models[model_key].predict(prop_features, prop_line=line)
+                    pred = prop_model.predict(prop_features, prop_line=line)
                     predicted_value = pred.get("predicted_value", line)
                 except Exception:
                     predicted_value = self._feature_based_prop(prop_features, prop_type)
@@ -1371,6 +1371,37 @@ class Orchestrator:
                     ))
 
         return recommendations
+
+    def _get_prop_model(self, prop_type: str):
+        """
+        Get prop model, preferring line-aware classifiers.
+
+        Priority order:
+        1. player_{type}_line_classifier (line-aware, best for betting)
+        2. player_{type}_line_aware
+        3. prop_{type} (generic key)
+        4. player_{type} (legacy regression)
+
+        Returns:
+            Model instance or None if not found
+        """
+        if not self.models_loaded:
+            return None
+
+        # Priority order: line-aware models first
+        priority_keys = [
+            f"player_{prop_type}_line_classifier",
+            f"player_{prop_type}_line_aware",
+            f"prop_{prop_type}_line_aware",
+            f"prop_{prop_type}",
+            f"player_{prop_type}",
+        ]
+
+        for key in priority_keys:
+            if key in self.pipeline.models:
+                return self.pipeline.models[key]
+
+        return None
 
     def _feature_based_prop(self, features: Dict, prop_type: str) -> float:
         """Generate prop prediction from features without ML model."""

@@ -3285,10 +3285,31 @@ class ModelTrainingPipeline:
                     X_prop, y_prop = line_classifier.prepare_training_data(player_data)
 
                     if len(X_prop) > 0:
-                        results[f"prop_{prop_type}_line_aware"] = line_classifier.train(X_prop, y_prop)
+                        train_result = line_classifier.train(X_prop, y_prop)
+                        results[f"prop_{prop_type}_line_aware"] = train_result
+
+                        # Register under multiple keys for app.py compatibility
                         self.models[f"prop_{prop_type}_line_aware"] = line_classifier
+                        self.models[f"prop_{prop_type}"] = line_classifier  # Primary key for app.py
+                        self.models[f"player_{prop_type}_line_classifier"] = line_classifier
+
                         if save_models:
                             line_classifier.save_model()
+
+                        # Log comprehensive metrics with TrainingMetricsLogger
+                        prop_logger = TrainingMetricsLogger(f"prop_{prop_type}_line_aware", "classifier")
+                        prop_logger.metrics["accuracy"] = train_result.get("accuracy", 0)
+                        prop_logger.metrics["brier_score"] = train_result.get("brier_score", 0)
+                        prop_logger.metrics["auc_roc"] = train_result.get("auc_roc", 0)
+                        prop_logger.metrics["train_size"] = train_result.get("train_size", 0)
+                        prop_logger.metrics["test_size"] = train_result.get("test_size", 0)
+                        prop_logger.metrics["over_rate_test"] = train_result.get("over_rate_test", 0)
+                        prop_logger.metrics["calibrated"] = train_result.get("calibrated", False)
+                        prop_logger.metrics["line_stats"] = train_result.get("line_stats", {})
+                        prop_logger.metrics["prop_type"] = prop_type
+                        prop_logger.metrics["model_architecture"] = "LineAwarePropClassifier"
+                        prop_logger.save()
+                        print(f"  Metrics saved to training_metrics/prop_{prop_type}_line_aware_{prop_logger.timestamp}.json")
                 else:
                     # REGRESSION MODEL: Predicts stat value, requires conversion to probability
                     print(f"Training {prop_type.title()} Prop Model (Random Forest Regressor)")
@@ -3377,6 +3398,15 @@ class ModelTrainingPipeline:
             try:
                 model.load_model(filepath)
                 self.models[model_name] = model
+
+                # For line-aware prop classifiers, also register under prop_{type} key
+                # This ensures app.py can find them using the standard prop_{type} lookup
+                if "line_classifier" in model_name or "line_aware" in model_name:
+                    parts = model_name.split("_")
+                    if len(parts) > 1:
+                        prop_type = parts[1]  # Extract from player_{type}_line_classifier
+                        self.models[f"prop_{prop_type}"] = model
+                        print(f"  Registered {model_name} as prop_{prop_type} (line-aware preferred)")
             except Exception as e:
                 print(f"Error loading {filepath}: {e}")
 
