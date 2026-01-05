@@ -11,11 +11,13 @@ from the future to predict the past. This module provides two approaches:
 
 1. LEAKAGE-SAFE functions (use these for training):
    - fetch_team_statistics_before_date(team_id, season, before_date)
+   - fetch_player_stats_before_date(player_id, season, before_date) [NEW]
    - fetch_head_to_head(..., date_to=game_date)
    - fetch_historical_games(..., date_to=game_date)
 
 2. CURRENT-STATE functions (use only for live predictions):
    - fetch_team_statistics(team_id, season) - returns full-season stats
+   - fetch_player_stats(player_id, season) - returns full-season player stats
    - fetch_head_to_head(...) without date_to - includes all games
 
 When building features for historical games during training, ALWAYS use the
@@ -27,8 +29,15 @@ was available at the time of the game.
 import json
 import time
 import threading
+import hashlib
+import functools
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, Callable, Dict, Optional, TypeVar, Union
+
+# Type variable for generic return types
+T = TypeVar('T')
 
 try:
     from nba_api.stats.endpoints import (
@@ -50,6 +59,236 @@ except ImportError:
 
 # Rate limiting to avoid API throttling
 API_DELAY = 0.4  # seconds between API calls (reduced from 0.6 for faster props loading)
+
+# =============================================================================
+# RELIABILITY: Retry, Caching, and Fallback System
+# =============================================================================
+
+# Cache configuration
+CACHE_DIR = Path(__file__).parent / ".api_cache"
+CACHE_TTL_SECONDS = 3600  # 1 hour TTL for cached responses
+CACHE_ENABLED = True
+
+# Retry configuration
+MAX_RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_FACTOR = 2.0
+RETRY_INITIAL_DELAY = 1.0  # seconds
+
+
+def _get_cache_path(cache_key: str) -> Path:
+    """Get the file path for a cache entry."""
+    CACHE_DIR.mkdir(exist_ok=True)
+    # Create a safe filename from the cache key
+    key_hash = hashlib.md5(cache_key.encode()).hexdigest()
+    return CACHE_DIR / f"{key_hash}.json"
+
+
+def _read_from_cache(cache_key: str) -> Optional[Any]:
+    """Read data from disk cache if it exists and hasn't expired."""
+    if not CACHE_ENABLED:
+        return None
+
+    cache_path = _get_cache_path(cache_key)
+    if not cache_path.exists():
+        return None
+
+    try:
+        with open(cache_path, "r") as f:
+            cached = json.load(f)
+
+        # Check TTL
+        cached_at = cached.get("cached_at", 0)
+        if time.time() - cached_at > CACHE_TTL_SECONDS:
+            # Cache expired, delete it
+            cache_path.unlink(missing_ok=True)
+            return None
+
+        return cached.get("data")
+    except (json.JSONDecodeError, IOError, KeyError):
+        return None
+
+
+def _write_to_cache(cache_key: str, data: Any) -> None:
+    """Write data to disk cache."""
+    if not CACHE_ENABLED:
+        return
+
+    cache_path = _get_cache_path(cache_key)
+    try:
+        with open(cache_path, "w") as f:
+            json.dump({
+                "cached_at": time.time(),
+                "cache_key": cache_key,
+                "data": data,
+            }, f)
+    except (IOError, TypeError):
+        pass  # Fail silently - caching is best-effort
+
+
+def clear_cache(older_than_hours: float = 0) -> int:
+    """
+    Clear the API cache.
+
+    Args:
+        older_than_hours: Only clear entries older than this many hours.
+                          If 0, clears all cache entries.
+
+    Returns:
+        Number of cache entries removed.
+    """
+    if not CACHE_DIR.exists():
+        return 0
+
+    removed = 0
+    cutoff_time = time.time() - (older_than_hours * 3600) if older_than_hours > 0 else float('inf')
+
+    for cache_file in CACHE_DIR.glob("*.json"):
+        try:
+            if older_than_hours > 0:
+                with open(cache_file, "r") as f:
+                    cached = json.load(f)
+                    if cached.get("cached_at", 0) > cutoff_time:
+                        continue  # Not old enough to remove
+
+            cache_file.unlink()
+            removed += 1
+        except (IOError, json.JSONDecodeError):
+            try:
+                cache_file.unlink()
+                removed += 1
+            except IOError:
+                pass
+
+    return removed
+
+
+def retry_with_backoff(
+    max_attempts: int = MAX_RETRY_ATTEMPTS,
+    backoff_factor: float = RETRY_BACKOFF_FACTOR,
+    initial_delay: float = RETRY_INITIAL_DELAY,
+    exceptions: tuple = (Exception,),
+):
+    """
+    Decorator that retries a function with exponential backoff.
+
+    Args:
+        max_attempts: Maximum number of retry attempts
+        backoff_factor: Multiplier for delay after each failure
+        initial_delay: Initial delay in seconds before first retry
+        exceptions: Tuple of exception types to catch and retry on
+
+    Returns:
+        Decorated function with retry logic
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            delay = initial_delay
+            last_exception = None
+
+            for attempt in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    last_exception = e
+                    if attempt < max_attempts - 1:
+                        print(f"[Retry {attempt + 1}/{max_attempts}] {func.__name__} failed: {e}. Retrying in {delay:.1f}s...")
+                        time.sleep(delay)
+                        delay *= backoff_factor
+                    else:
+                        print(f"[Retry {attempt + 1}/{max_attempts}] {func.__name__} failed permanently: {e}")
+
+            # All retries exhausted - re-raise the last exception
+            raise last_exception
+
+        return wrapper
+    return decorator
+
+
+def with_cache(cache_key_fn: Callable[..., str]):
+    """
+    Decorator that adds disk caching to a function.
+
+    Args:
+        cache_key_fn: Function that generates a cache key from the function arguments
+
+    Returns:
+        Decorated function with caching
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            # Generate cache key
+            cache_key = cache_key_fn(*args, **kwargs)
+
+            # Check cache first
+            cached_data = _read_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
+
+            # Call the actual function
+            result = func(*args, **kwargs)
+
+            # Cache the result (only if it's not None/empty)
+            if result:
+                _write_to_cache(cache_key, result)
+
+            return result
+
+        return wrapper
+    return decorator
+
+
+# Fallback API client (lazy-loaded)
+_balldontlie_api = None
+
+
+def _get_balldontlie_api():
+    """Get or create the Balldontlie API client."""
+    global _balldontlie_api
+    if _balldontlie_api is None:
+        try:
+            from balldontlie_api import BalldontlieAPI
+            api_key = os.environ.get("BALLDONTLIE_API_KEY")
+            if api_key:
+                _balldontlie_api = BalldontlieAPI(api_key=api_key)
+            else:
+                _balldontlie_api = False  # No API key, disable fallback
+        except (ImportError, ValueError) as e:
+            print(f"Balldontlie fallback unavailable: {e}")
+            _balldontlie_api = False
+
+    return _balldontlie_api if _balldontlie_api else None
+
+
+def with_fallback(fallback_fn: Optional[Callable] = None):
+    """
+    Decorator that provides fallback to Balldontlie API on failure.
+
+    Args:
+        fallback_fn: Optional function to call as fallback. If None, no fallback is used.
+
+    Returns:
+        Decorated function with fallback logic
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                if fallback_fn is None:
+                    raise
+
+                print(f"[Fallback] {func.__name__} failed ({e}), trying fallback...")
+                try:
+                    return fallback_fn(*args, **kwargs)
+                except Exception as fallback_error:
+                    print(f"[Fallback] Fallback also failed: {fallback_error}")
+                    raise e  # Re-raise original exception
+
+        return wrapper
+    return decorator
 
 
 class ThreadSafeRateLimiter:
@@ -81,16 +320,62 @@ class ThreadSafeRateLimiter:
 _rate_limiter = ThreadSafeRateLimiter(API_DELAY)
 
 
-def fetch_todays_schedule():
-    """Fetch today's NBA schedule from the NBA API."""
+def _fallback_todays_schedule():
+    """Fallback: Fetch today's schedule using Balldontlie API."""
+    api = _get_balldontlie_api()
+    if not api:
+        raise RuntimeError("Balldontlie API not available for fallback")
+
     today = datetime.now().strftime("%Y-%m-%d")
+    games = api.get_todays_games()
 
-    print(f"Fetching NBA schedule for {today}...")
+    # Convert Balldontlie format to NBA API format
+    game_header = []
+    for game in games:
+        game_header.append({
+            "GAME_ID": str(game.get("id", "")),
+            "GAME_STATUS_TEXT": game.get("status", ""),
+            "GAME_DATE_EST": game.get("date", today),
+            "HOME_TEAM_ID": game.get("home_team", {}).get("id"),
+            "VISITOR_TEAM_ID": game.get("visitor_team", {}).get("id"),
+            "ARENA_NAME": "",
+            "LIVE_PERIOD": 0,
+            "LIVE_PC_TIME": "",
+            "NATL_TV_BROADCASTER_ABBREVIATION": "",
+        })
 
+    return {"GameHeader": game_header, "LineScore": []}, today
+
+
+@retry_with_backoff(max_attempts=3, exceptions=(Exception,))
+def _fetch_todays_schedule_nba_api():
+    """Fetch today's NBA schedule from the NBA API with retry logic."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    _rate_limiter.wait()
     scoreboard = scoreboardv2.ScoreboardV2(game_date=today)
     games_data = scoreboard.get_normalized_dict()
-
     return games_data, today
+
+
+def fetch_todays_schedule():
+    """
+    Fetch today's NBA schedule from the NBA API.
+
+    RELIABILITY: Includes retry logic and fallback to Balldontlie API.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    print(f"Fetching NBA schedule for {today}...")
+
+    try:
+        return _fetch_todays_schedule_nba_api()
+    except Exception as e:
+        print(f"[Fallback] NBA API failed ({e}), trying Balldontlie...")
+        try:
+            return _fallback_todays_schedule()
+        except Exception as fallback_error:
+            print(f"[Fallback] Balldontlie also failed: {fallback_error}")
+            # Return empty schedule rather than crashing
+            return {"GameHeader": [], "LineScore": []}, today
 
 
 def parse_game_details(games_data):
@@ -189,9 +474,31 @@ def get_player_id(player_name):
     return None
 
 
+def _historical_games_cache_key(team_id=None, season="2025-26", last_n_games=None, date_from=None, date_to=None):
+    """Generate cache key for historical games."""
+    return f"historical_games:{team_id}:{season}:{last_n_games}:{date_from}:{date_to}"
+
+
+@retry_with_backoff(max_attempts=3, exceptions=(Exception,))
+def _fetch_historical_games_api(team_id=None, season="2025-26", date_from=None, date_to=None):
+    """Raw API call with retry logic."""
+    _rate_limiter.wait()
+    game_finder = leaguegamefinder.LeagueGameFinder(
+        team_id_nullable=team_id,
+        season_nullable=season,
+        season_type_nullable="Regular Season",
+        date_from_nullable=date_from,
+        date_to_nullable=date_to,
+    )
+    games_df = game_finder.get_normalized_dict()
+    return games_df.get("LeagueGameFinderResults", [])
+
+
 def fetch_historical_games(team_id=None, season="2025-26", last_n_games=None, date_from=None, date_to=None):
     """
     Fetch historical game data for analysis.
+
+    RELIABILITY: Includes retry logic with exponential backoff and disk caching.
 
     Args:
         team_id: Optional team ID to filter games
@@ -203,18 +510,18 @@ def fetch_historical_games(team_id=None, season="2025-26", last_n_games=None, da
     Returns:
         List of game dictionaries with detailed stats
     """
-    _rate_limiter.wait()
+    # Check cache first
+    cache_key = _historical_games_cache_key(team_id, season, last_n_games, date_from, date_to)
+    cached = _read_from_cache(cache_key)
+    if cached is not None:
+        return cached
 
-    # Use LeagueGameFinder for all cases (more reliable)
-    game_finder = leaguegamefinder.LeagueGameFinder(
-        team_id_nullable=team_id,
-        season_nullable=season,
-        season_type_nullable="Regular Season",
-        date_from_nullable=date_from,
-        date_to_nullable=date_to,
-    )
-    games_df = game_finder.get_normalized_dict()
-    games = games_df.get("LeagueGameFinderResults", [])
+    # Fetch from API with retry
+    try:
+        games = _fetch_historical_games_api(team_id, season, date_from, date_to)
+    except Exception as e:
+        print(f"Warning: Failed to fetch historical games: {e}")
+        return []
 
     parsed_games = []
     for game in games:
@@ -242,7 +549,41 @@ def fetch_historical_games(team_id=None, season="2025-26", last_n_games=None, da
         }
         parsed_games.append(parsed_game)
 
+    # Cache successful result
+    if parsed_games:
+        _write_to_cache(cache_key, parsed_games)
+
     return parsed_games
+
+
+def _team_stats_cache_key(team_id, season="2025-26"):
+    """Generate cache key for team statistics."""
+    return f"team_stats:{team_id}:{season}"
+
+
+@retry_with_backoff(max_attempts=3, exceptions=(Exception,))
+def _fetch_team_stats_api(team_id, season="2025-26"):
+    """Raw API call for team stats with retry logic."""
+    _rate_limiter.wait()
+    team_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
+        team_id=team_id,
+        season=season,
+        season_type_all_star="Regular Season"
+    )
+    return team_stats.get_normalized_dict()
+
+
+@retry_with_backoff(max_attempts=3, exceptions=(Exception,))
+def _fetch_team_advanced_stats_api(team_id, season="2025-26"):
+    """Raw API call for team advanced stats with retry logic."""
+    _rate_limiter.wait()
+    advanced_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
+        team_id=team_id,
+        season=season,
+        season_type_all_star="Regular Season",
+        measure_type_detailed_defense="Advanced"
+    )
+    return advanced_stats.get_normalized_dict()
 
 
 def fetch_team_statistics(team_id, season="2025-26"):
@@ -253,6 +594,8 @@ def fetch_team_statistics(team_id, season="2025-26"):
     TEMPORAL LEAKAGE when used for training on historical games. For training,
     use fetch_team_statistics_before_date() instead.
 
+    RELIABILITY: Includes retry logic with exponential backoff and disk caching.
+
     Args:
         team_id: NBA team ID
         season: NBA season (e.g., "2025-26")
@@ -260,29 +603,25 @@ def fetch_team_statistics(team_id, season="2025-26"):
     Returns:
         Dictionary with team statistics
     """
-    _rate_limiter.wait()
+    # Check cache first
+    cache_key = _team_stats_cache_key(team_id, season)
+    cached = _read_from_cache(cache_key)
+    if cached is not None:
+        return cached
 
-    # Fetch base stats
-    team_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
-        team_id=team_id,
-        season=season,
-        season_type_all_star="Regular Season"
-    )
-    stats_dict = team_stats.get_normalized_dict()
+    # Fetch base stats with retry
+    try:
+        stats_dict = _fetch_team_stats_api(team_id, season)
+    except Exception as e:
+        print(f"Warning: Could not fetch team stats for {team_id}: {e}")
+        stats_dict = {}
 
     overall = stats_dict.get("OverallTeamDashboard", [{}])[0] if stats_dict.get("OverallTeamDashboard") else {}
     home_away = stats_dict.get("LocationTeamDashboard", [])
 
-    # Fetch advanced stats for ratings (OFF_RATING, DEF_RATING, NET_RATING, PACE)
-    _rate_limiter.wait()
+    # Fetch advanced stats for ratings with retry
     try:
-        advanced_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
-            team_id=team_id,
-            season=season,
-            season_type_all_star="Regular Season",
-            measure_type_detailed_defense="Advanced"
-        )
-        advanced_dict = advanced_stats.get_normalized_dict()
+        advanced_dict = _fetch_team_advanced_stats_api(team_id, season)
         advanced_overall = advanced_dict.get("OverallTeamDashboard", [{}])[0] if advanced_dict.get("OverallTeamDashboard") else {}
     except Exception as e:
         print(f"Warning: Could not fetch advanced stats for team {team_id}: {e}")
@@ -294,7 +633,7 @@ def fetch_team_statistics(team_id, season="2025-26"):
     # Calculate games played for dividing totals into averages
     gp = max(overall.get("GP") or 1, 1)  # Avoid division by zero
 
-    return {
+    result = {
         "team_id": team_id,
         "season": season,
         "overall": {
@@ -337,6 +676,12 @@ def fetch_team_statistics(team_id, season="2025-26"):
             "plus_minus": away_stats.get("PLUS_MINUS"),
         },
     }
+
+    # Cache successful result
+    if result.get("overall", {}).get("games_played"):
+        _write_to_cache(cache_key, result)
+
+    return result
 
 
 def fetch_team_statistics_before_date(team_id, season="2025-26", before_date=None):
@@ -503,9 +848,41 @@ def fetch_league_team_stats(season="2025-26"):
     return stats_dict.get("LeagueDashTeamStats", [])
 
 
+def _player_stats_cache_key(player_id, season="2025-26", last_n_games=None):
+    """Generate cache key for player statistics."""
+    return f"player_stats:{player_id}:{season}:{last_n_games}"
+
+
+@retry_with_backoff(max_attempts=3, exceptions=(Exception,))
+def _fetch_player_game_log_api(player_id, season="2025-26"):
+    """Raw API call for player game log with retry logic."""
+    _rate_limiter.wait()
+    game_log = playergamelog.PlayerGameLog(
+        player_id=player_id,
+        season=season,
+        season_type_all_star="Regular Season"
+    )
+    return game_log.get_normalized_dict()
+
+
+@retry_with_backoff(max_attempts=3, exceptions=(Exception,))
+def _fetch_player_dashboard_api(player_id, season="2025-26"):
+    """Raw API call for player dashboard with retry logic."""
+    _rate_limiter.wait()
+    player_dashboard = playerdashboardbygeneralsplits.PlayerDashboardByGeneralSplits(
+        player_id=player_id,
+        season=season,
+        season_type_playoffs="Regular Season",
+        per_mode_detailed="PerGame"
+    )
+    return player_dashboard.get_normalized_dict()
+
+
 def fetch_player_stats(player_id, season="2025-26", last_n_games=None):
     """
     Fetch player statistics and game log.
+
+    RELIABILITY: Includes retry logic with exponential backoff and disk caching.
 
     Args:
         player_id: NBA player ID
@@ -515,31 +892,30 @@ def fetch_player_stats(player_id, season="2025-26", last_n_games=None):
     Returns:
         Dictionary with player stats, game log, and last 5 game averages
     """
-    _rate_limiter.wait()
+    # Check cache first
+    cache_key = _player_stats_cache_key(player_id, season, last_n_games)
+    cached = _read_from_cache(cache_key)
+    if cached is not None:
+        return cached
 
-    # Get player game log
-    game_log = playergamelog.PlayerGameLog(
-        player_id=player_id,
-        season=season,
-        season_type_all_star="Regular Season"
-    )
-    log_dict = game_log.get_normalized_dict()
-    games = log_dict.get("PlayerGameLog", [])
+    # Get player game log with retry
+    try:
+        log_dict = _fetch_player_game_log_api(player_id, season)
+        games = log_dict.get("PlayerGameLog", [])
+    except Exception as e:
+        print(f"Warning: Could not fetch game log for player {player_id}: {e}")
+        games = []
 
     if last_n_games:
         games = games[:last_n_games]
 
-    _rate_limiter.wait()
-
-    # Get player dashboard stats (per-game averages)
-    player_dashboard = playerdashboardbygeneralsplits.PlayerDashboardByGeneralSplits(
-        player_id=player_id,
-        season=season,
-        season_type_playoffs="Regular Season",
-        per_mode_detailed="PerGame"
-    )
-    dashboard_dict = player_dashboard.get_normalized_dict()
-    overall = dashboard_dict.get("OverallPlayerDashboard", [{}])[0] if dashboard_dict.get("OverallPlayerDashboard") else {}
+    # Get player dashboard stats with retry
+    try:
+        dashboard_dict = _fetch_player_dashboard_api(player_id, season)
+        overall = dashboard_dict.get("OverallPlayerDashboard", [{}])[0] if dashboard_dict.get("OverallPlayerDashboard") else {}
+    except Exception as e:
+        print(f"Warning: Could not fetch dashboard for player {player_id}: {e}")
+        overall = {}
 
     parsed_games = []
     for game in games:
@@ -583,7 +959,7 @@ def fetch_player_stats(player_id, season="2025-26", last_n_games=None):
             "blk_avg": sum(g.get("blk", 0) or 0 for g in recent_games) / num_games,
         }
 
-    return {
+    result = {
         "player_id": player_id,
         "season": season,
         "season_averages": {
@@ -602,6 +978,165 @@ def fetch_player_stats(player_id, season="2025-26", last_n_games=None):
         },
         "last_5_averages": last_5_averages,
         "game_log": parsed_games,
+    }
+
+    # Cache successful result
+    if parsed_games:
+        _write_to_cache(cache_key, result)
+
+    return result
+
+
+def fetch_player_stats_before_date(player_id, season="2025-26", before_date=None, last_n_games=None):
+    """
+    TEMPORAL DISCIPLINE: Fetch player statistics using ONLY games BEFORE the specified date.
+
+    This is the leakage-safe version of fetch_player_stats(). Use this when training
+    on historical games to ensure you don't use future data to make predictions.
+
+    Args:
+        player_id: NBA player ID
+        season: NBA season (e.g., "2024-25")
+        before_date: Date string (YYYY-MM-DD). Only include games BEFORE this date.
+                     If None, returns empty data (safe default to prevent leakage).
+        last_n_games: Optional limit to last N games before the date
+
+    Returns:
+        Dictionary with player stats computed only from games before before_date
+    """
+    # Safety: If no date provided, return empty data to prevent accidental leakage
+    if before_date is None:
+        return {
+            "player_id": player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+            "games_used": 0,
+            "temporal_cutoff": None,
+        }
+
+    _rate_limiter.wait()
+
+    # Get player game log
+    try:
+        game_log = playergamelog.PlayerGameLog(
+            player_id=player_id,
+            season=season,
+            season_type_all_star="Regular Season"
+        )
+        log_dict = game_log.get_normalized_dict()
+        all_games = log_dict.get("PlayerGameLog", [])
+    except Exception as e:
+        print(f"Warning: Could not fetch game log for player {player_id}: {e}")
+        return {
+            "player_id": player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+            "games_used": 0,
+            "temporal_cutoff": before_date,
+        }
+
+    # Filter games to only those BEFORE the specified date
+    # Game log is sorted most recent first
+    filtered_games = []
+    for game in all_games:
+        game_date_str = game.get("GAME_DATE", "")
+        # GAME_DATE format varies: could be "DEC 25, 2024" or "2024-12-25"
+        try:
+            if "-" in game_date_str:
+                # ISO format: YYYY-MM-DD
+                game_date = game_date_str[:10]  # Take first 10 chars
+            else:
+                # Parse "DEC 25, 2024" format
+                from datetime import datetime as dt
+                parsed = dt.strptime(game_date_str, "%b %d, %Y")
+                game_date = parsed.strftime("%Y-%m-%d")
+
+            # Only include games BEFORE the cutoff date
+            if game_date < before_date:
+                filtered_games.append(game)
+        except Exception:
+            # If date parsing fails, skip game to be safe
+            continue
+
+    # Apply last_n_games limit if specified
+    if last_n_games and len(filtered_games) > last_n_games:
+        filtered_games = filtered_games[:last_n_games]
+
+    # Parse games into standard format
+    parsed_games = []
+    for game in filtered_games:
+        parsed_games.append({
+            "game_id": game.get("Game_ID"),
+            "game_date": game.get("GAME_DATE"),
+            "matchup": game.get("MATCHUP"),
+            "wl": game.get("WL"),
+            "min": game.get("MIN"),
+            "pts": game.get("PTS"),
+            "reb": game.get("REB"),
+            "ast": game.get("AST"),
+            "stl": game.get("STL"),
+            "blk": game.get("BLK"),
+            "tov": game.get("TOV"),
+            "fg_made": game.get("FGM"),
+            "fg_att": game.get("FGA"),
+            "fg_pct": game.get("FG_PCT"),
+            "fg3_made": game.get("FG3M"),
+            "fg3_att": game.get("FG3A"),
+            "fg3_pct": game.get("FG3_PCT"),
+            "ft_made": game.get("FTM"),
+            "ft_att": game.get("FTA"),
+            "ft_pct": game.get("FT_PCT"),
+            "plus_minus": game.get("PLUS_MINUS"),
+        })
+
+    # Calculate season averages from filtered games (not from API which has full season)
+    season_averages = {}
+    if parsed_games:
+        num_games = len(parsed_games)
+        season_averages = {
+            "games_played": num_games,
+            "min_avg": sum(g.get("min", 0) or 0 for g in parsed_games) / num_games,
+            "pts_avg": sum(g.get("pts", 0) or 0 for g in parsed_games) / num_games,
+            "reb_avg": sum(g.get("reb", 0) or 0 for g in parsed_games) / num_games,
+            "ast_avg": sum(g.get("ast", 0) or 0 for g in parsed_games) / num_games,
+            "stl_avg": sum(g.get("stl", 0) or 0 for g in parsed_games) / num_games,
+            "blk_avg": sum(g.get("blk", 0) or 0 for g in parsed_games) / num_games,
+            "tov_avg": sum(g.get("tov", 0) or 0 for g in parsed_games) / num_games,
+            "fg3_avg": sum(g.get("fg3_made", 0) or 0 for g in parsed_games) / num_games,
+            "fg_pct": sum(g.get("fg_pct", 0) or 0 for g in parsed_games) / num_games,
+            "fg3_pct": sum(g.get("fg3_pct", 0) or 0 for g in parsed_games) / num_games,
+            "ft_pct": sum(g.get("ft_pct", 0) or 0 for g in parsed_games) / num_games,
+            "plus_minus": sum(g.get("plus_minus", 0) or 0 for g in parsed_games) / num_games,
+        }
+
+    # Calculate last 5 games averages (from filtered data)
+    last_5_averages = {}
+    if len(parsed_games) >= 1:
+        recent_games = parsed_games[:5]  # Most recent 5 games (before cutoff)
+        num_recent = len(recent_games)
+        last_5_averages = {
+            "games_count": num_recent,
+            "pts_avg": sum(g.get("pts", 0) or 0 for g in recent_games) / num_recent,
+            "reb_avg": sum(g.get("reb", 0) or 0 for g in recent_games) / num_recent,
+            "ast_avg": sum(g.get("ast", 0) or 0 for g in recent_games) / num_recent,
+            "fg3_avg": sum(g.get("fg3_made", 0) or 0 for g in recent_games) / num_recent,
+            "min_avg": sum(g.get("min", 0) or 0 for g in recent_games) / num_recent,
+            "stl_avg": sum(g.get("stl", 0) or 0 for g in recent_games) / num_recent,
+            "blk_avg": sum(g.get("blk", 0) or 0 for g in recent_games) / num_recent,
+        }
+
+    return {
+        "player_id": player_id,
+        "season": season,
+        "season_averages": season_averages,
+        "last_5_averages": last_5_averages,
+        "game_log": parsed_games,
+        "games_used": len(parsed_games),
+        "temporal_cutoff": before_date,
     }
 
 
@@ -820,6 +1355,609 @@ def save_schedule_to_json(schedule, date, output_dir="."):
 
     print(f"Schedule saved to {filename}")
     return filename
+
+
+# =============================================================================
+# BALLDONTLIE API PRIMARY DATA LAYER
+# =============================================================================
+# These functions use Balldontlie API as primary source for faster, more
+# reliable data fetching. Falls back to NBA API if needed.
+# =============================================================================
+
+def _parse_minutes(min_str) -> float:
+    """Parse Balldontlie minutes string (e.g., '23:45') to float."""
+    if min_str is None:
+        return 0.0
+    if isinstance(min_str, (int, float)):
+        return float(min_str)
+    if isinstance(min_str, str):
+        try:
+            if ':' in min_str:
+                parts = min_str.split(':')
+                return float(parts[0]) + float(parts[1]) / 60.0
+            return float(min_str)
+        except (ValueError, IndexError):
+            return 0.0
+    return 0.0
+
+
+def _get_id_mapper():
+    """Get or create the ID mapper instance."""
+    global _id_mapper
+    try:
+        _id_mapper
+    except NameError:
+        _id_mapper = None
+
+    if _id_mapper is None:
+        try:
+            from id_mapping import IDMapper
+            _id_mapper = IDMapper()
+        except ImportError:
+            _id_mapper = False
+
+    return _id_mapper if _id_mapper else None
+
+
+def fetch_player_stats_bdl(
+    player_id: int = None,
+    player_name: str = None,
+    season: int = None,
+    last_n_games: int = None,
+) -> dict:
+    """
+    Fetch player statistics using Balldontlie API (primary source).
+
+    This is significantly faster than NBA API (600 req/min vs 5 req/min).
+
+    Args:
+        player_id: Balldontlie player ID (preferred)
+        player_name: Player name (will be converted to BDL ID)
+        season: Season year (e.g., 2024 for 2024-25 season)
+        last_n_games: Limit to last N games
+
+    Returns:
+        Dictionary with player stats matching fetch_player_stats() format
+    """
+    api = _get_balldontlie_api()
+    if not api:
+        # Fall back to NBA API
+        if player_name:
+            nba_pid = get_player_id(player_name)
+            if nba_pid:
+                return fetch_player_stats(nba_pid, last_n_games=last_n_games)
+        return {}
+
+    # Convert player name to Balldontlie ID if needed
+    bdl_player_id = player_id
+    if bdl_player_id is None and player_name:
+        mapper = _get_id_mapper()
+        if mapper:
+            bdl_player_id = mapper.get_player_id(player_name)
+
+    if bdl_player_id is None:
+        return {
+            "player_id": player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+        }
+
+    # Determine season
+    if season is None:
+        season = datetime.now().year if datetime.now().month > 9 else datetime.now().year - 1
+
+    # Fetch all game stats for the season
+    all_stats = api.get_player_stats_paginated(bdl_player_id, season)
+
+    if not all_stats:
+        return {
+            "player_id": bdl_player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+        }
+
+    # Sort by date descending (most recent first)
+    all_stats.sort(
+        key=lambda x: x.get("game", {}).get("date", ""),
+        reverse=True
+    )
+
+    # Apply last_n_games limit
+    games = all_stats[:last_n_games] if last_n_games else all_stats
+
+    # Convert to standard format
+    parsed_games = []
+    for stat in games:
+        game = stat.get("game", {})
+        parsed_games.append({
+            "game_id": game.get("id"),
+            "game_date": game.get("date", "")[:10] if game.get("date") else "",
+            "matchup": f"{game.get('visitor_team', {}).get('abbreviation', '')} @ {game.get('home_team', {}).get('abbreviation', '')}",
+            "wl": None,  # Not directly available
+            "min": _parse_minutes(stat.get("min")),
+            "pts": stat.get("pts"),
+            "reb": stat.get("reb"),
+            "ast": stat.get("ast"),
+            "stl": stat.get("stl"),
+            "blk": stat.get("blk"),
+            "tov": stat.get("turnover"),
+            "fg_made": stat.get("fgm"),
+            "fg_att": stat.get("fga"),
+            "fg_pct": stat.get("fg_pct"),
+            "fg3_made": stat.get("fg3m"),
+            "fg3_att": stat.get("fg3a"),
+            "fg3_pct": stat.get("fg3_pct"),
+            "ft_made": stat.get("ftm"),
+            "ft_att": stat.get("fta"),
+            "ft_pct": stat.get("ft_pct"),
+            "plus_minus": None,  # Not in BDL stats
+        })
+
+    # Calculate season averages
+    num_games = len(parsed_games)
+    season_averages = {}
+    if num_games > 0:
+        season_averages = {
+            "games_played": num_games,
+            "min_avg": sum(g.get("min") or 0 for g in parsed_games) / num_games,
+            "pts_avg": sum(g.get("pts") or 0 for g in parsed_games) / num_games,
+            "reb_avg": sum(g.get("reb") or 0 for g in parsed_games) / num_games,
+            "ast_avg": sum(g.get("ast") or 0 for g in parsed_games) / num_games,
+            "stl_avg": sum(g.get("stl") or 0 for g in parsed_games) / num_games,
+            "blk_avg": sum(g.get("blk") or 0 for g in parsed_games) / num_games,
+            "tov_avg": sum(g.get("tov") or 0 for g in parsed_games) / num_games,
+            "fg_pct": sum(g.get("fg_pct") or 0 for g in parsed_games) / num_games,
+            "fg3_pct": sum(g.get("fg3_pct") or 0 for g in parsed_games) / num_games,
+            "ft_pct": sum(g.get("ft_pct") or 0 for g in parsed_games) / num_games,
+        }
+
+    # Calculate last 5 averages
+    last_5_averages = {}
+    if num_games >= 1:
+        recent = parsed_games[:5]
+        n = len(recent)
+        last_5_averages = {
+            "games_count": n,
+            "pts_avg": sum(g.get("pts") or 0 for g in recent) / n,
+            "reb_avg": sum(g.get("reb") or 0 for g in recent) / n,
+            "ast_avg": sum(g.get("ast") or 0 for g in recent) / n,
+            "fg3_avg": sum(g.get("fg3_made") or 0 for g in recent) / n,
+            "min_avg": sum(g.get("min") or 0 for g in recent) / n,
+            "stl_avg": sum(g.get("stl") or 0 for g in recent) / n,
+            "blk_avg": sum(g.get("blk") or 0 for g in recent) / n,
+        }
+
+    return {
+        "player_id": bdl_player_id,
+        "season": season,
+        "season_averages": season_averages,
+        "last_5_averages": last_5_averages,
+        "game_log": parsed_games,
+    }
+
+
+def fetch_player_stats_before_date_bdl(
+    player_id: int = None,
+    player_name: str = None,
+    before_date: str = None,
+    season: int = None,
+    last_n_games: int = None,
+) -> dict:
+    """
+    TEMPORAL SAFE: Fetch player stats using only games BEFORE the specified date.
+
+    Uses Balldontlie API for speed (600 req/min).
+
+    Args:
+        player_id: Balldontlie player ID (preferred)
+        player_name: Player name (will be converted to BDL ID)
+        before_date: Date string (YYYY-MM-DD) - only include games before this
+        season: Season year
+        last_n_games: Limit to last N games before the date
+
+    Returns:
+        Dictionary with player stats (same format as fetch_player_stats)
+    """
+    # Safety: No date means return empty to prevent leakage
+    if before_date is None:
+        return {
+            "player_id": player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+            "games_used": 0,
+            "temporal_cutoff": None,
+        }
+
+    api = _get_balldontlie_api()
+    if not api:
+        # Fall back to NBA API
+        if player_name:
+            nba_pid = get_player_id(player_name)
+            if nba_pid:
+                season_str = f"{season}-{str(season+1)[-2:]}" if season else "2025-26"
+                return fetch_player_stats_before_date(nba_pid, season_str, before_date, last_n_games)
+        return {
+            "player_id": player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+            "games_used": 0,
+            "temporal_cutoff": before_date,
+        }
+
+    # Convert player name to Balldontlie ID if needed
+    bdl_player_id = player_id
+    if bdl_player_id is None and player_name:
+        mapper = _get_id_mapper()
+        if mapper:
+            bdl_player_id = mapper.get_player_id(player_name)
+
+    if bdl_player_id is None:
+        return {
+            "player_id": player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+            "games_used": 0,
+            "temporal_cutoff": before_date,
+        }
+
+    # Determine season
+    if season is None:
+        season = datetime.now().year if datetime.now().month > 9 else datetime.now().year - 1
+
+    # Fetch stats before date using Balldontlie's temporal method
+    filtered_stats = api.get_player_stats_before_date(
+        bdl_player_id,
+        before_date,
+        season,
+        last_n_games
+    )
+
+    if not filtered_stats:
+        return {
+            "player_id": bdl_player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+            "games_used": 0,
+            "temporal_cutoff": before_date,
+        }
+
+    # Convert to standard format
+    parsed_games = []
+    for stat in filtered_stats:
+        game = stat.get("game", {})
+        parsed_games.append({
+            "game_id": game.get("id"),
+            "game_date": game.get("date", "")[:10] if game.get("date") else "",
+            "matchup": f"{game.get('visitor_team', {}).get('abbreviation', '')} @ {game.get('home_team', {}).get('abbreviation', '')}",
+            "wl": None,
+            "min": _parse_minutes(stat.get("min")),
+            "pts": stat.get("pts"),
+            "reb": stat.get("reb"),
+            "ast": stat.get("ast"),
+            "stl": stat.get("stl"),
+            "blk": stat.get("blk"),
+            "tov": stat.get("turnover"),
+            "fg_made": stat.get("fgm"),
+            "fg_att": stat.get("fga"),
+            "fg_pct": stat.get("fg_pct"),
+            "fg3_made": stat.get("fg3m"),
+            "fg3_att": stat.get("fg3a"),
+            "fg3_pct": stat.get("fg3_pct"),
+            "ft_made": stat.get("ftm"),
+            "ft_att": stat.get("fta"),
+            "ft_pct": stat.get("ft_pct"),
+            "plus_minus": None,
+        })
+
+    # Calculate averages
+    num_games = len(parsed_games)
+    season_averages = {}
+    if num_games > 0:
+        season_averages = {
+            "games_played": num_games,
+            "min_avg": sum(g.get("min") or 0 for g in parsed_games) / num_games,
+            "pts_avg": sum(g.get("pts") or 0 for g in parsed_games) / num_games,
+            "reb_avg": sum(g.get("reb") or 0 for g in parsed_games) / num_games,
+            "ast_avg": sum(g.get("ast") or 0 for g in parsed_games) / num_games,
+            "stl_avg": sum(g.get("stl") or 0 for g in parsed_games) / num_games,
+            "blk_avg": sum(g.get("blk") or 0 for g in parsed_games) / num_games,
+            "tov_avg": sum(g.get("tov") or 0 for g in parsed_games) / num_games,
+            "fg3_avg": sum(g.get("fg3_made") or 0 for g in parsed_games) / num_games,
+            "fg_pct": sum(g.get("fg_pct") or 0 for g in parsed_games) / num_games,
+            "fg3_pct": sum(g.get("fg3_pct") or 0 for g in parsed_games) / num_games,
+            "ft_pct": sum(g.get("ft_pct") or 0 for g in parsed_games) / num_games,
+        }
+
+    last_5_averages = {}
+    if num_games >= 1:
+        recent = parsed_games[:5]
+        n = len(recent)
+        last_5_averages = {
+            "games_count": n,
+            "pts_avg": sum(g.get("pts") or 0 for g in recent) / n,
+            "reb_avg": sum(g.get("reb") or 0 for g in recent) / n,
+            "ast_avg": sum(g.get("ast") or 0 for g in recent) / n,
+            "fg3_avg": sum(g.get("fg3_made") or 0 for g in recent) / n,
+            "min_avg": sum(g.get("min") or 0 for g in recent) / n,
+            "stl_avg": sum(g.get("stl") or 0 for g in recent) / n,
+            "blk_avg": sum(g.get("blk") or 0 for g in recent) / n,
+        }
+
+    return {
+        "player_id": bdl_player_id,
+        "season": season,
+        "season_averages": season_averages,
+        "last_5_averages": last_5_averages,
+        "game_log": parsed_games,
+        "games_used": num_games,
+        "temporal_cutoff": before_date,
+    }
+
+
+def fetch_season_averages_bdl(
+    player_ids: list = None,
+    player_names: list = None,
+    season: int = None,
+) -> dict:
+    """
+    Fetch season averages for multiple players using Balldontlie API.
+
+    Much faster than NBA API for batch lookups.
+
+    Args:
+        player_ids: List of Balldontlie player IDs
+        player_names: List of player names (will be converted to IDs)
+        season: Season year
+
+    Returns:
+        Dictionary mapping player_id -> season averages
+    """
+    api = _get_balldontlie_api()
+    if not api:
+        return {}
+
+    # Convert names to IDs if needed
+    bdl_ids = list(player_ids) if player_ids else []
+    if player_names:
+        mapper = _get_id_mapper()
+        if mapper:
+            for name in player_names:
+                pid = mapper.get_player_id(name)
+                if pid and pid not in bdl_ids:
+                    bdl_ids.append(pid)
+
+    if not bdl_ids:
+        return {}
+
+    # Determine season
+    if season is None:
+        season = datetime.now().year if datetime.now().month > 9 else datetime.now().year - 1
+
+    # Fetch season averages from Balldontlie
+    averages = api.get_season_averages(season=season, player_ids=bdl_ids)
+
+    # Convert to dictionary keyed by player_id
+    result = {}
+    for avg in averages:
+        pid = avg.get("player_id")
+        if pid:
+            result[pid] = {
+                "games_played": avg.get("games_played"),
+                "min_avg": avg.get("min"),
+                "pts_avg": avg.get("pts"),
+                "reb_avg": avg.get("reb"),
+                "ast_avg": avg.get("ast"),
+                "stl_avg": avg.get("stl"),
+                "blk_avg": avg.get("blk"),
+                "tov_avg": avg.get("turnover"),
+                "fg_pct": avg.get("fg_pct"),
+                "fg3_pct": avg.get("fg3_pct"),
+                "ft_pct": avg.get("ft_pct"),
+            }
+
+    return result
+
+
+def fetch_injuries_bdl(
+    team_abbrev: str = None,
+    player_names: list = None,
+) -> list:
+    """
+    Fetch current NBA injuries using Balldontlie API.
+
+    Args:
+        team_abbrev: Filter by team abbreviation
+        player_names: Filter by specific player names
+
+    Returns:
+        List of injury dictionaries with player info and status
+    """
+    api = _get_balldontlie_api()
+    if not api:
+        return []
+
+    # Get team ID if filtering by team
+    team_ids = None
+    if team_abbrev:
+        from id_mapping import TEAM_ABBREV_TO_BDL
+        tid = TEAM_ABBREV_TO_BDL.get(team_abbrev.upper())
+        if tid:
+            team_ids = [tid]
+
+    # Fetch injuries
+    injuries = api.get_injuries(team_ids=team_ids)
+
+    result = []
+    for inj in injuries:
+        player = inj.get("player", {})
+        team = inj.get("team", {}) or player.get("team", {})
+
+        injury_info = {
+            "player_id": player.get("id"),
+            "player_name": f"{player.get('first_name', '')} {player.get('last_name', '')}".strip(),
+            "team_id": team.get("id"),
+            "team_abbrev": team.get("abbreviation"),
+            "status": inj.get("status", ""),
+            "comment": inj.get("comment", ""),
+            "date": inj.get("date", ""),
+        }
+
+        # Filter by player names if specified
+        if player_names:
+            if injury_info["player_name"].lower() not in [n.lower() for n in player_names]:
+                continue
+
+        result.append(injury_info)
+
+    return result
+
+
+def get_player_injury_status(player_name: str) -> dict:
+    """
+    Check if a specific player is injured.
+
+    Args:
+        player_name: Player full name
+
+    Returns:
+        Dictionary with injury status or None if healthy
+    """
+    injuries = fetch_injuries_bdl()
+
+    name_lower = player_name.lower()
+    for inj in injuries:
+        if inj.get("player_name", "").lower() == name_lower:
+            return inj
+
+    return None
+
+
+# =============================================================================
+# UNIFIED DATA FUNCTIONS (Auto-select best source)
+# =============================================================================
+
+def fetch_player_stats_auto(
+    player_id: int = None,
+    player_name: str = None,
+    season: str = None,
+    last_n_games: int = None,
+    prefer_bdl: bool = True,
+) -> dict:
+    """
+    Fetch player stats, automatically choosing the best data source.
+
+    Prefers Balldontlie (faster) but falls back to NBA API if needed.
+
+    Args:
+        player_id: Player ID (NBA API or Balldontlie depending on prefer_bdl)
+        player_name: Player name (works with either source)
+        season: Season (e.g., "2025-26" or 2025)
+        last_n_games: Limit to last N games
+        prefer_bdl: If True, try Balldontlie first
+
+    Returns:
+        Player stats dictionary
+    """
+    if prefer_bdl:
+        # Try Balldontlie first
+        # Pass player_id as-is (Balldontlie IDs can be large like 17896075)
+        result = fetch_player_stats_bdl(
+            player_id=player_id,
+            player_name=player_name,
+            last_n_games=last_n_games,
+        )
+        if result.get("game_log"):
+            return result
+
+    # Fall back to NBA API
+    nba_id = player_id
+    if player_name and not nba_id:
+        nba_id = get_player_id(player_name)
+
+    if nba_id:
+        return fetch_player_stats(nba_id, season=season or "2025-26", last_n_games=last_n_games)
+
+    return {}
+
+
+def fetch_player_stats_before_date_auto(
+    player_id: int = None,
+    player_name: str = None,
+    before_date: str = None,
+    season: str = None,
+    last_n_games: int = None,
+    prefer_bdl: bool = True,
+) -> dict:
+    """
+    TEMPORAL SAFE: Fetch player stats before a date, auto-selecting source.
+
+    Args:
+        player_id: Player ID
+        player_name: Player name
+        before_date: Date cutoff (YYYY-MM-DD)
+        season: Season
+        last_n_games: Limit games
+        prefer_bdl: Prefer Balldontlie API
+
+    Returns:
+        Player stats dictionary with temporal safety
+    """
+    if before_date is None:
+        return {
+            "player_id": player_id,
+            "season": season,
+            "season_averages": {},
+            "last_5_averages": {},
+            "game_log": [],
+            "games_used": 0,
+            "temporal_cutoff": None,
+        }
+
+    if prefer_bdl:
+        # Pass player_id as-is (Balldontlie IDs can be large like 17896075)
+        result = fetch_player_stats_before_date_bdl(
+            player_id=player_id,
+            player_name=player_name,
+            before_date=before_date,
+            last_n_games=last_n_games,
+        )
+        if result.get("games_used", 0) > 0:
+            return result
+
+    # Fall back to NBA API
+    nba_id = player_id
+    if player_name and not nba_id:
+        nba_id = get_player_id(player_name)
+
+    if nba_id:
+        return fetch_player_stats_before_date(
+            nba_id,
+            season=season or "2025-26",
+            before_date=before_date,
+            last_n_games=last_n_games
+        )
+
+    return {
+        "player_id": player_id,
+        "season": season,
+        "season_averages": {},
+        "last_5_averages": {},
+        "game_log": [],
+        "games_used": 0,
+        "temporal_cutoff": before_date,
+    }
 
 
 def main():

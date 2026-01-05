@@ -17,16 +17,29 @@ game_date parameter to prevent temporal leakage. Key principles:
 
 1. ALWAYS pass game_date when generating features for historical games
 2. Use fetch_team_statistics_before_date() instead of fetch_team_statistics()
-3. Use date_to parameter with fetch_historical_games() and fetch_head_to_head()
-4. Never include the target game's data in its own features
+3. Use fetch_player_stats_before_date() instead of fetch_player_stats()
+4. Use date_to parameter with fetch_historical_games() and fetch_head_to_head()
+5. Never include the target game's data in its own features
 
 Functions that support temporal discipline (pass game_date):
+
+TEAM FEATURES:
 - generate_game_features(home, away, game_date=...)
 - generate_team_features(team_id, game_date=...)
 - calculate_home_advantage(team_id, game_date=...)
 - calculate_rest_and_fatigue(team_id, game_date=...)
 - analyze_h2h(team1, team2, before_date=...)
 - analyze_head_to_head(home, away, game_date=...)
+
+PLAYER PROP FEATURES (NEW - temporal-safe):
+- generate_points_prop_features(player_id, ..., game_date=...)
+- generate_rebounds_prop_features(player_id, ..., game_date=...)
+- generate_assists_prop_features(player_id, ..., game_date=...)
+- generate_threes_prop_features(player_id, ..., game_date=...)
+- generate_pra_prop_features(player_id, ..., game_date=...)
+- calculate_player_recent_form(player_id, ..., game_date=...)
+- calculate_opponent_defensive_context(opp_id, ..., game_date=...)
+- analyze_player_vs_team_history(player_id, opp_id, game_date=...)
 =============================================================================
 """
 
@@ -41,12 +54,21 @@ from data_fetcher import (
     fetch_team_statistics_before_date,
     fetch_historical_games,
     fetch_player_stats,
+    fetch_player_stats_before_date,  # NBA API temporal-safe
     fetch_league_team_stats,
     fetch_team_roster,
     fetch_head_to_head,
     fetch_player_vs_team,
     get_team_id,
     get_player_id,
+    # NEW: Balldontlie API primary data layer (faster, 600 req/min)
+    fetch_player_stats_bdl,
+    fetch_player_stats_before_date_bdl,
+    fetch_player_stats_auto,
+    fetch_player_stats_before_date_auto,
+    fetch_season_averages_bdl,
+    fetch_injuries_bdl,
+    get_player_injury_status,
 )
 
 
@@ -477,6 +499,95 @@ class InjuryReportManager:
     def __init__(self, season="2025-26"):
         self.season = season
         self._injury_cache = {}
+        self._all_injuries_fetched = False
+
+    def fetch_all_injuries(self) -> List[Dict]:
+        """
+        Fetch all current NBA injuries from Balldontlie API.
+
+        This is the primary way to get injury data - much better than
+        manual web scraping or hardcoded data.
+
+        Returns:
+            List of all injury reports
+        """
+        if self._all_injuries_fetched and self._injury_cache:
+            # Return cached data
+            all_injuries = []
+            for team_injuries in self._injury_cache.values():
+                all_injuries.extend(team_injuries)
+            return all_injuries
+
+        try:
+            injuries = fetch_injuries_bdl()
+            if injuries:
+                # Organize by team
+                for inj in injuries:
+                    team_id = inj.get("team_id")
+                    if team_id:
+                        if team_id not in self._injury_cache:
+                            self._injury_cache[team_id] = []
+                        # Convert to standard format
+                        injury_data = {
+                            "player_id": inj.get("player_id"),
+                            "player_name": inj.get("player_name"),
+                            "status": inj.get("status", "").lower(),
+                            "injury": inj.get("comment", ""),
+                            "date": inj.get("date", ""),
+                        }
+                        self._injury_cache[team_id].append(injury_data)
+
+                self._all_injuries_fetched = True
+                return injuries
+        except Exception as e:
+            pass
+
+        return []
+
+    def fetch_team_injuries(self, team_abbrev: str) -> List[Dict]:
+        """
+        Fetch injuries for a specific team from Balldontlie API.
+
+        Args:
+            team_abbrev: Team abbreviation (e.g., "LAL", "BOS")
+
+        Returns:
+            List of injury dictionaries for the team
+        """
+        try:
+            injuries = fetch_injuries_bdl(team_abbrev=team_abbrev)
+            if injuries:
+                # Cache and convert to standard format
+                from id_mapping import TEAM_ABBREV_TO_BDL
+                team_id = TEAM_ABBREV_TO_BDL.get(team_abbrev.upper())
+                if team_id:
+                    self._injury_cache[team_id] = []
+                    for inj in injuries:
+                        injury_data = {
+                            "player_id": inj.get("player_id"),
+                            "player_name": inj.get("player_name"),
+                            "status": inj.get("status", "").lower(),
+                            "injury": inj.get("comment", ""),
+                            "date": inj.get("date", ""),
+                        }
+                        self._injury_cache[team_id].append(injury_data)
+                return injuries
+        except Exception:
+            pass
+
+        return []
+
+    def is_player_injured(self, player_name: str) -> Optional[Dict]:
+        """
+        Check if a specific player is injured.
+
+        Args:
+            player_name: Player full name
+
+        Returns:
+            Injury dict if injured, None if healthy
+        """
+        return get_player_injury_status(player_name)
 
     def set_injury_report(self, team_id: int, injuries: List[Dict]):
         """
@@ -1702,21 +1813,30 @@ class PlayerPropFeatureGenerator:
             pass
         return {}
 
-    def calculate_opponent_defensive_context(self, opponent_team_id: int, player_position: str = None) -> Dict:
+    def calculate_opponent_defensive_context(self, opponent_team_id: int, player_position: str = None, game_date: str = None) -> Dict:
         """
         Calculate opponent's defensive context for player prop predictions.
 
         This is CRITICAL for accurate props - a player facing a bad defense
         will typically score more than against a good defense.
 
+        TEMPORAL DISCIPLINE: Pass game_date when training on historical games
+        to prevent using future opponent stats.
+
         Args:
             opponent_team_id: Opponent team NBA ID
             player_position: Player's position (G, F, C) for position-specific analysis
+            game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
 
         Returns:
             Dictionary with opponent defensive metrics
         """
-        opp_stats = fetch_team_statistics(opponent_team_id, self.season)
+        # Use temporal-safe function when game_date is provided (for training)
+        if game_date:
+            opp_stats = fetch_team_statistics_before_date(opponent_team_id, self.season, game_date)
+        else:
+            # For live predictions, use current stats
+            opp_stats = fetch_team_statistics(opponent_team_id, self.season)
         opp_overall = opp_stats.get("overall", {})
 
         # Base defensive metrics
@@ -1757,18 +1877,44 @@ class PlayerPropFeatureGenerator:
             "pace_factor": pace / 100,  # Higher pace = more opportunities
         }
 
-    def analyze_player_vs_team_history(self, player_id: int, opponent_team_id: int) -> Dict:
+    def analyze_player_vs_team_history(self, player_id: int, opponent_team_id: int, game_date: str = None) -> Dict:
         """
         Analyze player's historical performance against a specific team.
+
+        TEMPORAL DISCIPLINE: Pass game_date when training on historical games
+        to filter out games that occurred AFTER the prediction date.
 
         Args:
             player_id: NBA player ID
             opponent_team_id: Opponent team NBA ID
+            game_date: Date string (YYYY-MM-DD) for temporal filtering (training only)
 
         Returns:
             Dictionary with player vs team analysis
         """
         vs_games = fetch_player_vs_team(player_id, opponent_team_id, self.season, last_n_games=10)
+
+        # TEMPORAL DISCIPLINE: Filter games to only those before game_date
+        if game_date and vs_games:
+            filtered_games = []
+            for game in vs_games:
+                game_date_str = game.get("game_date", "")
+                try:
+                    # Handle different date formats
+                    if "-" in str(game_date_str):
+                        parsed_date = str(game_date_str)[:10]
+                    else:
+                        # Parse "DEC 25, 2024" format
+                        from datetime import datetime as dt
+                        parsed = dt.strptime(str(game_date_str), "%b %d, %Y")
+                        parsed_date = parsed.strftime("%Y-%m-%d")
+
+                    if parsed_date < game_date:
+                        filtered_games.append(game)
+                except Exception:
+                    # If date parsing fails, skip this game to be safe
+                    continue
+            vs_games = filtered_games
 
         if not vs_games:
             return {
@@ -1927,18 +2073,33 @@ class PlayerPropFeatureGenerator:
             "recent_fga_avg": recent_fga_avg,
         }
 
-    def calculate_player_recent_form(self, player_id, last_n_games=5):
+    def calculate_player_recent_form(self, player_id, last_n_games=5, game_date: str = None):
         """
         Calculate player's recent performance.
 
+        TEMPORAL DISCIPLINE: Pass game_date when training on historical games
+        to ensure only games BEFORE that date are used.
+
         Args:
-            player_id: NBA player ID
+            player_id: Balldontlie or NBA player ID (auto-detected)
             last_n_games: Number of recent games
+            game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
 
         Returns:
             Dictionary with recent stats
         """
-        stats = fetch_player_stats(player_id, self.season, last_n_games)
+        # Use auto-selecting functions that prefer Balldontlie (faster)
+        if game_date:
+            stats = fetch_player_stats_before_date_auto(
+                player_id=player_id,
+                before_date=game_date,
+                last_n_games=last_n_games
+            )
+        else:
+            stats = fetch_player_stats_auto(
+                player_id=player_id,
+                last_n_games=last_n_games
+            )
         games = stats.get("game_log", [])
 
         if not games:
@@ -1967,21 +2128,36 @@ class PlayerPropFeatureGenerator:
             "pts_plus_reb_plus_ast_avg": np.mean([p + r + a for p, r, a in zip(pts, reb, ast)]),
         }
 
-    def generate_points_prop_features(self, player_id, opponent_team_id=None, last_n_games=10):
+    def generate_points_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
         """
         Generate features for player points prop.
 
+        TEMPORAL DISCIPLINE: Pass game_date when training on historical games
+        to prevent using future data in features.
+
         Args:
-            player_id: NBA player ID
+            player_id: Balldontlie or NBA player ID (auto-detected)
             opponent_team_id: Optional opponent team ID for matchup context
             last_n_games: Recent games for form calculation
+            game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
 
         Returns:
             Dictionary with features for points prop prediction
         """
-        stats = fetch_player_stats(player_id, self.season, last_n_games)
+        # Use auto-selecting functions that prefer Balldontlie (faster, 600 req/min)
+        if game_date:
+            stats = fetch_player_stats_before_date_auto(
+                player_id=player_id,
+                before_date=game_date,
+                last_n_games=last_n_games
+            )
+        else:
+            stats = fetch_player_stats_auto(
+                player_id=player_id,
+                last_n_games=last_n_games
+            )
         season_avg = stats.get("season_averages", {})
-        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5)
+        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
 
         features = {
             "player_id": player_id,
@@ -2009,16 +2185,16 @@ class PlayerPropFeatureGenerator:
 
         # Add opponent context if available
         if opponent_team_id:
-            # NEW: Use enhanced opponent defensive context
-            opp_context = self.calculate_opponent_defensive_context(opponent_team_id)
+            # NEW: Use enhanced opponent defensive context (with temporal safety)
+            opp_context = self.calculate_opponent_defensive_context(opponent_team_id, game_date=game_date)
             features["opp_def_rating"] = opp_context.get("opp_def_rating", 110)
             features["opp_pace"] = opp_context.get("opp_pace", 100)
             features["opp_def_strength"] = opp_context.get("opp_def_strength", 0)
             features["expected_pts_boost"] = opp_context.get("expected_pts_boost", 0)
             features["pace_factor"] = opp_context.get("pace_factor", 1.0)
 
-            # Add player vs team history
-            vs_team = self.analyze_player_vs_team_history(player_id, opponent_team_id)
+            # Add player vs team history (with temporal safety)
+            vs_team = self.analyze_player_vs_team_history(player_id, opponent_team_id, game_date=game_date)
             features["vs_team_games"] = vs_team.get("vs_team_games", 0)
             features["vs_team_pts_avg"] = vs_team.get("vs_team_pts_avg", 0)
             features["vs_team_pts_std"] = vs_team.get("vs_team_pts_std", 0)
@@ -2070,21 +2246,35 @@ class PlayerPropFeatureGenerator:
 
         return features
 
-    def generate_rebounds_prop_features(self, player_id, opponent_team_id=None, last_n_games=10):
+    def generate_rebounds_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
         """
         Generate features for player rebounds prop.
 
+        TEMPORAL DISCIPLINE: Pass game_date when training on historical games.
+
         Args:
-            player_id: NBA player ID
+            player_id: Balldontlie or NBA player ID (auto-detected)
             opponent_team_id: Optional opponent team ID
             last_n_games: Recent games for form calculation
+            game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
 
         Returns:
             Dictionary with features for rebounds prop prediction
         """
-        stats = fetch_player_stats(player_id, self.season, last_n_games)
+        # Use auto-selecting functions that prefer Balldontlie (faster, 600 req/min)
+        if game_date:
+            stats = fetch_player_stats_before_date_auto(
+                player_id=player_id,
+                before_date=game_date,
+                last_n_games=last_n_games
+            )
+        else:
+            stats = fetch_player_stats_auto(
+                player_id=player_id,
+                last_n_games=last_n_games
+            )
         season_avg = stats.get("season_averages", {})
-        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5)
+        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
 
         features = {
             "player_id": player_id,
@@ -2103,7 +2293,11 @@ class PlayerPropFeatureGenerator:
         }
 
         if opponent_team_id:
-            opp_stats = fetch_team_statistics(opponent_team_id, self.season)
+            # Use temporal-safe function when game_date is provided
+            if game_date:
+                opp_stats = fetch_team_statistics_before_date(opponent_team_id, self.season, game_date)
+            else:
+                opp_stats = fetch_team_statistics(opponent_team_id, self.season)
             opp_overall = opp_stats.get("overall", {})
             features["opp_reb_avg"] = opp_overall.get("reb_avg", 0) or 0
             features["opp_pace"] = opp_overall.get("pace", 0) or 0
@@ -2120,21 +2314,35 @@ class PlayerPropFeatureGenerator:
 
         return features
 
-    def generate_assists_prop_features(self, player_id, opponent_team_id=None, last_n_games=10):
+    def generate_assists_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
         """
         Generate features for player assists prop.
 
+        TEMPORAL DISCIPLINE: Pass game_date when training on historical games.
+
         Args:
-            player_id: NBA player ID
+            player_id: Balldontlie or NBA player ID (auto-detected)
             opponent_team_id: Optional opponent team ID
             last_n_games: Recent games for form calculation
+            game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
 
         Returns:
             Dictionary with features for assists prop prediction
         """
-        stats = fetch_player_stats(player_id, self.season, last_n_games)
+        # Use auto-selecting functions that prefer Balldontlie (faster, 600 req/min)
+        if game_date:
+            stats = fetch_player_stats_before_date_auto(
+                player_id=player_id,
+                before_date=game_date,
+                last_n_games=last_n_games
+            )
+        else:
+            stats = fetch_player_stats_auto(
+                player_id=player_id,
+                last_n_games=last_n_games
+            )
         season_avg = stats.get("season_averages", {})
-        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5)
+        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
 
         features = {
             "player_id": player_id,
@@ -2176,21 +2384,27 @@ class PlayerPropFeatureGenerator:
 
         return features
 
-    def generate_threes_prop_features(self, player_id, opponent_team_id=None, last_n_games=10):
+    def generate_threes_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
         """
         Generate features for player 3-pointers made prop.
+
+        TEMPORAL DISCIPLINE: Pass game_date when training on historical games.
 
         Args:
             player_id: NBA player ID
             opponent_team_id: Optional opponent team ID
             last_n_games: Recent games for form calculation
+            game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
 
         Returns:
             Dictionary with features for 3-pointers prop prediction
         """
-        stats = fetch_player_stats(player_id, self.season, last_n_games)
+        if game_date:
+            stats = fetch_player_stats_before_date(player_id, self.season, game_date, last_n_games)
+        else:
+            stats = fetch_player_stats(player_id, self.season, last_n_games)
         season_avg = stats.get("season_averages", {})
-        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5)
+        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
 
         features = {
             "player_id": player_id,
@@ -2206,7 +2420,11 @@ class PlayerPropFeatureGenerator:
         }
 
         if opponent_team_id:
-            opp_stats = fetch_team_statistics(opponent_team_id, self.season)
+            # Use temporal-safe function when game_date is provided
+            if game_date:
+                opp_stats = fetch_team_statistics_before_date(opponent_team_id, self.season, game_date)
+            else:
+                opp_stats = fetch_team_statistics(opponent_team_id, self.season)
             opp_overall = opp_stats.get("overall", {})
             features["opp_fg3_pct_allowed"] = opp_overall.get("fg3_pct", 0) or 0
             features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
@@ -2231,21 +2449,27 @@ class PlayerPropFeatureGenerator:
 
         return features
 
-    def generate_pra_prop_features(self, player_id, opponent_team_id=None, last_n_games=10):
+    def generate_pra_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
         """
         Generate features for Points+Rebounds+Assists prop.
+
+        TEMPORAL DISCIPLINE: Pass game_date when training on historical games.
 
         Args:
             player_id: NBA player ID
             opponent_team_id: Optional opponent team ID
             last_n_games: Recent games for form calculation
+            game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
 
         Returns:
             Dictionary with features for PRA prop prediction
         """
-        stats = fetch_player_stats(player_id, self.season, last_n_games)
+        if game_date:
+            stats = fetch_player_stats_before_date(player_id, self.season, game_date, last_n_games)
+        else:
+            stats = fetch_player_stats(player_id, self.season, last_n_games)
         season_avg = stats.get("season_averages", {})
-        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5)
+        recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
 
         season_pra = (
             (season_avg.get("pts_avg", 0) or 0) +
@@ -4365,32 +4589,18 @@ def calculate_clv_from_bets(bets: List[Dict]) -> Dict:
     )
 
 
-print("\n# Calculate CLV metrics from bet history:")
-print('''
-from feature_engineering import calculate_clv_metrics
-
-# Example: 5 bets with their closing lines
-clv_metrics = calculate_clv_metrics(
-    bet_odds=[-150, +130, -110, -120, +150],
-    closing_odds=[-170, +120, -115, -110, +145],  # Closing lines
-    outcomes=[1, 0, 1, 1, 0]  # Optional: actual results
-)
-print(f"Average CLV: {clv_metrics['avg_clv_pct']:.2f}%")
-print(f"Beat Closing Line: {clv_metrics['positive_clv_rate']:.1%}")
-print(f"Estimated ROI: {clv_metrics['clv_roi_estimate']:.2f}%")
-''')
-print("\n# Generate travel fatigue features:")
-print('''
-travel_gen = TravelFatigueFeatureGenerator()
-travel_features = travel_gen.generate_travel_features(
-    team_abbrev="LAL",
-    opponent_abbrev="BOS",
-    is_home=False,
-    previous_game_location="PHX",
-    games_in_last_7_days=4,
-    is_back_to_back=True,
-    road_trip_game_number=3
-)
-print(f"Travel Distance: {travel_features['travel_distance_miles']:.0f} miles")
-print(f"Fatigue Score: {travel_features['composite_fatigue_score']:.2f}")
-''')
+# Example usage (moved to docstrings for clean import):
+# from feature_engineering import calculate_clv_metrics
+#
+# clv_metrics = calculate_clv_metrics(
+#     bet_odds=[-150, +130, -110, -120, +150],
+#     closing_odds=[-170, +120, -115, -110, +145],
+#     outcomes=[1, 0, 1, 1, 0]
+# )
+#
+# travel_gen = TravelFatigueFeatureGenerator()
+# travel_features = travel_gen.generate_travel_features(
+#     team_abbrev="LAL", opponent_abbrev="BOS", is_home=False,
+#     previous_game_location="PHX", games_in_last_7_days=4,
+#     is_back_to_back=True, road_trip_game_number=3
+# )

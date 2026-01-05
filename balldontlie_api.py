@@ -29,10 +29,118 @@ Usage:
 import os
 import requests
 import time
+import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 import json
+
+# =============================================================================
+# RESPONSE CACHING
+# =============================================================================
+# Cache API responses to disk to reduce API calls and improve speed.
+# Different TTLs for different data types.
+
+CACHE_DIR = Path(__file__).parent / ".bdl_cache"
+CACHE_TTL = {
+    "live": 60,          # 1 minute for live data (odds, box scores)
+    "daily": 1800,       # 30 minutes for daily data (schedules, props)
+    "stats": 3600,       # 1 hour for player stats
+    "historical": 86400, # 24 hours for historical data
+    "static": 604800,    # 1 week for static data (teams, players list)
+}
+
+
+def _get_cache_key(endpoint: str, params: Dict = None) -> str:
+    """Generate a unique cache key for an API request."""
+    params_str = json.dumps(params or {}, sort_keys=True)
+    key = f"{endpoint}:{params_str}"
+    return hashlib.md5(key.encode()).hexdigest()
+
+
+def _get_cache_path(cache_key: str) -> Path:
+    """Get the file path for a cache entry."""
+    CACHE_DIR.mkdir(exist_ok=True)
+    return CACHE_DIR / f"{cache_key}.json"
+
+
+def _read_cache(endpoint: str, params: Dict = None, ttl_type: str = "stats") -> Optional[Any]:
+    """Read data from cache if valid."""
+    cache_key = _get_cache_key(endpoint, params)
+    cache_path = _get_cache_path(cache_key)
+
+    if not cache_path.exists():
+        return None
+
+    try:
+        with open(cache_path, "r") as f:
+            cached = json.load(f)
+
+        # Check TTL
+        cached_at = cached.get("cached_at", 0)
+        ttl = CACHE_TTL.get(ttl_type, 3600)
+        if time.time() - cached_at > ttl:
+            cache_path.unlink(missing_ok=True)
+            return None
+
+        return cached.get("data")
+    except (json.JSONDecodeError, IOError, KeyError):
+        return None
+
+
+def _write_cache(endpoint: str, params: Dict, data: Any) -> None:
+    """Write data to cache."""
+    if not data:
+        return
+
+    cache_key = _get_cache_key(endpoint, params)
+    cache_path = _get_cache_path(cache_key)
+
+    try:
+        with open(cache_path, "w") as f:
+            json.dump({
+                "cached_at": time.time(),
+                "endpoint": endpoint,
+                "data": data,
+            }, f)
+    except (IOError, TypeError):
+        pass
+
+
+def clear_bdl_cache(older_than_hours: float = 0) -> int:
+    """
+    Clear the Balldontlie API cache.
+
+    Args:
+        older_than_hours: Only clear entries older than this. If 0, clear all.
+
+    Returns:
+        Number of entries removed.
+    """
+    if not CACHE_DIR.exists():
+        return 0
+
+    removed = 0
+    cutoff = time.time() - (older_than_hours * 3600) if older_than_hours > 0 else float('inf')
+
+    for cache_file in CACHE_DIR.glob("*.json"):
+        try:
+            if older_than_hours > 0:
+                with open(cache_file, "r") as f:
+                    cached = json.load(f)
+                    if cached.get("cached_at", 0) > cutoff:
+                        continue
+            cache_file.unlink()
+            removed += 1
+        except (IOError, json.JSONDecodeError):
+            try:
+                cache_file.unlink()
+                removed += 1
+            except IOError:
+                pass
+
+    return removed
+
 
 # Load .env file if exists
 def _load_env():
@@ -105,18 +213,26 @@ class BalldontlieAPI:
             time.sleep(self.min_delay - elapsed)
         self._last_request = time.time()
 
-    def _get(self, endpoint: str, params: Dict = None, version: int = 1) -> Any:
+    def _get(self, endpoint: str, params: Dict = None, version: int = 1, cache_ttl: str = None) -> Any:
         """
-        Make a GET request to the API.
+        Make a GET request to the API with optional caching.
 
         Args:
             endpoint: API endpoint path
             params: Query parameters
             version: API version (1 or 2)
+            cache_ttl: Cache TTL type ("live", "daily", "stats", "historical", "static")
+                       If None, no caching is used.
 
         Returns:
             JSON response data
         """
+        # Check cache first (if caching enabled for this request)
+        if cache_ttl:
+            cached = _read_cache(endpoint, params, cache_ttl)
+            if cached is not None:
+                return cached
+
         self._rate_limit()
         base_url = BASE_URL_V2 if version == 2 else BASE_URL_V1
         url = f"{base_url}/{endpoint}"
@@ -136,12 +252,18 @@ class BalldontlieAPI:
             elif response.status_code == 429:
                 print("Rate limited - waiting 60 seconds...")
                 time.sleep(60)
-                return self._get(endpoint, params, version)
+                return self._get(endpoint, params, version, cache_ttl)
             elif response.status_code != 200:
                 print(f"API error {response.status_code}: {response.text[:200]}")
                 return None
 
-            return response.json()
+            data = response.json()
+
+            # Cache successful response
+            if cache_ttl and data:
+                _write_cache(endpoint, params, data)
+
+            return data
 
         except requests.exceptions.RequestException as e:
             print(f"Request failed: {e}")
@@ -150,13 +272,13 @@ class BalldontlieAPI:
     # ==================== FREE TIER ====================
 
     def get_teams(self) -> List[Dict]:
-        """Get all NBA teams."""
-        data = self._get("teams")
+        """Get all NBA teams (cached for 1 week)."""
+        data = self._get("teams", cache_ttl="static")
         return data.get("data", []) if data else []
 
     def get_team(self, team_id: int) -> Dict:
-        """Get a specific team by ID."""
-        data = self._get(f"teams/{team_id}")
+        """Get a specific team by ID (cached for 1 week)."""
+        data = self._get(f"teams/{team_id}", cache_ttl="static")
         return data.get("data", {}) if data else {}
 
     def get_players(self, search: str = None, per_page: int = 100) -> List[Dict]:
@@ -256,6 +378,203 @@ class BalldontlieAPI:
 
         data = self._get("stats", params)
         return data.get("data", []) if data else []
+
+    def get_player_stats_paginated(
+        self,
+        player_id: int,
+        season: int = None,
+        max_pages: int = 10,
+    ) -> List[Dict]:
+        """
+        Fetch ALL player game stats with pagination.
+
+        Requires: All-Star tier or higher
+
+        Args:
+            player_id: Player ID to fetch stats for
+            season: Season year (defaults to current)
+            max_pages: Maximum pages to fetch (safety limit)
+
+        Returns:
+            List of all player stat lines for the season
+        """
+        if season is None:
+            season = datetime.now().year if datetime.now().month > 9 else datetime.now().year - 1
+
+        all_stats = []
+        cursor = None
+        page = 0
+
+        while page < max_pages:
+            params = {
+                "player_ids[]": [player_id],
+                "seasons[]": [season],
+                "per_page": 100,
+            }
+            if cursor:
+                params["cursor"] = cursor
+
+            data = self._get("stats", params)
+            if not data:
+                break
+
+            stats = data.get("data", [])
+            if not stats:
+                break
+
+            all_stats.extend(stats)
+
+            # Check for next page
+            meta = data.get("meta", {})
+            cursor = meta.get("next_cursor")
+            if not cursor:
+                break
+
+            page += 1
+
+        return all_stats
+
+    def get_player_stats_before_date(
+        self,
+        player_id: int,
+        before_date: str,
+        season: int = None,
+        last_n_games: int = None,
+    ) -> List[Dict]:
+        """
+        Fetch player stats for games BEFORE a specific date.
+
+        This is critical for temporal safety during model training -
+        ensures we only use data available before the prediction date.
+
+        Requires: All-Star tier or higher
+
+        Args:
+            player_id: Player ID to fetch stats for
+            before_date: Date string (YYYY-MM-DD) - only return games before this
+            season: Season year (defaults to current)
+            last_n_games: If specified, only return the N most recent games
+
+        Returns:
+            List of player stat lines before the date, sorted by date descending
+        """
+        # Get all stats for the season
+        all_stats = self.get_player_stats_paginated(player_id, season)
+
+        # Filter to games before the specified date
+        cutoff = datetime.strptime(before_date, "%Y-%m-%d")
+        filtered_stats = []
+
+        for stat in all_stats:
+            game = stat.get("game", {})
+            game_date_str = game.get("date", "")
+            if game_date_str:
+                try:
+                    # Handle ISO format dates
+                    if "T" in game_date_str:
+                        game_date_str = game_date_str.split("T")[0]
+                    game_date = datetime.strptime(game_date_str, "%Y-%m-%d")
+                    if game_date < cutoff:
+                        filtered_stats.append(stat)
+                except ValueError:
+                    continue
+
+        # Sort by date descending (most recent first)
+        filtered_stats.sort(
+            key=lambda x: x.get("game", {}).get("date", ""),
+            reverse=True
+        )
+
+        # Optionally limit to last N games
+        if last_n_games and len(filtered_stats) > last_n_games:
+            filtered_stats = filtered_stats[:last_n_games]
+
+        return filtered_stats
+
+    def get_players_paginated(
+        self,
+        search: str = None,
+        team_ids: List[int] = None,
+        max_pages: int = 20,
+    ) -> List[Dict]:
+        """
+        Fetch ALL players with pagination.
+
+        Args:
+            search: Search by player name
+            team_ids: Filter by team IDs
+            max_pages: Maximum pages to fetch
+
+        Returns:
+            List of all matching players
+        """
+        all_players = []
+        cursor = None
+        page = 0
+
+        while page < max_pages:
+            params = {"per_page": 100}
+            if search:
+                params["search"] = search
+            if team_ids:
+                params["team_ids[]"] = team_ids
+            if cursor:
+                params["cursor"] = cursor
+
+            data = self._get("players", params)
+            if not data:
+                break
+
+            players = data.get("data", [])
+            if not players:
+                break
+
+            all_players.extend(players)
+
+            # Check for next page
+            meta = data.get("meta", {})
+            cursor = meta.get("next_cursor")
+            if not cursor:
+                break
+
+            page += 1
+
+        return all_players
+
+    def get_all_active_players(self) -> List[Dict]:
+        """
+        Fetch ALL active NBA players with pagination.
+
+        Requires: All-Star tier or higher
+
+        Returns:
+            List of all active player dictionaries
+        """
+        all_players = []
+        cursor = None
+
+        while True:
+            params = {"per_page": 100}
+            if cursor:
+                params["cursor"] = cursor
+
+            data = self._get("players/active", params)
+            if not data:
+                break
+
+            players = data.get("data", [])
+            if not players:
+                break
+
+            all_players.extend(players)
+
+            # Check for next page
+            meta = data.get("meta", {})
+            cursor = meta.get("next_cursor")
+            if not cursor:
+                break
+
+        return all_players
 
     def get_active_players(self) -> List[Dict]:
         """

@@ -23,6 +23,8 @@ frontend/node_modules/
 # Caches
 data/balldontlie_cache/
 .cache/
+.bdl_cache/
+.api_cache/
 *.cache
 
 # Databases (start fresh on deploy)
