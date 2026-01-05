@@ -168,6 +168,7 @@ def generate_complete_prop_features(
             continue
 
         # Format stats for calculator
+        # NOTE: fetch_player_stats_bdl uses fg_made/fg_att format, not fgm/fga
         calc.add_game_stats(
             player_id=player_id,
             game_date=game_date,
@@ -177,14 +178,14 @@ def generate_complete_prop_features(
                 'ast': game.get('ast', 0) or 0,
                 'stl': game.get('stl', 0) or 0,
                 'blk': game.get('blk', 0) or 0,
-                'fg3m': game.get('fg3m', 0) or 0,
-                'fg3a': game.get('fg3a', 0) or 0,
-                'fgm': game.get('fgm', 0) or 0,
-                'fga': game.get('fga', 0) or 0,
-                'ftm': game.get('ftm', 0) or 0,
-                'fta': game.get('fta', 0) or 0,
+                'fg3m': game.get('fg3_made') or game.get('fg3m', 0) or 0,
+                'fg3a': game.get('fg3_att') or game.get('fg3a', 0) or 0,
+                'fgm': game.get('fg_made') or game.get('fgm', 0) or 0,
+                'fga': game.get('fg_att') or game.get('fga', 0) or 0,
+                'ftm': game.get('ft_made') or game.get('ftm', 0) or 0,
+                'fta': game.get('ft_att') or game.get('fta', 0) or 0,
                 'min': game.get('min', 0) or 0,
-                'turnover': game.get('tov', 0) or 0,
+                'turnover': game.get('tov') or game.get('turnover', 0) or 0,
                 'team': {'id': game.get('team_id')},
                 'game': {
                     'home_team': {'id': 0},  # Simplified
