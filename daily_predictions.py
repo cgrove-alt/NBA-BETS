@@ -30,13 +30,14 @@ logging.disable(logging.WARNING)
 
 # Import our modules
 from balldontlie_api import BalldontlieAPI
-from feature_engineering import generate_game_features, PlayerPropFeatureGenerator
+from feature_engineering import generate_game_features, PlayerPropFeatureGenerator, InjuryReportManager
 from scipy.stats import norm
 
 # Global feature generator for player props (lazy loaded)
 _prop_feature_gen = None
 _player_feature_cache = {}  # Cache player features to avoid redundant API calls
 _id_mapper = None  # IDMapper for Balldontlie player/team ID lookups
+_injury_manager = None  # InjuryReportManager for injury data
 
 def get_feature_engine(season: str = "2025-26") -> PlayerPropFeatureGenerator:
     """Get or create the feature generator for player prop features."""
@@ -69,6 +70,50 @@ def get_bdl_player_id(player_name: str) -> Optional[int]:
     if mapper:
         return mapper.get_player_id(player_name)
     return None
+
+
+def get_injury_manager(season: str = "2025-26") -> InjuryReportManager:
+    """Get or create the injury manager for injury data."""
+    global _injury_manager
+    if _injury_manager is None:
+        _injury_manager = InjuryReportManager(season=season)
+        try:
+            _injury_manager.fetch_all_injuries()
+        except Exception:
+            pass  # Continue without injuries if fetch fails
+    return _injury_manager
+
+
+def apply_injury_adjustments(
+    home_prob: float,
+    away_prob: float,
+    injury_features: Dict
+) -> Tuple[float, float]:
+    """
+    Apply post-hoc injury adjustments to win probabilities.
+
+    Since models weren't trained with injury data, we apply adjustments
+    after prediction. Research shows star player injuries shift win prob 4-8%.
+    """
+    home_key_out = injury_features.get("home_key_players_out", 0)
+    away_key_out = injury_features.get("away_key_players_out", 0)
+    injury_advantage = injury_features.get("injury_advantage", 0)
+
+    # Each key player out shifts probability ~4%
+    adjustment = (away_key_out - home_key_out) * 0.04
+
+    # Add injury advantage impact (scaled down since it's cumulative)
+    if injury_advantage != 0:
+        adjustment += injury_advantage * 0.002
+
+    # Cap adjustment at +/- 15%
+    adjustment = max(-0.15, min(0.15, adjustment))
+
+    adjusted_home = home_prob + adjustment
+    adjusted_home = max(0.1, min(0.9, adjusted_home))
+    adjusted_away = 1 - adjusted_home
+
+    return adjusted_home, adjusted_away
 
 def get_cached_features(player_name: str, prop_type: str, opponent_id: int, bdl_player_id: int = None) -> dict:
     """
@@ -282,10 +327,30 @@ def analyze_game(game: Dict, odds: Dict, models: Dict) -> Dict:
         'player_props': []
     }
 
-    # Generate features
+    # Generate features with injury data
+    injury_mgr = get_injury_manager()
+    injury_features = {}
+    injury_details = {'home': [], 'away': []}
+
     try:
-        features = generate_game_features(home_abbrev, away_abbrev, season="2025-26", include_advanced=False)
+        features = generate_game_features(
+            home_abbrev, away_abbrev,
+            season="2025-26",
+            include_advanced=True,
+            injury_manager=injury_mgr
+        )
         ml_features = features.get('moneyline_features', {}) if features else {}
+
+        # Extract injury features from moneyline_features (where they're stored)
+        if ml_features:
+            injury_features = {
+                'home_injury_impact': ml_features.get('home_injury_impact', 0),
+                'away_injury_impact': ml_features.get('away_injury_impact', 0),
+                'home_key_players_out': ml_features.get('home_key_players_out', 0),
+                'away_key_players_out': ml_features.get('away_key_players_out', 0),
+                'injury_advantage': ml_features.get('injury_advantage', 0),
+            }
+            injury_details = ml_features.get('injury_details', {'home': [], 'away': []})
     except Exception as e:
         ml_features = {}
 
@@ -293,8 +358,16 @@ def analyze_game(game: Dict, odds: Dict, models: Dict) -> Dict:
         # Use basic defaults
         ml_features = {'net_rating_diff': 0, 'win_pct_diff': 0}
 
-    # Moneyline prediction
+    # Store injury info in analysis
+    analysis['injury_features'] = injury_features
+    analysis['injury_details'] = injury_details
+
+    # Moneyline prediction (with injury adjustments)
     home_prob, away_prob = predict_moneyline(ml_features, models)
+
+    # Apply post-hoc injury adjustments
+    if injury_features.get('home_key_players_out', 0) or injury_features.get('away_key_players_out', 0):
+        home_prob, away_prob = apply_injury_adjustments(home_prob, away_prob, injury_features)
 
     # Get market odds
     home_ml_odds = odds.get('home_moneyline', -110)
@@ -351,6 +424,26 @@ def print_game_analysis(analysis: Dict):
     print(f"\n{'='*65}")
     print(f"  {away} @ {home}  ({time})")
     print(f"{'='*65}")
+
+    # Display injuries if any
+    injury_details = analysis.get('injury_details', {})
+    home_injured = injury_details.get('home', []) if isinstance(injury_details, dict) else []
+    away_injured = injury_details.get('away', []) if isinstance(injury_details, dict) else []
+
+    if home_injured or away_injured:
+        print(f"\n  INJURIES:")
+        if home_injured:
+            print(f"    {home}:")
+            for inj in home_injured[:5]:  # Limit to 5 per team
+                player_name = inj.get('player_name', 'Unknown')
+                status = inj.get('status', 'Unknown')
+                print(f"      - {player_name} ({status})")
+        if away_injured:
+            print(f"    {away}:")
+            for inj in away_injured[:5]:  # Limit to 5 per team
+                player_name = inj.get('player_name', 'Unknown')
+                status = inj.get('status', 'Unknown')
+                print(f"      - {player_name} ({status})")
 
     # Moneyline
     ml = analysis['moneyline']
@@ -765,10 +858,26 @@ def main():
                     home_team_id = home_team.get('id')
                     away_team_id = away_team.get('id')
 
+                    # Get injured players to filter from props
+                    injury_details = analysis.get('injury_details', {})
+                    injured_players = set()
+                    for inj in injury_details.get('home', []):
+                        status = inj.get('status', '').upper()
+                        if status in ('OUT', 'DOUBTFUL'):
+                            injured_players.add(inj.get('player_name', '').lower())
+                    for inj in injury_details.get('away', []):
+                        status = inj.get('status', '').upper()
+                        if status in ('OUT', 'DOUBTFUL'):
+                            injured_players.add(inj.get('player_name', '').lower())
+
                     # Add props to analysis
                     for player_id, props in sorted_players:
                         player_name = player_names.get(player_id, f"Player {player_id}")
                         player_team_id = props.get('team_id')
+
+                        # Skip injured players (OUT/DOUBTFUL)
+                        if player_name.lower() in injured_players:
+                            continue
 
                         # CRITICAL: Look up the correct Balldontlie ID for stats
                         # Props API uses different IDs than active players endpoint

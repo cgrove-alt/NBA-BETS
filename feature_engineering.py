@@ -1488,8 +1488,19 @@ class MatchupFeatureGenerator:
         Returns:
             Dictionary with injury impact features
         """
-        home_injuries = self.injury_manager.calculate_injury_impact(home_team_id)
-        away_injuries = self.injury_manager.calculate_injury_impact(away_team_id)
+        # Convert NBA team IDs to Balldontlie team IDs for injury lookup
+        # Injury cache uses Balldontlie IDs
+        from id_mapping import TEAM_ABBREV_TO_BDL
+        from data_fetcher import get_team_abbrev
+
+        home_abbrev = get_team_abbrev(home_team_id)
+        away_abbrev = get_team_abbrev(away_team_id)
+
+        home_bdl_id = TEAM_ABBREV_TO_BDL.get(home_abbrev, home_team_id) if home_abbrev else home_team_id
+        away_bdl_id = TEAM_ABBREV_TO_BDL.get(away_abbrev, away_team_id) if away_abbrev else away_team_id
+
+        home_injuries = self.injury_manager.calculate_injury_impact(home_bdl_id)
+        away_injuries = self.injury_manager.calculate_injury_impact(away_bdl_id)
 
         return {
             "home_injury_impact": home_injuries.get("total_impact", 0),

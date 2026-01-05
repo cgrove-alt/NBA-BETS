@@ -465,6 +465,15 @@ def get_team_id(team_name_or_abbrev):
     return None
 
 
+def get_team_abbrev(team_id: int) -> Optional[str]:
+    """Get team abbreviation from NBA team ID."""
+    nba_teams = teams.get_teams()
+    for team in nba_teams:
+        if team['id'] == team_id:
+            return team['abbreviation']
+    return None
+
+
 def get_player_id(player_name):
     """Get player ID from player name."""
     nba_players = players.get_players()
@@ -1799,19 +1808,25 @@ def fetch_injuries_bdl(
     # Fetch injuries
     injuries = api.get_injuries(team_ids=team_ids)
 
+    # Build team_id -> abbreviation map for reverse lookup
+    from id_mapping import TEAM_ABBREV_TO_BDL
+    bdl_to_abbrev = {v: k for k, v in TEAM_ABBREV_TO_BDL.items()}
+
     result = []
     for inj in injuries:
         player = inj.get("player", {})
-        team = inj.get("team", {}) or player.get("team", {})
+        # team_id is directly in the player object, not a nested team dict
+        team_id = player.get("team_id")
+        team_abbrev = bdl_to_abbrev.get(team_id, "") if team_id else ""
 
         injury_info = {
             "player_id": player.get("id"),
             "player_name": f"{player.get('first_name', '')} {player.get('last_name', '')}".strip(),
-            "team_id": team.get("id"),
-            "team_abbrev": team.get("abbreviation"),
+            "team_id": team_id,
+            "team_abbrev": team_abbrev,
             "status": inj.get("status", ""),
-            "comment": inj.get("comment", ""),
-            "date": inj.get("date", ""),
+            "comment": inj.get("description", "") or inj.get("comment", ""),
+            "date": inj.get("return_date", "") or inj.get("date", ""),
         }
 
         # Filter by player names if specified
