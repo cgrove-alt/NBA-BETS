@@ -2,43 +2,57 @@
 
 import type { PropPrediction } from './types';
 
-// Color thresholds
-const CONFIDENCE_HIGH = 70;
-const CONFIDENCE_MEDIUM = 50;
+// Color thresholds - Updated for better visual hierarchy
+const CONFIDENCE_FIRE = 90;    // Fire picks
+const CONFIDENCE_STRONG = 80;  // Strong picks
+const CONFIDENCE_GOOD = 70;    // Good picks
+const CONFIDENCE_MODERATE = 60; // Moderate picks
 
-// Get confidence color class
+// Get confidence color class - Enhanced with more tiers
 export function getConfidenceColor(confidence: number): string {
-  if (confidence >= CONFIDENCE_HIGH) return 'text-accent-success';
-  if (confidence >= CONFIDENCE_MEDIUM) return 'text-accent-warning';
+  if (confidence >= CONFIDENCE_FIRE) return 'text-orange-400';
+  if (confidence >= CONFIDENCE_STRONG) return 'text-yellow-400';
+  if (confidence >= CONFIDENCE_GOOD) return 'text-green-400';
+  if (confidence >= CONFIDENCE_MODERATE) return 'text-gray-400';
   return 'text-text-muted';
 }
 
-// Get confidence background class
+// Get confidence background class - Enhanced
 export function getConfidenceBgClass(confidence: number): string {
-  if (confidence >= CONFIDENCE_HIGH) return 'bg-success-light';
-  if (confidence >= CONFIDENCE_MEDIUM) return 'bg-warning-light';
+  if (confidence >= CONFIDENCE_FIRE) return 'bg-orange-500/20';
+  if (confidence >= CONFIDENCE_STRONG) return 'bg-yellow-500/20';
+  if (confidence >= CONFIDENCE_GOOD) return 'bg-green-500/20';
+  if (confidence >= CONFIDENCE_MODERATE) return 'bg-gray-500/20';
   return 'bg-bg-tertiary';
 }
 
-// Get confidence gradient class
+// Get confidence gradient class - Enhanced
 export function getConfidenceGradient(confidence: number): string {
-  if (confidence >= CONFIDENCE_HIGH) return 'gradient-success';
-  if (confidence >= CONFIDENCE_MEDIUM) return 'gradient-warning';
-  return 'gradient-neutral';
+  if (confidence >= CONFIDENCE_FIRE) return 'bg-gradient-to-r from-orange-500 to-red-500';
+  if (confidence >= CONFIDENCE_STRONG) return 'bg-gradient-to-r from-yellow-500 to-amber-500';
+  if (confidence >= CONFIDENCE_GOOD) return 'bg-gradient-to-r from-green-500 to-emerald-500';
+  return 'bg-gradient-to-r from-gray-500 to-gray-600';
 }
 
-// Get pick color class
+// Get pick color class - Enhanced with brighter colors
 export function getPickColor(pick: string): string {
-  if (pick === 'OVER') return 'text-accent-success';
-  if (pick === 'UNDER') return 'text-accent-danger';
+  if (pick === 'OVER') return 'text-green-400';
+  if (pick === 'UNDER') return 'text-red-400';
   return 'text-text-muted';
 }
 
-// Get pick background class
+// Get pick background class - Enhanced
 export function getPickBgClass(pick: string): string {
-  if (pick === 'OVER') return 'bg-success-light';
-  if (pick === 'UNDER') return 'bg-danger-light';
+  if (pick === 'OVER') return 'bg-green-500/20';
+  if (pick === 'UNDER') return 'bg-red-500/20';
   return 'transparent';
+}
+
+// Get pick border class - New helper
+export function getPickBorderClass(pick: string): string {
+  if (pick === 'OVER') return 'border-green-500/40';
+  if (pick === 'UNDER') return 'border-red-500/40';
+  return 'border-gray-500/20';
 }
 
 // Get edge color class

@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Loader2, Lock, Radio } from 'lucide-react';
 import { GameSelector } from '../components/game/GameSelector';
 import { DateSelector, getTodayDate } from '../components/game/DateSelector';
 import { FilterPanel } from '../components/predictions/FilterPanel';
 import { PropTable } from '../components/predictions/PropTable';
 import { BestBets } from '../components/predictions/BestBets';
+import { QuickPicks } from '../components/predictions/QuickPicks';
 import { GamePredictions } from '../components/predictions/GamePredictions';
 import { useGames } from '../hooks/useGames';
 import { usePredictions } from '../hooks/usePredictions';
@@ -14,6 +15,7 @@ import { useLiveStats } from '../hooks/useLiveStats';
 export function Predictions() {
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDate());
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+  const bestBetsRef = useRef<HTMLDivElement>(null);
 
   // Fetch games for selected date
   const { data: gamesData, isLoading: gamesLoading, error: gamesError } = useGames(selectedDate);
@@ -21,6 +23,11 @@ export function Predictions() {
 
   // Get selected game
   const selectedGame = games.find((g) => g.game_id === selectedGameId) || null;
+
+  // Build game context string (e.g., "NYK @ DET")
+  const gameContext = selectedGame
+    ? `${selectedGame.visitor_team.abbreviation} @ ${selectedGame.home_team.abbreviation}`
+    : undefined;
 
   // Fetch predictions
   const {
@@ -86,6 +93,10 @@ export function Predictions() {
     setSelectedGameId(gameId);
   };
 
+  const scrollToBestBets = () => {
+    bestBetsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -127,6 +138,11 @@ export function Predictions() {
       {/* Game Predictions (Spread/Moneyline) */}
       {selectedGameId && selectedGame && (
         <GamePredictions gameId={selectedGameId} game={selectedGame} />
+      )}
+
+      {/* Quick Picks Summary Bar */}
+      {isReady && allPlayers.length > 0 && (
+        <QuickPicks players={allPlayers} onScrollToBestBets={scrollToBestBets} />
       )}
 
       {/* Live tracking banner */}
@@ -180,7 +196,9 @@ export function Predictions() {
           {/* Main content */}
           <div className="lg:col-span-3 space-y-6">
             {/* Best Bets */}
-            <BestBets players={allPlayers} />
+            <div ref={bestBetsRef}>
+              <BestBets players={allPlayers} gameContext={gameContext} />
+            </div>
 
             {/* Prop Tables */}
             {filters.propTypes.map((propType) => (

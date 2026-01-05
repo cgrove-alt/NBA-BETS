@@ -1,12 +1,12 @@
-import { Star } from 'lucide-react';
+import { Flame, Star } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-import { ConfidenceBar } from './ConfidenceBar';
-import { cn, formatPrediction, formatLine, formatEdge, getPickColor } from '../../lib/utils';
+import { BetCard } from './BetCard';
 import type { PlayerProp, PropPrediction, PropType } from '../../lib/types';
 
 interface BestBetsProps {
   players: PlayerProp[];
+  gameContext?: string; // e.g., "NYK @ DET"
 }
 
 interface BestBetItem {
@@ -15,7 +15,7 @@ interface BestBetItem {
   prop: PropPrediction;
 }
 
-export function BestBets({ players }: BestBetsProps) {
+export function BestBets({ players, gameContext }: BestBetsProps) {
   // Find all best bets (confidence >= 80, edge >= 2.5)
   const bestBets: BestBetItem[] = [];
 
@@ -33,7 +33,7 @@ export function BestBets({ players }: BestBetsProps) {
     }
   }
 
-  // Sort by confidence, then by edge
+  // Sort by confidence (highest first), then by edge
   bestBets.sort((a, b) => {
     if (b.prop.confidence !== a.prop.confidence) {
       return b.prop.confidence - a.prop.confidence;
@@ -41,71 +41,128 @@ export function BestBets({ players }: BestBetsProps) {
     return Math.abs(b.prop.edge) - Math.abs(a.prop.edge);
   });
 
+  // Separate fire picks (90%+) from strong picks
+  const firePicks = bestBets.filter(b => b.prop.confidence >= 90);
+  const strongPicks = bestBets.filter(b => b.prop.confidence >= 80 && b.prop.confidence < 90);
+
   if (bestBets.length === 0) {
     return null;
   }
 
   return (
     <Card className="border-accent-primary/30">
-      <CardHeader className="bg-primary-light">
-        <div className="flex items-center gap-2">
-          <Star className="text-accent-primary" size={18} />
-          <CardTitle>Best Bets</CardTitle>
-          <Badge variant="primary">{bestBets.length}</Badge>
+      <CardHeader className="bg-gradient-to-r from-orange-500/10 to-yellow-500/10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Flame className="text-orange-500" size={20} />
+            <CardTitle>Best Bets</CardTitle>
+            <Badge variant="primary">{bestBets.length}</Badge>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-text-muted">
+            {firePicks.length > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="text-orange-400">🔥</span>
+                <span>{firePicks.length} Fire</span>
+              </span>
+            )}
+            {strongPicks.length > 0 && (
+              <span className="flex items-center gap-1">
+                <Star className="text-yellow-400" size={14} />
+                <span>{strongPicks.length} Strong</span>
+              </span>
+            )}
+          </div>
         </div>
       </CardHeader>
-      <CardContent className="p-0">
-        <div className="divide-y divide-border">
-          {bestBets.slice(0, 10).map(({ player, propType, prop }, index) => (
-            <div
-              key={`${player.player_id}-${propType}-${index}`}
-              className="px-4 py-3 hover:bg-bg-hover transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-text-primary">
-                      {player.player_name}
-                    </span>
-                    <span className="text-xs text-text-muted">{player.team}</span>
-                  </div>
-                  <div className="flex items-center gap-3 mt-1">
-                    <Badge variant="default">{propType}</Badge>
-                    <span className="text-sm text-text-secondary">
-                      Line: {formatLine(prop.line)}
-                    </span>
-                    <span className="text-sm font-medium text-text-primary">
-                      Pred: {formatPrediction(prop.prediction)}
-                    </span>
-                    <span
-                      className={cn(
-                        'text-sm font-medium',
-                        prop.edge > 0 ? 'text-accent-success' : 'text-accent-danger'
-                      )}
-                    >
-                      Edge: {formatEdge(prop.edge)}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span
-                    className={cn(
-                      'text-lg font-bold px-3 py-1 rounded',
-                      getPickColor(prop.pick),
-                      prop.pick === 'OVER' ? 'bg-success-light' : 'bg-danger-light'
-                    )}
-                  >
-                    {prop.pick}
-                  </span>
-                  <div className="w-24">
-                    <ConfidenceBar confidence={prop.confidence} size="sm" />
-                  </div>
-                </div>
-              </div>
+      <CardContent className="p-4">
+        {/* Fire Picks Section (90%+) */}
+        {firePicks.length > 0 && (
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">🔥</span>
+              <h4 className="font-bold text-text-primary">Fire Picks</h4>
+              <span className="text-xs text-text-muted bg-orange-500/20 px-2 py-0.5 rounded-full">
+                90%+ Confidence
+              </span>
             </div>
-          ))}
-        </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {firePicks.slice(0, 6).map(({ player, propType, prop }, index) => (
+                <BetCard
+                  key={`${player.player_id}-${propType}-${index}`}
+                  player={player}
+                  propType={propType}
+                  prop={prop}
+                  gameContext={gameContext}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Strong Picks Section (80-89%) */}
+        {strongPicks.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Star className="text-yellow-400" size={18} />
+              <h4 className="font-bold text-text-primary">Strong Picks</h4>
+              <span className="text-xs text-text-muted bg-yellow-500/20 px-2 py-0.5 rounded-full">
+                80-89% Confidence
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {strongPicks.slice(0, 9).map(({ player, propType, prop }, index) => (
+                <BetCard
+                  key={`${player.player_id}-${propType}-${index}`}
+                  player={player}
+                  propType={propType}
+                  prop={prop}
+                  gameContext={gameContext}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Show more hint if there are more picks */}
+        {bestBets.length > 15 && (
+          <div className="mt-4 text-center text-sm text-text-muted">
+            Showing top {Math.min(15, bestBets.length)} of {bestBets.length} best bets
+          </div>
+        )}
       </CardContent>
     </Card>
   );
+}
+
+// Summary stats component for the Best Bets section
+export function BestBetsSummary({ players }: { players: PlayerProp[] }) {
+  let totalPicks = 0;
+  let firePicks = 0;
+  let strongPicks = 0;
+
+  const propTypes: PropType[] = ['Points', 'Rebounds', 'Assists', '3PM', 'PRA'];
+
+  for (const player of players) {
+    for (const propType of propTypes) {
+      const prop = propType === '3PM'
+        ? player['3PM']
+        : player[propType as keyof PlayerProp] as PropPrediction | undefined;
+
+      if (prop && prop.pick !== '-') {
+        totalPicks++;
+        if (prop.confidence >= 90 && Math.abs(prop.edge) >= 2.5) {
+          firePicks++;
+        } else if (prop.confidence >= 80 && Math.abs(prop.edge) >= 2.5) {
+          strongPicks++;
+        }
+      }
+    }
+  }
+
+  return {
+    totalPicks,
+    firePicks,
+    strongPicks,
+    bestBets: firePicks + strongPicks,
+  };
 }

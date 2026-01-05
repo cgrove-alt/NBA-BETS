@@ -1,9 +1,8 @@
 import { useState, useMemo } from 'react';
-import { ChevronUp, ChevronDown, CheckCircle, XCircle } from 'lucide-react';
+import { ChevronUp, ChevronDown, CheckCircle, XCircle, ArrowUp, ArrowDown } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { ConfidenceBar } from './ConfidenceBar';
-import { EdgeBadge } from './EdgeBadge';
-import { cn, formatPrediction, formatLine, getPickColor, getPickBgClass } from '../../lib/utils';
+import { ConfidenceBadge } from '../ui/ConfidenceTier';
+import { cn, formatPrediction } from '../../lib/utils';
 import type { PlayerProp, PropPrediction, PropType, FilterState, PlayerLiveStats } from '../../lib/types';
 
 interface PropTableProps {
@@ -15,7 +14,7 @@ interface PropTableProps {
   isFinal?: boolean;
 }
 
-type SortField = 'player' | 'team' | 'line' | 'prediction' | 'edge' | 'pick' | 'confidence';
+type SortField = 'bet' | 'player' | 'prediction' | 'confidence';
 
 /**
  * Get the actual stat value from live stats for a given prop type
@@ -110,6 +109,71 @@ function ActualStatDisplay({
   return <span className="text-text-primary font-medium">{actual}</span>;
 }
 
+/**
+ * The Bet Action Box - prominently shows what bet to make
+ */
+function BetActionBox({ prop, propType }: { prop: PropPrediction; propType: PropType }) {
+  const isOver = prop.pick === 'OVER';
+  const hasLine = prop.line !== null && prop.line !== undefined && prop.line > 0;
+  const propLabel = propType === '3PM' ? '3PM' : propType.slice(0, 3);
+
+  return (
+    <div className={cn(
+      'flex flex-col items-center justify-center px-3 py-2 rounded-lg border min-w-[80px]',
+      isOver
+        ? 'bg-green-500/10 border-green-500/40'
+        : 'bg-red-500/10 border-red-500/40'
+    )}>
+      {/* Pick direction with icon */}
+      <div className={cn(
+        'flex items-center gap-1 text-sm font-black',
+        isOver ? 'text-green-400' : 'text-red-400'
+      )}>
+        {isOver ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+        {prop.pick}
+      </div>
+      {/* Line value */}
+      <div className="text-base font-bold text-text-primary">
+        {hasLine ? prop.line!.toFixed(1) : '—'}
+      </div>
+      {/* Prop type label */}
+      <div className="text-[10px] text-text-muted uppercase">
+        {propLabel}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Prediction vs Line comparison cell
+ */
+function PredictionCell({ prop }: { prop: PropPrediction }) {
+  const hasLine = prop.line !== null && prop.line !== undefined && prop.line > 0;
+  const edge = hasLine ? prop.prediction - prop.line! : 0;
+  const isOver = edge > 0;
+
+  return (
+    <div className="flex flex-col">
+      {/* Prediction value */}
+      <span className={cn(
+        'font-bold text-base',
+        isOver ? 'text-green-400' : 'text-red-400'
+      )}>
+        {formatPrediction(prop.prediction)}
+      </span>
+      {/* Edge vs line */}
+      {hasLine && (
+        <span className={cn(
+          'text-xs font-medium',
+          isOver ? 'text-green-400/70' : 'text-red-400/70'
+        )}>
+          {isOver ? '+' : ''}{edge.toFixed(1)} vs {prop.line!.toFixed(1)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function PropTable({ propType, players, filters, liveStats, isLive = false, isFinal = false }: PropTableProps) {
   const [sortField, setSortField] = useState<SortField>('confidence');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -139,23 +203,18 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
         let comparison = 0;
 
         switch (sortField) {
+          case 'bet':
+            // Sort by pick type, then by line
+            comparison = propA.pick.localeCompare(propB.pick);
+            if (comparison === 0) {
+              comparison = (propA.line || 0) - (propB.line || 0);
+            }
+            break;
           case 'player':
             comparison = a.player.player_name.localeCompare(b.player.player_name);
             break;
-          case 'team':
-            comparison = (a.player.team || '').localeCompare(b.player.team || '');
-            break;
-          case 'line':
-            comparison = (propA.line || 0) - (propB.line || 0);
-            break;
           case 'prediction':
             comparison = propA.prediction - propB.prediction;
-            break;
-          case 'edge':
-            comparison = Math.abs(propA.edge) - Math.abs(propB.edge);
-            break;
-          case 'pick':
-            comparison = propA.pick.localeCompare(propB.pick);
             break;
           case 'confidence':
           default:
@@ -187,10 +246,18 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
 
   const headerClass = 'px-3 py-2 text-left text-xs font-medium text-text-secondary uppercase tracking-wider cursor-pointer hover:text-text-primary';
 
+  // Format prop type for display
+  const propLabel = propType === '3PM' ? '3-Pointers Made' : propType;
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{propType}</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle>{propLabel}</CardTitle>
+          <span className="text-sm text-text-muted">
+            {filteredPlayers.length} picks
+          </span>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         {filteredPlayers.length === 0 ? (
@@ -202,30 +269,21 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
             <table className="w-full">
               <thead className="bg-bg-tertiary">
                 <tr>
+                  <th className={headerClass} onClick={() => handleSort('bet')}>
+                    Bet <SortIcon field="bet" />
+                  </th>
                   <th className={headerClass} onClick={() => handleSort('player')}>
                     Player <SortIcon field="player" />
                   </th>
-                  <th className={headerClass} onClick={() => handleSort('team')}>
-                    Team <SortIcon field="team" />
-                  </th>
-                  <th className={headerClass} onClick={() => handleSort('line')}>
-                    Line <SortIcon field="line" />
-                  </th>
                   <th className={headerClass} onClick={() => handleSort('prediction')}>
                     Prediction <SortIcon field="prediction" />
-                  </th>
-                  <th className={headerClass} onClick={() => handleSort('edge')}>
-                    Edge <SortIcon field="edge" />
-                  </th>
-                  <th className={headerClass} onClick={() => handleSort('pick')}>
-                    Pick <SortIcon field="pick" />
                   </th>
                   {(isLive || isFinal || liveStats) && (
                     <th className={headerClass}>
                       Actual {isLive && <span className="text-blue-400 text-[10px] ml-1">LIVE</span>}
                     </th>
                   )}
-                  <th className={cn(headerClass, 'w-32')} onClick={() => handleSort('confidence')}>
+                  <th className={cn(headerClass, 'text-center')} onClick={() => handleSort('confidence')}>
                     Confidence <SortIcon field="confidence" />
                   </th>
                 </tr>
@@ -236,32 +294,24 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
                     key={`${player.player_id}-${propType}`}
                     className="hover:bg-bg-hover transition-colors"
                   >
-                    <td className="px-3 py-3 text-sm text-text-primary font-medium">
-                      {player.player_name}
-                    </td>
-                    <td className="px-3 py-3 text-sm text-text-secondary">
-                      {player.team || '-'}
-                    </td>
-                    <td className="px-3 py-3 text-sm text-text-secondary">
-                      {formatLine(prop?.line)}
-                    </td>
-                    <td className="px-3 py-3 text-sm text-text-primary font-medium">
-                      {formatPrediction(prop!.prediction)}
-                    </td>
+                    {/* THE BET - Action first */}
                     <td className="px-3 py-3">
-                      <EdgeBadge prop={prop!} />
+                      <BetActionBox prop={prop!} propType={propType} />
                     </td>
+                    {/* Player info */}
                     <td className="px-3 py-3">
-                      <span
-                        className={cn(
-                          'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold',
-                          getPickColor(prop!.pick),
-                          getPickBgClass(prop!.pick)
-                        )}
-                      >
-                        {prop!.pick}
-                      </span>
+                      <div className="flex flex-col">
+                        <span className="font-medium text-text-primary">
+                          {player.player_name}
+                        </span>
+                        <span className="text-xs text-text-muted">{player.team || '-'}</span>
+                      </div>
                     </td>
+                    {/* Prediction vs Line */}
+                    <td className="px-3 py-3">
+                      <PredictionCell prop={prop!} />
+                    </td>
+                    {/* Actual (Live/Final) */}
                     {(isLive || isFinal || liveStats) && (
                       <td className="px-3 py-3 text-sm">
                         <ActualStatDisplay
@@ -273,8 +323,11 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
                         />
                       </td>
                     )}
-                    <td className="px-3 py-3 w-32">
-                      <ConfidenceBar confidence={prop!.confidence} size="sm" />
+                    {/* Confidence */}
+                    <td className="px-3 py-3">
+                      <div className="flex justify-center">
+                        <ConfidenceBadge confidence={prop!.confidence} />
+                      </div>
                     </td>
                   </tr>
                 ))}
