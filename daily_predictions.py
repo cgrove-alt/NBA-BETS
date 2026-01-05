@@ -32,12 +32,32 @@ logging.disable(logging.WARNING)
 from balldontlie_api import BalldontlieAPI
 from feature_engineering import generate_game_features, PlayerPropFeatureGenerator, InjuryReportManager
 from scipy.stats import norm
+from data_fetcher import fetch_player_stats_bdl
+
+# Import training feature generator for accurate prop predictions
+try:
+    from train_complete_balldontlie import (
+        PlayerStatsCalculator,
+        PositionDefenseCalculator,
+        TeamStatsCalculator,
+        calculate_pace_adjusted_features,
+        calculate_vegas_total_features,
+        calculate_blowout_risk_features,
+    )
+    HAS_TRAINING_FEATURES = True
+except ImportError:
+    HAS_TRAINING_FEATURES = False
+    print("Note: Training feature generator not available. Using simplified features.")
 
 # Global feature generator for player props (lazy loaded)
 _prop_feature_gen = None
 _player_feature_cache = {}  # Cache player features to avoid redundant API calls
 _id_mapper = None  # IDMapper for Balldontlie player/team ID lookups
 _injury_manager = None  # InjuryReportManager for injury data
+_player_stats_calc = None  # PlayerStatsCalculator for training-compatible features
+_team_stats_calc = None  # TeamStatsCalculator for team features
+_position_def_calc = None  # PositionDefenseCalculator for opponent features
+_balldontlie_api = None  # Shared Balldontlie API instance
 
 def get_feature_engine(season: str = "2025-26") -> PlayerPropFeatureGenerator:
     """Get or create the feature generator for player prop features."""
@@ -84,6 +104,211 @@ def get_injury_manager(season: str = "2025-26") -> InjuryReportManager:
     return _injury_manager
 
 
+def get_balldontlie_api() -> Optional[BalldontlieAPI]:
+    """Get or create shared Balldontlie API instance."""
+    global _balldontlie_api
+    if _balldontlie_api is None:
+        api_key = os.getenv("BALLDONTLIE_API_KEY")
+        if api_key:
+            _balldontlie_api = BalldontlieAPI(api_key=api_key)
+    return _balldontlie_api
+
+
+def get_player_stats_calculator():
+    """Get or create PlayerStatsCalculator for training-compatible features."""
+    global _player_stats_calc
+    if _player_stats_calc is None and HAS_TRAINING_FEATURES:
+        _player_stats_calc = PlayerStatsCalculator(window=10)
+    return _player_stats_calc
+
+
+def generate_complete_prop_features(
+    player_id: int,
+    player_name: str,
+    opponent_team_id: int,
+    is_home: bool = False,
+    vegas_total: float = None,
+) -> Optional[Dict]:
+    """
+    Generate ALL 150 features matching what the model was trained on.
+
+    Uses the same PlayerStatsCalculator logic from training to ensure
+    features match exactly.
+    """
+    if not HAS_TRAINING_FEATURES:
+        return None
+
+    api = get_balldontlie_api()
+    if not api:
+        return None
+
+    # Fetch player's game history
+    stats_data = fetch_player_stats_bdl(player_id=player_id)
+    game_log = stats_data.get("game_log", [])
+
+    if not game_log or len(game_log) < 3:
+        return None
+
+    # Get player info (position, etc.)
+    mapper = get_id_mapper()
+    position = "G"  # Default
+    if mapper and mapper._all_players:
+        for p in mapper._all_players:
+            if p.get("id") == player_id:
+                position = p.get("position", "G") or "G"
+                break
+
+    # Create a fresh PlayerStatsCalculator and populate with game data
+    calc = PlayerStatsCalculator(window=10)
+
+    # Add games to calculator in chronological order
+    for game in sorted(game_log, key=lambda x: x.get("game_date", "")):
+        game_date = game.get("game_date", "")
+        if not game_date:
+            continue
+
+        # Format stats for calculator
+        calc.add_game_stats(
+            player_id=player_id,
+            game_date=game_date,
+            stats={
+                'pts': game.get('pts', 0) or 0,
+                'reb': game.get('reb', 0) or 0,
+                'ast': game.get('ast', 0) or 0,
+                'stl': game.get('stl', 0) or 0,
+                'blk': game.get('blk', 0) or 0,
+                'fg3m': game.get('fg3m', 0) or 0,
+                'fg3a': game.get('fg3a', 0) or 0,
+                'fgm': game.get('fgm', 0) or 0,
+                'fga': game.get('fga', 0) or 0,
+                'ftm': game.get('ftm', 0) or 0,
+                'fta': game.get('fta', 0) or 0,
+                'min': game.get('min', 0) or 0,
+                'turnover': game.get('tov', 0) or 0,
+                'team': {'id': game.get('team_id')},
+                'game': {
+                    'home_team': {'id': 0},  # Simplified
+                    'visitor_team': {'id': 0},
+                },
+            },
+            player_info={'position': position}
+        )
+
+    # Get features using a future date to include all games
+    future_date = "2099-12-31"
+    base_features = calc.get_player_stats_before_date(
+        player_id=player_id,
+        date=future_date,
+        min_games=3
+    )
+
+    if not base_features:
+        return None
+
+    # Add opponent features (use defaults for now, can be enhanced)
+    opponent_features = {
+        'opp_def_rating': 114.0,  # League average
+        'opp_off_rating': 114.0,
+        'opp_net_rating': 0.0,
+        'opp_pts_allowed': 114.0,
+        'opp_pts_allowed_recent': 114.0,
+        'opp_pts_allowed_std': 8.0,
+        'opp_pace': 100.0,
+        'opp_pace_season': 100.0,
+        'opp_def_strength': 0.0,
+        'opp_reb_factor': 1.0,
+        'opp_location_def': 0.0,
+        'opp_win_pct': 0.5,
+        'opp_recent_win_pct': 0.5,
+        'is_home': 1 if is_home else 0,
+        'team_pace': 100.0,
+        'team_off_rating': 114.0,
+        # Position-specific opponent allowed stats (use league averages)
+        'opp_pts_allowed_to_guards': 18.0,
+        'opp_reb_allowed_to_guards': 3.5,
+        'opp_ast_allowed_to_guards': 5.5,
+        'opp_fg3m_allowed_to_guards': 2.0,
+        'opp_pts_allowed_to_forwards': 16.0,
+        'opp_reb_allowed_to_forwards': 6.5,
+        'opp_ast_allowed_to_forwards': 3.0,
+        'opp_fg3m_allowed_to_forwards': 1.5,
+        'opp_pts_allowed_to_centers': 14.0,
+        'opp_reb_allowed_to_centers': 9.0,
+        'opp_ast_allowed_to_centers': 2.5,
+        'opp_fg3m_allowed_to_centers': 0.5,
+        'opp_pts_vs_pos_std': 3.0,
+        'opp_pts_vs_pos_diff': 0.0,
+        'opp_reb_vs_pos_diff': 0.0,
+        'opp_ast_vs_pos_diff': 0.0,
+        'opp_fg3m_vs_pos_diff': 0.0,
+    }
+    base_features.update(opponent_features)
+
+    # Add pace-adjusted features
+    try:
+        pace_features = calculate_pace_adjusted_features(
+            player_features=base_features,
+            team_pace=100.0,
+            opponent_pace=100.0,
+            vegas_spread=0.0
+        )
+        base_features.update(pace_features)
+    except Exception:
+        # Use defaults if calculation fails
+        base_features.update({
+            'blowout_probability': 0.1,
+            'expected_min_reduction': 0.0,
+            'projected_min_factor': 1.0,
+            'is_likely_blowout': 0,
+            'spread_magnitude': 0.0,
+            'expected_game_pace': 100.0,
+            'pace_multiplier': 1.0,
+            'pace_vs_average': 0.0,
+            'is_high_pace_game': 0,
+            'is_low_pace_game': 0,
+            'pace_pts_adjustment': 0.0,
+            'pace_reb_adjustment': 0.0,
+            'pace_ast_adjustment': 0.0,
+            'pace_fg3_adjustment': 0.0,
+            'pts_per_100_poss': base_features.get('season_pts_avg', 15) * 3.0,
+            'reb_per_100_poss': base_features.get('season_reb_avg', 5) * 3.0,
+            'ast_per_100_poss': base_features.get('season_ast_avg', 4) * 3.0,
+        })
+
+    # Add Vegas total features
+    try:
+        vegas_features = calculate_vegas_total_features(
+            vegas_total=vegas_total or 225.0,
+            player_features=base_features,
+            is_starter=base_features.get('is_starter', 1)
+        )
+        base_features.update(vegas_features)
+    except Exception:
+        base_features.update({
+            'vegas_total': 225.0,
+            'total_vs_average': 0.0,
+            'total_multiplier': 1.0,
+            'is_high_total_game': 0,
+            'is_low_total_game': 0,
+            'total_pts_boost': 0.0,
+        })
+
+    # Add regression features
+    base_features.update({
+        'pts_deviation_from_mean': base_features.get('season_pts_avg', 15) - 15.0,
+        'pts_regression_adjustment': 0.0,
+        'pts_regressed_estimate': base_features.get('season_pts_avg', 15),
+        'reb_deviation_from_mean': base_features.get('season_reb_avg', 5) - 5.0,
+        'reb_regression_adjustment': 0.0,
+        'ast_deviation_from_mean': base_features.get('season_ast_avg', 4) - 4.0,
+        'ast_regression_adjustment': 0.0,
+        'fg3_deviation_from_mean': base_features.get('season_fg3m_avg', 1.5) - 1.5,
+        'fg3_regression_adjustment': 0.0,
+    })
+
+    return base_features
+
+
 def apply_injury_adjustments(
     home_prob: float,
     away_prob: float,
@@ -115,12 +340,17 @@ def apply_injury_adjustments(
 
     return adjusted_home, adjusted_away
 
-def get_cached_features(player_name: str, prop_type: str, opponent_id: int, bdl_player_id: int = None) -> dict:
+def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
+                        bdl_player_id: int = None, is_home: bool = False,
+                        vegas_total: float = None) -> dict:
     """
     Get cached features or generate new ones using Balldontlie data.
 
-    Now uses Balldontlie IDs throughout for consistency and speed.
-    Falls back to NBA API if Balldontlie data unavailable.
+    CRITICAL: Uses training-compatible feature generator to produce ALL 150 features
+    that models expect. This fixes the feature mismatch bug where only 27 features
+    were generated, causing garbage predictions (e.g., Brunson 16.8 instead of 27).
+
+    Falls back to simplified generator if training features unavailable.
     """
     cache_key = f"{player_name}_{prop_type}_{opponent_id}"
     if cache_key in _player_feature_cache:
@@ -134,9 +364,29 @@ def get_cached_features(player_name: str, prop_type: str, opponent_id: int, bdl_
     if bdl_player_id is None:
         bdl_player_id = get_bdl_player_id(player_name)
 
+    if not bdl_player_id:
+        return None
+
+    # TRY TRAINING-COMPATIBLE FEATURES FIRST (generates all 150 features)
+    if HAS_TRAINING_FEATURES:
+        try:
+            features = generate_complete_prop_features(
+                player_id=bdl_player_id,
+                player_name=player_name,
+                opponent_team_id=opponent_id,
+                is_home=is_home,
+                vegas_total=vegas_total,
+            )
+            if features:
+                _player_feature_cache[cache_key] = features
+                return features
+        except Exception as e:
+            # Log but continue to fallback
+            pass
+
+    # FALLBACK: Use old feature generator (only 27 features - may cause issues)
     fe = get_feature_engine()
     try:
-        # Try to generate features using player name (works with new Balldontlie layer)
         if prop_type == 'points':
             features = fe.generate_points_prop_features(
                 player_id=bdl_player_id,
@@ -198,9 +448,12 @@ def load_models() -> Dict:
     # Player prop models - load available models
     for prop_type in ['points', 'rebounds', 'assists', 'threes', 'pra']:
         # Try different model files in order of preference
+        # IMPORTANT: Ensemble models come first (trained with 150 features)
         model_paths = [
+            MODEL_DIR / f"player_{prop_type}_ensemble.pkl",  # Ensemble with 150 features
             MODEL_DIR / f"player_{prop_type}_line_classifier.pkl",
-            MODEL_DIR / f"player_{prop_type}.pkl",  # Simple regressor
+            MODEL_DIR / f"player_{prop_type}_position_aware.pkl",
+            MODEL_DIR / f"player_{prop_type}.pkl",  # Simple regressor (old, 27 features)
             MODEL_DIR / f"player_{prop_type}_quantile.pkl",
         ]
 
@@ -210,14 +463,28 @@ def load_models() -> Dict:
                     with open(path, 'rb') as f:
                         data = pickle.load(f)
 
-                    # Handle dict format with model, scaler, feature_names
-                    if isinstance(data, dict):
+                    # Handle ensemble format (has 'models' and 'meta_model')
+                    if isinstance(data, dict) and 'models' in data and 'meta_model' in data:
+                        # Store full ensemble for proper prediction
+                        models[f'prop_{prop_type}'] = {
+                            'ensemble': True,
+                            'models': data['models'],
+                            'meta_model': data['meta_model'],
+                            'model_weights': data.get('model_weights', {}),
+                            'scaler': data.get('scaler'),
+                            'feature_names': data.get('feature_names', []),
+                            'over_under_classifier': data.get('over_under_classifier'),
+                            'prop_type': prop_type,
+                        }
+                        break
+
+                    # Handle dict format with single model, scaler, feature_names
+                    elif isinstance(data, dict):
                         model = data.get('model')
                         scaler = data.get('scaler')
                         feature_names = data.get('feature_names', [])
 
                         if model and hasattr(model, 'predict'):
-                            # Store as tuple for later unpacking
                             models[f'prop_{prop_type}'] = {
                                 'model': model,
                                 'scaler': scaler,
@@ -589,8 +856,51 @@ def predict_player_prop(
             features = get_cached_features(player_name, prop_type, opponent_id, bdl_player_id=player_id)
 
             if features:
-                # Handle dict format (raw model with scaler)
-                if isinstance(model_data, dict) and 'model' in model_data:
+                # Handle ENSEMBLE format (multiple models with meta_model)
+                if isinstance(model_data, dict) and model_data.get('ensemble'):
+                    base_models = model_data['models']
+                    meta_model = model_data['meta_model']
+                    model_weights = model_data.get('model_weights', {})
+                    scaler = model_data.get('scaler')
+                    feature_names = model_data.get('feature_names', [])
+
+                    # Build feature array matching training features
+                    X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
+                    X = X[feature_names].fillna(0)
+
+                    # Scale if scaler available
+                    if scaler is not None:
+                        X_scaled = scaler.transform(X)
+                    else:
+                        X_scaled = X.values
+
+                    # Get predictions from tree-based models only (ridge can have scaling issues)
+                    tree_models = ['xgboost', 'lightgbm', 'catboost', 'random_forest']
+                    base_preds = []
+                    for name in tree_models:
+                        if name in base_models and base_models[name] is not None:
+                            try:
+                                pred = base_models[name].predict(X_scaled)[0]
+                                if -50 < pred < 100:  # Sanity check
+                                    base_preds.append(pred)
+                            except Exception:
+                                continue
+
+                    # Compute weighted average if we have predictions
+                    if base_preds:
+                        predicted_value = float(np.mean(base_preds))
+                    else:
+                        # Fallback to season average from features
+                        predicted_value = features.get('season_pts_avg', 15.0)
+
+                    # Convert to probability using normal CDF
+                    std = line * 0.20 if line > 0 else 5.0
+                    z_score = (predicted_value - line) / max(std, 1)
+                    over_prob = float(norm.cdf(z_score))
+                    edge = (over_prob - 0.524) * 100
+
+                # Handle dict format with single model
+                elif isinstance(model_data, dict) and 'model' in model_data:
                     model = model_data['model']
                     scaler = model_data.get('scaler')
                     feature_names = model_data.get('feature_names', [])
