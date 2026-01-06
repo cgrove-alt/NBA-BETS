@@ -43,7 +43,7 @@ from enum import Enum
 
 # Book classification by sharpness
 SHARP_BOOKS = ['pinnacle', 'circa', 'bookmaker', 'betcris', 'bet365']
-SOFT_BOOKS = ['draftkings', 'fanduel', 'betmgm', 'caesars', 'pointsbet', 'barstool']
+SOFT_BOOKS = ['fanduel', 'draftkings', 'betmgm', 'caesars', 'pointsbet', 'barstool']
 ALL_BOOKS = SHARP_BOOKS + SOFT_BOOKS
 
 # Detection thresholds

@@ -63,14 +63,28 @@ except ImportError:
 try:
     from simulation_engine import (
         GameSimulator,
+        GameSimulatorV3,
         TeamStats,
         PlayerStats,
+        PlayerTrackingStats,
         create_player_from_dict,
         create_team_from_dict,
     )
     HAS_SIMULATION_ENGINE = True
 except ImportError:
     HAS_SIMULATION_ENGINE = False
+
+# Import V3 tracking data for enhanced simulation
+try:
+    from tracking_data import (
+        ShotAtlas,
+        RotationTracker,
+        fetch_shot_chart,
+        fetch_pbp_historical,
+    )
+    HAS_TRACKING_DATA = True
+except ImportError:
+    HAS_TRACKING_DATA = False
 
 # Import portfolio optimizer for bet sizing
 try:
@@ -681,9 +695,48 @@ def simulate_game_predictions(
         home_team = create_team_from_dict(home_team_data, home_players)
         away_team = create_team_from_dict(away_team_data, away_players)
 
-        # Run simulation
-        simulator = GameSimulator(home_team, away_team)
-        results = simulator.run_simulation(n_simulations=n_simulations)
+        # Use V3 simulator with tracking data if available
+        use_v3 = HAS_TRACKING_DATA and os.environ.get('USE_V3_SIMULATION', '1') == '1'
+
+        if use_v3:
+            simulator = GameSimulatorV3(home_team, away_team)
+
+            # Try to load tracking data for enhanced accuracy
+            try:
+                # Create ShotAtlas from recent games (cached)
+                shot_atlas = ShotAtlas()
+
+                # Load any cached shot data from .tracking_cache
+                from pathlib import Path
+                cache_dir = Path(__file__).parent / ".tracking_cache"
+                if cache_dir.exists():
+                    import json
+                    for cache_file in list(cache_dir.glob("shots_*.json"))[:5]:  # Last 5 games
+                        try:
+                            with open(cache_file, 'r') as f:
+                                data = json.load(f)
+                            # Parse shots and add to atlas
+                            from tracking_data import _parse_shot_chart_response
+                            game_id = cache_file.stem.replace('shots_', '')
+                            shots = _parse_shot_chart_response(data, game_id)
+                            shot_atlas.add_shots(shots)
+                        except:
+                            pass
+
+                # Load tracking data into simulator
+                if shot_atlas.league_zones:
+                    simulator.load_tracking_data(shot_atlas=shot_atlas)
+
+            except Exception as e:
+                pass  # Fall back to V3 without tracking data
+
+            results = simulator.run_simulation(n_simulations=n_simulations)
+            source = 'monte_carlo_v3'
+        else:
+            # Use standard simulator
+            simulator = GameSimulator(home_team, away_team)
+            results = simulator.run_simulation(n_simulations=n_simulations)
+            source = 'monte_carlo'
 
         # Get betting probabilities
         return {
@@ -696,7 +749,7 @@ def simulate_game_predictions(
             'projected_total': results['total_mean'],
             'total_std': results['total_std'],
             'simulator': simulator,  # For prop calculations
-            'source': 'monte_carlo',
+            'source': source,
         }
 
     except Exception as e:
@@ -1309,8 +1362,8 @@ def main():
             odds_list = api.get_betting_odds(date=target_date)
             print(f"  Fetched {len(odds_list)} odds entries")
 
-            # Index by game_id, preferring DraftKings/FanDuel
-            preferred_vendors = ['draftkings', 'fanduel', 'betmgm', 'caesars']
+            # Index by game_id, preferring FanDuel
+            preferred_vendors = ['fanduel', 'draftkings', 'betmgm', 'caesars']
             for odds in odds_list:
                 game_id = odds.get('game_id')
                 vendor = odds.get('vendor', '').lower()

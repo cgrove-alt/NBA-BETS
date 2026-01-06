@@ -1,96 +1,36 @@
-# NBA Model Improvement Execution Tasks
+# NBA Model V3 "The Oracle" - Execution Tasks
 
-- [x] **Phase 1: Simulation Engine**
-    - [x] Create `simulation_engine.py` structure
-    - [x] Implement `Possession` class and state transitions
-    - [x] Implement `GameSimulator` class with Monte Carlo loop
-    - [x] Create `PlayerTransitionStats` generator (converting season stats to probability tables)
-    - [x] Verify simulation output against historical box scores (Calibration)
+## Phase 0: Granular Data Acquisition (The Missing Attribute)
+- [ ] **Data Pipeline Infrastructure**
+    - [ ] Create `tracking_data.py`
+    - [ ] Implement `fetch_pbp_historical(game_id)` (Deep, slow for training)
+    - [ ] Implement `fetch_pbp_live(game_id)` (Fast, light for inference)
+    - [ ] Implement `fetch_shot_chart(game_id)` using `nba_api`
+- [ ] **Data Processing**
+    - [ ] Build `PBPParser` to convert text play-by-play into `Possession` objects
+    - [ ] Create `ShotAtlas` (Heatmap of player efficiencies by (X,Y) zone)
+    - [ ] Implement `RotationTracker` (Derive substitution matrix from PBP)
 
-- [x] **Phase 2: Market Microstructure**
-    - [x] Create `market_microstructure.py`
-    - [x] Implement robust `OddsFetcher` with rate-limit handling
-    - [x] Implement `SteamDetector` (Move > X% in Y minutes)
-    - [x] Implement `StaleLineFinder` (Book vs Consensus diff)
+## Phase 1: Simulation Engine V3 (Tracking-Based)
+- [ ] **Upgrade `simulation_engine.py`**
+    - [ ] Refactor `PlayerStats` to `PlayerTrackingStats` (Include Zone Shooting %)
+    - [ ] Update `_simulate_shot` to use `ShotAtlas` probabilities instead of season FG%
+    - [ ] Update `_select_shooter` to use `RotationTracker` for realistic lineups
+- [ ] **Validation**
+    - [ ] Verify V3 calibration against historical tracking data
 
-- [x] **Phase 3: Qualitative Intelligence**
-    - [x] Create `news_sentiment.py`
-    - [x] Setup `NewsIngestor` (Mock/API)
-    - [x] Implement `analyze_sentiment(text)` using Claude API
-    - [x] Create pipeline to update `injury_fetcher.py` adjustments
+## Phase 2: Market Microstructure V3 (Latency-Optimized)
+- [ ] **Speed Upgrades**
+    - [ ] Refactor `OddsMonitor` to use multi-threaded polling
+    - [ ] Implement "Heartbeat" mechanism for steam detection (< 1s latency)
 
-- [x] **Phase 4: Portfolio Optimization**
-    - [x] Create `portfolio_optimizer.py`
-    - [x] Implement `calculate_covariance(active_bets)`
-    - [x] Implement `optimize_portfolio_kelly(bets, covariance)`
-
-- [x] **Phase 5: Integration**
-    - [x] Update `daily_predictions.py` to use `GameSimulator` instead of Regression
-    - [x] Update `bet_tracker.py` to use `PortfolioOptimizer`
+## Phase 3: Qualitative V3 (Context-Aware)
+- [ ] **LLM Integration**
+    - [ ] Integrate `injury_report` into `RotationTracker` (Remove injured players from rotation)
 
 ---
-
-## Review Summary
-
-### Completed: 2026-01-06
-
-All 5 phases of the NBA Model V2 "The Oracle" improvement plan have been successfully implemented.
-
-### New Modules Created:
-
-1. **simulation_engine.py** (~1000 lines)
-   - Monte Carlo game simulator with possession-level modeling
-   - PlayerStats and TeamStats dataclasses
-   - GameSimulator with 10,000+ simulation support
-   - Prop probability, spread, total, and parlay correlation calculators
-   - Factory functions for creating from API data
-
-2. **market_microstructure.py** (~900 lines)
-   - OddsFetcher with caching and rate limiting
-   - SteamDetector for sharp money movement detection
-   - StaleLineFinder for consensus vs book pricing
-   - MarketMonitor for continuous monitoring
-   - ConsensusCalculator and CLVTracker
-
-3. **news_sentiment.py** (~700 lines)
-   - NewsIngestor for collecting news items
-   - SentimentAnalyzer with Claude API integration
-   - InjuryImpactCalculator for quantitative adjustments
-   - SentimentPipeline for end-to-end processing
-   - Fallback rule-based analysis when API unavailable
-
-4. **portfolio_optimizer.py** (~800 lines)
-   - CovarianceCalculator for bet correlations
-   - KellyOptimizer for multivariate Kelly criterion
-   - PortfolioOptimizer main interface
-   - calculate_covariance() and optimize_portfolio_kelly() integration functions
-
-### Integration Updates:
-
-5. **daily_predictions.py**
-   - Added imports for all new modules
-   - `simulate_game_predictions()` function for Monte Carlo predictions
-   - `optimize_bet_portfolio()` function for stake sizing
-   - Feature flags: HAS_SIMULATION_ENGINE, HAS_PORTFOLIO_OPTIMIZER, HAS_SENTIMENT, HAS_MARKET_MICRO
-
-6. **bet_tracker.py**
-   - Added PortfolioOptimizer import
-   - `optimize_pending_stakes()` method on BetTracker class
-   - `get_correlation_matrix()` method for bet correlations
-
-### Key Capabilities Added:
-
-- **Simulation-based predictions**: More accurate than regression for capturing pace effects, blowouts, player correlations
-- **Steam/stale line detection**: Real-time monitoring of sharp money moves
-- **News-driven adjustments**: LLM-powered analysis of injury reports and news
-- **Covariance-aware bet sizing**: Reduces overexposure to correlated outcomes
-- **Same-game parlay analysis**: Calculates true joint probabilities
-
-### Testing Results:
-
-All modules tested and functional:
-- simulation_engine.py: Produces realistic ~100 point games
-- market_microstructure.py: Odds utilities and alert system working
-- news_sentiment.py: News processing and insight extraction working
-- portfolio_optimizer.py: Multivariate Kelly optimization working
-- Integration: All feature flags True, methods accessible
+## Archive: V2 Implementation (Completed Jan 2026)
+- [x] Phase 1: Simulation Engine (Base Monte Carlo)
+- [x] Phase 2: Market Microstructure (Base Odds)
+- [x] Phase 3: Qualitative Intelligence (Base Sentiment)
+- [x] Phase 4: Portfolio Optimization (Base Kelly)

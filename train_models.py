@@ -59,10 +59,87 @@ except ImportError:
 
 # Kaggle/CSV data support (no rate limits!)
 try:
-    from kaggle_data_loader import load_training_data_from_csv, load_training_data_with_live
+    from kaggle_data_loader import (
+        load_training_data_from_csv,
+        load_training_data_with_live,
+        load_live_season_data,
+        process_games_to_matchups,
+        calculate_rolling_stats,
+        generate_training_features,
+    )
     HAS_KAGGLE = True
 except ImportError:
     HAS_KAGGLE = False
+
+
+def load_recent_seasons_only(
+    seasons: Optional[List[str]] = None,
+    window: int = 10,
+) -> List[Dict]:
+    """
+    Load training data from only recent seasons (2024-25, 2025-26).
+
+    This uses live API data exclusively, ignoring older CSV data.
+    Provides the most up-to-date training data for current predictions.
+
+    Args:
+        seasons: List of seasons to include (default: ["2024-25", "2025-26"])
+        window: Rolling window size for stats calculation
+
+    Returns:
+        List of training examples with features and outcomes
+    """
+    if not HAS_KAGGLE:
+        print("Error: kaggle_data_loader module not available")
+        return []
+
+    if seasons is None:
+        seasons = ["2024-25", "2025-26"]
+
+    print("\n" + "="*60)
+    print("RECENT SEASONS ONLY MODE")
+    print("="*60)
+    print(f"Seasons: {', '.join(seasons)}")
+
+    # Load live data
+    live_df = load_live_season_data()
+
+    if live_df.empty:
+        print("\nNo live data found!")
+        print("Run: python3 live_season_fetcher.py --seasons 2024,2025")
+        return []
+
+    # Filter to requested seasons
+    live_df = live_df[live_df["SEASON_YEAR"].isin(seasons)]
+
+    print(f"\nLive data loaded:")
+    for season in seasons:
+        season_df = live_df[live_df["SEASON_YEAR"] == season]
+        games_count = len(season_df) // 2  # Each game has 2 records
+        print(f"  {season}: {games_count} games")
+
+    total_records = len(live_df)
+    print(f"Total: {total_records} records ({total_records // 2} games)")
+
+    # Process into matchups
+    games_df = process_games_to_matchups(live_df)
+
+    # Calculate rolling stats
+    games_df = calculate_rolling_stats(games_df, window=window)
+
+    # Generate features
+    training_data = generate_training_features(games_df)
+
+    print(f"\nGenerated {len(training_data)} training examples")
+
+    # Summary stats
+    if training_data:
+        home_wins = sum(1 for g in training_data if g.get("home_win", False))
+        avg_diff = sum(g.get("point_differential", 0) for g in training_data) / len(training_data)
+        print(f"Home win rate: {home_wins / len(training_data):.1%}")
+        print(f"Average point differential: {avg_diff:+.1f}")
+
+    return training_data
 
 def get_all_teams():
     """Get all NBA teams."""
@@ -590,6 +667,8 @@ Examples:
         help="Run walk-forward backtest after training to evaluate model profitability")
     parser.add_argument("--backtest-min-games", type=int, default=100,
         help="Minimum games required for backtesting (default: 100)")
+    parser.add_argument("--recent-only", action="store_true",
+        help="Train on only recent seasons (2024-25, 2025-26) from live data")
 
     args = parser.parse_args()
 
@@ -601,7 +680,13 @@ Examples:
     print(f"Target players: {args.players}")
 
     # Load or fetch data
-    if args.kaggle and args.live:
+    if args.recent_only:
+        print("\n*** RECENT SEASONS ONLY MODE ***")
+        print("Training on 2024-25 and 2025-26 seasons only.\n")
+        seasons = args.seasons.split(",") if args.seasons else ["2024-25", "2025-26"]
+        games_data = load_recent_seasons_only(seasons=seasons)
+        player_data = None
+    elif args.kaggle and args.live:
         print("\n*** KAGGLE + LIVE MODE: CSV + API data (BEST) ***")
         print("This combines historical CSV + live API data for maximum coverage!\n")
         csv_seasons = args.seasons.split(",") if args.seasons else ["2023-24"]

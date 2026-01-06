@@ -32,13 +32,20 @@ Output: Distribution of 10,000+ simulated games providing:
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
 from enum import Enum
 import random
 from collections import defaultdict
 import json
 from pathlib import Path
 from datetime import datetime
+
+# V3 tracking data imports (optional, for enhanced simulation)
+try:
+    from tracking_data import ShotAtlas, RotationTracker, PBPParser
+    HAS_TRACKING_DATA = True
+except ImportError:
+    HAS_TRACKING_DATA = False
 
 
 # =============================================================================
@@ -105,6 +112,142 @@ class PlayerStats:
     def three_rate(self) -> float:
         """Percentage of FGA that are 3-pointers."""
         return self.fg3a / self.fga if self.fga > 0 else 0.35
+
+
+@dataclass
+class PlayerTrackingStats(PlayerStats):
+    """
+    V3: Enhanced player stats with zone-based shooting data from tracking.
+
+    Extends PlayerStats with:
+    - Zone-specific shooting percentages
+    - Shot distribution by zone
+    - Hot/cold zone identification
+    - Lineup-aware usage adjustments
+
+    Usage:
+        player = PlayerTrackingStats.from_player_stats(base_stats, shot_atlas)
+    """
+
+    # Zone shooting percentages (from ShotAtlas)
+    zone_fg_pct: Dict[str, float] = field(default_factory=dict)
+
+    # Shot distribution by zone (where they shoot from)
+    zone_distribution: Dict[str, float] = field(default_factory=dict)
+
+    # Hot zones (above league average)
+    hot_zones: List[str] = field(default_factory=list)
+
+    # Cold zones (below league average)
+    cold_zones: List[str] = field(default_factory=list)
+
+    # Lineup-specific usage adjustments
+    lineup_usage_factor: float = 1.0  # Multiplied with usage_rate when in specific lineups
+
+    # Expected minutes from rotation tracking
+    expected_minutes: float = 0.0
+
+    # Players they play well with (pair synergy)
+    synergy_partners: Dict[int, float] = field(default_factory=dict)  # player_id -> synergy boost
+
+    @classmethod
+    def from_player_stats(
+        cls,
+        player: PlayerStats,
+        shot_atlas: Optional[Any] = None,
+        rotation_tracker: Optional[Any] = None
+    ) -> 'PlayerTrackingStats':
+        """
+        Create PlayerTrackingStats from base PlayerStats + tracking data.
+
+        Args:
+            player: Base PlayerStats object
+            shot_atlas: ShotAtlas instance with zone data
+            rotation_tracker: RotationTracker instance with lineup data
+        """
+        # Copy base stats
+        tracking = cls(
+            id=player.id,
+            name=player.name,
+            position=player.position,
+            team_id=player.team_id,
+            minutes=player.minutes,
+            usage_rate=player.usage_rate,
+            ppg=player.ppg,
+            fga=player.fga,
+            fgm=player.fgm,
+            fg_pct=player.fg_pct,
+            fg3a=player.fg3a,
+            fg3m=player.fg3m,
+            fg3_pct=player.fg3_pct,
+            fta=player.fta,
+            ftm=player.ftm,
+            ft_pct=player.ft_pct,
+            orb=player.orb,
+            drb=player.drb,
+            reb=player.reb,
+            ast=player.ast,
+            tov=player.tov,
+            stl=player.stl,
+            blk=player.blk,
+            is_starter=player.is_starter,
+            availability=player.availability,
+        )
+
+        # Add zone data from ShotAtlas
+        if shot_atlas is not None and HAS_TRACKING_DATA:
+            zone_data = shot_atlas.to_simulation_input(player.id)
+            tracking.zone_fg_pct = zone_data.get('zone_fg_pct', {})
+            tracking.zone_distribution = zone_data.get('zone_distribution', {})
+            tracking.hot_zones = zone_data.get('hot_zones', [])
+            tracking.cold_zones = zone_data.get('cold_zones', [])
+
+        # Add rotation data
+        if rotation_tracker is not None and HAS_TRACKING_DATA:
+            tracking.expected_minutes = rotation_tracker.get_player_minutes(player.id)
+
+        return tracking
+
+    def get_zone_shot_probability(self, zone: str, league_avg: float = 0.45) -> float:
+        """
+        Get shooting probability for a specific zone.
+
+        Falls back to overall FG% if zone data not available.
+        """
+        if zone in self.zone_fg_pct:
+            return self.zone_fg_pct[zone]
+
+        # Fallback based on zone type
+        if 'Restricted' in zone:
+            return self.fg_pct + 0.15  # Rim shots are higher %
+        elif '3' in zone or 'Corner' in zone:
+            return self.fg3_pct
+        elif 'Mid-Range' in zone:
+            return self.fg_pct - 0.03  # Mid-range slightly lower
+        else:
+            return league_avg
+
+    def select_shot_zone(self) -> str:
+        """
+        Select which zone this player shoots from based on their distribution.
+
+        Returns zone name for shot simulation.
+        """
+        if not self.zone_distribution:
+            # Default distribution based on modern NBA
+            return random.choices(
+                ['Restricted Area', 'In The Paint (Non-RA)', 'Mid-Range',
+                 'Above the Break 3', 'Left Corner 3', 'Right Corner 3'],
+                weights=[0.30, 0.10, 0.15, 0.35, 0.05, 0.05]
+            )[0]
+
+        zones = list(self.zone_distribution.keys())
+        weights = list(self.zone_distribution.values())
+
+        if sum(weights) == 0:
+            return 'Mid-Range'
+
+        return random.choices(zones, weights=weights)[0]
 
 
 @dataclass
@@ -804,6 +947,284 @@ class GameSimulator:
             return value > line if side == 'over' else value < line
 
         return False
+
+
+# =============================================================================
+# V3 ENHANCED SIMULATOR (TRACKING-BASED)
+# =============================================================================
+
+class GameSimulatorV3(GameSimulator):
+    """
+    V3: Enhanced Monte Carlo simulator using tracking data.
+
+    Improvements over base GameSimulator:
+    - Zone-based shot selection and probabilities (ShotAtlas)
+    - Realistic rotation patterns (RotationTracker)
+    - Lineup-aware usage rates
+    - Hot/cold zone adjustments
+
+    Usage:
+        sim = GameSimulatorV3(home_team, away_team)
+        sim.load_tracking_data(shot_atlas, rotation_tracker)
+        results = sim.run_simulation(n_simulations=10000)
+    """
+
+    # Zone-to-points mapping
+    ZONE_POINTS = {
+        'Restricted Area': 2,
+        'In The Paint (Non-RA)': 2,
+        'Mid-Range': 2,
+        'Above the Break 3': 3,
+        'Left Corner 3': 3,
+        'Right Corner 3': 3,
+        'Backcourt': 3,  # Rare
+    }
+
+    # League average zone efficiencies (fallback)
+    LEAGUE_ZONE_AVG = {
+        'Restricted Area': 0.63,
+        'In The Paint (Non-RA)': 0.42,
+        'Mid-Range': 0.41,
+        'Above the Break 3': 0.36,
+        'Left Corner 3': 0.39,
+        'Right Corner 3': 0.39,
+    }
+
+    def __init__(
+        self,
+        home_team: TeamStats,
+        away_team: TeamStats,
+        neutral_site: bool = False
+    ):
+        super().__init__(home_team, away_team, neutral_site)
+
+        # V3 tracking data
+        self.shot_atlas: Optional[Any] = None
+        self.rotation_tracker: Optional[Any] = None
+
+        # Current lineup tracking
+        self._home_current_lineup: Set[int] = set()
+        self._away_current_lineup: Set[int] = set()
+
+        # Lineup-based probabilities
+        self._home_lineup_probs: Dict[Tuple[int, ...], float] = {}
+        self._away_lineup_probs: Dict[Tuple[int, ...], float] = {}
+
+        # Flag for V3 mode
+        self.use_tracking_data = False
+
+    def load_tracking_data(
+        self,
+        shot_atlas: Optional[Any] = None,
+        rotation_tracker: Optional[Any] = None
+    ):
+        """
+        Load tracking data for enhanced simulation.
+
+        Args:
+            shot_atlas: ShotAtlas instance with zone shooting data
+            rotation_tracker: RotationTracker instance with lineup data
+        """
+        self.shot_atlas = shot_atlas
+        self.rotation_tracker = rotation_tracker
+
+        if shot_atlas is not None or rotation_tracker is not None:
+            self.use_tracking_data = True
+
+        # Upgrade players to PlayerTrackingStats if needed
+        if self.use_tracking_data:
+            self._upgrade_players_to_tracking()
+
+        # Load lineup probabilities
+        if rotation_tracker is not None:
+            self._load_lineup_probabilities()
+
+    def _upgrade_players_to_tracking(self):
+        """Convert PlayerStats to PlayerTrackingStats with tracking data."""
+        for team in [self.home, self.away]:
+            upgraded = []
+            for player in team.players:
+                if not isinstance(player, PlayerTrackingStats):
+                    tracking_player = PlayerTrackingStats.from_player_stats(
+                        player,
+                        shot_atlas=self.shot_atlas,
+                        rotation_tracker=self.rotation_tracker
+                    )
+                    upgraded.append(tracking_player)
+                else:
+                    upgraded.append(player)
+            team.players = upgraded
+
+    def _load_lineup_probabilities(self):
+        """Load lineup probabilities from rotation tracker."""
+        if self.rotation_tracker is None:
+            return
+
+        if self.home.id in self.rotation_tracker.lineup_spells:
+            lineup_data = self.rotation_tracker.to_simulation_input(self.home.id)
+            self._home_lineup_probs = lineup_data.get('lineup_probabilities', {})
+
+        if self.away.id in self.rotation_tracker.lineup_spells:
+            lineup_data = self.rotation_tracker.to_simulation_input(self.away.id)
+            self._away_lineup_probs = lineup_data.get('lineup_probabilities', {})
+
+    def _select_shooter(self, team: TeamStats, game_state: GameState) -> int:
+        """
+        V3: Select shooter with lineup and tracking awareness.
+
+        Enhancements:
+        - Uses lineup-specific usage rates
+        - Accounts for player synergies
+        - More realistic garbage time patterns
+        """
+        margin = game_state.get_margin()
+        is_garbage_time = (game_state.quarter == 4 and
+                          abs(margin) > 20 and
+                          game_state.time_remaining < 300)
+
+        # Get current lineup (for synergy calculations)
+        current_lineup = self._get_current_lineup(team)
+
+        weights = []
+        for i, player in enumerate(team.players):
+            if player.availability < 0.5:
+                weight = 0.0
+            elif is_garbage_time and player.is_starter:
+                weight = player.usage_rate * 0.3
+            else:
+                base_usage = player.usage_rate
+
+                # V3: Apply lineup usage factor for PlayerTrackingStats
+                if isinstance(player, PlayerTrackingStats):
+                    base_usage *= player.lineup_usage_factor
+
+                    # Apply synergy boost if playing with synergy partners
+                    for partner_id, boost in player.synergy_partners.items():
+                        if partner_id in current_lineup:
+                            base_usage *= (1 + boost * 0.1)
+
+                weight = base_usage * player.availability
+            weights.append(weight)
+
+        if sum(weights) == 0:
+            return 0
+
+        total = sum(weights)
+        probs = [w / total for w in weights]
+        return np.random.choice(len(team.players), p=probs)
+
+    def _get_current_lineup(self, team: TeamStats) -> Set[int]:
+        """Get IDs of players currently on the court."""
+        # Simplified: return starters + active bench
+        lineup = set()
+        for player in team.players:
+            if player.is_starter or player.availability > 0.8:
+                lineup.add(player.id)
+            if len(lineup) >= 5:
+                break
+        return lineup
+
+    def _simulate_shot(
+        self,
+        shooter: PlayerStats,
+        is_three: bool,
+        defense_rating: float
+    ) -> Tuple[bool, int]:
+        """
+        V3: Simulate shot with zone-based probabilities.
+
+        If shooter is PlayerTrackingStats with zone data:
+        - Select zone from player's shot distribution
+        - Use zone-specific shooting percentage
+        - Apply hot/cold zone adjustments
+
+        Falls back to base implementation if no tracking data.
+        """
+        # If not using V3 or not PlayerTrackingStats, use base implementation
+        if not self.use_tracking_data or not isinstance(shooter, PlayerTrackingStats):
+            return super()._simulate_shot(shooter, is_three, defense_rating)
+
+        # V3: Zone-based shot simulation
+        return self._simulate_shot_v3(shooter, defense_rating)
+
+    def _simulate_shot_v3(
+        self,
+        shooter: PlayerTrackingStats,
+        defense_rating: float
+    ) -> Tuple[bool, int]:
+        """
+        V3 zone-based shot simulation.
+        """
+        # Select zone based on player's distribution
+        zone = shooter.select_shot_zone()
+
+        # Determine points for this zone
+        points = self.ZONE_POINTS.get(zone, 2)
+        is_three = points == 3
+
+        # Get zone-specific shooting probability
+        base_pct = shooter.get_zone_shot_probability(
+            zone,
+            league_avg=self.LEAGUE_ZONE_AVG.get(zone, 0.45)
+        )
+
+        # Adjust for defense
+        def_factor = defense_rating / 112.0
+
+        # Apply hot/cold zone adjustments
+        zone_adjustment = 0.0
+        if zone in shooter.hot_zones:
+            zone_adjustment = 0.03  # 3% boost in hot zones
+        elif zone in shooter.cold_zones:
+            zone_adjustment = -0.02  # 2% penalty in cold zones
+
+        # Add variance
+        variance = np.random.normal(0, 0.04)
+
+        # Calculate final probability
+        adjusted_pct = (base_pct * (1.0 / def_factor)) + zone_adjustment + variance
+
+        # Clamp to reasonable range
+        if is_three:
+            adjusted_pct = max(0.20, min(0.50, adjusted_pct))
+        else:
+            adjusted_pct = max(0.35, min(0.75, adjusted_pct))
+
+        made = random.random() < adjusted_pct
+        return (made, points if made else 0)
+
+    def get_zone_stats_summary(self) -> Dict:
+        """
+        Get summary of zone shooting stats used in simulation.
+
+        Useful for validating tracking data integration.
+        """
+        if not self.shot_atlas:
+            return {'error': 'No shot atlas loaded'}
+
+        summary = {
+            'league_averages': self.shot_atlas.get_league_averages(),
+            'home_team': {},
+            'away_team': {},
+        }
+
+        for player in self.home.players:
+            if isinstance(player, PlayerTrackingStats) and player.zone_fg_pct:
+                summary['home_team'][player.name] = {
+                    'zone_efficiency': player.zone_fg_pct,
+                    'hot_zones': player.hot_zones,
+                    'cold_zones': player.cold_zones,
+                }
+
+        for player in self.away.players:
+            if isinstance(player, PlayerTrackingStats) and player.zone_fg_pct:
+                summary['away_team'][player.name] = {
+                    'zone_efficiency': player.zone_fg_pct,
+                    'hot_zones': player.hot_zones,
+                    'cold_zones': player.cold_zones,
+                }
+
+        return summary
 
 
 # =============================================================================

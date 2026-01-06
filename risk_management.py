@@ -32,6 +32,301 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# RISK OF RUIN CALCULATIONS
+# =============================================================================
+
+def calculate_risk_of_ruin(
+    win_probability: float,
+    win_payout: float,
+    loss_amount: float,
+    bankroll_units: float,
+    ruin_threshold_units: float = 0
+) -> float:
+    """
+    Calculate probability of going bust (Risk of Ruin).
+
+    Uses the closed-form solution for simplified RoR calculation.
+    For more accurate results with varying bet sizes, use Monte Carlo simulation.
+
+    Formula: RoR = ((1-p)/p * (a/b))^n
+    Where:
+        p = win probability
+        a = profit on win
+        b = loss on loss
+        n = number of units to lose to reach ruin
+
+    Args:
+        win_probability: Probability of winning each bet (0-1)
+        win_payout: Amount won on a win (profit, not total return)
+        loss_amount: Amount lost on a loss
+        bankroll_units: Current bankroll in betting units
+        ruin_threshold_units: Bankroll level considered "ruin" (default 0)
+
+    Returns:
+        Probability of ruin (0-1)
+    """
+    if win_probability <= 0 or win_probability >= 1:
+        return 0.0 if win_probability >= 1 else 1.0
+
+    if win_payout <= 0 or loss_amount <= 0:
+        return 0.0
+
+    p = win_probability
+    q = 1 - p
+
+    # Expected value per bet
+    ev = p * win_payout - q * loss_amount
+
+    # If EV is negative or zero, eventual ruin is certain (or very high)
+    if ev <= 0:
+        return 1.0
+
+    # Units we can lose before reaching ruin
+    units_to_ruin = bankroll_units - ruin_threshold_units
+
+    if units_to_ruin <= 0:
+        return 1.0
+
+    # Simplified formula (assumes fixed bet size)
+    # RoR = ((q/p) * (win_payout/loss_amount)) ^ units_to_ruin
+    # Only valid when EV > 0
+
+    ratio = (q / p) * (loss_amount / win_payout)
+
+    if ratio >= 1:
+        # Edge not large enough to overcome variance
+        return 1.0
+
+    # Calculate RoR
+    try:
+        ror = ratio ** units_to_ruin
+    except OverflowError:
+        ror = 0.0
+
+    return min(1.0, max(0.0, ror))
+
+
+def calculate_risk_of_ruin_monte_carlo(
+    win_probability: float,
+    bet_size_fraction: float,
+    decimal_odds: float,
+    num_simulations: int = 10000,
+    num_bets: int = 1000,
+    ruin_threshold_pct: float = 0.0
+) -> Dict:
+    """
+    Calculate Risk of Ruin using Monte Carlo simulation.
+
+    More accurate than closed-form when bet sizes vary or for complex scenarios.
+
+    Args:
+        win_probability: Probability of winning each bet
+        bet_size_fraction: Bet size as fraction of bankroll
+        decimal_odds: Decimal odds (e.g., 1.91 for -110)
+        num_simulations: Number of Monte Carlo paths to simulate
+        num_bets: Number of bets in each simulation
+        ruin_threshold_pct: Bankroll percentage considered ruin
+
+    Returns:
+        Dict with RoR statistics and distribution
+    """
+    np.random.seed(42)  # For reproducibility
+
+    starting_bankroll = 1.0  # Normalized to 1
+    ruin_threshold = starting_bankroll * ruin_threshold_pct
+
+    ruined_count = 0
+    final_bankrolls = []
+    max_drawdowns = []
+
+    for _ in range(num_simulations):
+        bankroll = starting_bankroll
+        peak = starting_bankroll
+        max_dd = 0
+
+        for _ in range(num_bets):
+            # Calculate bet size (fraction of current bankroll)
+            bet_size = bankroll * bet_size_fraction
+
+            # Simulate outcome
+            if np.random.random() < win_probability:
+                # Win
+                profit = bet_size * (decimal_odds - 1)
+                bankroll += profit
+            else:
+                # Lose
+                bankroll -= bet_size
+
+            # Track peak and drawdown
+            if bankroll > peak:
+                peak = bankroll
+            dd = (peak - bankroll) / peak if peak > 0 else 0
+            max_dd = max(max_dd, dd)
+
+            # Check for ruin
+            if bankroll <= ruin_threshold:
+                ruined_count += 1
+                break
+
+        final_bankrolls.append(bankroll)
+        max_drawdowns.append(max_dd)
+
+    ror = ruined_count / num_simulations
+    final_arr = np.array(final_bankrolls)
+    dd_arr = np.array(max_drawdowns)
+
+    return {
+        "risk_of_ruin": ror,
+        "risk_of_ruin_pct": ror * 100,
+        "mean_final_bankroll": np.mean(final_arr),
+        "median_final_bankroll": np.median(final_arr),
+        "std_final_bankroll": np.std(final_arr),
+        "mean_max_drawdown": np.mean(dd_arr),
+        "percentile_5_final": np.percentile(final_arr, 5),
+        "percentile_95_final": np.percentile(final_arr, 95),
+        "simulations": num_simulations,
+        "bets_per_sim": num_bets,
+    }
+
+
+# =============================================================================
+# CLV (CLOSING LINE VALUE) TRACKING
+# =============================================================================
+
+class CLVTracker:
+    """
+    Track and analyze Closing Line Value (CLV).
+
+    CLV is the single best predictor of long-term betting profitability.
+    If you consistently beat the closing line, you have a real edge.
+    """
+
+    def __init__(self):
+        self.bets: List[Dict] = []
+
+    def record_bet(
+        self,
+        bet_id: str,
+        selection: str,
+        opening_odds: float,
+        bet_odds: float,
+        closing_odds: float,
+        won: bool = None
+    ) -> Dict:
+        """
+        Record a bet with opening, bet, and closing odds.
+
+        Args:
+            bet_id: Unique bet identifier
+            selection: What was bet on
+            opening_odds: Odds when market opened (American)
+            bet_odds: Odds when bet was placed (American)
+            closing_odds: Final odds before game start (American)
+            won: Whether bet won (can be None if pending)
+
+        Returns:
+            Dict with CLV analysis for this bet
+        """
+        # Convert to probabilities
+        def american_to_prob(odds):
+            if odds > 0:
+                return 100 / (odds + 100)
+            else:
+                return abs(odds) / (abs(odds) + 100)
+
+        bet_prob = american_to_prob(bet_odds)
+        closing_prob = american_to_prob(closing_odds)
+        opening_prob = american_to_prob(opening_odds)
+
+        # CLV = closing probability - bet probability
+        # Positive CLV = you got better odds than closing
+        clv = closing_prob - bet_prob
+        clv_vs_opening = opening_prob - bet_prob
+
+        # Line movement direction
+        line_movement = closing_prob - opening_prob
+
+        bet_record = {
+            "bet_id": bet_id,
+            "selection": selection,
+            "opening_odds": opening_odds,
+            "bet_odds": bet_odds,
+            "closing_odds": closing_odds,
+            "opening_prob": opening_prob,
+            "bet_prob": bet_prob,
+            "closing_prob": closing_prob,
+            "clv": clv,
+            "clv_vs_opening": clv_vs_opening,
+            "line_movement": line_movement,
+            "won": won,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        self.bets.append(bet_record)
+
+        return bet_record
+
+    def get_clv_summary(self) -> Dict:
+        """Get summary statistics of CLV performance."""
+        if not self.bets:
+            return {"error": "No bets recorded"}
+
+        clv_values = [b["clv"] for b in self.bets]
+        clv_vs_opening = [b["clv_vs_opening"] for b in self.bets]
+
+        # Split by result
+        won_bets = [b for b in self.bets if b.get("won") is True]
+        lost_bets = [b for b in self.bets if b.get("won") is False]
+
+        return {
+            "total_bets": len(self.bets),
+            "avg_clv": np.mean(clv_values),
+            "avg_clv_pct": np.mean(clv_values) * 100,
+            "median_clv": np.median(clv_values),
+            "std_clv": np.std(clv_values),
+            "positive_clv_count": sum(1 for c in clv_values if c > 0),
+            "positive_clv_pct": sum(1 for c in clv_values if c > 0) / len(clv_values) * 100,
+            "avg_clv_vs_opening": np.mean(clv_vs_opening),
+            "avg_clv_winners": np.mean([b["clv"] for b in won_bets]) if won_bets else None,
+            "avg_clv_losers": np.mean([b["clv"] for b in lost_bets]) if lost_bets else None,
+        }
+
+    def is_profitable_long_term(self) -> Tuple[bool, str]:
+        """
+        Assess if betting strategy shows signs of long-term profitability.
+
+        Based on CLV analysis rather than short-term results.
+
+        Returns:
+            Tuple of (is_profitable, explanation)
+        """
+        if len(self.bets) < 50:
+            return (None, f"Insufficient data: {len(self.bets)} bets. Need 50+ for assessment.")
+
+        summary = self.get_clv_summary()
+
+        avg_clv = summary["avg_clv"]
+        positive_clv_pct = summary["positive_clv_pct"]
+
+        # Criteria for likely profitable strategy:
+        # 1. Average CLV > 1% (consistently beating closing line)
+        # 2. >55% of bets have positive CLV
+
+        if avg_clv > 0.01 and positive_clv_pct > 55:
+            return (True, f"Strong positive CLV: avg {avg_clv:.2%}, {positive_clv_pct:.0f}% positive. "
+                         "Strategy shows signs of genuine edge.")
+        elif avg_clv > 0 and positive_clv_pct > 50:
+            return (True, f"Marginal positive CLV: avg {avg_clv:.2%}, {positive_clv_pct:.0f}% positive. "
+                         "Strategy may have edge but needs more data to confirm.")
+        elif avg_clv < -0.02:
+            return (False, f"Significant negative CLV: avg {avg_clv:.2%}. "
+                          "Market is pricing better - strategy likely unprofitable long-term.")
+        else:
+            return (None, f"CLV near zero: avg {avg_clv:.2%}. "
+                         "No clear edge detected - may be positive or negative variance.")
+
+
 class RiskLevel(Enum):
     """Risk levels for betting operations."""
     NORMAL = "normal"           # Full stakes allowed
@@ -590,16 +885,75 @@ class DynamicKellyCalculator:
         # Kelly can be negative if edge is negative
         return max(0.0, kelly)
 
+    def calculate_uncertainty_adjusted_kelly(
+        self,
+        win_probability: float,
+        decimal_odds: float,
+        probability_std: float = 0.05
+    ) -> float:
+        """
+        Calculate Kelly with uncertainty adjustment for probability estimation error.
+
+        When you're uncertain about your probability estimate, you should bet less
+        than full Kelly suggests. This accounts for estimation error.
+
+        Based on: "Kelly Criterion with Uncertainty" by Ed Thorp
+
+        Args:
+            win_probability: Estimated probability of winning
+            decimal_odds: Decimal odds
+            probability_std: Standard deviation of probability estimate
+                           (how uncertain are you? 0.05 = fairly confident)
+
+        Returns:
+            Uncertainty-adjusted Kelly fraction
+        """
+        # Base Kelly
+        base_kelly = self.calculate_kelly(win_probability, decimal_odds)
+
+        if base_kelly <= 0 or probability_std <= 0:
+            return base_kelly
+
+        # Adjust for uncertainty
+        # The more uncertain, the more we reduce Kelly
+        # Formula: adjusted_kelly = kelly * (1 - variance/edge_squared)
+        # where variance = probability_std^2
+
+        b = decimal_odds - 1  # Net odds
+        implied_prob = 1 / decimal_odds
+        edge = win_probability - implied_prob
+
+        if edge <= 0:
+            return 0.0
+
+        variance = probability_std ** 2
+        edge_squared = edge ** 2
+
+        # Uncertainty penalty (bounded to not go negative)
+        uncertainty_factor = max(0.25, 1 - (variance / (edge_squared + 0.001)))
+
+        adjusted_kelly = base_kelly * uncertainty_factor
+
+        return max(0.0, adjusted_kelly)
+
     def calculate_dynamic_kelly(
         self,
         win_probability: float,
         decimal_odds: float,
         edge_quality_score: float = 100.0,
         current_drawdown: float = 0.0,
-        num_same_day_bets: int = 1
+        num_same_day_bets: int = 1,
+        probability_std: float = None
     ) -> Dict:
         """
         Calculate dynamically adjusted Kelly stake.
+
+        IMPROVEMENTS over basic Kelly:
+        1. Fractional Kelly (25% by default) for safety
+        2. Edge quality adjustment - reduce stakes for lower quality edges
+        3. Drawdown adjustment - reduce stakes during drawdowns
+        4. Correlation adjustment - account for multiple same-day bets
+        5. Uncertainty adjustment - account for probability estimation error
 
         Args:
             win_probability: Probability of winning (0-1)
@@ -607,12 +961,19 @@ class DynamicKellyCalculator:
             edge_quality_score: Edge quality score (0-100)
             current_drawdown: Current drawdown as decimal
             num_same_day_bets: Number of bets placed today
+            probability_std: Standard deviation of probability estimate
+                           (optional - if provided, applies uncertainty adjustment)
 
         Returns:
             Dict with kelly calculations and adjustments
         """
-        # Calculate base Kelly
-        full_kelly = self.calculate_kelly(win_probability, decimal_odds)
+        # Calculate base Kelly (with optional uncertainty adjustment)
+        if probability_std is not None and probability_std > 0:
+            full_kelly = self.calculate_uncertainty_adjusted_kelly(
+                win_probability, decimal_odds, probability_std
+            )
+        else:
+            full_kelly = self.calculate_kelly(win_probability, decimal_odds)
 
         # Apply fractional Kelly
         fractional_kelly = full_kelly * self.kelly_fraction

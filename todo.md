@@ -27,7 +27,77 @@
 
 ---
 
-## Improvement Recommendations (Priority Ordered)
+## NEXT STEPS: NBA Model V3 "The Oracle" (CURRENT FOCUS)
+
+### Phase 0: Granular Data Acquisition (The Missing Attribute)
+- [x] **Data Pipeline Infrastructure** (Completed Jan 6, 2026)
+    - [x] Create `tracking_data.py`
+    - [x] Implement `fetch_pbp_historical(game_id)` (Deep, slow for training)
+        - Uses NBA CDN as primary source (more reliable)
+        - Falls back to stats.nba.com if CDN unavailable
+        - Caches responses to `.tracking_cache/`
+    - [x] Implement `fetch_pbp_live(game_id)` (Fast, light for inference)
+        - Returns last 50 plays for live context
+        - Shorter timeout for real-time responsiveness
+    - [x] Implement `fetch_shot_chart(game_id)` using `nba_api`
+        - Returns ShotLocation objects with (x, y) coordinates
+        - Includes zone info (Restricted Area, Mid-Range, Above the Break 3, etc.)
+- [x] **Data Processing** (Completed Jan 6, 2026)
+    - [x] Build `PBPParser` to convert text play-by-play into `Possession` objects
+        - Parses plays into possessions with start/end times
+        - Tracks outcome (made_2pt, made_3pt, missed, turnover, free_throws)
+        - Identifies shooter, assister, and points scored
+        - `get_possession_stats()` returns PPP, turnover rate, etc.
+    - [x] Create `ShotAtlas` (Heatmap of player efficiencies by (X,Y) zone)
+        - Tracks player/team/league shooting by zone
+        - `get_hot_zones()` / `get_cold_zones()` for above/below league avg
+        - `to_simulation_input()` for simulation engine integration
+    - [x] Implement `RotationTracker` (Derive substitution matrix from PBP)
+        - Tracks `LineupSpell` objects (5-player units with duration)
+        - `get_most_used_lineups()`, `get_player_minutes()`, `get_pair_minutes()`
+        - `get_starters()` identifies period 1 starters
+        - Note: CDN data substitution parsing needs refinement for full accuracy
+
+### Phase 1: Simulation Engine V3 (Tracking-Based) - COMPLETE (Jan 6, 2026)
+- [x] **Upgrade `simulation_engine.py`**
+    - [x] Refactor `PlayerStats` to `PlayerTrackingStats` (Include Zone Shooting %)
+        - Extends PlayerStats with zone_fg_pct, zone_distribution, hot_zones, cold_zones
+        - `from_player_stats()` factory integrates ShotAtlas + RotationTracker
+        - `get_zone_shot_probability()` returns zone-specific FG%
+        - `select_shot_zone()` uses player's actual shot distribution
+    - [x] Update `_simulate_shot` to use `ShotAtlas` probabilities instead of season FG%
+        - `_simulate_shot_v3()` selects zone → gets zone FG% → applies hot/cold adjustments
+        - Falls back to base implementation when no tracking data
+    - [x] Update `_select_shooter` to use `RotationTracker` for realistic lineups
+        - Lineup-aware usage rates via `lineup_usage_factor`
+        - Synergy partner boosts when playing together
+- [x] **GameSimulatorV3 Class**
+    - `load_tracking_data(shot_atlas, rotation_tracker)` for V3 mode
+    - `_upgrade_players_to_tracking()` converts PlayerStats → PlayerTrackingStats
+    - `get_zone_stats_summary()` for validation
+- [x] **Validation**
+    - [x] Tested V3 with/without tracking data
+    - [x] Monte Carlo (100 sims): 55% home win, margin=2.0 (std=18.8), total=204.3
+
+### Phase 2: Market Microstructure V3 (Latency-Optimized) - COMPLETE (Jan 6, 2026)
+- [x] **Speed Upgrades** in `odds_fetcher.py`
+    - [x] `OddsMonitorV3` class with multi-threaded polling
+        - `ThreadPoolExecutor` with configurable max_threads (default 4)
+        - Separate poll thread + heartbeat thread architecture
+        - Thread-safe `RLock` for odds history access
+        - `OddsSnapshot` dataclass for point-in-time odds
+    - [x] Heartbeat mechanism for steam detection (500ms interval)
+        - `SteamAlert` dataclass with type, direction, magnitude, confidence
+        - Spread steam: ≥1 point threshold
+        - ML steam: ≥3% probability change threshold
+        - Total steam: ≥1.5 point threshold
+        - Callback system: `add_steam_callback(handler)`
+    - [x] Helper: `create_steam_logger()` for console alerts
+    - [x] Tested: 3 steam alerts detected (spread, ML, total) correctly
+
+---
+
+## Improvement Recommendations (Legacy/Prioritized)
 
 ### TIER 1: High Impact, Easy Implementation
 

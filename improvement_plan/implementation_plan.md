@@ -5,6 +5,34 @@ This document outlines the architectural upgrades required to transform the curr
 
 **Objective**: Move from "Regression-based" to "Simulation & Market-based".
 
+## 0. Data Acquisition ("The Atomic Unit")
+
+### Problem: The "Speed of Light" Gap
+The NBA API has high latency (~30-60s delay) which is fatal for "Steam Chasing" and in-play betting. We need a dual-pipeline approach.
+
+### Proposed Solution: Dual-Pipeline Architecture
+**File**: `tracking_data.py`
+
+#### A. Historical Training Pipeline (Accuracy > Speed)
+*Source*: `nba_api`, `pbpstats` (GitHub package), `Balldontlie` (Historical)
+-   **Goal**: Build the most robust simulation engine using the deepest possible data.
+-   **Data Points**:
+    1.  **Possession-Level PBP**: Who is on court, who took the shot, shot clock remaining.
+    2.  **Shot Coordinates**: (X,Y) location for every shot (from `shotchartdetail`).
+    3.  **Rotation Stints**: Exact substitution timestamps to model "Bench Units" vs "Starters".
+
+#### B. Real-Time Inference Pipeline (Speed > Depth)
+*Source*: **Genius Sports** or **Sportradar** (Enterprise) OR **RapidAPI/Balldontlie GOAT** (Prosumer)
+-   **Action Item**: We must decide on a budget. For "Most Accurate Ever", we ideally need a **Sportradar** feed.
+-   **Fallback**: Optimized `Balldontlie` polling or `nba_api` with aggressive caching strategies, accepting we might miss the *absolute* fastest steam moves but crush the market on *derived* edges (like mispriced player props based on Possession Model).
+
+### Implementation Tasks:
+1.  **[ ] `tracking_data.py`**:
+    -   Implement `fetch_pbp_historical(game_id)` (Deep, slow).
+    -   Implement `fetch_pbp_live(game_id)` (Fast, light).
+2.  **[ ] `ShotAtlas`**:
+    -   Heatmap generator for player efficiencies by zone.
+
 ## 1. Simulation Engine ("Possession-Level Modeling")
 
 ### Current Limitation:

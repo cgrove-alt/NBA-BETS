@@ -1929,10 +1929,10 @@ class DataService:
                 print(f"No odds found for game {game_id}")
                 return {}
 
-            # Use DraftKings as primary (industry standard), fallback to first available
+            # Use FanDuel as primary (industry standard), fallback to first available
             primary_odds = None
             for o in game_odds:
-                if o.get('vendor') == 'draftkings':
+                if o.get('vendor') == 'fanduel':
                     primary_odds = o
                     break
 
@@ -2564,7 +2564,7 @@ class DataService:
         return players
 
     def _get_real_prop_line(self, game_id: str, player_id: int, prop_type: str) -> Optional[float]:
-        """Get real prop line from DraftKings ONLY for a player/prop.
+        """Get real prop line from FanDuel ONLY for a player/prop.
 
         Args:
             game_id: Game ID
@@ -2653,7 +2653,7 @@ class DataService:
                     self._real_prop_lines_cache[cache_key] = lines_by_player
                     self._real_prop_lines_timestamps[cache_key] = datetime.now()
                     if lines_by_player:
-                        print(f"Fetched DraftKings prop lines for game {game_id}: {len(lines_by_player)} players ({draftkings_count} DK props)")
+                        print(f"Fetched FanDuel prop lines for game {game_id}: {len(lines_by_player)} players ({fanduel_count} FD props)")
 
             except Exception as e:
                 print(f"Error fetching prop lines for game {game_id}: {e}")
