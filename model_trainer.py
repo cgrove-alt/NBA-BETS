@@ -3960,38 +3960,39 @@ class ModelTrainingPipeline:
             moneyline_model = MoneylineModel()
         X_ml, y_ml = moneyline_model.prepare_training_data(games_data)
         if len(X_ml) > 0:
-            results["moneyline"] = moneyline_model.train(X_ml, y_ml)
+            # CRITICAL FIX: Split data BEFORE training to prevent data leakage!
+            # Previously, model was trained on ALL data, then "test" set was created
+            # from data the model had already seen = data leakage = fake 3500%+ ROI
+            n_samples = len(X_ml)
+            n_test = int(n_samples * 0.2)  # 20% for final test
+            n_cal_val = int((n_samples - n_test) * 0.25)  # 25% of remaining for calibration
+
+            train_end = n_samples - n_test - n_cal_val
+            cal_val_end = n_samples - n_test
+
+            # Data splits (chronological order preserved - oldest data for training)
+            X_train_only = X_ml.iloc[:train_end]
+            y_train_only = y_ml[:train_end]
+            X_cal_val = X_ml.iloc[train_end:cal_val_end]
+            y_cal_val = y_ml[train_end:cal_val_end]
+            X_test = X_ml.iloc[cal_val_end:]
+            y_test = y_ml[cal_val_end:]
+
+            print(f"  Data split: {len(X_train_only)} train, {len(X_cal_val)} cal_val, {len(X_test)} test (HELD OUT)")
+
+            # Train model on TRAINING DATA ONLY (test set never seen!)
+            results["moneyline"] = moneyline_model.train(X_train_only, y_train_only)
             self.models["moneyline"] = moneyline_model
             if save_models:
                 moneyline_model.save_model()
 
-            # CALIBRATION: Fit and save calibrators for moneyline probabilities
-            # CRITICAL FIX: Split data BEFORE calibration to prevent leakage
+            # CALIBRATION: Fit calibrators on cal_val data
             if HAS_CALIBRATION:
                 try:
                     print("\n  Fitting moneyline calibrator...")
 
-                    # STEP 1: Create train/cal_val/test split BEFORE any predictions
-                    # This prevents calibrator from seeing test data
-                    n_samples = len(X_ml)
-                    n_test = int(n_samples * 0.2)  # 20% for final test
-                    n_cal_val = int((n_samples - n_test) * 0.25)  # 25% of training for calibration
-
-                    train_end = n_samples - n_test - n_cal_val
-                    cal_val_end = n_samples - n_test
-
-                    # Data splits (chronological order preserved)
-                    X_train_only = X_ml.iloc[:train_end]
-                    y_train_only = y_ml[:train_end]
-                    X_cal_val = X_ml.iloc[train_end:cal_val_end]
-                    y_cal_val = y_ml[train_end:cal_val_end]
-                    X_test = X_ml.iloc[cal_val_end:]
-                    y_test = y_ml[cal_val_end:]
-
-                    print(f"    Split: {len(X_train_only)} train, {len(X_cal_val)} cal_val, {len(X_test)} test")
-
-                    # STEP 2: Get predictions on CALIBRATION VALIDATION set only
-                    # (Model was already trained on full training set in .train() method)
+                    # STEP 1: Get predictions on CALIBRATION VALIDATION set only
+                    # Model was trained on X_train_only, so cal_val is unseen
                     y_prob_cal = np.array([
                         moneyline_model.predict(dict(zip(moneyline_model.feature_names, x)))["home_win_probability"]
                         for x in X_cal_val.values
@@ -4083,34 +4084,39 @@ class ModelTrainingPipeline:
         spread_model = SpreadCoverClassifier()
         X_sp, y_sp = spread_model.prepare_training_data(games_data)
         if len(X_sp) > 0:
-            results["spread"] = spread_model.train(X_sp, y_sp)
+            # CRITICAL FIX: Split data BEFORE training to prevent data leakage!
+            # Previously, model was trained on ALL data, then "test" set was created
+            # from data the model had already seen = data leakage = fake 91000%+ ROI
+            n_samples = len(X_sp)
+            n_test = int(n_samples * 0.2)  # 20% for final test
+            n_cal_val = int((n_samples - n_test) * 0.25)  # 25% of remaining for calibration
+
+            train_end = n_samples - n_test - n_cal_val
+            cal_val_end = n_samples - n_test
+
+            # Data splits (chronological order preserved - oldest data for training)
+            X_train_only = X_sp.iloc[:train_end]
+            y_train_only = y_sp[:train_end]
+            X_cal_val = X_sp.iloc[train_end:cal_val_end]
+            y_cal_val = y_sp[train_end:cal_val_end]
+            X_test = X_sp.iloc[cal_val_end:]
+            y_test = y_sp[cal_val_end:]
+
+            print(f"  Data split: {len(X_train_only)} train, {len(X_cal_val)} cal_val, {len(X_test)} test (HELD OUT)")
+
+            # Train model on TRAINING DATA ONLY (test set never seen!)
+            results["spread"] = spread_model.train(X_train_only, y_train_only)
             self.models["spread"] = spread_model
             if save_models:
                 spread_model.save_model()
 
-            # CALIBRATION: Classifier directly outputs probabilities
-            # CRITICAL FIX: Split data BEFORE calibration to prevent leakage
+            # CALIBRATION: Fit calibrators on cal_val data
             if HAS_CALIBRATION:
                 try:
                     print("\n  Fitting spread cover calibrator...")
 
-                    # STEP 1: Create train/cal_val/test split BEFORE any predictions
-                    n_samples = len(X_sp)
-                    n_test = int(n_samples * 0.2)  # 20% for final test
-                    n_cal_val = int((n_samples - n_test) * 0.25)  # 25% of training for calibration
-
-                    train_end = n_samples - n_test - n_cal_val
-                    cal_val_end = n_samples - n_test
-
-                    # Data splits (chronological order preserved)
-                    X_cal_val = X_sp.iloc[train_end:cal_val_end]
-                    y_cal_val = y_sp[train_end:cal_val_end]
-                    X_test = X_sp.iloc[cal_val_end:]
-                    y_test = y_sp[cal_val_end:]
-
-                    print(f"    Split: {train_end} train, {len(X_cal_val)} cal_val, {len(X_test)} test")
-
-                    # STEP 2: Get predictions on CALIBRATION VALIDATION set only
+                    # STEP 1: Get predictions on CALIBRATION VALIDATION set only
+                    # Model was trained on X_train_only, so cal_val is unseen
                     X_cal_scaled = spread_model.preprocess_features(X_cal_val, fit=False)
                     y_prob_cal = spread_model.model.predict_proba(X_cal_scaled)[:, 1]
 
@@ -4148,7 +4154,7 @@ class ModelTrainingPipeline:
 
                         # Log betting ROI on TEST data only
                         logger.log_betting_roi(y_prob_test, y_test)
-                        logger.add_custom_metric("train_size", train_end)
+                        logger.add_custom_metric("train_size", len(X_train_only))
                         logger.add_custom_metric("cal_val_size", len(X_cal_val))
                         logger.add_custom_metric("test_size", len(X_test))
                         logger.add_custom_metric("calibration_method", sp_calibrator.best_method)
