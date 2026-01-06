@@ -4021,10 +4021,13 @@ class ModelTrainingPipeline:
                             for x in X_test.values
                         ])
 
+                        # Calibrate the test predictions
+                        y_prob_test_calibrated = ml_calibrator.calibrate(y_prob_test)
+
                         # Log classification metrics on TEST data only (honest evaluation)
-                        y_pred_test = (y_prob_test > 0.5).astype(int)
-                        logger.log_classification_metrics(y_test, y_pred_test, y_prob_test)
-                        logger.log_calibration_metrics(y_prob_test, y_test)
+                        y_pred_test = (y_prob_test_calibrated > 0.5).astype(int)
+                        logger.log_classification_metrics(y_test, y_pred_test, y_prob_test_calibrated)
+                        logger.log_calibration_metrics(y_prob_test_calibrated, y_test)
 
                         # Log betting ROI on TEST data only
                         logger.log_betting_roi(y_prob_test, np.array(y_test))
@@ -4133,10 +4136,13 @@ class ModelTrainingPipeline:
                         X_test_scaled = spread_model.preprocess_features(X_test, fit=False)
                         y_prob_test = spread_model.model.predict_proba(X_test_scaled)[:, 1]
 
+                        # Calibrate the test predictions
+                        y_prob_test_calibrated = sp_calibrator.calibrate(y_prob_test)
+
                         # Log classification metrics on TEST data only
-                        y_pred_test = (y_prob_test > 0.5).astype(int)
-                        logger.log_classification_metrics(y_test, y_pred_test, y_prob_test)
-                        logger.log_calibration_metrics(y_prob_test, y_test)
+                        y_pred_test = (y_prob_test_calibrated > 0.5).astype(int)
+                        logger.log_classification_metrics(y_test, y_pred_test, y_prob_test_calibrated)
+                        logger.log_calibration_metrics(y_prob_test_calibrated, y_test)
 
                         # Log betting ROI on TEST data only
                         logger.log_betting_roi(y_prob_test, y_test)

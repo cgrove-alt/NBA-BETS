@@ -1020,17 +1020,33 @@ class ModelCalibrator:
         self,
         y_prob: np.ndarray,
         y_true: np.ndarray,
-        method: str = "auto"
+        method: str = "auto",
+        train_fraction: float = 0.70,
+        val_fraction: float = 0.15
     ) -> "ModelCalibrator":
         """
-        Fit calibrator(s) to validation data.
+        Fit calibrator(s) with THREE-WAY split to prevent data leakage.
+
+        CRITICAL FIX v2: Previous version used 2-way split but then REFIT on all data,
+        causing the production calibrator to have seen the selection data.
+
+        Three-way split ensures:
+        - Training data (70%): Used to FIT calibrators
+        - Validation data (15%): Used to SELECT best method
+        - Test data (15%): Used ONLY for final metrics (never influences any decisions)
+
+        The calibrator used in production is fit ONLY on training data.
+        Metrics reported are from TEST data (completely held out).
 
         Args:
             y_prob: Uncalibrated probability predictions
             y_true: True binary labels
             method: Calibration method to use
-                   'auto' = try all and pick best by ECE
-                   'platt', 'isotonic', 'temperature', 'beta' = use specific method
+                   'auto' = try all and pick best by ECE on validation set
+                   'platt', 'isotonic', etc. = use specific method
+            train_fraction: Fraction for training (default: 70%)
+            val_fraction: Fraction for validation/selection (default: 15%)
+                         Remaining (15%) is for test metrics
 
         Returns:
             self
@@ -1038,36 +1054,86 @@ class ModelCalibrator:
         y_prob = np.asarray(y_prob).flatten()
         y_true = np.asarray(y_true).flatten()
 
-        if len(y_prob) < 100:
+        n_samples = len(y_prob)
+        if n_samples < 100:
             logger.warning("Limited calibration data (<100 samples). Results may be unreliable.")
 
+        # THREE-WAY SPLIT to prevent data leakage
+        n_train = int(n_samples * train_fraction)
+        n_val = int(n_samples * val_fraction)
+        n_test = n_samples - n_train - n_val
+
+        if n_train < 50 or n_val < 20 or n_test < 20:
+            logger.warning(f"Small splits (train={n_train}, val={n_val}, test={n_test}). Using 2-way split.")
+            # Fall back to simpler split
+            n_train = int(n_samples * 0.7)
+            n_val = n_samples - n_train
+            n_test = 0
+            y_prob_train = y_prob[:n_train]
+            y_true_train = y_true[:n_train]
+            y_prob_val = y_prob[n_train:]
+            y_true_val = y_true[n_train:]
+            y_prob_test, y_true_test = y_prob_val, y_true_val  # Use val as test
+            self._metrics_are_in_sample = True
+        else:
+            # Proper 3-way split (temporal ordering preserved)
+            y_prob_train = y_prob[:n_train]
+            y_true_train = y_true[:n_train]
+            y_prob_val = y_prob[n_train:n_train + n_val]
+            y_true_val = y_true[n_train:n_train + n_val]
+            y_prob_test = y_prob[n_train + n_val:]
+            y_true_test = y_true[n_train + n_val:]
+            self._metrics_are_in_sample = False
+            logger.info(f"3-way split: {n_train} train, {n_val} validation, {n_test} test samples")
+
         if method == "auto":
-            # Fit all methods and select best
-            best_ece = float('inf')
+            # Fit all methods on TRAINING, select best on VALIDATION
+            # CRITICAL: Use MCE (Maximum Calibration Error) not ECE for sports betting
+            # MCE captures worst-case error - one bad probability bin ruins betting edge
+            best_val_mce = float('inf')
 
             for name, calibrator in self.calibrators.items():
                 try:
-                    calibrator.fit(y_prob, y_true)
-                    calibrated = calibrator.calibrate(y_prob)
-                    metrics = CalibrationEvaluator.evaluate(calibrated, y_true)
-                    self.metrics[name] = metrics
+                    # Fit on TRAINING portion only
+                    calibrator.fit(y_prob_train, y_true_train)
 
-                    logger.info(f"{name}: ECE={metrics.ece:.4f}, Brier={metrics.brier_score:.4f}")
+                    # Evaluate on VALIDATION portion (for method selection)
+                    calibrated_val = calibrator.calibrate(y_prob_val)
+                    val_metrics = CalibrationEvaluator.evaluate(calibrated_val, y_true_val)
 
-                    if metrics.ece < best_ece:
-                        best_ece = metrics.ece
+                    logger.info(f"{name}: VAL MCE={val_metrics.mce:.4f}, ECE={val_metrics.ece:.4f}")
+
+                    if val_metrics.mce < best_val_mce:
+                        best_val_mce = val_metrics.mce
                         self.best_method = name
 
                 except Exception as e:
                     logger.warning(f"Failed to fit {name}: {e}")
 
-            logger.info(f"Best calibration method: {self.best_method} (ECE={best_ece:.4f})")
+            logger.info(f"Best calibration method: {self.best_method} (Val MCE={best_val_mce:.4f})")
+
+            # CRITICAL: DO NOT REFIT ON ALL DATA
+            # The production calibrator is already fit on training data only
+            # This prevents data leakage from validation set
+
+            # Compute final metrics on TEST set (completely held out)
+            calibrated_test = self.calibrators[self.best_method].calibrate(y_prob_test)
+            test_metrics = CalibrationEvaluator.evaluate(calibrated_test, y_true_test)
+            self.metrics[self.best_method] = test_metrics
+
+            oos_label = "(TEST set - honest)" if not self._metrics_are_in_sample else "(in-sample)"
+            logger.info(f"Final TEST metrics: ECE={test_metrics.ece:.4f}, Brier={test_metrics.brier_score:.4f} {oos_label}")
 
         elif method in self.calibrators:
-            self.calibrators[method].fit(y_prob, y_true)
+            # Fit on training portion only
+            self.calibrators[method].fit(y_prob_train, y_true_train)
             self.best_method = method
-            calibrated = self.calibrators[method].calibrate(y_prob)
-            self.metrics[method] = CalibrationEvaluator.evaluate(calibrated, y_true)
+
+            # Evaluate on test set
+            calibrated_test = self.calibrators[method].calibrate(y_prob_test)
+            self.metrics[method] = CalibrationEvaluator.evaluate(calibrated_test, y_true_test)
+
+            # DO NOT REFIT ON ALL DATA - this was the bug!
 
         else:
             raise ValueError(f"Unknown method: {method}. Use 'auto', 'platt', 'isotonic', 'temperature', or 'beta'")
