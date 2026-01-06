@@ -3850,16 +3850,17 @@ class DataService:
             else:
                 pick, edge = "-", 0  # No pick without a valid line
 
-            # Apply calibration to confidence if available
-            # This converts raw confidence to calibrated probability based on historical accuracy
+            # DISABLED: Prop calibration was over-aggressively compressing all confidences toward 50%
+            # This caused 0 Best Bets to appear since none met the 80% threshold
+            # Use raw confidence instead - it has proper distribution from 50-85%
             calibrated_confidence = confidence
-            if PROP_CALIBRATOR is not None and confidence > 0:
-                try:
-                    # Confidence is 0-100, calibrator expects 0-1
-                    calibrated_prob = PROP_CALIBRATOR.calibrate(confidence / 100.0)
-                    calibrated_confidence = calibrated_prob * 100.0
-                except Exception:
-                    pass  # Use uncalibrated if calibration fails
+            # if PROP_CALIBRATOR is not None and confidence > 0:
+            #     try:
+            #         # Confidence is 0-100, calibrator expects 0-1
+            #         calibrated_prob = PROP_CALIBRATOR.calibrate(confidence / 100.0)
+            #         calibrated_confidence = calibrated_prob * 100.0
+            #     except Exception:
+            #         pass  # Use uncalibrated if calibration fails
 
             prop_key = prop_label.lower().replace(" ", "_")
             result[f"{prop_key}_line"] = line

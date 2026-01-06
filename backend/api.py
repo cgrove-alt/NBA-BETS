@@ -185,8 +185,9 @@ def _build_prop_prediction(player_data: dict, prop_key: str) -> Optional[PropPre
     confidence = player_data.get(f"{prop_key}_confidence", 50) or 50
     pick = player_data.get(f"{prop_key}_pick", "-") or "-"
 
-    # Calculate edge_pct - only if we have a valid line
-    edge_pct = (edge / line * 100) if line and line > 0 else 0
+    # edge is already a percentage from DataService's _determine_prop_pick()
+    # DO NOT divide by line again - that was causing double-calculation bug
+    edge_pct = edge
 
     return PropPrediction(
         prediction=prediction,
