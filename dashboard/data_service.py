@@ -3827,31 +3827,30 @@ class DataService:
             if is_blacklisted:
                 pick, edge = "-", 0  # No pick for blacklisted players
             elif line is not None and line > 0:
-                # RECENCY FILTER: Skip picks where recent form differs >40% from season
-                # Historical data shows these are unreliable
-                recency_ratio = recent_value / max(season_value, 0.1) if season_value > 0 else 1.0
-                form_unstable = recency_ratio < 0.6 or recency_ratio > 1.5
+                # REMOVED: Form instability filter was too aggressive
+                # The confidence heuristic already penalizes unstable form (-2 to -3 penalty)
+                # No need to double-filter and lose valid picks
+                # recency_ratio = recent_value / max(season_value, 0.1) if season_value > 0 else 1.0
+                # form_unstable = recency_ratio < 0.6 or recency_ratio > 1.5
+                # if form_unstable:
+                #     pick, edge = "-", 0
 
-                if form_unstable:
-                    pick, edge = "-", 0  # Skip unstable form players
-                else:
-                    # Use 8% threshold for all players (selectivity)
-                    # The quantile models and direction calibration handle confidence
-                    threshold = 8.0
-                    pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key, threshold=threshold)
+                # Use 3% threshold to allow more actionable picks (was 8%, filtered too many)
+                threshold = 3.0
+                pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key, threshold=threshold)
 
-                    # DISABLED: Direction calibration was crushing confidence to 50%
-                    # The calibration factors (e.g., 0.381 for POINTS OVER) multiply confidence
-                    # by the actual win rate, which over-corrects for display purposes.
-                    # Raw heuristic/quantile confidence better reflects pick strength for UI.
-                    # if pick in ['OVER', 'UNDER'] and quantile_conf is None:
-                    #     dir_cal = self._get_direction_calibration(prop_label, pick)
-                    #     if dir_cal != 1.0:
-                    #         confidence *= dir_cal
+                # DISABLED: Direction calibration was crushing confidence to 50%
+                # The calibration factors (e.g., 0.381 for POINTS OVER) multiply confidence
+                # by the actual win rate, which over-corrects for display purposes.
+                # Raw heuristic/quantile confidence better reflects pick strength for UI.
+                # if pick in ['OVER', 'UNDER'] and quantile_conf is None:
+                #     dir_cal = self._get_direction_calibration(prop_label, pick)
+                #     if dir_cal != 1.0:
+                #         confidence *= dir_cal
 
-                    # Keep in valid range - WIDENED from 55-65% to 50-85%
-                    # Let accurate predictions express higher confidence
-                    confidence = max(50.0, min(85.0, confidence))
+                # Keep in valid range - WIDENED from 55-65% to 50-85%
+                # Let accurate predictions express higher confidence
+                confidence = max(50.0, min(85.0, confidence))
             else:
                 pick, edge = "-", 0  # No pick without a valid line
 
