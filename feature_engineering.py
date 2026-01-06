@@ -1707,8 +1707,10 @@ class MatchupFeatureGenerator:
         # Add H2H spread-specific features if available
         if include_advanced:
             # OPTIMIZED: Use cached H2H (already fetched by generate_moneyline_features)
+            # CRITICAL FIX: Pass before_date to prevent temporal leakage!
+            # Without this, H2H includes the current game's result = target leakage
             if self._h2h_cache is None:
-                self._h2h_cache = self.h2h_analyzer.analyze_h2h(home_team_id, away_team_id)
+                self._h2h_cache = self.h2h_analyzer.analyze_h2h(home_team_id, away_team_id, before_date=game_date)
             h2h = self._h2h_cache
             spread_features["h2h_spread_prediction"] = h2h.get("avg_point_diff", 0)
             spread_features["h2h_spread_volatility"] = h2h.get("point_diff_std", 0)
