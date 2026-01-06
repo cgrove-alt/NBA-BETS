@@ -44,11 +44,11 @@ function calculateStats(players: PlayerProp[]): PickStats {
         if (prop.pick === 'OVER') overPicks++;
         if (prop.pick === 'UNDER') underPicks++;
 
-        // Only count as "best bet" if edge >= 2.5
-        if (Math.abs(prop.edge) >= 2.5) {
-          if (prop.confidence >= 90) firePicks++;
-          else if (prop.confidence >= 80) strongPicks++;
-          else if (prop.confidence >= 70) goodPicks++;
+        // Thresholds lowered to match model's natural confidence range (50-70%)
+        if (Math.abs(prop.edge) >= 2.0) {
+          if (prop.confidence >= 70) firePicks++;
+          else if (prop.confidence >= 65) strongPicks++;
+          else if (prop.confidence >= 60) goodPicks++;
         }
       }
     }

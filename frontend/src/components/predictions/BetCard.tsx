@@ -178,12 +178,12 @@ export function BetCardCompact({ player, propType, prop }: Omit<BetCardProps, 'g
         )}
       </div>
 
-      {/* Confidence indicator */}
+      {/* Confidence indicator - thresholds adjusted for model's range */}
       <div className="flex flex-col items-center">
         <div className={cn(
           'text-sm font-bold px-2 py-0.5 rounded',
-          prop.confidence >= 80 ? 'bg-green-500/20 text-green-400' :
-          prop.confidence >= 70 ? 'bg-yellow-500/20 text-yellow-400' :
+          prop.confidence >= 70 ? 'bg-green-500/20 text-green-400' :
+          prop.confidence >= 60 ? 'bg-yellow-500/20 text-yellow-400' :
           'bg-gray-500/20 text-gray-400'
         )}>
           {Math.round(prop.confidence)}%

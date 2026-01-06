@@ -16,7 +16,8 @@ interface BestBetItem {
 }
 
 export function BestBets({ players, gameContext }: BestBetsProps) {
-  // Find all best bets (confidence >= 80, edge >= 2.5)
+  // Find all best bets (confidence >= 65, edge >= 2.0)
+  // Thresholds lowered to match model's natural confidence range (50-70%)
   const bestBets: BestBetItem[] = [];
 
   const propTypes: PropType[] = ['Points', 'Rebounds', 'Assists', '3PM', 'PRA'];
@@ -27,7 +28,7 @@ export function BestBets({ players, gameContext }: BestBetsProps) {
         ? player['3PM']
         : player[propType as keyof PlayerProp] as PropPrediction | undefined;
 
-      if (prop && prop.pick !== '-' && prop.confidence >= 80 && Math.abs(prop.edge) >= 2.5) {
+      if (prop && prop.pick !== '-' && prop.confidence >= 65 && Math.abs(prop.edge) >= 2.0) {
         bestBets.push({ player, propType, prop });
       }
     }
@@ -41,9 +42,9 @@ export function BestBets({ players, gameContext }: BestBetsProps) {
     return Math.abs(b.prop.edge) - Math.abs(a.prop.edge);
   });
 
-  // Separate fire picks (90%+) from strong picks
-  const firePicks = bestBets.filter(b => b.prop.confidence >= 90);
-  const strongPicks = bestBets.filter(b => b.prop.confidence >= 80 && b.prop.confidence < 90);
+  // Separate fire picks (70%+) from strong picks (65-69%)
+  const firePicks = bestBets.filter(b => b.prop.confidence >= 70);
+  const strongPicks = bestBets.filter(b => b.prop.confidence >= 65 && b.prop.confidence < 70);
 
   if (bestBets.length === 0) {
     return null;
@@ -75,14 +76,14 @@ export function BestBets({ players, gameContext }: BestBetsProps) {
         </div>
       </CardHeader>
       <CardContent className="p-4">
-        {/* Fire Picks Section (90%+) */}
+        {/* Fire Picks Section (70%+) */}
         {firePicks.length > 0 && (
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-3">
               <span className="text-lg">🔥</span>
               <h4 className="font-bold text-text-primary">Fire Picks</h4>
               <span className="text-xs text-text-muted bg-orange-500/20 px-2 py-0.5 rounded-full">
-                90%+ Confidence
+                70%+ Confidence
               </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -99,14 +100,14 @@ export function BestBets({ players, gameContext }: BestBetsProps) {
           </div>
         )}
 
-        {/* Strong Picks Section (80-89%) */}
+        {/* Strong Picks Section (65-69%) */}
         {strongPicks.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Star className="text-yellow-400" size={18} />
               <h4 className="font-bold text-text-primary">Strong Picks</h4>
               <span className="text-xs text-text-muted bg-yellow-500/20 px-2 py-0.5 rounded-full">
-                80-89% Confidence
+                65-69% Confidence
               </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -150,9 +151,10 @@ export function BestBetsSummary({ players }: { players: PlayerProp[] }) {
 
       if (prop && prop.pick !== '-') {
         totalPicks++;
-        if (prop.confidence >= 90 && Math.abs(prop.edge) >= 2.5) {
+        // Thresholds lowered to match model's natural confidence range
+        if (prop.confidence >= 70 && Math.abs(prop.edge) >= 2.0) {
           firePicks++;
-        } else if (prop.confidence >= 80 && Math.abs(prop.edge) >= 2.5) {
+        } else if (prop.confidence >= 65 && Math.abs(prop.edge) >= 2.0) {
           strongPicks++;
         }
       }

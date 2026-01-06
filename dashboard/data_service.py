@@ -2644,61 +2644,65 @@ class DataService:
         confidence = 50.0
 
         # Factor 1: Sample size (more games = more reliable data)
+        # BOOSTED: Increased values to allow higher confidence expression
         if games_played >= 30:
-            confidence += 6
+            confidence += 8  # was 6
         elif games_played >= 20:
-            confidence += 4
+            confidence += 5  # was 4
         elif games_played >= 10:
-            confidence += 2
+            confidence += 3  # was 2
 
         # Factor 2: Form stability (recent matches season = predictable)
+        # BOOSTED: More reward for stable form
         if season_avg > 0:
             recency_ratio = recent_avg / max(season_avg, 0.1)
             # Stable form (90-110% of season avg) gets boost
             if 0.9 <= recency_ratio <= 1.1:
-                confidence += 5  # Very stable
+                confidence += 8  # was 5 - Very stable
             elif 0.8 <= recency_ratio <= 1.2:
-                confidence += 2  # Moderately stable
+                confidence += 4  # was 2 - Moderately stable
             else:
-                confidence -= 3  # Unstable form = less confidence
+                confidence -= 2  # was -3 - Unstable form (reduced penalty)
 
         # Factor 3: Player consistency (low variance = predictable)
+        # BOOSTED: More reward for consistent players
         if features and "consistency_score" in features:
             consistency = features["consistency_score"]
             if consistency > 0.8:
-                confidence += 6
+                confidence += 8  # was 6
             elif consistency > 0.6:
-                confidence += 3
+                confidence += 4  # was 3
             elif consistency < 0.4:
-                confidence -= 4
+                confidence -= 3  # was -4 (reduced penalty)
 
-        # Factor 4: Edge magnitude - CRITICAL: Historical sweet spot is 5-15%
-        # Very large edges (>30%) actually perform WORSE
+        # Factor 4: Edge magnitude - Historical sweet spot is 5-15%
+        # BOOSTED: More reward for sweet spot edges
         if line is not None and line > 0:
             edge_pct = abs(prediction - line) / line * 100
 
             if 5 <= edge_pct <= 15:
-                confidence += 4  # Sweet spot - best historical performance
+                confidence += 6  # was 4 - Sweet spot
             elif 15 < edge_pct <= 25:
-                confidence += 1  # Still okay
+                confidence += 2  # was 1 - Still okay
             elif edge_pct > 30:
-                confidence -= 6  # Large edges often wrong (38% WR historically)
+                confidence -= 4  # was -6 (reduced penalty)
 
         # Factor 5: Real Vegas line available (better calibration target)
         if features and features.get("used_real_line", False):
-            confidence += 2
+            confidence += 3  # was 2
 
         # Factor 6: Whitelist boost (historically accurate players)
         if player_name and player_name in WHITELIST_BOOST:
-            confidence += 8
+            confidence += 10  # was 8
 
         # Factor 7: Minutes stability (from features if available)
+        # BOOSTED: More reward for consistent minutes
         if features:
             minutes_std = features.get("minutes_std", 5)
             if minutes_std < 3:
-                confidence += 3  # Very consistent minutes
+                confidence += 5  # was 3 - Very consistent minutes
             elif minutes_std > 8:
-                confidence -= 3  # Inconsistent minutes = unpredictable
+                confidence -= 2  # was -3 (reduced penalty)
 
         # Cap at reasonable range - WIDENED from 55-65% to 50-85%
         # With improved training (OT normalization, blowout weighting, regression-to-mean)
@@ -3836,13 +3840,14 @@ class DataService:
                     threshold = 8.0
                     pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key, threshold=threshold)
 
-                    # Apply direction-specific confidence calibration
-                    # OVER picks historically underperform, UNDER picks outperform
-                    # Only apply if NOT using quantile confidence (quantile already calibrated)
-                    if pick in ['OVER', 'UNDER'] and quantile_conf is None:
-                        dir_cal = self._get_direction_calibration(prop_label, pick)
-                        if dir_cal != 1.0:
-                            confidence *= dir_cal
+                    # DISABLED: Direction calibration was crushing confidence to 50%
+                    # The calibration factors (e.g., 0.381 for POINTS OVER) multiply confidence
+                    # by the actual win rate, which over-corrects for display purposes.
+                    # Raw heuristic/quantile confidence better reflects pick strength for UI.
+                    # if pick in ['OVER', 'UNDER'] and quantile_conf is None:
+                    #     dir_cal = self._get_direction_calibration(prop_label, pick)
+                    #     if dir_cal != 1.0:
+                    #         confidence *= dir_cal
 
                     # Keep in valid range - WIDENED from 55-65% to 50-85%
                     # Let accurate predictions express higher confidence

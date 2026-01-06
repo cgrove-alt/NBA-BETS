@@ -2,11 +2,11 @@
 
 import type { PropPrediction } from './types';
 
-// Color thresholds - Updated for better visual hierarchy
-const CONFIDENCE_FIRE = 90;    // Fire picks
-const CONFIDENCE_STRONG = 80;  // Strong picks
-const CONFIDENCE_GOOD = 70;    // Good picks
-const CONFIDENCE_MODERATE = 60; // Moderate picks
+// Color thresholds - Adjusted for model's natural confidence range (50-70%)
+const CONFIDENCE_FIRE = 70;    // Fire picks (top tier for this model)
+const CONFIDENCE_STRONG = 65;  // Strong picks
+const CONFIDENCE_GOOD = 60;    // Good picks
+const CONFIDENCE_MODERATE = 55; // Moderate picks
 
 // Get confidence color class - Enhanced with more tiers
 export function getConfidenceColor(confidence: number): string {
@@ -101,9 +101,10 @@ export function hasStrongEdge(prop: PropPrediction | undefined): boolean {
 }
 
 // Check if prop is a best bet
+// Thresholds lowered to match model's natural confidence range (50-70%)
 export function isBestBet(prop: PropPrediction | undefined): boolean {
   if (!prop) return false;
-  return prop.confidence >= 80 && Math.abs(prop.edge) >= 2.5;
+  return prop.confidence >= 65 && Math.abs(prop.edge) >= 2.0;
 }
 
 // Format game time

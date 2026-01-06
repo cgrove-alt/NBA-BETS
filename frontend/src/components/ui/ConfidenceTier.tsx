@@ -9,11 +9,12 @@ interface ConfidenceTierProps {
   showPercentage?: boolean;
 }
 
+// Thresholds adjusted for model's natural confidence range (50-70%)
 export function getConfidenceLevel(confidence: number): ConfidenceLevel {
-  if (confidence >= 90) return 'fire';
-  if (confidence >= 80) return 'strong';
-  if (confidence >= 70) return 'good';
-  if (confidence >= 60) return 'moderate';
+  if (confidence >= 70) return 'fire';    // Top tier for this model
+  if (confidence >= 65) return 'strong';
+  if (confidence >= 60) return 'good';
+  if (confidence >= 55) return 'moderate';
   return 'risky';
 }
 
