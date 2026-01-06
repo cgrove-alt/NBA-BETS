@@ -355,6 +355,163 @@ def get_star_player_impact(player_name: str) -> float:
     return STAR_PLAYER_IMPACTS.get(player_name, 0.0)
 
 
+# Player defensive and offensive roles for prop adjustments
+# Used to adjust props when opponent defensive specialists are out
+PLAYER_DEFENSIVE_ROLES = {
+    # Elite Perimeter Defenders - when out, opposing guards score more
+    "Jrue Holiday": {"team": "BOS", "position": "G", "defensive_role": "perimeter", "offensive_role": "secondary", "impact_score": 2.5},
+    "Marcus Smart": {"team": "MEM", "position": "G", "defensive_role": "perimeter", "offensive_role": "secondary", "impact_score": 1.5},
+    "Derrick White": {"team": "BOS", "position": "G", "defensive_role": "perimeter", "offensive_role": "secondary", "impact_score": 2.0},
+    "Alex Caruso": {"team": "OKC", "position": "G", "defensive_role": "perimeter", "offensive_role": "role_player", "impact_score": 1.5},
+    "Matisse Thybulle": {"team": "POR", "position": "G", "defensive_role": "perimeter", "offensive_role": "role_player", "impact_score": 1.0},
+    "Lu Dort": {"team": "OKC", "position": "G", "defensive_role": "perimeter", "offensive_role": "role_player", "impact_score": 1.5},
+    "Herb Jones": {"team": "NOP", "position": "F", "defensive_role": "perimeter", "offensive_role": "role_player", "impact_score": 1.5},
+
+    # Elite Wing Stoppers - when out, opposing forwards score more
+    "OG Anunoby": {"team": "NYK", "position": "F", "defensive_role": "wing_stopper", "offensive_role": "secondary", "impact_score": 2.0},
+    "Mikal Bridges": {"team": "NYK", "position": "F", "defensive_role": "wing_stopper", "offensive_role": "secondary", "impact_score": 2.0},
+    "Aaron Gordon": {"team": "DEN", "position": "F", "defensive_role": "wing_stopper", "offensive_role": "secondary", "impact_score": 2.0},
+    "Dillon Brooks": {"team": "HOU", "position": "F", "defensive_role": "wing_stopper", "offensive_role": "role_player", "impact_score": 1.5},
+    "Andrew Wiggins": {"team": "GSW", "position": "F", "defensive_role": "wing_stopper", "offensive_role": "secondary", "impact_score": 2.0},
+
+    # Elite Rim Protectors - when out, interior scoring increases
+    "Rudy Gobert": {"team": "MIN", "position": "C", "defensive_role": "rim_protector", "offensive_role": "role_player", "impact_score": 3.0},
+    "Anthony Davis": {"team": "LAL", "position": "C", "defensive_role": "rim_protector", "offensive_role": "primary_scorer", "impact_score": 4.0},
+    "Evan Mobley": {"team": "CLE", "position": "C", "defensive_role": "rim_protector", "offensive_role": "secondary", "impact_score": 2.5},
+    "Jaren Jackson Jr.": {"team": "MEM", "position": "C", "defensive_role": "rim_protector", "offensive_role": "secondary", "impact_score": 2.5},
+    "Victor Wembanyama": {"team": "SAS", "position": "C", "defensive_role": "rim_protector", "offensive_role": "primary_scorer", "impact_score": 3.5},
+    "Chet Holmgren": {"team": "OKC", "position": "C", "defensive_role": "rim_protector", "offensive_role": "secondary", "impact_score": 3.0},
+    "Myles Turner": {"team": "IND", "position": "C", "defensive_role": "rim_protector", "offensive_role": "secondary", "impact_score": 2.0},
+    "Brook Lopez": {"team": "MIL", "position": "C", "defensive_role": "rim_protector", "offensive_role": "role_player", "impact_score": 2.0},
+    "Bam Adebayo": {"team": "MIA", "position": "C", "defensive_role": "versatile", "offensive_role": "secondary", "impact_score": 3.0},
+    "Giannis Antetokounmpo": {"team": "MIL", "position": "F", "defensive_role": "versatile", "offensive_role": "primary_scorer", "impact_score": 4.5},
+    "Draymond Green": {"team": "GSW", "position": "F", "defensive_role": "versatile", "offensive_role": "playmaker", "impact_score": 2.5},
+    "Joel Embiid": {"team": "PHI", "position": "C", "defensive_role": "rim_protector", "offensive_role": "primary_scorer", "impact_score": 4.5},
+
+    # Primary Playmakers - when out, teammate assists may increase
+    "Nikola Jokic": {"team": "DEN", "position": "C", "defensive_role": None, "offensive_role": "playmaker", "impact_score": 5.0},
+    "Luka Doncic": {"team": "DAL", "position": "G", "defensive_role": None, "offensive_role": "playmaker", "impact_score": 4.5},
+    "Trae Young": {"team": "ATL", "position": "G", "defensive_role": None, "offensive_role": "playmaker", "impact_score": 3.5},
+    "Tyrese Haliburton": {"team": "IND", "position": "G", "defensive_role": None, "offensive_role": "playmaker", "impact_score": 3.0},
+    "Darius Garland": {"team": "CLE", "position": "G", "defensive_role": None, "offensive_role": "playmaker", "impact_score": 2.5},
+    "LaMelo Ball": {"team": "CHA", "position": "G", "defensive_role": None, "offensive_role": "playmaker", "impact_score": 3.0},
+    "James Harden": {"team": "LAC", "position": "G", "defensive_role": None, "offensive_role": "playmaker", "impact_score": 3.0},
+
+    # Primary Scorers - when out, teammate scoring may increase
+    "Stephen Curry": {"team": "GSW", "position": "G", "defensive_role": None, "offensive_role": "primary_scorer", "impact_score": 4.0},
+    "Jayson Tatum": {"team": "BOS", "position": "F", "defensive_role": None, "offensive_role": "primary_scorer", "impact_score": 4.0},
+    "Kevin Durant": {"team": "PHX", "position": "F", "defensive_role": None, "offensive_role": "primary_scorer", "impact_score": 4.0},
+    "Shai Gilgeous-Alexander": {"team": "OKC", "position": "G", "defensive_role": "perimeter", "offensive_role": "primary_scorer", "impact_score": 4.0},
+    "Donovan Mitchell": {"team": "CLE", "position": "G", "defensive_role": None, "offensive_role": "primary_scorer", "impact_score": 3.5},
+    "Devin Booker": {"team": "PHX", "position": "G", "defensive_role": None, "offensive_role": "primary_scorer", "impact_score": 3.5},
+    "Anthony Edwards": {"team": "MIN", "position": "G", "defensive_role": None, "offensive_role": "primary_scorer", "impact_score": 3.5},
+    "Damian Lillard": {"team": "MIL", "position": "G", "defensive_role": None, "offensive_role": "primary_scorer", "impact_score": 3.5},
+    "Jimmy Butler": {"team": "MIA", "position": "F", "defensive_role": "wing_stopper", "offensive_role": "primary_scorer", "impact_score": 3.5},
+    "LeBron James": {"team": "LAL", "position": "F", "defensive_role": None, "offensive_role": "primary_scorer", "impact_score": 4.0},
+}
+
+# Injury boost constants for prop adjustments
+PROP_INJURY_BOOST = {
+    "perimeter_defender_out_guard_points": 0.08,   # +8% for guards
+    "perimeter_defender_out_guard_threes": 0.10,   # +10% for 3PM
+    "rim_protector_out_center_points": 0.10,       # +10% for centers
+    "rim_protector_out_guard_points": 0.05,        # +5% guards attack paint
+    "rim_protector_out_rebounds": 0.12,            # +12% rebounds
+    "wing_stopper_out_forward_points": 0.08,       # +8% for forwards
+    "primary_scorer_out_secondary": 0.10,          # +10% for secondary scorer
+    "playmaker_out_secondary_assists": 0.15,       # +15% for secondary handler
+}
+
+
+def get_player_role(player_name: str) -> Optional[Dict]:
+    """Get complete role information for a player."""
+    return PLAYER_DEFENSIVE_ROLES.get(player_name)
+
+
+def calculate_prop_injury_boost(
+    player_position: str,
+    prop_type: str,
+    opponent_injured: List[str],
+    teammate_injured: List[str] = None
+) -> Dict:
+    """
+    Calculate prop prediction boost based on injuries.
+
+    Args:
+        player_position: G (guard), F (forward), or C (center)
+        prop_type: points, rebounds, assists, threes, pra
+        opponent_injured: List of injured opponent player names
+        teammate_injured: List of injured teammate names
+
+    Returns:
+        Dictionary with boost_factor and reasons
+    """
+    boost_factor = 1.0
+    reasons = []
+
+    # Check opponent injuries
+    for injured_player in opponent_injured:
+        role_info = PLAYER_DEFENSIVE_ROLES.get(injured_player, {})
+        defensive_role = role_info.get("defensive_role")
+
+        if not defensive_role:
+            continue
+
+        # Perimeter defender out - guards score more
+        if defensive_role == "perimeter" and player_position == "G":
+            if prop_type in ["points", "pra"]:
+                boost = PROP_INJURY_BOOST["perimeter_defender_out_guard_points"]
+                boost_factor *= (1 + boost)
+                reasons.append(f"{injured_player} (perimeter) out")
+            elif prop_type == "threes":
+                boost = PROP_INJURY_BOOST["perimeter_defender_out_guard_threes"]
+                boost_factor *= (1 + boost)
+                reasons.append(f"{injured_player} (perimeter) out")
+
+        # Wing stopper out - forwards score more
+        elif defensive_role == "wing_stopper" and player_position == "F":
+            if prop_type in ["points", "pra"]:
+                boost = PROP_INJURY_BOOST["wing_stopper_out_forward_points"]
+                boost_factor *= (1 + boost)
+                reasons.append(f"{injured_player} (wing stopper) out")
+
+        # Rim protector out
+        elif defensive_role in ["rim_protector", "versatile"]:
+            if prop_type in ["points", "pra"] and player_position == "C":
+                boost = PROP_INJURY_BOOST["rim_protector_out_center_points"]
+                boost_factor *= (1 + boost)
+                reasons.append(f"{injured_player} (rim protector) out")
+            elif prop_type in ["rebounds", "pra"]:
+                boost = PROP_INJURY_BOOST["rim_protector_out_rebounds"]
+                boost_factor *= (1 + boost)
+                reasons.append(f"{injured_player} (rim protector) out")
+
+    # Check teammate injuries
+    if teammate_injured:
+        for injured_teammate in teammate_injured:
+            role_info = PLAYER_DEFENSIVE_ROLES.get(injured_teammate, {})
+            offensive_role = role_info.get("offensive_role")
+
+            if offensive_role == "primary_scorer" and prop_type in ["points", "pra"]:
+                boost = PROP_INJURY_BOOST["primary_scorer_out_secondary"]
+                boost_factor *= (1 + boost)
+                reasons.append(f"Teammate {injured_teammate} out (+usage)")
+
+            elif offensive_role == "playmaker" and prop_type in ["assists", "pra"]:
+                boost = PROP_INJURY_BOOST["playmaker_out_secondary_assists"]
+                boost_factor *= (1 + boost)
+                reasons.append(f"Playmaker {injured_teammate} out (+assists)")
+
+    # Cap at +/- 15%
+    boost_factor = max(0.85, min(1.15, boost_factor))
+
+    return {
+        "boost_factor": boost_factor,
+        "reasons": reasons,
+        "adjustment_pct": (boost_factor - 1) * 100
+    }
+
+
 def calculate_injury_adjustment(injured_players: List[str]) -> float:
     """
     Calculate spread adjustment based on injured players.

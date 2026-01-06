@@ -1600,6 +1600,34 @@ def calc_travel_fatigue_features(last_game_team_abbrev: str, current_game_team_a
 ELITE_TEAMS = {'BOS', 'DEN', 'MIL', 'PHX', 'LAL', 'GSW', 'MIA', 'PHI', 'CLE', 'OKC', 'MIN', 'NYK'}
 
 
+def _get_opponent_from_game(game: Dict, team_id: int) -> str:
+    """Extract opponent abbreviation from a game dict."""
+    home_team = game.get('home_team', {})
+    away_team = game.get('visitor_team', {})
+
+    # Handle both API structures
+    if isinstance(home_team, dict):
+        if home_team.get('id') == team_id:
+            return away_team.get('abbreviation', '')
+        else:
+            return home_team.get('abbreviation', '')
+    return ''
+
+
+def _days_between(date1: str, date2: str) -> int:
+    """Calculate days between two date strings (YYYY-MM-DD or ISO format)."""
+    try:
+        # Handle ISO format (2025-01-05T19:00:00Z)
+        d1_str = date1.split('T')[0] if 'T' in date1 else date1
+        d2_str = date2.split('T')[0] if 'T' in date2 else date2
+
+        d1 = datetime.strptime(d1_str, "%Y-%m-%d")
+        d2 = datetime.strptime(d2_str, "%Y-%m-%d")
+        return abs((d2 - d1).days)
+    except (ValueError, TypeError):
+        return 999  # Large number if parsing fails
+
+
 def analyze_schedule_spots(
     team_id: int,
     team_abbrev: str,
@@ -1670,9 +1698,43 @@ def analyze_schedule_spots(
                     spots['letdown_spot'] = 1
 
     # === TRAP GAME ===
-    # Weak opponent before elite opponent (if we have future schedule)
-    # For training data, we can check if next game was vs elite team
-    # This is tricky for point-in-time data, so we'll use a proxy
+    # Weak opponent BEFORE elite opponent (lookahead spot)
+    # Team may be looking ahead to tough game, underperform vs weak opponent
+    if opponent_abbrev not in ELITE_TEAMS:  # Current opponent is weak
+        next_is_elite = False
+
+        # Method 1: Use future_games from API (live predictions)
+        if future_games:
+            for future_game in future_games[:3]:  # Check next 3 games
+                future_opp = _get_opponent_from_game(future_game, team_id)
+                if future_opp in ELITE_TEAMS:
+                    # Check if elite game is within 3 days (relevant lookahead)
+                    future_date = future_game.get('date', '') or future_game.get('datetime', '')
+                    if future_date:
+                        days_until = _days_between(game_date, future_date)
+                        if days_until <= 3:
+                            next_is_elite = True
+                    else:
+                        next_is_elite = True  # Assume relevant if no date
+                    break
+
+        # Method 2: Training data lookahead (we have full season data)
+        # Look at games AFTER this date for the team
+        else:
+            future_in_data = [(d, s) for d, s in team_calc.team_games.get(team_id, [])
+                              if d > game_date]
+            future_in_data.sort(key=lambda x: x[0])
+
+            if future_in_data:
+                next_date, next_stats = future_in_data[0]
+                next_opp = next_stats.get('opponent_abbrev', '')
+                if next_opp in ELITE_TEAMS:
+                    days_until = _days_between(game_date, next_date)
+                    if days_until <= 3:
+                        next_is_elite = True
+
+        if next_is_elite:
+            spots['trap_game'] = 1
 
     # === ROAD TRIP FATIGUE ===
     # Count consecutive road games
@@ -1709,14 +1771,33 @@ def analyze_schedule_spots(
             break
 
     # === SANDWICH GAME ===
-    # Between two elite opponents (need to check both prev and next)
-    # For training, check if previous opponent was elite
-    if len(recent_games) >= 1:
+    # TRUE sandwich: playing weak team BETWEEN two elite opponents
+    # Both previous AND next game must be vs elite teams
+    if len(recent_games) >= 1 and opponent_abbrev not in ELITE_TEAMS:
         prev_opp = recent_games[0][1].get('opponent_abbrev', '')
-        if prev_opp in ELITE_TEAMS and opponent_abbrev not in ELITE_TEAMS:
-            # If we knew next game was also elite, this would be stronger
-            # Partial indicator
-            spots['sandwich_game'] = 1 if prev_opp in ELITE_TEAMS else 0
+        prev_is_elite = prev_opp in ELITE_TEAMS
+
+        next_is_elite = False
+
+        # Check next game (using future_games or training lookahead)
+        if future_games:
+            for future_game in future_games[:1]:  # Just need next game
+                next_opp = _get_opponent_from_game(future_game, team_id)
+                if next_opp in ELITE_TEAMS:
+                    next_is_elite = True
+                break
+        else:
+            # Training lookahead
+            future_in_data = [(d, s) for d, s in team_calc.team_games.get(team_id, [])
+                              if d > game_date]
+            future_in_data.sort(key=lambda x: x[0])
+            if future_in_data:
+                next_opp = future_in_data[0][1].get('opponent_abbrev', '')
+                next_is_elite = next_opp in ELITE_TEAMS
+
+        # TRUE sandwich = elite on BOTH sides
+        if prev_is_elite and next_is_elite:
+            spots['sandwich_game'] = 1
 
     # === EARLY SEASON VARIANCE ===
     # First 10 games have more variance, models less accurate

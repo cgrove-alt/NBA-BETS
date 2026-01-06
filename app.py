@@ -10,10 +10,155 @@ Main application that orchestrates the complete betting workflow:
 """
 
 import json
+import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
+
+# Import scipy for proper probability calculations
+try:
+    from scipy.stats import norm
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+    print("Warning: scipy not available. Using approximate probability calculations.")
+
+
+# Constants for spread-to-probability conversion
+NBA_SPREAD_VOLATILITY = 13.0  # Historical standard deviation of NBA game margins
+MIN_FEATURES_REQUIRED = 3  # Minimum non-zero features needed for valid prediction
+
+
+def spread_edge_to_cover_probability(spread_edge: float, volatility: float = NBA_SPREAD_VOLATILITY) -> float:
+    """
+    Convert spread edge (in points) to cover probability using normal CDF.
+
+    This is the mathematically correct way to convert point spreads to probabilities.
+    NBA games have ~13 point standard deviation in final margins.
+
+    Args:
+        spread_edge: Model spread - Market spread (positive = model favors home more)
+        volatility: Standard deviation of score margins (~13 for NBA)
+
+    Returns:
+        Probability of covering the spread (0.0 to 1.0)
+
+    Examples:
+        spread_edge=0: 50% (coin flip)
+        spread_edge=6.5: ~69% (half a standard deviation)
+        spread_edge=13: ~84% (one full standard deviation)
+    """
+    if HAS_SCIPY:
+        return float(norm.cdf(spread_edge / volatility))
+    else:
+        # Approximate using logistic function if scipy not available
+        return 1.0 / (1.0 + math.exp(-spread_edge / (volatility * 0.6)))
+
+
+def determine_spread_bet_side(
+    model_spread: float,
+    market_spread: float,
+) -> Tuple[str, float, float]:
+    """
+    Determine which side to bet based on model vs market spread.
+
+    CRITICAL: This fixes the sign convention bug where model was recommending
+    opposite bets!
+
+    Args:
+        model_spread: Model's predicted home margin (+ = home wins by X)
+        market_spread: Market spread for home team (- = home is favorite)
+                       e.g., -12 means home must win by 13+ to cover
+
+    Returns:
+        Tuple of (side_to_bet, edge_in_points, cover_probability)
+
+    Examples:
+        model_spread=4.6, market_spread=-12.0:
+        -> Model says home wins by 4.6
+        -> Market says home -12 (home must win by 13+)
+        -> Home WON'T cover (4.6 < 12), so bet AWAY +12
+        -> Edge: 12 - 4.6 = 7.4 points for away
+
+        model_spread=15.0, market_spread=-12.0:
+        -> Model says home wins by 15
+        -> Market says home -12
+        -> Home WILL cover (15 > 12), so bet HOME -12
+        -> Edge: 15 - 12 = 3 points for home
+    """
+    # The spread from home's perspective:
+    # model_spread: positive means home wins by that many (home favored)
+    # market_spread: negative means home is favored (e.g., -12 = home -12)
+
+    # To cover, home needs: actual_margin > abs(market_spread) when home is favorite
+    # market_spread = -12 means home needs to win by more than 12
+
+    # Convert market spread to "points home must win by to cover"
+    # If market_spread = -12, home must win by 13+ to cover
+    # If market_spread = +5, home can lose by up to 4 and still cover
+    home_cover_threshold = -market_spread  # e.g., -(-12) = 12 points needed
+
+    # Model says home wins by model_spread
+    # If model_spread > home_cover_threshold: bet HOME (they'll cover)
+    # If model_spread < home_cover_threshold: bet AWAY (home won't cover)
+
+    if model_spread > home_cover_threshold:
+        # Model predicts home covers
+        side = "home"
+        edge_points = model_spread - home_cover_threshold
+        cover_prob = spread_edge_to_cover_probability(edge_points)
+    else:
+        # Model predicts away covers (home doesn't cover)
+        side = "away"
+        edge_points = home_cover_threshold - model_spread
+        cover_prob = spread_edge_to_cover_probability(edge_points)
+
+    return side, edge_points, cover_prob
+
+
+def validate_features(features: Dict, feature_type: str = "game") -> Tuple[bool, str]:
+    """
+    Validate that features were actually generated (not all zeros/defaults).
+
+    This prevents the model from making predictions based on failed feature
+    generation, which was causing 6/9 games to have identical predictions.
+
+    Args:
+        features: Dictionary of features
+        feature_type: "game" or "player" for appropriate validation
+
+    Returns:
+        Tuple of (is_valid, reason_if_invalid)
+    """
+    if not features:
+        return False, "Empty features dictionary"
+
+    # Count non-zero, non-default numeric features
+    non_zero_count = 0
+    key_features = []
+
+    if feature_type == "game":
+        key_features = [
+            "net_rating_diff", "off_rating_diff", "def_rating_diff",
+            "home_recent_win_pct", "away_recent_win_pct",
+            "home_pts_avg", "away_pts_avg",
+        ]
+    else:  # player
+        key_features = [
+            "season_pts_avg", "recent_pts_avg", "min_avg",
+            "season_reb_avg", "season_ast_avg",
+        ]
+
+    for key in key_features:
+        val = features.get(key, 0)
+        if isinstance(val, (int, float)) and abs(val) > 0.01:
+            non_zero_count += 1
+
+    if non_zero_count < MIN_FEATURES_REQUIRED:
+        return False, f"Only {non_zero_count}/{len(key_features)} key features have values (need {MIN_FEATURES_REQUIRED}+)"
+
+    return True, "Features validated"
 
 from data_fetcher import (
     fetch_todays_schedule,
@@ -40,7 +185,7 @@ from model_trainer import (
 
 # Import real odds and injury integrations
 try:
-    from odds_fetcher import OddsFetcher, get_nba_odds, get_best_odds, find_value_bets
+    from odds_fetcher import OddsFetcher, get_nba_odds, get_best_odds, find_value_bets, LineMovementTracker, CLVTracker
     HAS_ODDS_FETCHER = True
 except ImportError:
     HAS_ODDS_FETCHER = False
@@ -102,6 +247,7 @@ class GameAnalysis:
     away_team: str
     game_time: str
     features: Dict = field(default_factory=dict)
+    features_valid: bool = False  # Whether features were successfully generated
     moneyline_prediction: Dict = field(default_factory=dict)
     spread_prediction: Dict = field(default_factory=dict)
     total_prediction: Dict = field(default_factory=dict)
@@ -475,6 +621,17 @@ class Orchestrator:
         self.current_odds = {}  # Cache for real odds
         self.injuries_cache = []  # Balldontlie injuries cache
 
+        # Line movement and CLV tracking
+        self.line_tracker = None
+        self.clv_tracker = None
+        if HAS_ODDS_FETCHER:
+            try:
+                self.line_tracker = LineMovementTracker(storage_dir="odds_history")
+                self.clv_tracker = CLVTracker(self.odds_fetcher)
+                print("Line movement and CLV tracking enabled")
+            except Exception as e:
+                print(f"Could not initialize line tracking: {e}")
+
         # Probability calibrators for improved betting edge calculation
         self.moneyline_calibrator = None
         self.spread_calibrator = None
@@ -751,6 +908,49 @@ class Orchestrator:
 
         return default_odds
 
+    def _format_odds_for_tracker(
+        self,
+        game_odds: Dict,
+        home_abbrev: str,
+        away_abbrev: str
+    ) -> Dict:
+        """
+        Format odds data for LineMovementTracker.
+
+        Args:
+            game_odds: Odds dictionary from get_game_odds()
+            home_abbrev: Home team abbreviation
+            away_abbrev: Away team abbreviation
+
+        Returns:
+            Formatted dictionary for line tracker
+        """
+        ml = game_odds.get("moneyline", {})
+        spread = game_odds.get("spread", {})
+        total = game_odds.get("total", {})
+
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "home_team": home_abbrev,
+            "away_team": away_abbrev,
+            "sportsbook": game_odds.get("sportsbook", "Unknown"),
+            "moneyline": {
+                "home": ml.get("home", -110),
+                "away": ml.get("away", -110),
+            },
+            "spread": {
+                "home_line": spread.get("home_line", 0),
+                "home_odds": spread.get("home_odds", -110),
+                "away_line": spread.get("away_line", 0),
+                "away_odds": spread.get("away_odds", -110),
+            },
+            "total": {
+                "line": total.get("line", 220),
+                "over_odds": total.get("over_odds", -110),
+                "under_odds": total.get("under_odds", -110),
+            },
+        }
+
     def fetch_balldontlie_odds(self, date: str = None) -> Dict[str, Any]:
         """
         Fetch betting odds from Balldontlie API (GOAT tier required).
@@ -998,7 +1198,9 @@ class Orchestrator:
 
         print(f"\nAnalyzing: {away_abbrev} @ {home_abbrev}...")
 
-        # Generate features
+        # Generate features with validation
+        features = {}
+        features_valid = False
         try:
             print(f"  Fetching team data and generating features...")
             features = generate_game_features(
@@ -1008,18 +1210,30 @@ class Orchestrator:
                 include_advanced=True,
                 injury_manager=self.injury_manager,
             )
-            print(f"  Features generated successfully.")
-        except Exception as e:
-            print(f"  Error generating features: {e}")
-            features = {}
 
-        # Initialize analysis
+            # CRITICAL: Validate features were actually generated
+            moneyline_features = features.get("moneyline_features", {})
+            is_valid, validation_msg = validate_features(moneyline_features, "game")
+
+            if is_valid:
+                print(f"  Features generated and validated successfully.")
+                features_valid = True
+            else:
+                print(f"  WARNING: Feature validation failed: {validation_msg}")
+                print(f"  This game will have limited predictions due to incomplete data.")
+
+        except Exception as e:
+            print(f"  ERROR generating features: {e}")
+            print(f"  This game will be skipped or have very limited predictions.")
+
+        # Initialize analysis with feature validation status
         analysis = GameAnalysis(
             game_id=game.get("game_id", ""),
             home_team=f"{home_team.get('city', '')} {home_team.get('name', '')}".strip(),
             away_team=f"{away_team.get('city', '')} {away_team.get('name', '')}".strip(),
             game_time=game.get("game_time", ""),
             features=features,
+            features_valid=features_valid,  # Track if features were successfully generated
         )
 
         # Generate predictions
@@ -1130,6 +1344,20 @@ class Orchestrator:
         injury_data = self.get_injury_adjustment(home_abbrev, away_abbrev)
         analysis.injury_impact = injury_data
 
+        # Get line movement data for edge quality
+        line_movement = {}
+        line_movement_note = ""
+        if self.line_tracker:
+            game_id = analysis.game_id if hasattr(analysis, 'game_id') else f"{away_abbrev}@{home_abbrev}"
+            line_movement = self.line_tracker.calculate_line_movement(game_id) or {}
+            if line_movement:
+                spread_move = line_movement.get("movements", {}).get("spread", {})
+                if spread_move:
+                    pt_change = spread_move.get("point_change", 0)
+                    direction = spread_move.get("direction", "")
+                    if abs(pt_change) >= 0.5:
+                        line_movement_note = f" | Line moved {pt_change:+.1f}pts ({direction})"
+
         # Moneyline recommendation
         ml = analysis.moneyline_prediction
         home_prob = ml.get("home_win_probability", 0.5)
@@ -1181,7 +1409,8 @@ class Orchestrator:
                 sportsbook=sportsbook,
             ))
 
-        # Spread recommendation with REAL spread line
+        # Spread recommendation with REAL spread line - CORRECTED LOGIC
+        # This fixes the sign convention bug that was causing wrong-direction bets
         sp = analysis.spread_prediction
         predicted_spread = sp.get("predicted_spread", 0)
 
@@ -1199,90 +1428,95 @@ class Orchestrator:
                 real_spread_line = -3.5
         home_spread_odds = spread_odds.get("home_odds", -110)
         away_spread_odds = spread_odds.get("away_odds", -110)
-        spread_implied_prob = self.american_to_implied_prob(home_spread_odds)
 
-        spread_edge = adjusted_spread - real_spread_line  # Positive = favor home
+        # CRITICAL FIX: Use correct spread-to-probability conversion and direction logic
+        # determine_spread_bet_side() properly handles:
+        # - Which side to bet based on model vs market
+        # - Correct edge calculation in points
+        # - Proper probability using normal CDF (not linear approximation)
+        side, edge_points, cover_prob = determine_spread_bet_side(
+            model_spread=adjusted_spread,
+            market_spread=real_spread_line
+        )
 
-        if abs(spread_edge) >= 1.5:  # At least 1.5 point edge on spread
-            if spread_edge > 0:
-                # Favor home covering
-                spread_prob = min(0.5 + (abs(spread_edge) * 0.03), 0.75)  # ~3% per point edge, capped
-                spread_eval = self.strategy.evaluate_bet(spread_prob, spread_implied_prob, "spread")
-                if spread_eval["is_recommended"]:
-                    stake = self.strategy.calculate_kelly_stake(spread_prob, home_spread_odds, spread_eval["confidence"])
-                    inj_note = f" (injury adj: {injury_adj:+.1f})" if abs(injury_adj) > 0.5 else ""
-                    recommendations.append(BetRecommendation(
-                        bet_type="spread",
-                        description=f"{analysis.home_team} {real_spread_line}",
-                        selection="home",
-                        line=real_spread_line,
-                        probability=spread_prob,
-                        confidence=spread_eval["confidence"],
-                        edge=spread_eval["edge"],
-                        expected_value=spread_eval["expected_value"],
-                        recommended_stake=stake,
-                        reasoning=f"Model: {adjusted_spread:+.1f} vs Line: {real_spread_line}{inj_note}",
-                        game_info={"home": home_abbrev, "away": away_abbrev},
-                        odds=home_spread_odds,
-                        implied_probability=spread_implied_prob,
-                        sportsbook=sportsbook,
-                    ))
-            else:
-                # Favor away covering
-                spread_prob = min(0.5 + (abs(spread_edge) * 0.03), 0.75)
-                away_spread_implied = self.american_to_implied_prob(away_spread_odds)
-                spread_eval = self.strategy.evaluate_bet(spread_prob, away_spread_implied, "spread")
-                if spread_eval["is_recommended"]:
-                    stake = self.strategy.calculate_kelly_stake(spread_prob, away_spread_odds, spread_eval["confidence"])
-                    away_line = -real_spread_line  # Flip the sign for away
-                    inj_note = f" (injury adj: {injury_adj:+.1f})" if abs(injury_adj) > 0.5 else ""
-                    recommendations.append(BetRecommendation(
-                        bet_type="spread",
-                        description=f"{analysis.away_team} {away_line:+.1f}",
-                        selection="away",
-                        line=away_line,
-                        probability=spread_prob,
-                        confidence=spread_eval["confidence"],
-                        edge=spread_eval["edge"],
-                        expected_value=spread_eval["expected_value"],
-                        recommended_stake=stake,
-                        reasoning=f"Model: {adjusted_spread:+.1f} vs Line: {real_spread_line}{inj_note}",
-                        game_info={"home": home_abbrev, "away": away_abbrev},
-                        odds=away_spread_odds,
-                        implied_probability=away_spread_implied,
-                        sportsbook=sportsbook,
-                    ))
+        # Only recommend if we have meaningful edge (at least 1 point)
+        # and the features were validated successfully
+        min_edge_points = 1.0
+        if edge_points >= min_edge_points and analysis.features_valid:
+            # Get the appropriate odds and implied probability for chosen side
+            if side == "home":
+                bet_odds = home_spread_odds
+                bet_line = real_spread_line
+                description = f"{analysis.home_team} {real_spread_line}"
+                implied_prob = self.american_to_implied_prob(home_spread_odds)
+            else:  # away
+                bet_odds = away_spread_odds
+                bet_line = -real_spread_line  # Flip sign for away
+                description = f"{analysis.away_team} {bet_line:+.1f}"
+                implied_prob = self.american_to_implied_prob(away_spread_odds)
 
-        # Total recommendation (over/under) with REAL line
+            # Calculate true edge (probability difference, not point difference)
+            true_edge = cover_prob - implied_prob
+
+            # Evaluate bet using true probability edge
+            spread_eval = self.strategy.evaluate_bet(cover_prob, implied_prob, "spread")
+
+            if spread_eval["is_recommended"] and true_edge > 0.02:  # Min 2% true edge
+                stake = self.strategy.calculate_kelly_stake(cover_prob, bet_odds, spread_eval["confidence"])
+                inj_note = f" (injury adj: {injury_adj:+.1f})" if abs(injury_adj) > 0.5 else ""
+
+                recommendations.append(BetRecommendation(
+                    bet_type="spread",
+                    description=description,
+                    selection=side,
+                    line=bet_line,
+                    probability=cover_prob,  # TRUE probability (no 75% cap!)
+                    confidence=spread_eval["confidence"],
+                    edge=true_edge,  # TRUE edge (probability diff, not points)
+                    expected_value=spread_eval["expected_value"],
+                    recommended_stake=stake,
+                    reasoning=f"Model: {adjusted_spread:+.1f} vs Line: {real_spread_line} ({edge_points:.1f}pt edge){inj_note}{line_movement_note}",
+                    game_info={"home": home_abbrev, "away": away_abbrev},
+                    odds=bet_odds,
+                    implied_probability=implied_prob,
+                    sportsbook=sportsbook,
+                ))
+
+        # Total recommendation (over/under) with REAL line - CORRECTED LOGIC
+        # Totals have similar volatility to spreads (~13 points stddev)
         total_line = total_odds.get("line", 220.0)
         over_odds = total_odds.get("over_odds", -110)
         under_odds = total_odds.get("under_odds", -110)
 
         # Get totals prediction if available
         totals_pred = analysis.total_prediction
-        if totals_pred:
+        if totals_pred and analysis.features_valid:  # Only if features validated
             predicted_total = totals_pred.get("predicted_total", total_line)
-            total_edge = predicted_total - total_line
+            total_edge = predicted_total - total_line  # Positive = favor over
 
-            if abs(total_edge) >= 3.0:  # At least 3 point edge on totals
+            # Use proper normal CDF for probability (same volatility as spreads)
+            total_prob = spread_edge_to_cover_probability(abs(total_edge))
+
+            if abs(total_edge) >= 2.0:  # At least 2 point edge on totals
                 if total_edge > 0:
                     # Favor over
-                    total_prob = min(0.5 + (abs(total_edge) * 0.025), 0.70)
                     over_implied = self.american_to_implied_prob(over_odds)
+                    true_edge = total_prob - over_implied
+
                     total_eval = self.strategy.evaluate_bet(total_prob, over_implied, "total")
-                    if total_eval["is_recommended"]:
+                    if total_eval["is_recommended"] and true_edge > 0.02:
                         stake = self.strategy.calculate_kelly_stake(total_prob, over_odds, total_eval["confidence"])
                         recommendations.append(BetRecommendation(
                             bet_type="total",
                             description=f"OVER {total_line}",
                             selection="over",
                             line=total_line,
-                            probability=total_prob,
+                            probability=total_prob,  # TRUE probability (no cap!)
                             confidence=total_eval["confidence"],
-                            edge=total_eval["edge"],
+                            edge=true_edge,  # TRUE edge
                             expected_value=total_eval["expected_value"],
                             recommended_stake=stake,
-                            reasoning=f"Model: {predicted_total:.1f} pts vs Line: {total_line}",
+                            reasoning=f"Model: {predicted_total:.1f} pts vs Line: {total_line} ({abs(total_edge):.1f}pt edge)",
                             game_info={"home": home_abbrev, "away": away_abbrev},
                             odds=over_odds,
                             implied_probability=over_implied,
@@ -1290,22 +1524,23 @@ class Orchestrator:
                         ))
                 else:
                     # Favor under
-                    total_prob = min(0.5 + (abs(total_edge) * 0.025), 0.70)
                     under_implied = self.american_to_implied_prob(under_odds)
+                    true_edge = total_prob - under_implied
+
                     total_eval = self.strategy.evaluate_bet(total_prob, under_implied, "total")
-                    if total_eval["is_recommended"]:
+                    if total_eval["is_recommended"] and true_edge > 0.02:
                         stake = self.strategy.calculate_kelly_stake(total_prob, under_odds, total_eval["confidence"])
                         recommendations.append(BetRecommendation(
                             bet_type="total",
                             description=f"UNDER {total_line}",
                             selection="under",
                             line=total_line,
-                            probability=total_prob,
+                            probability=total_prob,  # TRUE probability (no cap!)
                             confidence=total_eval["confidence"],
-                            edge=total_eval["edge"],
+                            edge=true_edge,  # TRUE edge
                             expected_value=total_eval["expected_value"],
                             recommended_stake=stake,
-                            reasoning=f"Model: {predicted_total:.1f} pts vs Line: {total_line}",
+                            reasoning=f"Model: {predicted_total:.1f} pts vs Line: {total_line} ({abs(total_edge):.1f}pt edge)",
                             game_info={"home": home_abbrev, "away": away_abbrev},
                             odds=under_odds,
                             implied_probability=under_implied,
@@ -1504,6 +1739,31 @@ class Orchestrator:
         # Fetch premium data (odds, injuries) from best available source
         # Balldontlie > SportsDataIO > The Odds API > ESPN (free)
         premium_data = self.fetch_all_premium_data()
+
+        # Record opening odds for CLV tracking
+        if self.line_tracker and self.current_odds:
+            for game in self.schedule:
+                home_team = game.get("home_team", {})
+                away_team = game.get("visitor_team", {})
+                home_abbrev = home_team.get("abbreviation", "")
+                away_abbrev = away_team.get("abbreviation", "")
+                game_id = str(game.get("id", f"{away_abbrev}@{home_abbrev}"))
+
+                # Get current odds for this game
+                game_odds = self.get_game_odds(home_abbrev, away_abbrev)
+
+                # Format odds for tracker
+                odds_data = self._format_odds_for_tracker(game_odds, home_abbrev, away_abbrev)
+
+                # Record as opening odds
+                self.line_tracker.record_odds_snapshot(
+                    game_id=game_id,
+                    home_team=home_abbrev,
+                    away_team=away_abbrev,
+                    odds_data=odds_data,
+                    is_opening=True
+                )
+            print(f"Recorded opening odds for {len(self.schedule)} games")
 
         # Analyze each game
         all_recommendations = []

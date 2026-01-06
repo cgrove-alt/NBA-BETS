@@ -340,6 +340,61 @@ class BalldontlieAPI:
         today = datetime.now().strftime("%Y-%m-%d")
         return self.get_games(dates=[today])
 
+    def get_upcoming_games(
+        self,
+        team_id: int,
+        from_date: str = None,
+        days_ahead: int = 7
+    ) -> List[Dict]:
+        """
+        Get upcoming games for a specific team.
+
+        Used for trap game detection - need to know who's playing next
+        to detect lookahead spots (weak opponent before elite team).
+
+        Args:
+            team_id: Team ID to get upcoming games for
+            from_date: Start date (YYYY-MM-DD), defaults to today
+            days_ahead: Number of days to look ahead (default 7)
+
+        Returns:
+            List of upcoming games sorted by date
+
+        Example:
+            >>> api = BalldontlieAPI()
+            >>> upcoming = api.get_upcoming_games(1610612738, days_ahead=7)  # BOS
+            >>> for game in upcoming:
+            ...     print(game['date'], game['home_team']['abbreviation'])
+        """
+        if from_date is None:
+            from_date = datetime.now().strftime("%Y-%m-%d")
+
+        # Generate list of dates to query
+        try:
+            start = datetime.strptime(from_date, "%Y-%m-%d")
+        except ValueError:
+            start = datetime.now()
+
+        # Generate dates from tomorrow to days_ahead
+        dates = [
+            (start + timedelta(days=i)).strftime("%Y-%m-%d")
+            for i in range(1, days_ahead + 1)
+        ]
+
+        if not dates:
+            return []
+
+        # Fetch games for these dates and filter by team
+        all_games = self.get_games(dates=dates, team_ids=[team_id])
+
+        # Sort by date
+        sorted_games = sorted(
+            all_games,
+            key=lambda g: g.get('date', '') or g.get('datetime', '') or ''
+        )
+
+        return sorted_games
+
     # ==================== ALL-STAR TIER ($9.99) ====================
 
     def get_player_stats(

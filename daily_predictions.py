@@ -34,6 +34,15 @@ from feature_engineering import generate_game_features, PlayerPropFeatureGenerat
 from scipy.stats import norm
 from data_fetcher import fetch_player_stats_bdl
 
+# Import prop injury boost calculation
+try:
+    from player_impact_fetcher import calculate_prop_injury_boost
+    HAS_INJURY_BOOST = True
+except ImportError:
+    HAS_INJURY_BOOST = False
+    def calculate_prop_injury_boost(*args, **kwargs):
+        return {'boost_factor': 1.0, 'reasons': []}
+
 # Import training feature generator for accurate prop predictions
 try:
     from train_complete_balldontlie import (
@@ -43,6 +52,7 @@ try:
         calculate_pace_adjusted_features,
         calculate_vegas_total_features,
         calculate_blowout_risk_features,
+        analyze_schedule_spots,
     )
     HAS_TRAINING_FEATURES = True
 except ImportError:
@@ -112,6 +122,38 @@ def get_balldontlie_api() -> Optional[BalldontlieAPI]:
         if api_key:
             _balldontlie_api = BalldontlieAPI(api_key=api_key)
     return _balldontlie_api
+
+
+# Cache for future games to avoid redundant API calls
+_future_games_cache = {}
+
+def get_future_games_for_team(team_id: int, game_date: str) -> List[Dict]:
+    """
+    Get upcoming games for a team (cached).
+
+    Used for trap game and sandwich game detection.
+
+    Args:
+        team_id: Team ID
+        game_date: Current game date (YYYY-MM-DD)
+
+    Returns:
+        List of upcoming games for this team
+    """
+    cache_key = f"{team_id}_{game_date}"
+    if cache_key in _future_games_cache:
+        return _future_games_cache[cache_key]
+
+    api = get_balldontlie_api()
+    if not api:
+        return []
+
+    try:
+        future_games = api.get_upcoming_games(team_id, game_date, days_ahead=7)
+        _future_games_cache[cache_key] = future_games
+        return future_games
+    except Exception as e:
+        return []
 
 
 def get_player_stats_calculator():
@@ -624,6 +666,57 @@ def analyze_game(game: Dict, odds: Dict, models: Dict) -> Dict:
 
     if not ml_features:
         # Use basic defaults
+        pass
+
+    # Get schedule spot features (trap games, sandwich games, etc.)
+    schedule_spots = {'home': {}, 'away': {}}
+    if HAS_TRAINING_FEATURES:
+        try:
+            # Get game date for schedule analysis
+            game_date_str = game.get('date', '') or datetime.now().strftime("%Y-%m-%d")
+            if 'T' in game_date_str:
+                game_date_str = game_date_str.split('T')[0]
+
+            # Get team IDs
+            home_team_id = home_team.get('id', 0)
+            away_team_id = away_team.get('id', 0)
+
+            # Create minimal TeamStatsCalculator for live predictions
+            # (schedule spots analysis needs it but we don't have full history)
+            team_calc = TeamStatsCalculator(window=10)
+
+            # Get future games for each team
+            home_future = get_future_games_for_team(home_team_id, game_date_str)
+            away_future = get_future_games_for_team(away_team_id, game_date_str)
+
+            # Analyze schedule spots for home team
+            schedule_spots['home'] = analyze_schedule_spots(
+                team_id=home_team_id,
+                team_abbrev=home_abbrev,
+                game_date=game_date_str,
+                opponent_abbrev=away_abbrev,
+                team_calc=team_calc,
+                is_home=True,
+                future_games=home_future
+            )
+
+            # Analyze schedule spots for away team
+            schedule_spots['away'] = analyze_schedule_spots(
+                team_id=away_team_id,
+                team_abbrev=away_abbrev,
+                game_date=game_date_str,
+                opponent_abbrev=home_abbrev,
+                team_calc=team_calc,
+                is_home=False,
+                future_games=away_future
+            )
+        except Exception as e:
+            pass  # Continue without schedule spots if analysis fails
+
+    analysis['schedule_spots'] = schedule_spots
+
+    if not ml_features:
+        # Use basic defaults
         ml_features = {'net_rating_diff': 0, 'win_pct_diff': 0}
 
     # Store injury info in analysis
@@ -825,7 +918,10 @@ def predict_player_prop(
     opponent: str,
     opponent_id: int,
     models: Dict,
-    use_api_features: bool = False  # Disable by default for speed
+    use_api_features: bool = False,  # Disable by default for speed
+    player_position: str = None,  # Player position (G/F/C)
+    opponent_injured: List[str] = None,  # Injured players on opponent
+    teammate_injured: List[str] = None,  # Injured teammates
 ) -> Dict:
     """
     Predict over/under probability for a player prop.
@@ -839,6 +935,9 @@ def predict_player_prop(
         opponent_id: Opponent team ID for matchup features
         models: Loaded models
         use_api_features: If True, fetch player stats from API (slow)
+        player_position: Player's position (G/F/C) for injury impact
+        opponent_injured: List of injured player names on opponent
+        teammate_injured: List of injured teammate names
 
     Returns:
         Prediction dict with over_prob and edge
@@ -945,6 +1044,33 @@ def predict_player_prop(
         except Exception as e:
             pass  # Fall through to return defaults
 
+    # Apply injury-based adjustments to predicted value
+    injury_boost_info = {'boost_factor': 1.0, 'reasons': []}
+    if predicted_value is not None and HAS_INJURY_BOOST:
+        try:
+            # Calculate injury boost based on position, prop type, and injuries
+            injury_boost_info = calculate_prop_injury_boost(
+                player_position=player_position or 'G',  # Default to guard
+                prop_type=prop_type,
+                opponent_injured=opponent_injured or [],
+                teammate_injured=teammate_injured or []
+            )
+
+            boost_factor = injury_boost_info.get('boost_factor', 1.0)
+
+            # Apply boost to predicted value (capped at ±15%)
+            if boost_factor != 1.0:
+                adjusted_value = predicted_value * boost_factor
+                predicted_value = adjusted_value
+
+                # Recalculate probability with adjusted value
+                std = line * 0.20 if line > 0 else 5.0
+                z_score = (predicted_value - line) / max(std, 1)
+                over_prob = float(norm.cdf(z_score))
+                edge = (over_prob - 0.524) * 100
+        except Exception:
+            pass  # Continue without injury adjustment if it fails
+
     # Without full feature generation, just show the prop lines
     # Edge calculation would need player stats
     return {
@@ -955,6 +1081,8 @@ def predict_player_prop(
         'over_prob': over_prob,
         'edge': edge,
         'predicted_value': predicted_value,
+        'injury_boost': injury_boost_info.get('boost_factor', 1.0),
+        'injury_reasons': injury_boost_info.get('reasons', []),
     }
 
 
@@ -1169,17 +1297,25 @@ def main():
                     home_team_id = home_team.get('id')
                     away_team_id = away_team.get('id')
 
-                    # Get injured players to filter from props
+                    # Get injured players to filter from props + for injury boost calculation
                     injury_details = analysis.get('injury_details', {})
                     injured_players = set()
+                    home_injured_names = []
+                    away_injured_names = []
+
                     for inj in injury_details.get('home', []):
                         status = inj.get('status', '').upper()
+                        player_inj_name = inj.get('player_name', '')
                         if status in ('OUT', 'DOUBTFUL'):
-                            injured_players.add(inj.get('player_name', '').lower())
+                            injured_players.add(player_inj_name.lower())
+                            home_injured_names.append(player_inj_name)
+
                     for inj in injury_details.get('away', []):
                         status = inj.get('status', '').upper()
+                        player_inj_name = inj.get('player_name', '')
                         if status in ('OUT', 'DOUBTFUL'):
-                            injured_players.add(inj.get('player_name', '').lower())
+                            injured_players.add(player_inj_name.lower())
+                            away_injured_names.append(player_inj_name)
 
                     # Add props to analysis
                     for player_id, props in sorted_players:
@@ -1193,16 +1329,27 @@ def main():
                         # CRITICAL: Look up the correct Balldontlie ID for stats
                         # Props API uses different IDs than active players endpoint
                         bdl_stats_id = None
+                        player_position = 'G'  # Default
                         if player_name and not player_name.startswith("Player"):
                             bdl_stats_id = get_bdl_player_id(player_name)
+                            # Get player position from mapper
+                            if mapper and mapper._all_players:
+                                for p in mapper._all_players:
+                                    if p.get('id') == bdl_stats_id:
+                                        player_position = p.get('position', 'G') or 'G'
+                                        break
 
-                        # Determine opponent based on player's team
+                        # Determine opponent/teammate injuries based on player's team
                         if player_team_id == home_team_id:
                             opponent_id = away_team_id
                             opponent_abbrev = analysis['away_team']
+                            opponent_injured = away_injured_names
+                            teammate_injured = home_injured_names
                         else:
                             opponent_id = home_team_id
                             opponent_abbrev = analysis['home_team']
+                            opponent_injured = home_injured_names
+                            teammate_injured = away_injured_names
 
                         for prop_type in ['points', 'rebounds', 'assists']:
                             line_key = f'{prop_type}_line'
@@ -1212,7 +1359,10 @@ def main():
                                 pred = predict_player_prop(
                                     player_name, bdl_stats_id or player_id, prop_type, line,
                                     opponent_abbrev, opponent_id, models,
-                                    use_api_features=True  # Enable real predictions
+                                    use_api_features=True,  # Enable real predictions
+                                    player_position=player_position,
+                                    opponent_injured=opponent_injured,
+                                    teammate_injured=teammate_injured
                                 )
                                 analysis['player_props'].append(pred)
                                 all_player_props.append({

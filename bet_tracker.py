@@ -769,6 +769,135 @@ class BetTracker:
                   f"{metrics.win_rate:5.1f}% WR | {metrics.roi:+6.2f}% ROI | "
                   f"${metrics.total_pnl:+8.2f}")
 
+        # CLV Analytics
+        print("\nCLV (Closing Line Value) Analytics:")
+        print("-" * 40)
+        clv_analytics = self.get_clv_analytics()
+        if clv_analytics.get("overall_avg_clv") is not None:
+            print(f"Overall Avg CLV: {clv_analytics['overall_avg_clv']:.4f}")
+            print(f"Positive CLV %:  {clv_analytics['positive_clv_pct']:.1%}")
+            print(f"Sample Size:     {clv_analytics['sample_size']}")
+            if clv_analytics.get("clv_roi_correlation") is not None:
+                print(f"CLV-ROI Corr:    {clv_analytics['clv_roi_correlation']:.3f}")
+        else:
+            print("No CLV data available (closing odds not recorded)")
+
+    def get_clv_analytics(self) -> Dict:
+        """
+        Get comprehensive CLV (Closing Line Value) analytics.
+
+        CLV is the most important metric for validating a betting edge.
+        Positive CLV over time indicates you're consistently getting
+        better odds than the market settles on.
+
+        Returns:
+            Dictionary with:
+            - overall_avg_clv: Average CLV across all bets
+            - positive_clv_pct: Percentage of bets with positive CLV
+            - sample_size: Number of bets with CLV data
+            - by_bet_type: CLV breakdown by bet type
+            - clv_roi_correlation: Correlation between CLV and ROI
+            - clv_distribution: Distribution of CLV values
+        """
+        # Get all settled bets with closing odds
+        bets = self._query_bets(
+            "status != 'pending' AND closing_odds IS NOT NULL",
+            ()
+        )
+
+        result = {
+            "overall_avg_clv": None,
+            "positive_clv_pct": None,
+            "sample_size": 0,
+            "by_bet_type": {},
+            "clv_roi_correlation": None,
+            "clv_distribution": {
+                "very_positive": 0,   # CLV > 0.05
+                "positive": 0,         # CLV 0.01-0.05
+                "neutral": 0,          # CLV -0.01 to 0.01
+                "negative": 0,         # CLV -0.05 to -0.01
+                "very_negative": 0,    # CLV < -0.05
+            },
+            "clv_vs_outcome": {
+                "positive_clv_wins": 0,
+                "positive_clv_losses": 0,
+                "negative_clv_wins": 0,
+                "negative_clv_losses": 0,
+            },
+        }
+
+        if not bets:
+            return result
+
+        # Calculate CLV for each bet
+        clv_values = []
+        rois = []
+
+        for bet in bets:
+            clv = bet.closing_line_value()
+            if clv is not None:
+                clv_values.append(clv)
+
+                # Track ROI for correlation
+                if bet.stake > 0:
+                    rois.append(bet.pnl / bet.stake)
+
+                # Categorize CLV
+                if clv > 0.05:
+                    result["clv_distribution"]["very_positive"] += 1
+                elif clv > 0.01:
+                    result["clv_distribution"]["positive"] += 1
+                elif clv > -0.01:
+                    result["clv_distribution"]["neutral"] += 1
+                elif clv > -0.05:
+                    result["clv_distribution"]["negative"] += 1
+                else:
+                    result["clv_distribution"]["very_negative"] += 1
+
+                # Track CLV vs outcome
+                if clv > 0:
+                    if bet.status == BetStatus.WON:
+                        result["clv_vs_outcome"]["positive_clv_wins"] += 1
+                    elif bet.status == BetStatus.LOST:
+                        result["clv_vs_outcome"]["positive_clv_losses"] += 1
+                else:
+                    if bet.status == BetStatus.WON:
+                        result["clv_vs_outcome"]["negative_clv_wins"] += 1
+                    elif bet.status == BetStatus.LOST:
+                        result["clv_vs_outcome"]["negative_clv_losses"] += 1
+
+        if not clv_values:
+            return result
+
+        result["sample_size"] = len(clv_values)
+        result["overall_avg_clv"] = float(np.mean(clv_values))
+        result["positive_clv_pct"] = sum(1 for c in clv_values if c > 0) / len(clv_values)
+
+        # CLV by bet type
+        clv_by_type = {}
+        for bet_type in BetType:
+            type_bets = [b for b in bets if b.bet_type == bet_type]
+            type_clvs = [b.closing_line_value() for b in type_bets
+                        if b.closing_line_value() is not None]
+            if type_clvs:
+                clv_by_type[bet_type.value] = {
+                    "avg_clv": float(np.mean(type_clvs)),
+                    "positive_pct": sum(1 for c in type_clvs if c > 0) / len(type_clvs),
+                    "sample_size": len(type_clvs),
+                }
+        result["by_bet_type"] = clv_by_type
+
+        # CLV vs ROI correlation
+        if len(clv_values) >= 10 and len(rois) == len(clv_values):
+            try:
+                correlation = np.corrcoef(clv_values, rois)[0, 1]
+                if not np.isnan(correlation):
+                    result["clv_roi_correlation"] = float(correlation)
+            except Exception:
+                pass
+
+        return result
+
 
 def create_tracker(db_path: str = "bets.db") -> BetTracker:
     """Create a new bet tracker instance."""
