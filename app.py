@@ -218,6 +218,12 @@ try:
 except ImportError:
     HAS_BET_TRACKER = False
 
+try:
+    from edge_quality import EdgeQualityScorer, EdgeQualityResult, EdgeTier, DynamicKellyCalculator
+    HAS_EDGE_QUALITY = True
+except ImportError:
+    HAS_EDGE_QUALITY = False
+
 
 @dataclass
 class BetRecommendation:
@@ -238,6 +244,10 @@ class BetRecommendation:
     implied_probability: float = 0.524  # Implied from odds
     sportsbook: str = ""  # Where to place the bet
     closing_line_value: Optional[float] = None  # CLV if available
+    # Edge quality scoring
+    edge_quality_score: Optional[float] = None  # 0-100 score
+    edge_quality_tier: Optional[str] = None  # "elite", "strong", "moderate", "weak", "avoid"
+    edge_quality_factors: List[str] = field(default_factory=list)  # Key factors
 
 
 @dataclass
@@ -638,6 +648,21 @@ class Orchestrator:
         self.spread_calibrator = None
         self.prop_calibrators = {}  # Dict of prop_type -> ModelCalibrator
 
+        # Edge quality scoring for bet filtering and stake sizing
+        self.edge_quality_scorer = None
+        self.dynamic_kelly = None
+        if HAS_EDGE_QUALITY:
+            try:
+                self.edge_quality_scorer = EdgeQualityScorer(min_edge_threshold=0.02)
+                self.dynamic_kelly = DynamicKellyCalculator(
+                    base_kelly_fraction=0.25,  # Quarter Kelly as base
+                    max_bet_pct=0.05,          # Max 5% of bankroll
+                    min_bet_pct=0.005,         # Min 0.5% of bankroll
+                )
+                print("Edge quality scoring enabled")
+            except Exception as e:
+                print(f"Could not initialize edge quality scoring: {e}")
+
     def load_models(self) -> bool:
         """
         Load trained ML models and calibrators.
@@ -896,6 +921,70 @@ class Orchestrator:
         else:
             # Very large spreads: heavy adjustment
             return -130, 110
+
+    def _evaluate_edge_quality(
+        self,
+        model_probability: float,
+        implied_probability: float,
+        bet_type: str,
+        home_away: str = "home",
+        analysis: Optional['GameAnalysis'] = None,
+        line_movement: Optional[Dict] = None,
+    ) -> Optional['EdgeQualityResult']:
+        """
+        Evaluate edge quality for a bet using the EdgeQualityScorer.
+
+        Args:
+            model_probability: Model's predicted probability
+            implied_probability: Market implied probability
+            bet_type: "moneyline", "spread", or "total"
+            home_away: "home" or "away" for the side being bet
+            analysis: GameAnalysis with additional context
+            line_movement: Line movement data if available
+
+        Returns:
+            EdgeQualityResult or None if edge quality scoring unavailable
+        """
+        if not self.edge_quality_scorer:
+            return None
+
+        # Extract data from analysis if available
+        injury_impact = 0.0
+        games_played = 30  # Default
+        is_back_to_back = False
+
+        if analysis and hasattr(analysis, 'injury_impact'):
+            injury_data = analysis.injury_impact or {}
+            # Normalize injury impact to 0-1 scale
+            spread_adj = abs(injury_data.get("spread_adjustment", 0))
+            injury_impact = min(1.0, spread_adj / 10.0)  # 10pt adjustment = max impact
+
+        # Extract line movement data
+        opening_odds = None
+        current_odds = None
+        if line_movement:
+            spread_move = line_movement.get("movements", {}).get(bet_type, {})
+            if spread_move:
+                opening_odds = spread_move.get("opening")
+                current_odds = spread_move.get("current")
+
+        try:
+            result = self.edge_quality_scorer.evaluate_edge(
+                model_probability=model_probability,
+                implied_probability=implied_probability,
+                opening_odds=opening_odds,
+                current_odds=current_odds,
+                home_away=home_away,
+                injury_impact_score=injury_impact,
+                games_played=games_played,
+                is_back_to_back=is_back_to_back,
+                training_data_age_days=30.0,  # Default - could be computed from model metadata
+                last_game_days_ago=2.0,       # Default
+            )
+            return result
+        except Exception as e:
+            print(f"Edge quality evaluation failed: {e}")
+            return None
 
     def get_game_odds(self, home_abbrev: str, away_abbrev: str) -> Dict[str, Any]:
         """
@@ -1423,42 +1512,86 @@ class Orchestrator:
         # Evaluate home moneyline with REAL odds
         home_eval = self.strategy.evaluate_bet(home_prob, home_implied_prob, "moneyline")
         if home_eval["is_recommended"]:
-            stake = self.strategy.calculate_kelly_stake(home_prob, home_ml_odds, home_eval["confidence"])
-            recommendations.append(BetRecommendation(
-                bet_type="moneyline",
-                description=f"{analysis.home_team} ML",
-                selection="home",
-                probability=home_prob,
-                confidence=home_eval["confidence"],
-                edge=home_eval["edge"],
-                expected_value=home_eval["expected_value"],
-                recommended_stake=stake,
-                reasoning=f"Model: {home_prob:.1%} vs Market: {home_implied_prob:.1%} (odds: {home_ml_odds:+.0f})",
-                game_info={"home": home_abbrev, "away": away_abbrev},
-                odds=home_ml_odds,
-                implied_probability=home_implied_prob,
-                sportsbook=sportsbook,
-            ))
+            # Evaluate edge quality
+            home_edge_quality = self._evaluate_edge_quality(
+                home_prob, home_implied_prob, "moneyline", "home", analysis, line_movement
+            )
+
+            # Skip AVOID tier bets
+            if home_edge_quality and home_edge_quality.tier.value == "avoid":
+                pass  # Don't add this bet
+            else:
+                stake = self.strategy.calculate_kelly_stake(home_prob, home_ml_odds, home_eval["confidence"])
+
+                # Adjust stake by edge quality multiplier
+                if home_edge_quality:
+                    stake = round(stake * home_edge_quality.recommended_kelly_multiplier, 2)
+
+                # Extract edge quality info
+                eq_score = home_edge_quality.overall_score if home_edge_quality else None
+                eq_tier = home_edge_quality.tier.value if home_edge_quality else None
+                eq_factors = (home_edge_quality.positive_factors[:2] + home_edge_quality.risk_factors[:2]) if home_edge_quality else []
+
+                recommendations.append(BetRecommendation(
+                    bet_type="moneyline",
+                    description=f"{analysis.home_team} ML",
+                    selection="home",
+                    probability=home_prob,
+                    confidence=home_eval["confidence"],
+                    edge=home_eval["edge"],
+                    expected_value=home_eval["expected_value"],
+                    recommended_stake=stake,
+                    reasoning=f"Model: {home_prob:.1%} vs Market: {home_implied_prob:.1%} (odds: {home_ml_odds:+.0f})",
+                    game_info={"home": home_abbrev, "away": away_abbrev},
+                    odds=home_ml_odds,
+                    implied_probability=home_implied_prob,
+                    sportsbook=sportsbook,
+                    edge_quality_score=eq_score,
+                    edge_quality_tier=eq_tier,
+                    edge_quality_factors=eq_factors,
+                ))
 
         # Evaluate away moneyline with REAL odds
         away_eval = self.strategy.evaluate_bet(away_prob, away_implied_prob, "moneyline")
         if away_eval["is_recommended"]:
-            stake = self.strategy.calculate_kelly_stake(away_prob, away_ml_odds, away_eval["confidence"])
-            recommendations.append(BetRecommendation(
-                bet_type="moneyline",
-                description=f"{analysis.away_team} ML",
-                selection="away",
-                probability=away_prob,
-                confidence=away_eval["confidence"],
-                edge=away_eval["edge"],
-                expected_value=away_eval["expected_value"],
-                recommended_stake=stake,
-                reasoning=f"Model: {away_prob:.1%} vs Market: {away_implied_prob:.1%} (odds: {away_ml_odds:+.0f})",
-                game_info={"home": home_abbrev, "away": away_abbrev},
-                odds=away_ml_odds,
-                implied_probability=away_implied_prob,
-                sportsbook=sportsbook,
-            ))
+            # Evaluate edge quality
+            away_edge_quality = self._evaluate_edge_quality(
+                away_prob, away_implied_prob, "moneyline", "away", analysis, line_movement
+            )
+
+            # Skip AVOID tier bets
+            if away_edge_quality and away_edge_quality.tier.value == "avoid":
+                pass  # Don't add this bet
+            else:
+                stake = self.strategy.calculate_kelly_stake(away_prob, away_ml_odds, away_eval["confidence"])
+
+                # Adjust stake by edge quality multiplier
+                if away_edge_quality:
+                    stake = round(stake * away_edge_quality.recommended_kelly_multiplier, 2)
+
+                # Extract edge quality info
+                eq_score = away_edge_quality.overall_score if away_edge_quality else None
+                eq_tier = away_edge_quality.tier.value if away_edge_quality else None
+                eq_factors = (away_edge_quality.positive_factors[:2] + away_edge_quality.risk_factors[:2]) if away_edge_quality else []
+
+                recommendations.append(BetRecommendation(
+                    bet_type="moneyline",
+                    description=f"{analysis.away_team} ML",
+                    selection="away",
+                    probability=away_prob,
+                    confidence=away_eval["confidence"],
+                    edge=away_eval["edge"],
+                    expected_value=away_eval["expected_value"],
+                    recommended_stake=stake,
+                    reasoning=f"Model: {away_prob:.1%} vs Market: {away_implied_prob:.1%} (odds: {away_ml_odds:+.0f})",
+                    game_info={"home": home_abbrev, "away": away_abbrev},
+                    odds=away_ml_odds,
+                    implied_probability=away_implied_prob,
+                    sportsbook=sportsbook,
+                    edge_quality_score=eq_score,
+                    edge_quality_tier=eq_tier,
+                    edge_quality_factors=eq_factors,
+                ))
 
         # Spread recommendation with REAL spread line
         sp = analysis.spread_prediction
@@ -1541,25 +1674,46 @@ class Orchestrator:
             spread_eval = self.strategy.evaluate_bet(cover_prob, implied_prob, "spread")
 
             if spread_eval["is_recommended"]:
-                stake = self.strategy.calculate_kelly_stake(cover_prob, bet_odds, spread_eval["confidence"])
-                inj_note = f" (injury adj: {injury_adj:+.1f})" if abs(injury_adj) > 0.5 else ""
+                # Evaluate edge quality
+                spread_edge_quality = self._evaluate_edge_quality(
+                    cover_prob, implied_prob, "spread", side, analysis, line_movement
+                )
 
-                recommendations.append(BetRecommendation(
-                    bet_type="spread",
-                    description=description,
-                    selection=side,
-                    line=bet_line,
-                    probability=cover_prob,
-                    confidence=spread_eval["confidence"],
-                    edge=true_edge,
-                    expected_value=spread_eval["expected_value"],
-                    recommended_stake=stake,
-                    reasoning=f"{reasoning_base}{inj_note}{line_movement_note}",
-                    game_info={"home": home_abbrev, "away": away_abbrev},
-                    odds=bet_odds,
-                    implied_probability=implied_prob,
-                    sportsbook=sportsbook,
-                ))
+                # Skip AVOID tier bets
+                if spread_edge_quality and spread_edge_quality.tier.value == "avoid":
+                    pass  # Don't add this bet
+                else:
+                    stake = self.strategy.calculate_kelly_stake(cover_prob, bet_odds, spread_eval["confidence"])
+                    inj_note = f" (injury adj: {injury_adj:+.1f})" if abs(injury_adj) > 0.5 else ""
+
+                    # Adjust stake by edge quality multiplier
+                    if spread_edge_quality:
+                        stake = round(stake * spread_edge_quality.recommended_kelly_multiplier, 2)
+
+                    # Extract edge quality info
+                    eq_score = spread_edge_quality.overall_score if spread_edge_quality else None
+                    eq_tier = spread_edge_quality.tier.value if spread_edge_quality else None
+                    eq_factors = (spread_edge_quality.positive_factors[:2] + spread_edge_quality.risk_factors[:2]) if spread_edge_quality else []
+
+                    recommendations.append(BetRecommendation(
+                        bet_type="spread",
+                        description=description,
+                        selection=side,
+                        line=bet_line,
+                        probability=cover_prob,
+                        confidence=spread_eval["confidence"],
+                        edge=true_edge,
+                        expected_value=spread_eval["expected_value"],
+                        recommended_stake=stake,
+                        reasoning=f"{reasoning_base}{inj_note}{line_movement_note}",
+                        game_info={"home": home_abbrev, "away": away_abbrev},
+                        odds=bet_odds,
+                        implied_probability=implied_prob,
+                        sportsbook=sportsbook,
+                        edge_quality_score=eq_score,
+                        edge_quality_tier=eq_tier,
+                        edge_quality_factors=eq_factors,
+                    ))
 
         # Total recommendation (over/under) with REAL line - CORRECTED LOGIC
         # Totals have similar volatility to spreads (~13 points stddev)
@@ -1584,23 +1738,45 @@ class Orchestrator:
 
                     total_eval = self.strategy.evaluate_bet(total_prob, over_implied, "total")
                     if total_eval["is_recommended"] and true_edge > 0.02:
-                        stake = self.strategy.calculate_kelly_stake(total_prob, over_odds, total_eval["confidence"])
-                        recommendations.append(BetRecommendation(
-                            bet_type="total",
-                            description=f"OVER {total_line}",
-                            selection="over",
-                            line=total_line,
-                            probability=total_prob,  # TRUE probability (no cap!)
-                            confidence=total_eval["confidence"],
-                            edge=true_edge,  # TRUE edge
-                            expected_value=total_eval["expected_value"],
-                            recommended_stake=stake,
-                            reasoning=f"Model: {predicted_total:.1f} pts vs Line: {total_line} ({abs(total_edge):.1f}pt edge)",
-                            game_info={"home": home_abbrev, "away": away_abbrev},
-                            odds=over_odds,
-                            implied_probability=over_implied,
-                            sportsbook=sportsbook,
-                        ))
+                        # Evaluate edge quality
+                        over_edge_quality = self._evaluate_edge_quality(
+                            total_prob, over_implied, "total", "home", analysis, line_movement
+                        )
+
+                        # Skip AVOID tier bets
+                        if over_edge_quality and over_edge_quality.tier.value == "avoid":
+                            pass  # Don't add this bet
+                        else:
+                            stake = self.strategy.calculate_kelly_stake(total_prob, over_odds, total_eval["confidence"])
+
+                            # Adjust stake by edge quality multiplier
+                            if over_edge_quality:
+                                stake = round(stake * over_edge_quality.recommended_kelly_multiplier, 2)
+
+                            # Extract edge quality info
+                            eq_score = over_edge_quality.overall_score if over_edge_quality else None
+                            eq_tier = over_edge_quality.tier.value if over_edge_quality else None
+                            eq_factors = (over_edge_quality.positive_factors[:2] + over_edge_quality.risk_factors[:2]) if over_edge_quality else []
+
+                            recommendations.append(BetRecommendation(
+                                bet_type="total",
+                                description=f"OVER {total_line}",
+                                selection="over",
+                                line=total_line,
+                                probability=total_prob,  # TRUE probability (no cap!)
+                                confidence=total_eval["confidence"],
+                                edge=true_edge,  # TRUE edge
+                                expected_value=total_eval["expected_value"],
+                                recommended_stake=stake,
+                                reasoning=f"Model: {predicted_total:.1f} pts vs Line: {total_line} ({abs(total_edge):.1f}pt edge)",
+                                game_info={"home": home_abbrev, "away": away_abbrev},
+                                odds=over_odds,
+                                implied_probability=over_implied,
+                                sportsbook=sportsbook,
+                                edge_quality_score=eq_score,
+                                edge_quality_tier=eq_tier,
+                                edge_quality_factors=eq_factors,
+                            ))
                 else:
                     # Favor under
                     under_implied = self.american_to_implied_prob(under_odds)
@@ -1608,23 +1784,45 @@ class Orchestrator:
 
                     total_eval = self.strategy.evaluate_bet(total_prob, under_implied, "total")
                     if total_eval["is_recommended"] and true_edge > 0.02:
-                        stake = self.strategy.calculate_kelly_stake(total_prob, under_odds, total_eval["confidence"])
-                        recommendations.append(BetRecommendation(
-                            bet_type="total",
-                            description=f"UNDER {total_line}",
-                            selection="under",
-                            line=total_line,
-                            probability=total_prob,  # TRUE probability (no cap!)
-                            confidence=total_eval["confidence"],
-                            edge=true_edge,  # TRUE edge
-                            expected_value=total_eval["expected_value"],
-                            recommended_stake=stake,
-                            reasoning=f"Model: {predicted_total:.1f} pts vs Line: {total_line} ({abs(total_edge):.1f}pt edge)",
-                            game_info={"home": home_abbrev, "away": away_abbrev},
-                            odds=under_odds,
-                            implied_probability=under_implied,
-                            sportsbook=sportsbook,
-                        ))
+                        # Evaluate edge quality
+                        under_edge_quality = self._evaluate_edge_quality(
+                            total_prob, under_implied, "total", "home", analysis, line_movement
+                        )
+
+                        # Skip AVOID tier bets
+                        if under_edge_quality and under_edge_quality.tier.value == "avoid":
+                            pass  # Don't add this bet
+                        else:
+                            stake = self.strategy.calculate_kelly_stake(total_prob, under_odds, total_eval["confidence"])
+
+                            # Adjust stake by edge quality multiplier
+                            if under_edge_quality:
+                                stake = round(stake * under_edge_quality.recommended_kelly_multiplier, 2)
+
+                            # Extract edge quality info
+                            eq_score = under_edge_quality.overall_score if under_edge_quality else None
+                            eq_tier = under_edge_quality.tier.value if under_edge_quality else None
+                            eq_factors = (under_edge_quality.positive_factors[:2] + under_edge_quality.risk_factors[:2]) if under_edge_quality else []
+
+                            recommendations.append(BetRecommendation(
+                                bet_type="total",
+                                description=f"UNDER {total_line}",
+                                selection="under",
+                                line=total_line,
+                                probability=total_prob,  # TRUE probability (no cap!)
+                                confidence=total_eval["confidence"],
+                                edge=true_edge,  # TRUE edge
+                                expected_value=total_eval["expected_value"],
+                                recommended_stake=stake,
+                                reasoning=f"Model: {predicted_total:.1f} pts vs Line: {total_line} ({abs(total_edge):.1f}pt edge)",
+                                game_info={"home": home_abbrev, "away": away_abbrev},
+                                odds=under_odds,
+                                implied_probability=under_implied,
+                                sportsbook=sportsbook,
+                                edge_quality_score=eq_score,
+                                edge_quality_tier=eq_tier,
+                                edge_quality_factors=eq_factors,
+                            ))
 
         return recommendations
 
