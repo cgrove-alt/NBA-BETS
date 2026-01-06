@@ -181,19 +181,19 @@ def _build_prop_prediction(player_data: dict, prop_key: str) -> Optional[PropPre
         line = None  # Treat 0 or negative as "no line available"
 
     prediction = player_data.get(pred_key, 0) or 0
-    edge = player_data.get(f"{prop_key}_edge", 0) or 0
+    edge_pct_from_ds = player_data.get(f"{prop_key}_edge", 0) or 0  # Percentage from DataService
     confidence = player_data.get(f"{prop_key}_confidence", 50) or 50
     pick = player_data.get(f"{prop_key}_pick", "-") or "-"
 
-    # edge is already a percentage from DataService's _determine_prop_pick()
-    # DO NOT divide by line again - that was causing double-calculation bug
-    edge_pct = edge
+    # Calculate raw edge (points) for frontend display
+    # Frontend expects edge to be raw points (e.g., +2.5), not percentage
+    raw_edge = prediction - line if line and line > 0 else 0
 
     return PropPrediction(
         prediction=prediction,
         confidence=confidence,
-        edge=edge,
-        edge_pct=edge_pct,
+        edge=raw_edge,            # Raw points (e.g., +2.5)
+        edge_pct=edge_pct_from_ds,  # Percentage (e.g., 10.2%)
         pick=pick,
         line=line,  # Can be None now
         implied_probability=None,
