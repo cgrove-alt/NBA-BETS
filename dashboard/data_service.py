@@ -1012,10 +1012,17 @@ class DataService:
         else:
             target_date = datetime.now(eastern).strftime("%Y-%m-%d")
 
-        print(f"[DEBUG] get_todays_games called for date={target_date}", flush=True)
+        print(f"[DEBUG] get_todays_games called for date={target_date}, force_refresh={force_refresh}", flush=True)
         cache_key = f"games_{target_date}"
 
-        if not force_refresh:
+        if force_refresh:
+            # Clear all related caches to ensure fresh data on page refresh
+            print("[DEBUG] Force refresh - clearing games, odds, and props caches", flush=True)
+            self.cache.clear("games")
+            self.cache.clear("odds")
+            self.cache.clear("market_odds")
+            self.cache.clear("props")
+        else:
             cached = self.cache.get(cache_key)
             if cached:
                 print(f"[DEBUG] Returning {len(cached)} cached games for {target_date}", flush=True)
@@ -1103,6 +1110,14 @@ class DataService:
                 # Fallback to noon on the game date
                 full_datetime = f"{game_date}T12:00:00Z" if game_date else ""
 
+            # Extract scores (available for in-progress and final games)
+            home_score = game.get("home_team_score", 0) or 0
+            away_score = game.get("visitor_team_score", 0) or 0
+
+            # Determine if game is live (in progress)
+            is_live = status in ["In Progress"] or "Qtr" in status or "Half" in status
+            is_final = status == "Final"
+
             formatted.append({
                 "game_id": str(game.get("id", "")),
                 "status": status,
@@ -1119,6 +1134,13 @@ class DataService:
                     "city": away.get("city", ""),
                     "name": away.get("name", ""),
                 },
+                # Live score data
+                "home_score": home_score,
+                "away_score": away_score,
+                "is_live": is_live,
+                "is_final": is_final,
+                "period": game.get("period", 0),
+                "time_remaining": game.get("time", ""),
             })
         return formatted
 
@@ -1289,7 +1311,8 @@ class DataService:
             pts_values = []
             reb_values = []
             ast_values = []
-            fg3_values = []
+            fg3_values = []  # 3PM (makes)
+            fg3a_values = []  # 3PA (attempts) - for volume context
             min_values = []
 
             for game_stat in stats[:num_games]:
@@ -1297,6 +1320,7 @@ class DataService:
                 reb = game_stat.get('reb', 0) or 0
                 ast = game_stat.get('ast', 0) or 0
                 fg3m = game_stat.get('fg3m', 0) or 0
+                fg3a = game_stat.get('fg3a', 0) or 0  # 3-point attempts
                 mins = _parse_minutes(game_stat.get('min', 0))
 
                 # Only include games where player actually played
@@ -1305,6 +1329,7 @@ class DataService:
                     reb_values.append(reb)
                     ast_values.append(ast)
                     fg3_values.append(fg3m)
+                    fg3a_values.append(fg3a)
                     min_values.append(mins)
 
             if not pts_values:
@@ -1315,6 +1340,7 @@ class DataService:
             avg_reb = sum(reb_values) / len(reb_values)
             avg_ast = sum(ast_values) / len(ast_values)
             avg_fg3 = sum(fg3_values) / len(fg3_values)
+            avg_fg3a = sum(fg3a_values) / len(fg3a_values) if fg3a_values else 0
             avg_min = sum(min_values) / len(min_values)
 
             # Calculate trend using 3-game rolling average vs 5-game average (less noisy)
@@ -1331,12 +1357,21 @@ class DataService:
                 reb_trend = 0
                 ast_trend = 0
 
+            # Calculate min_trend: recent 3-game avg vs overall avg
+            # Positive trend = player getting more minutes recently
+            if len(min_values) >= 3:
+                recent_3_min = sum(min_values[:3]) / 3
+                min_trend = recent_3_min - avg_min
+            else:
+                min_trend = 0
+
             # Calculate actual standard deviations (not estimated)
             import numpy as np
             pts_std = float(np.std(pts_values)) if len(pts_values) >= 3 else avg_pts * 0.25
             reb_std = float(np.std(reb_values)) if len(reb_values) >= 3 else avg_reb * 0.25
             ast_std = float(np.std(ast_values)) if len(ast_values) >= 3 else avg_ast * 0.25
             fg3_std = float(np.std(fg3_values)) if len(fg3_values) >= 3 else avg_fg3 * 0.35
+            fg3a_std = float(np.std(fg3a_values)) if len(fg3a_values) >= 3 else avg_fg3a * 0.35
             min_std = float(np.std(min_values)) if len(min_values) >= 3 else avg_min * 0.15
 
             # Calculate min consistency (1 = very consistent, 0 = very variable)
@@ -1348,16 +1383,19 @@ class DataService:
                 'recent_reb_avg': round(avg_reb, 1),
                 'recent_ast_avg': round(avg_ast, 1),
                 'recent_fg3_avg': round(avg_fg3, 1),
+                'recent_fg3a_avg': round(avg_fg3a, 1),  # 3PA for volume context
                 'recent_min_avg': round(avg_min, 1),
                 'pts_trend': round(pts_trend, 1),
                 'reb_trend': round(reb_trend, 1),
                 'ast_trend': round(ast_trend, 1),
+                'min_trend': round(min_trend, 1),  # Minutes trend for fatigue/role changes
                 'games_analyzed': len(pts_values),
-                # NEW: Real standard deviations from game data
+                # Real standard deviations from game data
                 'pts_std': round(pts_std, 2),
                 'reb_std': round(reb_std, 2),
                 'ast_std': round(ast_std, 2),
                 'fg3_std': round(fg3_std, 2),
+                'fg3a_std': round(fg3a_std, 2),  # 3PA std for volume consistency
                 'min_std': round(min_std, 2),
                 'min_consistency': round(min_consistency, 2),
             }
@@ -1471,6 +1509,97 @@ class DataService:
         except Exception as e:
             # Silently return no adjustment on error
             return {'adjustment': 1.0, 'games_vs_team': 0, 'avg_vs_team': None}
+
+    def _get_team_rest_info(self, team_abbrev: str, game_date: str = None) -> Dict:
+        """
+        Calculate rest days and back-to-back status for a team.
+
+        Uses Balldontlie API get_games() to find the team's most recent game
+        and calculate days since last game.
+
+        Args:
+            team_abbrev: Team abbreviation (e.g., "LAL", "BOS")
+            game_date: Target game date (YYYY-MM-DD), defaults to today
+
+        Returns:
+            Dict with:
+            - days_rest: Days since last game (capped at 7)
+            - is_back_to_back: 1 if played yesterday, 0 otherwise
+            - fatigue_factor: -0.5 (B2B) to +0.2 (well rested)
+        """
+        defaults = {'days_rest': 2, 'is_back_to_back': 0, 'fatigue_factor': 0}
+
+        if not self.balldontlie or not team_abbrev:
+            return defaults
+
+        try:
+            from id_mapping import TEAM_ABBREV_TO_BDL
+            team_id = TEAM_ABBREV_TO_BDL.get(team_abbrev.upper())
+            if not team_id:
+                print(f"Warning: Unknown team abbreviation: {team_abbrev}")
+                return defaults
+
+            # Parse game_date
+            if game_date is None:
+                target_date = datetime.now()
+                game_date = target_date.strftime('%Y-%m-%d')
+            else:
+                target_date = datetime.strptime(game_date[:10], '%Y-%m-%d')
+
+            # Generate list of dates for the last 7 days
+            dates_to_check = []
+            for i in range(1, 8):  # 1 to 7 days back (not including today)
+                check_date = (target_date - timedelta(days=i)).strftime('%Y-%m-%d')
+                dates_to_check.append(check_date)
+
+            # Fetch games for this team in the date range
+            games = self.balldontlie.get_games(
+                dates=dates_to_check,
+                team_ids=[team_id],
+                per_page=10
+            )
+
+            if not games:
+                # No games in last 7 days - well rested but possibly rusty
+                return {'days_rest': 7, 'is_back_to_back': 0, 'fatigue_factor': -0.1}
+
+            # Find most recent completed game
+            completed_games = [
+                g for g in games
+                if g.get('status') == 'Final' and g.get('date', '') < game_date
+            ]
+
+            if not completed_games:
+                return {'days_rest': 3, 'is_back_to_back': 0, 'fatigue_factor': 0}
+
+            # Sort by date descending, get most recent
+            completed_games.sort(key=lambda x: x.get('date', ''), reverse=True)
+            last_game_date_str = completed_games[0].get('date', '')[:10]
+            last_game_date = datetime.strptime(last_game_date_str, '%Y-%m-%d')
+
+            # Calculate days rest
+            days_rest = (target_date - last_game_date).days
+            is_back_to_back = 1 if days_rest <= 1 else 0
+
+            # Fatigue factor: negative for B2B, positive for well-rested
+            if days_rest <= 1:
+                fatigue_factor = -0.5  # Back-to-back penalty
+            elif days_rest == 2:
+                fatigue_factor = 0.2   # Ideal rest
+            elif days_rest == 3:
+                fatigue_factor = 0.1   # Good rest
+            else:
+                fatigue_factor = -0.1  # Rust from too much rest
+
+            return {
+                'days_rest': min(days_rest, 7),
+                'is_back_to_back': is_back_to_back,
+                'fatigue_factor': fatigue_factor
+            }
+
+        except Exception as e:
+            print(f"Error getting rest info for {team_abbrev}: {e}")
+            return defaults
 
     def _start_analysis_worker(self):
         """Start a single worker thread to process analyses sequentially."""
@@ -3116,6 +3245,21 @@ class DataService:
             assist_rate = calc_assist_rate(ast_avg=ast_avg, min_avg=min_avg)
             rebound_rate = calc_rebound_rate(reb_avg=reb_avg, min_avg=min_avg)
 
+            # ============ Get REAL rest info from schedule data ============
+            # Get min_trend from player_stats (calculated in _get_recent_stats)
+            min_trend = player_stats.get('min_trend', 0)
+            if min_trend == 0:
+                # Fallback: check recent_averages dict
+                min_trend = recent_avg.get('min_trend', 0)
+
+            # Get team rest info from Balldontlie schedule API
+            team_abbrev = player_stats.get('team_abbrev', '')
+            rest_info = self._get_team_rest_info(team_abbrev) if team_abbrev else {
+                'days_rest': 2, 'is_back_to_back': 0, 'fatigue_factor': 0
+            }
+            days_rest = rest_info.get('days_rest', 2)
+            is_back_to_back = rest_info.get('is_back_to_back', 0)
+
             # Build feature dict matching training order
             features = {
                 'season_games': games_played,
@@ -3149,13 +3293,12 @@ class DataService:
                 'opp_pts_allowed': opp_pts_allowed,
                 'opp_def_strength': opp_def_strength,
                 'is_home': 1 if is_home else 0,
-                # ============ PHASE 1 FIX: Use REAL values instead of hardcoded defaults ============
-                'min_trend': 0,  # TODO: Calculate from _get_recent_stats if min data available
-                'min_consistency': min_consistency,  # Use REAL value from player_stats
-                'last5_min_avg': recent_min,  # Use recent minutes as proxy
-                # TODO: Phase 1.2 - Calculate days_rest from schedule data
-                'days_rest': 2,  # Default 2 days rest (typical schedule)
-                'is_back_to_back': 0,  # Default - not back-to-back
+                # ============ REAL values from schedule/stats (no more hardcoded defaults!) ============
+                'min_trend': min_trend,  # From _get_recent_stats (3-game vs 5-game avg)
+                'min_consistency': min_consistency,  # From player_stats
+                'last5_min_avg': recent_min,  # Recent minutes
+                'days_rest': days_rest,  # From _get_team_rest_info (Balldontlie API)
+                'is_back_to_back': is_back_to_back,  # From _get_team_rest_info
                 # Advanced efficiency stats (Phase 4)
                 'ts_pct': ts_pct,
                 'efg_pct': efg_pct,
