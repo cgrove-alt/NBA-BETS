@@ -1,13 +1,12 @@
 """
 NBA Injury Data Fetcher
 
-Fetches real-time injury data from multiple sources to enhance prediction accuracy.
+Fetches real-time injury data from Balldontlie API to enhance prediction accuracy.
 Injuries significantly impact team performance and betting lines.
 
 Data Sources:
-1. Official NBA Injury Report (via web scraping/API)
-2. nbainjuries package (if available)
-3. ESPN injury data (backup source)
+1. Balldontlie API (primary source - GOAT tier)
+2. Star player database (fallback for impact calculations)
 
 Injury Statuses (Official NBA):
 - Out: Player will not play
@@ -27,6 +26,13 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 import re
 import time
+
+# Import Balldontlie API
+try:
+    from balldontlie_api import BalldontlieAPI
+    BALLDONTLIE_AVAILABLE = True
+except ImportError:
+    BALLDONTLIE_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -194,20 +200,12 @@ NBA_TEAM_ABBREV["LA Lakers"] = "LAL"
 
 class InjuryFetcher:
     """
-    Fetches and processes NBA injury data from multiple sources.
+    Fetches and processes NBA injury data from Balldontlie API.
 
     Primary sources:
-    1. ESPN NBA Injuries API
-    2. CBS Sports injury data
-    3. Official NBA injury report (via RotoWire)
+    1. Balldontlie API (GOAT tier - player_injuries endpoint)
+    2. Star player database (fallback for impact calculations)
     """
-
-    # ESPN API endpoints
-    ESPN_INJURIES_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
-    ESPN_TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
-
-    # RotoWire (aggregates official NBA injury report)
-    ROTOWIRE_URL = "https://www.rotowire.com/basketball/nba-lineups.php"
 
     def __init__(self, cache_duration_minutes: int = 30):
         """
@@ -219,6 +217,35 @@ class InjuryFetcher:
         self.cache_duration = timedelta(minutes=cache_duration_minutes)
         self._cache: Dict[str, Tuple[datetime, Any]] = {}
         self._star_players = self._load_star_players()
+
+        # Initialize Balldontlie API client
+        self._balldontlie_api = None
+        self._team_id_to_abbrev = {}
+        if BALLDONTLIE_AVAILABLE:
+            try:
+                self._balldontlie_api = BalldontlieAPI()
+                # Build team ID to abbreviation mapping
+                self._team_id_to_abbrev = self._build_team_id_mapping()
+            except Exception as e:
+                logger.warning(f"Failed to initialize Balldontlie API: {e}")
+
+    def _build_team_id_mapping(self) -> Dict[int, str]:
+        """Build a mapping of Balldontlie team IDs to abbreviations."""
+        if not self._balldontlie_api:
+            return {}
+
+        try:
+            teams = self._balldontlie_api.get_teams()
+            mapping = {}
+            for team in teams:
+                team_id = team.get("id")
+                abbrev = team.get("abbreviation", "")
+                if team_id and abbrev:
+                    mapping[team_id] = abbrev
+            return mapping
+        except Exception as e:
+            logger.warning(f"Failed to build team ID mapping: {e}")
+            return {}
 
     def _load_star_players(self) -> Dict[str, Dict]:
         """Load list of star players for impact calculations."""
@@ -274,87 +301,108 @@ class InjuryFetcher:
         """Set cache data."""
         self._cache[cache_key] = (datetime.now(), data)
 
-    def fetch_espn_injuries(self) -> List[InjuryReport]:
+    def fetch_balldontlie_injuries(self) -> List[InjuryReport]:
         """
-        Fetch injury data from ESPN API.
+        Fetch injury data from Balldontlie API.
 
         Returns:
             List of InjuryReport objects
         """
-        cache_key = "espn_injuries"
+        cache_key = "balldontlie_injuries"
         cached = self._get_cached(cache_key)
         if cached:
-            logger.info("Using cached ESPN injury data")
+            logger.info("Using cached Balldontlie injury data")
             return cached
 
         injuries = []
 
+        if not self._balldontlie_api:
+            logger.warning("Balldontlie API not available for injuries")
+            return []
+
         try:
-            response = requests.get(self.ESPN_INJURIES_URL, timeout=10)
-            response.raise_for_status()
-            data = response.json()
+            # Fetch all injuries from Balldontlie
+            injury_data = self._balldontlie_api.get_injuries()
 
-            # ESPN returns injuries grouped by team
-            for team_data in data.get("injuries", []):
-                # ESPN API has displayName directly on team_data (e.g., "Atlanta Hawks")
-                team_name = team_data.get("displayName", "")
-                team_id = team_data.get("id", "")
-                # Look up abbreviation from full name
-                team_abbrev = NBA_TEAM_ABBREV.get(team_name, "")
+            for injury_record in injury_data:
+                # Extract player info
+                player = injury_record.get("player", {})
+                player_name = f"{player.get('first_name', '')} {player.get('last_name', '')}".strip()
+                player_id = str(player.get("id", ""))
 
-                for player_injury in team_data.get("injuries", []):
-                    athlete = player_injury.get("athlete", {})
-                    player_name = athlete.get("displayName", "")
-                    player_id = athlete.get("id", "")
+                # Extract team info from team_id
+                team_id_int = player.get("team_id")
+                team_abbrev = self._team_id_to_abbrev.get(team_id_int, "")
+                team_id = str(team_id_int) if team_id_int else ""
 
-                    # Get injury details
-                    injury_type = player_injury.get("type", {}).get("description", "")
-                    injury_detail = player_injury.get("longComment", "") or player_injury.get("shortComment", "")
-                    status_str = player_injury.get("status", "Unknown")
+                # Get injury details
+                status_str = injury_record.get("status", "Unknown")
+                injury_detail = injury_record.get("description", "") or injury_record.get("comment", "")
 
-                    # Parse date
-                    date_str = player_injury.get("date", "")
-                    report_date = None
-                    if date_str:
-                        try:
+                # Try to extract injury type from description (e.g., "(quadriceps)")
+                injury_type = ""
+                if injury_detail:
+                    # Pattern: "(body_part)" like "(quadriceps)", "(ankle)"
+                    import re
+                    match = re.search(r'\(([a-zA-Z\-\s]+)\)', injury_detail)
+                    if match:
+                        injury_type = match.group(1).strip().title()
+                expected_return = injury_record.get("return_date", "")
+
+                # Parse date if available
+                date_str = injury_record.get("date", "") or injury_record.get("updated_at", "")
+                report_date = None
+                if date_str:
+                    try:
+                        # Handle various date formats
+                        if "T" in date_str:
                             report_date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                        except ValueError:
-                            pass
+                        else:
+                            report_date = datetime.strptime(date_str, "%Y-%m-%d")
+                    except ValueError:
+                        pass
 
-                    # Get player stats if available
-                    stats = self._star_players.get(player_name, {})
+                # Get player stats if available (from our star players database)
+                stats = self._star_players.get(player_name, {})
 
-                    injury = InjuryReport(
-                        player_name=player_name,
-                        player_id=player_id,
-                        team=team_abbrev or team_name,
-                        team_id=team_id,
-                        status=InjuryStatus.from_string(status_str),
-                        injury_type=injury_type,
-                        injury_detail=injury_detail,
-                        report_date=report_date,
-                        source="ESPN",
-                        ppg=stats.get("ppg", 0.0),
-                        rpg=stats.get("rpg", 0.0),
-                        apg=stats.get("apg", 0.0),
-                        minutes=stats.get("min", 0.0),
-                    )
-                    injuries.append(injury)
+                injury = InjuryReport(
+                    player_name=player_name,
+                    player_id=player_id,
+                    team=team_abbrev,
+                    team_id=team_id,
+                    status=InjuryStatus.from_string(status_str),
+                    injury_type=injury_type,
+                    injury_detail=injury_detail,
+                    report_date=report_date,
+                    expected_return=expected_return,
+                    source="Balldontlie",
+                    ppg=stats.get("ppg", 0.0),
+                    rpg=stats.get("rpg", 0.0),
+                    apg=stats.get("apg", 0.0),
+                    minutes=stats.get("min", 0.0),
+                )
+                injuries.append(injury)
 
-            logger.info(f"Fetched {len(injuries)} injuries from ESPN")
+            logger.info(f"Fetched {len(injuries)} injuries from Balldontlie")
             self._set_cache(cache_key, injuries)
             return injuries
 
-        except requests.RequestException as e:
-            logger.error(f"Failed to fetch ESPN injuries: {e}")
+        except Exception as e:
+            logger.error(f"Failed to fetch Balldontlie injuries: {e}")
             return []
-        except (KeyError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to parse ESPN injury data: {e}")
-            return []
+
+    # Keep ESPN as fallback (deprecated)
+    def fetch_espn_injuries(self) -> List[InjuryReport]:
+        """
+        DEPRECATED: Use fetch_balldontlie_injuries() instead.
+        Kept for backward compatibility.
+        """
+        logger.warning("fetch_espn_injuries() is deprecated, use fetch_balldontlie_injuries()")
+        return self.fetch_balldontlie_injuries()
 
     def fetch_all_injuries(self) -> List[InjuryReport]:
         """
-        Fetch injuries from all available sources and merge.
+        Fetch injuries from Balldontlie API.
 
         Returns:
             Deduplicated list of InjuryReport objects
@@ -362,17 +410,13 @@ class InjuryFetcher:
         all_injuries = []
         seen_players = set()
 
-        # Fetch from ESPN (primary source)
-        espn_injuries = self.fetch_espn_injuries()
-        for injury in espn_injuries:
+        # Fetch from Balldontlie (primary source)
+        balldontlie_injuries = self.fetch_balldontlie_injuries()
+        for injury in balldontlie_injuries:
             key = (injury.player_name.lower(), injury.team)
             if key not in seen_players:
                 seen_players.add(key)
                 all_injuries.append(injury)
-
-        # Additional sources could be added here
-        # cbs_injuries = self.fetch_cbs_injuries()
-        # rotowire_injuries = self.fetch_rotowire_injuries()
 
         logger.info(f"Total unique injuries: {len(all_injuries)}")
         return all_injuries

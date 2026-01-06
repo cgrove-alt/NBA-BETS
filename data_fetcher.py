@@ -50,12 +50,32 @@ try:
         playerdashboardbygeneralsplits,
         leaguedashteamstats,
         commonplayerinfo,
+        # CLUTCH STATS: For crunch-time performance data
+        leaguedashplayerclutch,
+        leaguedashteamclutch,
     )
     from nba_api.stats.static import teams, players
-except ImportError:
-    print("Error: nba_api package not installed.")
-    print("Install it with: pip install nba_api")
-    exit(1)
+    HAS_CLUTCH_ENDPOINTS = True
+except ImportError as e:
+    # Some endpoints may not be available in older nba_api versions
+    try:
+        from nba_api.stats.endpoints import (
+            scoreboardv2,
+            leaguegamefinder,
+            teamdashboardbygeneralsplits,
+            playergamelog,
+            commonteamroster,
+            teamgamelog,
+            playerdashboardbygeneralsplits,
+            leaguedashteamstats,
+            commonplayerinfo,
+        )
+        from nba_api.stats.static import teams, players
+        HAS_CLUTCH_ENDPOINTS = False
+    except ImportError:
+        print("Error: nba_api package not installed.")
+        print("Install it with: pip install nba_api")
+        exit(1)
 
 # Rate limiting to avoid API throttling
 API_DELAY = 0.4  # seconds between API calls (reduced from 0.6 for faster props loading)
@@ -320,8 +340,8 @@ class ThreadSafeRateLimiter:
 _rate_limiter = ThreadSafeRateLimiter(API_DELAY)
 
 
-def _fallback_todays_schedule():
-    """Fallback: Fetch today's schedule using Balldontlie API."""
+def _fetch_todays_schedule_balldontlie():
+    """Primary: Fetch today's schedule using Balldontlie API."""
     api = _get_balldontlie_api()
     if not api:
         raise RuntimeError("Balldontlie API not available for fallback")
@@ -331,20 +351,44 @@ def _fallback_todays_schedule():
 
     # Convert Balldontlie format to NBA API format
     game_header = []
+    line_score = []
+
     for game in games:
+        game_id = str(game.get("id", ""))
+        home_team = game.get("home_team", {})
+        visitor_team = game.get("visitor_team", {})
+
         game_header.append({
-            "GAME_ID": str(game.get("id", "")),
+            "GAME_ID": game_id,
             "GAME_STATUS_TEXT": game.get("status", ""),
             "GAME_DATE_EST": game.get("date", today),
-            "HOME_TEAM_ID": game.get("home_team", {}).get("id"),
-            "VISITOR_TEAM_ID": game.get("visitor_team", {}).get("id"),
+            "HOME_TEAM_ID": home_team.get("id"),
+            "VISITOR_TEAM_ID": visitor_team.get("id"),
             "ARENA_NAME": "",
-            "LIVE_PERIOD": 0,
+            "LIVE_PERIOD": game.get("period", 0),
             "LIVE_PC_TIME": "",
             "NATL_TV_BROADCASTER_ABBREVIATION": "",
         })
 
-    return {"GameHeader": game_header, "LineScore": []}, today
+        # Add LineScore entries for team info
+        line_score.append({
+            "GAME_ID": game_id,
+            "TEAM_ID": home_team.get("id"),
+            "TEAM_ABBREVIATION": home_team.get("abbreviation", ""),
+            "TEAM_CITY_NAME": home_team.get("city", ""),
+            "TEAM_NAME": home_team.get("name", ""),
+            "PTS": game.get("home_team_score"),
+        })
+        line_score.append({
+            "GAME_ID": game_id,
+            "TEAM_ID": visitor_team.get("id"),
+            "TEAM_ABBREVIATION": visitor_team.get("abbreviation", ""),
+            "TEAM_CITY_NAME": visitor_team.get("city", ""),
+            "TEAM_NAME": visitor_team.get("name", ""),
+            "PTS": game.get("visitor_team_score"),
+        })
+
+    return {"GameHeader": game_header, "LineScore": line_score}, today
 
 
 @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
@@ -359,21 +403,24 @@ def _fetch_todays_schedule_nba_api():
 
 def fetch_todays_schedule():
     """
-    Fetch today's NBA schedule from the NBA API.
+    Fetch today's NBA schedule from Balldontlie API.
 
-    RELIABILITY: Includes retry logic and fallback to Balldontlie API.
+    RELIABILITY: Includes retry logic and fallback to NBA API.
+    Primary: Balldontlie API (premium data source)
+    Fallback: NBA API (scoreboardv2)
     """
     today = datetime.now().strftime("%Y-%m-%d")
     print(f"Fetching NBA schedule for {today}...")
 
+    # Primary: Balldontlie API
     try:
-        return _fetch_todays_schedule_nba_api()
+        return _fetch_todays_schedule_balldontlie()
     except Exception as e:
-        print(f"[Fallback] NBA API failed ({e}), trying Balldontlie...")
+        print(f"[Fallback] Balldontlie API failed ({e}), trying NBA API...")
         try:
-            return _fallback_todays_schedule()
+            return _fetch_todays_schedule_nba_api()
         except Exception as fallback_error:
-            print(f"[Fallback] Balldontlie also failed: {fallback_error}")
+            print(f"[Fallback] NBA API also failed: {fallback_error}")
             # Return empty schedule rather than crashing
             return {"GameHeader": [], "LineScore": []}, today
 
@@ -1972,6 +2019,201 @@ def fetch_player_stats_before_date_auto(
         "game_log": [],
         "games_used": 0,
         "temporal_cutoff": before_date,
+    }
+
+
+# =============================================================================
+# CLUTCH STATISTICS (1-3% accuracy impact)
+# Clutch = last 5 minutes of 4th quarter or OT, score within 5 points
+# =============================================================================
+
+def fetch_team_clutch_stats(team_id: int, season: str = "2025-26") -> Dict[str, Any]:
+    """
+    Fetch team clutch performance statistics.
+
+    Clutch time is defined as the last 5 minutes of the 4th quarter or overtime,
+    with the score margin within 5 points. This data is critical for predicting
+    close game outcomes.
+
+    Args:
+        team_id: NBA team ID
+        season: Season string (e.g., "2025-26")
+
+    Returns:
+        Dict with clutch statistics:
+        - clutch_net_rating: Points per 100 possessions differential in clutch
+        - clutch_win_pct: Win percentage in clutch situations
+        - clutch_fg_pct: Field goal percentage in clutch
+        - clutch_plus_minus: Plus/minus in clutch minutes
+        - clutch_games: Number of clutch games played
+    """
+    if not HAS_CLUTCH_ENDPOINTS:
+        return _get_default_clutch_stats()
+
+    cache_key = f"team_clutch_{team_id}_{season}"
+    cached = _read_from_cache(cache_key)
+    if cached:
+        return cached
+
+    try:
+        time.sleep(API_DELAY)
+
+        clutch_data = leaguedashteamclutch.LeagueDashTeamClutch(
+            season=season,
+            season_type_all_star="Regular Season",
+            clutch_time="Last 5 Minutes",
+            ahead_behind="Ahead or Behind",
+            point_diff=5,  # Within 5 points
+        ).get_normalized_dict()
+
+        # Find our team in the results
+        team_stats = None
+        for row in clutch_data.get('LeagueDashTeamClutch', []):
+            if row.get('TEAM_ID') == team_id:
+                team_stats = row
+                break
+
+        if not team_stats:
+            return _get_default_clutch_stats()
+
+        result = {
+            "clutch_net_rating": team_stats.get('NET_RATING', 0.0),
+            "clutch_win_pct": team_stats.get('W_PCT', 0.5),
+            "clutch_fg_pct": team_stats.get('FG_PCT', 0.45),
+            "clutch_plus_minus": team_stats.get('PLUS_MINUS', 0.0),
+            "clutch_games": team_stats.get('GP', 0),
+            "clutch_pts_per_game": team_stats.get('PTS', 0.0),
+            "clutch_available": True,
+        }
+
+        _write_to_cache(cache_key, result)
+        return result
+
+    except Exception as e:
+        print(f"[CLUTCH] Error fetching team {team_id} clutch stats: {e}")
+        return _get_default_clutch_stats()
+
+
+def fetch_player_clutch_stats(player_id: int, season: str = "2025-26") -> Dict[str, Any]:
+    """
+    Fetch player clutch performance statistics.
+
+    Identifies "closers" - players who perform well in clutch situations.
+
+    Args:
+        player_id: NBA player ID
+        season: Season string
+
+    Returns:
+        Dict with player clutch statistics
+    """
+    if not HAS_CLUTCH_ENDPOINTS:
+        return _get_default_player_clutch_stats()
+
+    cache_key = f"player_clutch_{player_id}_{season}"
+    cached = _read_from_cache(cache_key)
+    if cached:
+        return cached
+
+    try:
+        time.sleep(API_DELAY)
+
+        clutch_data = leaguedashplayerclutch.LeagueDashPlayerClutch(
+            season=season,
+            season_type_all_star="Regular Season",
+            clutch_time="Last 5 Minutes",
+            ahead_behind="Ahead or Behind",
+            point_diff=5,
+        ).get_normalized_dict()
+
+        # Find our player in the results
+        player_stats = None
+        for row in clutch_data.get('LeagueDashPlayerClutch', []):
+            if row.get('PLAYER_ID') == player_id:
+                player_stats = row
+                break
+
+        if not player_stats:
+            return _get_default_player_clutch_stats()
+
+        result = {
+            "player_clutch_pts": player_stats.get('PTS', 0.0),
+            "player_clutch_fg_pct": player_stats.get('FG_PCT', 0.0),
+            "player_clutch_plus_minus": player_stats.get('PLUS_MINUS', 0.0),
+            "player_clutch_minutes": player_stats.get('MIN', 0.0),
+            "is_closer": player_stats.get('PLUS_MINUS', 0.0) > 2.0,  # +2 or better in clutch
+            "clutch_available": True,
+        }
+
+        _write_to_cache(cache_key, result)
+        return result
+
+    except Exception as e:
+        print(f"[CLUTCH] Error fetching player {player_id} clutch stats: {e}")
+        return _get_default_player_clutch_stats()
+
+
+def _get_default_clutch_stats() -> Dict[str, Any]:
+    """Return default/neutral clutch stats when data is unavailable."""
+    return {
+        "clutch_net_rating": 0.0,
+        "clutch_win_pct": 0.5,
+        "clutch_fg_pct": 0.45,
+        "clutch_plus_minus": 0.0,
+        "clutch_games": 0,
+        "clutch_pts_per_game": 0.0,
+        "clutch_available": False,
+    }
+
+
+def _get_default_player_clutch_stats() -> Dict[str, Any]:
+    """Return default/neutral player clutch stats when data is unavailable."""
+    return {
+        "player_clutch_pts": 0.0,
+        "player_clutch_fg_pct": 0.0,
+        "player_clutch_plus_minus": 0.0,
+        "player_clutch_minutes": 0.0,
+        "is_closer": False,
+        "clutch_available": False,
+    }
+
+
+def fetch_team_clutch_differential(
+    home_team_id: int,
+    away_team_id: int,
+    season: str = "2025-26"
+) -> Dict[str, float]:
+    """
+    Calculate clutch performance differential between two teams.
+
+    This is the primary feature for game predictions - teams that perform
+    better in clutch situations have an edge in close games.
+
+    Args:
+        home_team_id: Home team NBA ID
+        away_team_id: Away team NBA ID
+        season: Season string
+
+    Returns:
+        Dict with differential features:
+        - clutch_net_rating_diff: Home - Away clutch net rating
+        - clutch_win_pct_diff: Home - Away clutch win percentage
+        - clutch_fg_pct_diff: Home - Away clutch FG%
+        - home_clutch_edge: Boolean if home team has clutch advantage
+    """
+    home_clutch = fetch_team_clutch_stats(home_team_id, season)
+    away_clutch = fetch_team_clutch_stats(away_team_id, season)
+
+    net_diff = home_clutch['clutch_net_rating'] - away_clutch['clutch_net_rating']
+    win_diff = home_clutch['clutch_win_pct'] - away_clutch['clutch_win_pct']
+    fg_diff = home_clutch['clutch_fg_pct'] - away_clutch['clutch_fg_pct']
+
+    return {
+        "clutch_net_rating_diff": round(net_diff, 2),
+        "clutch_win_pct_diff": round(win_diff, 3),
+        "clutch_fg_pct_diff": round(fg_diff, 3),
+        "home_clutch_edge": 1 if net_diff > 3.0 else 0,  # >3 net rating = meaningful edge
+        "clutch_data_available": home_clutch['clutch_available'] and away_clutch['clutch_available'],
     }
 
 
