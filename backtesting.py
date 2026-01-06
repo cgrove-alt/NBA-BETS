@@ -41,6 +41,169 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# SANITY CHECK THRESHOLDS
+# =============================================================================
+# These thresholds help detect data leakage or bugs in the backtesting pipeline.
+# Professional sports bettors typically achieve 2-8% ROI, so anything significantly
+# higher is a red flag for temporal leakage or other issues.
+
+SANITY_THRESHOLDS = {
+    "max_realistic_roi": 15.0,           # ROI > 15% is almost certainly leakage
+    "max_realistic_win_rate": 60.0,      # Win rate > 60% on -110 juice is suspicious
+    "max_realistic_sharpe": 3.0,         # Sharpe > 3 is hedge fund level (unrealistic for betting)
+    "max_realistic_profit_factor": 3.0,  # Profit factor > 3 is highly suspicious
+    "min_samples_for_validation": 50,    # Need at least 50 bets for meaningful stats
+    "max_streak_for_size": 15,           # Winning streaks > 15 in a small sample = suspicious
+}
+
+
+class BacktestSanityChecker:
+    """
+    Validates backtest results to detect potential data leakage or bugs.
+
+    Professional sports bettors achieve 2-8% ROI long-term. Results significantly
+    better than this almost always indicate:
+    1. Temporal leakage (using future data to predict past)
+    2. Calibration overfitting (training and testing on same data)
+    3. Feature leakage (features contain the target)
+    4. Selection bias (only testing on cherry-picked periods)
+    """
+
+    def __init__(self, thresholds: dict = None):
+        self.thresholds = thresholds or SANITY_THRESHOLDS
+        self.warnings = []
+        self.is_suspicious = False
+
+    def check(self, result: 'BacktestResult') -> dict:
+        """
+        Run all sanity checks on a backtest result.
+
+        Returns:
+            Dict with 'passed', 'warnings', and 'details'
+        """
+        self.warnings = []
+        self.is_suspicious = False
+
+        # Check sample size
+        if result.total_bets < self.thresholds["min_samples_for_validation"]:
+            self.warnings.append(
+                f"INSUFFICIENT DATA: Only {result.total_bets} bets. "
+                f"Need at least {self.thresholds['min_samples_for_validation']} for reliable statistics."
+            )
+
+        # Check ROI
+        if result.overall_roi > self.thresholds["max_realistic_roi"]:
+            self.is_suspicious = True
+            self.warnings.append(
+                f"UNREALISTIC ROI: {result.overall_roi:.1f}% exceeds realistic maximum of "
+                f"{self.thresholds['max_realistic_roi']}%. This almost certainly indicates "
+                "temporal leakage (using future data to predict past)."
+            )
+        elif result.overall_roi > 10.0:
+            self.warnings.append(
+                f"HIGH ROI WARNING: {result.overall_roi:.1f}% is unusually high. "
+                "Verify there is no data leakage. Professional bettors achieve 2-8%."
+            )
+
+        # Check win rate
+        if result.overall_win_rate > self.thresholds["max_realistic_win_rate"]:
+            self.is_suspicious = True
+            self.warnings.append(
+                f"UNREALISTIC WIN RATE: {result.overall_win_rate:.1f}% exceeds realistic maximum of "
+                f"{self.thresholds['max_realistic_win_rate']}%. At -110 odds, this is nearly impossible "
+                "without data leakage."
+            )
+
+        # Check Sharpe ratio
+        if result.sharpe_ratio > self.thresholds["max_realistic_sharpe"]:
+            self.is_suspicious = True
+            self.warnings.append(
+                f"UNREALISTIC SHARPE: {result.sharpe_ratio:.2f} exceeds realistic maximum of "
+                f"{self.thresholds['max_realistic_sharpe']}. Top hedge funds rarely exceed 2.0."
+            )
+
+        # Check profit factor
+        if result.profit_factor > self.thresholds["max_realistic_profit_factor"]:
+            self.is_suspicious = True
+            self.warnings.append(
+                f"UNREALISTIC PROFIT FACTOR: {result.profit_factor:.2f} exceeds realistic maximum of "
+                f"{self.thresholds['max_realistic_profit_factor']}."
+            )
+
+        # Check winning streak (in context of total bets)
+        if result.total_bets > 0:
+            streak_ratio = result.longest_winning_streak / max(result.total_bets, 1)
+            if streak_ratio > 0.15 and result.longest_winning_streak > self.thresholds["max_streak_for_size"]:
+                self.warnings.append(
+                    f"SUSPICIOUS STREAK: Winning streak of {result.longest_winning_streak} "
+                    f"({streak_ratio:.1%} of total bets) is unusually high."
+                )
+
+        # Check if ECE is impossibly perfect
+        if result.ece is not None and result.ece < 0.001:
+            self.is_suspicious = True
+            self.warnings.append(
+                f"PERFECT CALIBRATION: ECE of {result.ece:.6f} is impossibly perfect. "
+                "This indicates the calibrator was evaluated on training data."
+            )
+
+        # Generate detailed report
+        details = {
+            "roi_check": {
+                "value": result.overall_roi,
+                "threshold": self.thresholds["max_realistic_roi"],
+                "passed": result.overall_roi <= self.thresholds["max_realistic_roi"],
+            },
+            "win_rate_check": {
+                "value": result.overall_win_rate,
+                "threshold": self.thresholds["max_realistic_win_rate"],
+                "passed": result.overall_win_rate <= self.thresholds["max_realistic_win_rate"],
+            },
+            "sharpe_check": {
+                "value": result.sharpe_ratio,
+                "threshold": self.thresholds["max_realistic_sharpe"],
+                "passed": result.sharpe_ratio <= self.thresholds["max_realistic_sharpe"],
+            },
+            "sample_size_check": {
+                "value": result.total_bets,
+                "threshold": self.thresholds["min_samples_for_validation"],
+                "passed": result.total_bets >= self.thresholds["min_samples_for_validation"],
+            },
+        }
+
+        return {
+            "passed": not self.is_suspicious,
+            "warnings": self.warnings,
+            "warning_count": len(self.warnings),
+            "details": details,
+            "recommendation": self._get_recommendation(),
+        }
+
+    def _get_recommendation(self) -> str:
+        """Get recommendation based on findings."""
+        if self.is_suspicious:
+            return (
+                "CRITICAL: Results are highly suspicious and likely contain data leakage. "
+                "Before trusting these results:\n"
+                "1. Verify all features use only point-in-time data (fetch_*_before_date functions)\n"
+                "2. Ensure calibration uses proper holdout split\n"
+                "3. Check that no features contain future information\n"
+                "4. Verify walk-forward validation is implemented correctly\n"
+                "5. Run on a completely held-out dataset to validate"
+            )
+        elif self.warnings:
+            return (
+                "CAUTION: Some metrics are higher than typical. Double-check for subtle leakage "
+                "and consider running additional validation tests."
+            )
+        else:
+            return (
+                "Results appear realistic. However, always verify on out-of-sample data "
+                "and track real betting performance against backtested expectations."
+            )
+
+
 class BetType(Enum):
     """Types of bets supported."""
     MONEYLINE = "moneyline"
@@ -222,6 +385,9 @@ class BacktestResult:
     ece: Optional[float] = None  # Expected Calibration Error
     avg_ev: Optional[float] = None  # Average Expected Value per bet
 
+    # Sanity check results
+    sanity_check: Optional[dict] = None
+
     def calculate_aggregate_metrics(self) -> None:
         """Calculate aggregate metrics from all periods."""
         if not self.periods:
@@ -267,6 +433,25 @@ class BacktestResult:
 
         # ECE and EV
         self._calculate_calibration_metrics(all_bets)
+
+        # Run sanity checks
+        self._run_sanity_checks()
+
+    def _run_sanity_checks(self) -> None:
+        """Run sanity checks and store warnings."""
+        checker = BacktestSanityChecker()
+        self.sanity_check = checker.check(self)
+
+        # Log warnings
+        if self.sanity_check["warnings"]:
+            logger.warning("=" * 60)
+            logger.warning("BACKTEST SANITY CHECK WARNINGS")
+            logger.warning("=" * 60)
+            for warning in self.sanity_check["warnings"]:
+                logger.warning(f"  - {warning}")
+            logger.warning("-" * 60)
+            logger.warning(self.sanity_check["recommendation"])
+            logger.warning("=" * 60)
 
     def _calculate_drawdown(self, bets: List[Bet]) -> None:
         """Calculate maximum drawdown."""
@@ -420,6 +605,23 @@ class BacktestResult:
             lines.append("  - Decent risk-adjusted returns")
         else:
             lines.append("  - Poor risk-adjusted returns")
+
+        # Add sanity check warnings
+        if self.sanity_check:
+            lines.append("")
+            if not self.sanity_check["passed"]:
+                lines.append("⚠️  SANITY CHECK FAILED - RESULTS MAY BE UNREALISTIC")
+                lines.append("-" * 60)
+                for warning in self.sanity_check["warnings"]:
+                    lines.append(f"  ❌ {warning}")
+                lines.append("")
+                lines.append(self.sanity_check["recommendation"])
+            elif self.sanity_check["warnings"]:
+                lines.append("⚠️  SANITY CHECK WARNINGS:")
+                for warning in self.sanity_check["warnings"]:
+                    lines.append(f"  ⚠️  {warning}")
+            else:
+                lines.append("✅ SANITY CHECK PASSED - Results appear realistic")
 
         lines.append("=" * 60)
         return "\n".join(lines)
@@ -1212,12 +1414,14 @@ class ModelBacktester:
 
         for game in games:
             features = game.get("features", {})
-            predicted_spread, home_cover_prob = model_predict_fn(features)
+            spread_line = game.get("spread_line", 0)
+
+            # Pass spread_line to model since SpreadCoverClassifier needs it
+            predicted_spread, home_cover_prob = model_predict_fn(features, spread_line)
 
             # Calculate actual result
             home_score = game.get("home_score", 0)
             away_score = game.get("away_score", 0)
-            spread_line = game.get("spread_line", 0)
             actual_margin = home_score - away_score
             home_covered = actual_margin > -spread_line
 

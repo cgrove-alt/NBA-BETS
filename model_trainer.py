@@ -473,15 +473,17 @@ class BacktestReporter:
         )
 
         # Define predict function for backtester
-        def model_predict_fn(features):
-            """Predict spread and cover probability from features."""
+        def model_predict_fn(features, spread_line):
+            """Predict spread cover probability from features and spread_line."""
             try:
-                prediction = model.predict(features)
-                predicted_spread = prediction.get("predicted_spread", 0)
+                # SpreadCoverClassifier.predict() requires both features and spread_line
+                prediction = model.predict(features, spread_line)
                 cover_prob = prediction.get("home_cover_probability", 0.5)
-                return predicted_spread, cover_prob
-            except Exception:
-                return 0, 0.5
+                # Return (predicted_spread, cover_prob) - spread is the line itself for classifiers
+                return spread_line, cover_prob
+            except Exception as e:
+                print(f"  Warning: Spread prediction failed: {e}")
+                return spread_line, 0.5
 
         # Format ALL games for sorting
         all_formatted_games = []
