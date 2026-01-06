@@ -86,6 +86,56 @@ try:
 except ImportError:
     HAS_TRACKING_DATA = False
 
+
+def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> Tuple[Optional['ShotAtlas'], Optional['RotationTracker']]:
+    """
+    Fetch tracking data for a team's recent games.
+
+    Fetches shot charts and PBP data for the most recent N games,
+    building a ShotAtlas and RotationTracker for zone-based simulation.
+
+    Args:
+        team_id: NBA team ID
+        n_games: Number of recent games to fetch (default 3)
+
+    Returns:
+        Tuple of (ShotAtlas, RotationTracker) or (None, None) if unavailable
+    """
+    if not HAS_TRACKING_DATA:
+        return None, None
+
+    try:
+        from tracking_data import (
+            ShotAtlas, RotationTracker,
+            fetch_shot_chart, fetch_pbp_historical,
+            fetch_season_games
+        )
+
+        shot_atlas = ShotAtlas()
+        rotation_tracker = RotationTracker()
+
+        # Get recent game IDs for team
+        game_ids = fetch_season_games(season="2025-26", team_id=team_id)
+        recent_games = game_ids[-n_games:] if game_ids else []
+
+        for game_id in recent_games:
+            # Fetch shot chart
+            shots = fetch_shot_chart(game_id, use_cache=True)
+            if shots:
+                shot_atlas.add_shots(shots)
+
+            # Fetch PBP for rotations
+            plays = fetch_pbp_historical(game_id, use_cache=True)
+            if plays:
+                # Process for rotations (we don't know opponent ID here, use 0)
+                rotation_tracker.process_game(plays, team_id, 0)
+
+        return shot_atlas, rotation_tracker
+
+    except Exception as e:
+        return None, None
+
+
 # Import portfolio optimizer for bet sizing
 try:
     from portfolio_optimizer import (
@@ -702,36 +752,83 @@ def simulate_game_predictions(
             simulator = GameSimulatorV3(home_team, away_team)
 
             # Try to load tracking data for enhanced accuracy
+            shot_atlas = None
+            rotation_tracker = None
+            tracking_loaded = False
+
             try:
-                # Create ShotAtlas from recent games (cached)
-                shot_atlas = ShotAtlas()
-
-                # Load any cached shot data from .tracking_cache
                 from pathlib import Path
+                import json
                 cache_dir = Path(__file__).parent / ".tracking_cache"
-                if cache_dir.exists():
-                    import json
-                    for cache_file in list(cache_dir.glob("shots_*.json"))[:5]:  # Last 5 games
-                        try:
-                            with open(cache_file, 'r') as f:
-                                data = json.load(f)
-                            # Parse shots and add to atlas
-                            from tracking_data import _parse_shot_chart_response
-                            game_id = cache_file.stem.replace('shots_', '')
-                            shots = _parse_shot_chart_response(data, game_id)
-                            shot_atlas.add_shots(shots)
-                        except:
-                            pass
+                cache_dir.mkdir(exist_ok=True)
 
-                # Load tracking data into simulator
+                # Create ShotAtlas and RotationTracker
+                shot_atlas = ShotAtlas()
+                rotation_tracker = RotationTracker()
+
+                # Get team IDs for filtering
+                home_team_id = home_team_data.get('id', 0)
+                away_team_id = away_team_data.get('id', 0)
+
+                # 1. Load cached shot data for BOTH teams specifically
+                shots_loaded = 0
+                for cache_file in cache_dir.glob("shots_*.json"):
+                    try:
+                        with open(cache_file, 'r') as f:
+                            data = json.load(f)
+
+                        # Parse shots
+                        from tracking_data import _parse_shot_chart_response
+                        game_id = cache_file.stem.replace('shots_', '')
+                        shots = _parse_shot_chart_response(data, game_id)
+
+                        if shots:
+                            # Check if shots are from either team
+                            game_team_ids = set(s.team_id for s in shots)
+                            if home_team_id in game_team_ids or away_team_id in game_team_ids:
+                                shot_atlas.add_shots(shots)
+                                shots_loaded += len(shots)
+                    except Exception:
+                        continue
+
+                # 2. Load cached PBP for rotation tracking
+                games_processed = 0
+                for cache_file in list(cache_dir.glob("pbp_*.json"))[:10]:
+                    try:
+                        with open(cache_file, 'r') as f:
+                            data = json.load(f)
+
+                        # Parse PBP
+                        from tracking_data import _parse_pbp_cdn, _parse_pbp_response
+                        game_id = cache_file.stem.replace('pbp_', '')
+
+                        if 'game' in data:
+                            plays = _parse_pbp_cdn(data, game_id)
+                        else:
+                            plays = _parse_pbp_response(data, game_id)
+
+                        if plays:
+                            # Identify team IDs from plays
+                            play_team_ids = set(p.team_id for p in plays if p.team_id)
+                            if home_team_id in play_team_ids or away_team_id in play_team_ids:
+                                rotation_tracker.process_game(plays, home_team_id, away_team_id)
+                                games_processed += 1
+                    except Exception:
+                        continue
+
+                # 3. Load tracking data into simulator
                 if shot_atlas.league_zones:
-                    simulator.load_tracking_data(shot_atlas=shot_atlas)
+                    simulator.load_tracking_data(
+                        shot_atlas=shot_atlas,
+                        rotation_tracker=rotation_tracker if rotation_tracker.player_minutes else None
+                    )
+                    tracking_loaded = True
 
             except Exception as e:
                 pass  # Fall back to V3 without tracking data
 
             results = simulator.run_simulation(n_simulations=n_simulations)
-            source = 'monte_carlo_v3'
+            source = 'monte_carlo_v3' + ('_tracking' if tracking_loaded else '')
         else:
             # Use standard simulator
             simulator = GameSimulator(home_team, away_team)

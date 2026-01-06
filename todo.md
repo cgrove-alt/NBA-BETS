@@ -78,6 +78,12 @@
 - [x] **Validation**
     - [x] Tested V3 with/without tracking data
     - [x] Monte Carlo (100 sims): 55% home win, margin=2.0 (std=18.8), total=204.3
+- [x] **daily_predictions.py Integration** (Enhanced Jan 6, 2026)
+    - [x] Added `fetch_team_tracking_data(team_id, n_games)` helper function
+    - [x] Improved cache loading to filter by team IDs (only loads relevant games)
+    - [x] Added RotationTracker integration for lineup-aware simulation
+    - [x] Added `_tracking` suffix to source when tracking data loaded
+    - [x] Verified: V3 with ShotAtlas loads zone probabilities correctly
 
 ### Phase 2: Market Microstructure V3 (Latency-Optimized) - COMPLETE (Jan 6, 2026)
 - [x] **Speed Upgrades** in `odds_fetcher.py`
