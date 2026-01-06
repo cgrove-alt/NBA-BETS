@@ -1877,7 +1877,8 @@ class Orchestrator:
                     predicted_value = pred.get("predicted_value", line)
                     # Line-aware classifiers return over_probability directly
                     over_prob = pred.get("over_probability")
-                except Exception:
+                except Exception as e:
+                    print(f"  Warning: Prop model failed for {prop_type}: {e}, using fallback")
                     predicted_value = self._feature_based_prop(prop_features, prop_type)
             else:
                 predicted_value = self._feature_based_prop(prop_features, prop_type)
@@ -1953,11 +1954,13 @@ class Orchestrator:
         if not self.models_loaded:
             return None
 
-        # Priority order: line-aware models first
+        # Priority order: line-aware models first, then ensembles
         priority_keys = [
             f"player_{prop_type}_line_classifier",
             f"player_{prop_type}_line_aware",
             f"prop_{prop_type}_line_aware",
+            f"player_{prop_type}_ensemble",       # PropEnsembleModel
+            f"player_{prop_type}_position_aware", # Position-aware ensemble
             f"prop_{prop_type}",
             f"player_{prop_type}",
         ]

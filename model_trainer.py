@@ -4304,6 +4304,27 @@ class ModelTrainingPipeline:
                 # Check if this is a prop model FIRST (before ensemble check)
                 # Prop models have 'prop_type' key OR are named 'player_*'
                 if "prop_type" in model_data or model_name.startswith("player_"):
+                    # Check if this is a PropEnsembleModel (has 'models' dict with sub-models)
+                    if "models" in model_data and isinstance(model_data.get("models"), dict):
+                        try:
+                            from train_complete_balldontlie import PropEnsembleModel
+                            prop_model = PropEnsembleModel.load(filepath)
+                            self.models[model_name] = prop_model
+                            print(f"  Loaded PropEnsembleModel: {model_name}")
+
+                            # Also register under simplified key for _get_prop_model() lookup
+                            prop_type = model_data.get("prop_type", "")
+                            if prop_type:
+                                simplified_key = f"player_{prop_type}"
+                                if simplified_key != model_name:
+                                    self.models[simplified_key] = prop_model
+                                    print(f"    -> Registered as {simplified_key}")
+                            continue
+                        except Exception as e:
+                            print(f"  Warning: Could not load {model_name} as PropEnsembleModel: {e}")
+                            # Fall through to PropModelWrapper
+
+                    # Use PropModelWrapper for simple prop models
                     prop_wrapper = PropModelWrapper(
                         model=model_data.get("model"),
                         scaler=model_data.get("scaler"),
@@ -4326,8 +4347,9 @@ class ModelTrainingPipeline:
                     self.models[model_name] = wrapper
                     continue
 
-            except Exception:
-                pass  # Fall through to legacy loading
+            except Exception as e:
+                print(f"  Warning: Error loading {model_name}: {e}")
+                # Fall through to legacy loading
 
             if "moneyline" in model_name:
                 # Try XGBoost first if available, fall back to Logistic Regression
