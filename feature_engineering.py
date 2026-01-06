@@ -17,7 +17,7 @@ game_date parameter to prevent temporal leakage. Key principles:
 
 1. ALWAYS pass game_date when generating features for historical games
 2. Use fetch_team_statistics_before_date() instead of fetch_team_statistics()
-3. Use fetch_player_stats_before_date() instead of fetch_player_stats()
+3. Use fetch_player_stats_before_date_auto() (Balldontlie primary, NBA fallback)
 4. Use date_to parameter with fetch_historical_games() and fetch_head_to_head()
 5. Never include the target game's data in its own features
 
@@ -696,7 +696,7 @@ class InjuryReportManager:
 
             if player_id:
                 try:
-                    stats = fetch_player_stats(player_id, self.season)
+                    stats = fetch_player_stats_auto(player_id, self.season)
                     season_avg = stats.get("season_averages", {})
                     player_value = self.calculate_player_value(season_avg, position)
 
@@ -861,7 +861,7 @@ class PositionalAnalyzer:
             if not player_id:
                 return None
             try:
-                stats = fetch_player_stats(player_id, self.season, last_n_games=10)
+                stats = fetch_player_stats_auto(player_id, self.season, last_n_games=10)
                 return (player, stats)
             except Exception:
                 return None
@@ -1788,6 +1788,103 @@ class PlayerPropFeatureGenerator:
                 self._balldontlie_api = None
         return self._balldontlie_api
 
+    def _calculate_dynamic_usage(self, game_log: List[Dict], last_n: int = 10) -> float:
+        """
+        Calculate usage rate from recent game logs.
+
+        Usage approximates: (FGA + 0.44*FTA + TOV) / minutes * scaling_factor
+        This gives a value in the ~0.15-0.40 range for NBA players.
+
+        Args:
+            game_log: List of game stat dictionaries
+            last_n: Number of recent games to use
+
+        Returns:
+            Usage rate (0.10 to 0.45 range, league avg ~0.20)
+        """
+        if not game_log:
+            return 0.20  # League average default
+
+        recent = game_log[:last_n]
+
+        total_fga = sum(g.get("fg_att", 0) or g.get("fga", 0) or 0 for g in recent)
+        total_fta = sum(g.get("ft_att", 0) or g.get("fta", 0) or 0 for g in recent)
+        total_tov = sum(g.get("tov", 0) or g.get("turnover", 0) or 0 for g in recent)
+        total_min = sum(g.get("min", 0) or 0 for g in recent)
+
+        if total_min == 0:
+            return 0.20
+
+        # Simplified usage approximation (scales to ~15-40% range)
+        possessions_used = total_fga + 0.44 * total_fta + total_tov
+        usage_rate = min(0.45, max(0.10, (possessions_used / total_min) * 0.4))
+
+        return round(usage_rate, 3)
+
+    def get_position_defense_features(self, opponent_team_id: int, player_position: str, game_date: str = None) -> Dict:
+        """
+        Get opponent's defensive stats against a specific position.
+
+        Args:
+            opponent_team_id: Opponent team ID
+            player_position: Player position ('G', 'F', 'C', 'G-F', 'F-C', etc.)
+            game_date: Optional date for temporal-safe fetching
+
+        Returns:
+            Dictionary with position-specific defensive features:
+            - opp_pts_allowed_to_pos: Points allowed to this position
+            - opp_reb_allowed_to_pos: Rebounds allowed to this position
+            - opp_ast_allowed_to_pos: Assists allowed to this position
+            - opp_fg3_allowed_to_pos: 3PM allowed to this position
+            - position_matchup_factor: Multiplier for this matchup (>1 = favorable)
+        """
+        if not player_position or not opponent_team_id:
+            return {}
+
+        # Normalize position to G/F/C
+        pos = player_position.upper()
+        if 'G' in pos:
+            pos_category = 'G'
+        elif 'C' in pos:
+            pos_category = 'C'
+        else:
+            pos_category = 'F'
+
+        # League average points by position (used for normalization)
+        LEAGUE_AVG_BY_POS = {
+            'G': {'pts': 18.0, 'reb': 3.5, 'ast': 5.5, 'fg3': 2.2},
+            'F': {'pts': 15.0, 'reb': 6.0, 'ast': 2.5, 'fg3': 1.5},
+            'C': {'pts': 12.0, 'reb': 8.5, 'ast': 2.0, 'fg3': 0.5},
+        }
+
+        try:
+            # Get opponent team stats
+            if game_date:
+                opp_stats = fetch_team_statistics_before_date(opponent_team_id, self.season, game_date)
+            else:
+                opp_stats = fetch_team_statistics(opponent_team_id, self.season)
+
+            opp_overall = opp_stats.get("overall", {})
+            opp_def_rating = opp_overall.get("def_rating", 110) or 110
+
+            # Calculate position-specific allowed stats based on defensive rating
+            # Better defense (lower rating) = lower allowed stats
+            def_factor = opp_def_rating / 110.0  # 110 is ~league average
+
+            league_avg = LEAGUE_AVG_BY_POS.get(pos_category, LEAGUE_AVG_BY_POS['F'])
+
+            return {
+                'opp_pts_allowed_to_pos': league_avg['pts'] * def_factor,
+                'opp_reb_allowed_to_pos': league_avg['reb'] * def_factor,
+                'opp_ast_allowed_to_pos': league_avg['ast'] * def_factor,
+                'opp_fg3_allowed_to_pos': league_avg['fg3'] * def_factor,
+                'position_matchup_factor': def_factor,
+                'position_category': pos_category,
+            }
+
+        except Exception:
+            return {}
+
     def get_player_season_averages_balldontlie(self, player_id: int) -> Dict:
         """
         Fetch player season averages from Balldontlie API.
@@ -2119,7 +2216,8 @@ class PlayerPropFeatureGenerator:
         pts = [g.get("pts", 0) or 0 for g in games]
         reb = [g.get("reb", 0) or 0 for g in games]
         ast = [g.get("ast", 0) or 0 for g in games]
-        fg3_made = [g.get("fg3_made", 0) or 0 for g in games]
+        fg3_made = [g.get("fg3_made", 0) or g.get("fg3m", 0) or 0 for g in games]
+        fg3_att = [g.get("fg3_att", 0) or g.get("fg3a", 0) or 0 for g in games]  # 3PA for volume
         mins = [g.get("min", 0) or 0 for g in games]
 
         return {
@@ -2134,12 +2232,14 @@ class PlayerPropFeatureGenerator:
             "ast_std": np.std(ast),
             "fg3_avg": np.mean(fg3_made),
             "fg3_std": np.std(fg3_made),
+            "fg3a_avg": np.mean(fg3_att),  # 3PA average for volume context
+            "fg3a_std": np.std(fg3_att),   # 3PA consistency
             "min_avg": np.mean(mins),
             "min_std": np.std(mins),
             "pts_plus_reb_plus_ast_avg": np.mean([p + r + a for p, r, a in zip(pts, reb, ast)]),
         }
 
-    def generate_points_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
+    def generate_points_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None, player_position: str = None):
         """
         Generate features for player points prop.
 
@@ -2151,6 +2251,7 @@ class PlayerPropFeatureGenerator:
             opponent_team_id: Optional opponent team ID for matchup context
             last_n_games: Recent games for form calculation
             game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
+            player_position: Player position (G/F/C) for position-specific matchup features
 
         Returns:
             Dictionary with features for points prop prediction
@@ -2168,7 +2269,11 @@ class PlayerPropFeatureGenerator:
                 last_n_games=last_n_games
             )
         season_avg = stats.get("season_averages", {})
+        game_log = stats.get("game_log", [])
         recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
+
+        # Calculate dynamic usage rate from recent games
+        usage_rate = self._calculate_dynamic_usage(game_log, last_n=last_n_games)
 
         features = {
             "player_id": player_id,
@@ -2186,6 +2291,9 @@ class PlayerPropFeatureGenerator:
             "recent_pts_min": recent_form.get("pts_min", 0) if recent_form else 0,
             "recent_pts_max": recent_form.get("pts_max", 0) if recent_form else 0,
             "recent_min_avg": recent_form.get("min_avg", 0) if recent_form else 0,
+
+            # Usage rate (dynamic from recent games)
+            "usage_rate": usage_rate,
 
             # Form trend (recent vs season)
             "pts_trend": (recent_form.get("pts_avg", 0) - (season_avg.get("pts_avg", 0) or 0)) if recent_form else 0,
@@ -2225,6 +2333,12 @@ class PlayerPropFeatureGenerator:
             vs_adj = features.get("vs_team_pts_adjustment", 0) * 0.3  # Weight historical
             features["projected_pts"] = base_pts + trend_adj + def_adj + vs_adj
 
+            # NEW: Position-specific defensive features
+            if player_position:
+                pos_features = self.get_position_defense_features(opponent_team_id, player_position, game_date)
+                features["opp_pts_allowed_to_pos"] = pos_features.get("opp_pts_allowed_to_pos", 0)
+                features["position_matchup_factor"] = pos_features.get("position_matchup_factor", 1.0)
+
         # =========================================================
         # CRITICAL NEW FEATURES (Based on historical analysis)
         # These help model understand when to predict lower
@@ -2257,7 +2371,7 @@ class PlayerPropFeatureGenerator:
 
         return features
 
-    def generate_rebounds_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
+    def generate_rebounds_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None, player_position: str = None):
         """
         Generate features for player rebounds prop.
 
@@ -2268,6 +2382,7 @@ class PlayerPropFeatureGenerator:
             opponent_team_id: Optional opponent team ID
             last_n_games: Recent games for form calculation
             game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
+            player_position: Player position (G/F/C) for position-specific matchup features
 
         Returns:
             Dictionary with features for rebounds prop prediction
@@ -2285,7 +2400,11 @@ class PlayerPropFeatureGenerator:
                 last_n_games=last_n_games
             )
         season_avg = stats.get("season_averages", {})
+        game_log = stats.get("game_log", [])
         recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
+
+        # Calculate dynamic usage rate from recent games
+        usage_rate = self._calculate_dynamic_usage(game_log, last_n=last_n_games)
 
         features = {
             "player_id": player_id,
@@ -2298,6 +2417,9 @@ class PlayerPropFeatureGenerator:
             "recent_reb_avg": recent_form.get("reb_avg", 0) if recent_form else 0,
             "recent_reb_std": recent_form.get("reb_std", 0) if recent_form else 0,
             "recent_min_avg": recent_form.get("min_avg", 0) if recent_form else 0,
+
+            # Usage rate (dynamic from recent games)
+            "usage_rate": usage_rate,
 
             # Trend
             "reb_trend": (recent_form.get("reb_avg", 0) - (season_avg.get("reb_avg", 0) or 0)) if recent_form else 0,
@@ -2313,6 +2435,12 @@ class PlayerPropFeatureGenerator:
             features["opp_reb_avg"] = opp_overall.get("reb_avg", 0) or 0
             features["opp_pace"] = opp_overall.get("pace", 0) or 0
 
+            # Position-specific defensive features for rebounds
+            if player_position:
+                pos_features = self.get_position_defense_features(opponent_team_id, player_position, game_date)
+                features["opp_reb_allowed_to_pos"] = pos_features.get("opp_reb_allowed_to_pos", 0)
+                features["position_matchup_factor"] = pos_features.get("position_matchup_factor", 1.0)
+
         # CRITICAL NEW FEATURES
         season_reb = features.get("season_reb_avg", 0)
         recent_reb = features.get("recent_reb_avg", 0)
@@ -2325,7 +2453,7 @@ class PlayerPropFeatureGenerator:
 
         return features
 
-    def generate_assists_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
+    def generate_assists_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None, player_position: str = None):
         """
         Generate features for player assists prop.
 
@@ -2335,6 +2463,7 @@ class PlayerPropFeatureGenerator:
             player_id: Balldontlie or NBA player ID (auto-detected)
             opponent_team_id: Optional opponent team ID
             last_n_games: Recent games for form calculation
+            player_position: Player position (G/F/C) for position-specific matchup features
             game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
 
         Returns:
@@ -2353,7 +2482,11 @@ class PlayerPropFeatureGenerator:
                 last_n_games=last_n_games
             )
         season_avg = stats.get("season_averages", {})
+        game_log = stats.get("game_log", [])
         recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
+
+        # Calculate dynamic usage rate from recent games
+        usage_rate = self._calculate_dynamic_usage(game_log, last_n=last_n_games)
 
         features = {
             "player_id": player_id,
@@ -2368,6 +2501,9 @@ class PlayerPropFeatureGenerator:
             "recent_ast_std": recent_form.get("ast_std", 0) if recent_form else 0,
             "recent_min_avg": recent_form.get("min_avg", 0) if recent_form else 0,
 
+            # Usage rate (dynamic from recent games)
+            "usage_rate": usage_rate,
+
             # Trend
             "ast_trend": (recent_form.get("ast_avg", 0) - (season_avg.get("ast_avg", 0) or 0)) if recent_form else 0,
         }
@@ -2377,6 +2513,12 @@ class PlayerPropFeatureGenerator:
             opp_overall = opp_stats.get("overall", {})
             features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
             features["opp_stl_avg"] = opp_overall.get("stl_avg", 0) or 0
+
+            # Position-specific defensive features for assists
+            if player_position:
+                pos_features = self.get_position_defense_features(opponent_team_id, player_position, game_date)
+                features["opp_ast_allowed_to_pos"] = pos_features.get("opp_ast_allowed_to_pos", 0)
+                features["position_matchup_factor"] = pos_features.get("position_matchup_factor", 1.0)
 
         # CRITICAL NEW FEATURES for assists
         season_ast = features.get("season_ast_avg", 0)
@@ -2395,7 +2537,7 @@ class PlayerPropFeatureGenerator:
 
         return features
 
-    def generate_threes_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
+    def generate_threes_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None, player_position: str = None):
         """
         Generate features for player 3-pointers made prop.
 
@@ -2406,16 +2548,21 @@ class PlayerPropFeatureGenerator:
             opponent_team_id: Optional opponent team ID
             last_n_games: Recent games for form calculation
             game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
+            player_position: Player position (G/F/C) for position-specific matchup features
 
         Returns:
             Dictionary with features for 3-pointers prop prediction
         """
         if game_date:
-            stats = fetch_player_stats_before_date(player_id, self.season, game_date, last_n_games)
+            stats = fetch_player_stats_before_date_auto(player_id, self.season, game_date, last_n_games)
         else:
-            stats = fetch_player_stats(player_id, self.season, last_n_games)
+            stats = fetch_player_stats_auto(player_id, self.season, last_n_games)
         season_avg = stats.get("season_averages", {})
+        game_log = stats.get("game_log", [])
         recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
+
+        # Calculate dynamic usage rate from recent games
+        usage_rate = self._calculate_dynamic_usage(game_log, last_n=last_n_games)
 
         features = {
             "player_id": player_id,
@@ -2423,11 +2570,19 @@ class PlayerPropFeatureGenerator:
             # Season shooting
             "season_fg3_pct": season_avg.get("fg3_pct", 0) or 0,
             "season_min_avg": season_avg.get("min_avg", 0) or 0,
+            "season_fg3a_avg": season_avg.get("fg3a_avg", 0) or 0,  # Season 3PA volume
 
-            # Recent form
+            # Recent form - makes
             "recent_fg3_avg": recent_form.get("fg3_avg", 0) if recent_form else 0,
             "recent_fg3_std": recent_form.get("fg3_std", 0) if recent_form else 0,
             "recent_min_avg": recent_form.get("min_avg", 0) if recent_form else 0,
+
+            # Recent form - attempts (volume context for 3PM predictions)
+            "recent_fg3a_avg": recent_form.get("fg3a_avg", 0) if recent_form else 0,
+            "fg3a_std": recent_form.get("fg3a_std", 0) if recent_form else 0,
+
+            # Usage rate (dynamic from recent games)
+            "usage_rate": usage_rate,
         }
 
         if opponent_team_id:
@@ -2439,6 +2594,12 @@ class PlayerPropFeatureGenerator:
             opp_overall = opp_stats.get("overall", {})
             features["opp_fg3_pct_allowed"] = opp_overall.get("fg3_pct", 0) or 0
             features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
+
+            # Position-specific defensive features for 3PM
+            if player_position:
+                pos_features = self.get_position_defense_features(opponent_team_id, player_position, game_date)
+                features["opp_fg3_allowed_to_pos"] = pos_features.get("opp_fg3_allowed_to_pos", 0)
+                features["position_matchup_factor"] = pos_features.get("position_matchup_factor", 1.0)
 
         # CRITICAL NEW FEATURES for threes
         recent_fg3 = features.get("recent_fg3_avg", 0)
@@ -2460,7 +2621,7 @@ class PlayerPropFeatureGenerator:
 
         return features
 
-    def generate_pra_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None):
+    def generate_pra_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None, player_position: str = None):
         """
         Generate features for Points+Rebounds+Assists prop.
 
@@ -2471,16 +2632,21 @@ class PlayerPropFeatureGenerator:
             opponent_team_id: Optional opponent team ID
             last_n_games: Recent games for form calculation
             game_date: Date string (YYYY-MM-DD) for temporal-safe fetching (training only)
+            player_position: Player position (G/F/C) for matchup features
 
         Returns:
             Dictionary with features for PRA prop prediction
         """
         if game_date:
-            stats = fetch_player_stats_before_date(player_id, self.season, game_date, last_n_games)
+            stats = fetch_player_stats_before_date_auto(player_id, self.season, game_date, last_n_games)
         else:
-            stats = fetch_player_stats(player_id, self.season, last_n_games)
+            stats = fetch_player_stats_auto(player_id, self.season, last_n_games)
         season_avg = stats.get("season_averages", {})
+        game_log = stats.get("game_log", [])
         recent_form = self.calculate_player_recent_form(player_id, last_n_games=5, game_date=game_date)
+
+        # Calculate dynamic usage rate from recent games
+        usage_rate = self._calculate_dynamic_usage(game_log, last_n=last_n_games)
 
         season_pra = (
             (season_avg.get("pts_avg", 0) or 0) +
@@ -2505,6 +2671,9 @@ class PlayerPropFeatureGenerator:
             "recent_ast_avg": recent_form.get("ast_avg", 0) if recent_form else 0,
             "recent_min_avg": recent_form.get("min_avg", 0) if recent_form else 0,
 
+            # Usage rate (dynamic from recent games)
+            "usage_rate": usage_rate,
+
             # Trend
             "pra_trend": (recent_form.get("pts_plus_reb_plus_ast_avg", 0) - season_pra) if recent_form else 0,
         }
@@ -2514,6 +2683,19 @@ class PlayerPropFeatureGenerator:
             opp_overall = opp_stats.get("overall", {})
             features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
             features["opp_pace"] = opp_overall.get("pace", 0) or 0
+
+        # Position-specific defensive features for PRA (combines all stat types)
+        if player_position and opponent_team_id:
+            pos_features = self.get_position_defense_features(opponent_team_id, player_position, game_date)
+            features["opp_pts_allowed_to_pos"] = pos_features.get("opp_pts_allowed_to_pos", 0)
+            features["opp_reb_allowed_to_pos"] = pos_features.get("opp_reb_allowed_to_pos", 0)
+            features["opp_ast_allowed_to_pos"] = pos_features.get("opp_ast_allowed_to_pos", 0)
+            features["position_matchup_factor"] = pos_features.get("position_matchup_factor", 1.0)
+            # Composite PRA matchup based on position features
+            pra_allowed = (pos_features.get("opp_pts_allowed_to_pos", 0) +
+                          pos_features.get("opp_reb_allowed_to_pos", 0) +
+                          pos_features.get("opp_ast_allowed_to_pos", 0))
+            features["opp_pra_allowed_to_pos"] = pra_allowed
 
         # CRITICAL NEW FEATURES for PRA
         season_pra_val = features.get("season_pra_avg", 0)

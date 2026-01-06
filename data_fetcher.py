@@ -4,6 +4,18 @@ NBA Data Fetcher
 Fetches NBA schedules, historical game data, team statistics, and player stats.
 
 =============================================================================
+DATA SOURCES
+=============================================================================
+- Schedule: Balldontlie (primary), NBA API (fallback)
+- Player Stats: Balldontlie (primary), NBA API (fallback)
+- Team Stats: NBA API only (Balldontlie has no team stats endpoint)
+- Clutch Stats: NBA API only (not available in Balldontlie)
+
+Prefer *_auto() functions which automatically try Balldontlie first:
+- fetch_player_stats_auto() - player game stats
+- fetch_player_stats_before_date_auto() - temporal-safe player stats
+
+=============================================================================
 TEMPORAL DISCIPLINE
 =============================================================================
 When training ML models, it is CRITICAL to avoid temporal leakage - using data
@@ -11,13 +23,13 @@ from the future to predict the past. This module provides two approaches:
 
 1. LEAKAGE-SAFE functions (use these for training):
    - fetch_team_statistics_before_date(team_id, season, before_date)
-   - fetch_player_stats_before_date(player_id, season, before_date) [NEW]
+   - fetch_player_stats_before_date_auto(player_id, season, before_date)
    - fetch_head_to_head(..., date_to=game_date)
    - fetch_historical_games(..., date_to=game_date)
 
 2. CURRENT-STATE functions (use only for live predictions):
    - fetch_team_statistics(team_id, season) - returns full-season stats
-   - fetch_player_stats(player_id, season) - returns full-season player stats
+   - fetch_player_stats_auto(player_id, season) - returns full-season player stats
    - fetch_head_to_head(...) without date_to - includes all games
 
 When building features for historical games during training, ALWAYS use the
