@@ -869,6 +869,34 @@ class Orchestrator:
             print(f"Error fetching odds: {e}")
             return {}
 
+    def _estimate_spread_odds(self, spread_line: float) -> Tuple[int, int]:
+        """
+        Estimate realistic spread odds when real odds unavailable.
+
+        In reality, larger spreads have worse odds for favorites and
+        better odds for underdogs (vig adjustment).
+
+        Args:
+            spread_line: The home spread line (negative = home favored)
+
+        Returns:
+            Tuple of (favorite_odds, underdog_odds)
+        """
+        abs_spread = abs(spread_line)
+
+        if abs_spread <= 3.0:
+            # Close games: standard -110 / -110
+            return -110, -110
+        elif abs_spread <= 6.0:
+            # Medium spreads: slight adjustment
+            return -115, -105
+        elif abs_spread <= 10.0:
+            # Large spreads: bigger adjustment
+            return -120, 100
+        else:
+            # Very large spreads: heavy adjustment
+            return -130, 110
+
     def get_game_odds(self, home_abbrev: str, away_abbrev: str) -> Dict[str, Any]:
         """
         Get real odds for a specific game.
@@ -1443,8 +1471,21 @@ class Orchestrator:
                 real_spread_line = float(real_spread_line)
             except ValueError:
                 real_spread_line = -3.5
-        home_spread_odds = spread_odds.get("home_odds", -110)
-        away_spread_odds = spread_odds.get("away_odds", -110)
+
+        # Get spread odds - use real odds if available, otherwise estimate based on spread size
+        home_spread_odds = spread_odds.get("home_odds")
+        away_spread_odds = spread_odds.get("away_odds")
+
+        # If no real odds or both are default -110, estimate based on spread
+        if home_spread_odds is None or away_spread_odds is None or (home_spread_odds == -110 and away_spread_odds == -110):
+            fav_odds, dog_odds = self._estimate_spread_odds(real_spread_line)
+            # If home is favored (negative line), home gets favorite odds
+            if real_spread_line < 0:
+                home_spread_odds = fav_odds
+                away_spread_odds = dog_odds
+            else:
+                home_spread_odds = dog_odds
+                away_spread_odds = fav_odds
 
         # Get cover probability - two sources:
         # 1. SpreadCoverClassifier outputs home_cover_probability directly
