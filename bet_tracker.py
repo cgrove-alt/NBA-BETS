@@ -28,6 +28,19 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import portfolio optimizer for covariance-aware bet sizing
+try:
+    from portfolio_optimizer import (
+        PortfolioOptimizer,
+        BetType as PortfolioBetType,
+        calculate_covariance,
+        optimize_portfolio_kelly,
+    )
+    HAS_PORTFOLIO_OPTIMIZER = True
+except ImportError:
+    HAS_PORTFOLIO_OPTIMIZER = False
+    logger.info("Portfolio optimizer not available. Bet sizing will use simple Kelly.")
+
 
 class BetStatus(Enum):
     """Bet status states."""
@@ -738,6 +751,120 @@ class BetTracker:
                 results[name] = metrics
 
         return results
+
+    def optimize_pending_stakes(
+        self,
+        bankroll: float = 1000,
+        min_edge: float = 0.02
+    ) -> Dict:
+        """
+        Optimize stake sizing for pending bets using portfolio optimization.
+
+        Uses covariance-aware Kelly criterion to size bets accounting for
+        correlations between same-game bets.
+
+        Args:
+            bankroll: Total bankroll for sizing
+            min_edge: Minimum edge required (default 2%)
+
+        Returns:
+            Dictionary with optimized stakes for each bet
+        """
+        if not HAS_PORTFOLIO_OPTIMIZER:
+            logger.warning("Portfolio optimizer not available")
+            return {}
+
+        # Get pending bets
+        pending_bets = self.get_pending_bets()
+        if not pending_bets:
+            return {'bets': [], 'total_stake': 0, 'message': 'No pending bets'}
+
+        # Convert to format for optimizer
+        bets_for_optimizer = []
+        for bet in pending_bets:
+            if bet.edge < min_edge:
+                continue
+
+            bets_for_optimizer.append({
+                'bet_id': bet.bet_id,
+                'game_id': bet.event_id,
+                'bet_type': bet.bet_type.value,
+                'selection': bet.selection,
+                'odds': int(bet.odds),
+                'probability': bet.model_probability,
+                'edge': bet.edge,
+                'team': bet.event_name.split(' vs ')[0] if ' vs ' in bet.event_name else None,
+                'side': 'home' if 'home' in bet.selection.lower() else (
+                    'away' if 'away' in bet.selection.lower() else (
+                        'over' if 'over' in bet.selection.lower() else 'under'
+                    )
+                ),
+            })
+
+        if not bets_for_optimizer:
+            return {
+                'bets': [],
+                'total_stake': 0,
+                'message': f'No bets with edge >= {min_edge:.1%}'
+            }
+
+        try:
+            # Run optimization
+            result = optimize_portfolio_kelly(
+                bets_for_optimizer,
+                bankroll=bankroll
+            )
+
+            # Map back to bet IDs
+            optimized = {
+                'bets': [],
+                'total_stake': result.get('total_stake', 0),
+                'expected_return': result.get('expected_return', 0),
+                'sharpe_ratio': result.get('sharpe_ratio', 0),
+            }
+
+            for opt_bet in result.get('bets', []):
+                if opt_bet.get('final_stake', 0) > 0:
+                    optimized['bets'].append({
+                        'selection': opt_bet['selection'],
+                        'recommended_stake': opt_bet['final_stake'],
+                        'kelly_fraction': opt_bet['kelly_fraction'],
+                        'edge': opt_bet['edge'],
+                        'odds': opt_bet['odds'],
+                    })
+
+            return optimized
+
+        except Exception as e:
+            logger.error(f"Portfolio optimization failed: {e}")
+            return {'bets': [], 'total_stake': 0, 'message': str(e)}
+
+    def get_correlation_matrix(self) -> Optional[np.ndarray]:
+        """
+        Get correlation matrix for pending bets.
+
+        Useful for understanding how bets are related.
+        """
+        if not HAS_PORTFOLIO_OPTIMIZER:
+            return None
+
+        pending_bets = self.get_pending_bets()
+        if len(pending_bets) < 2:
+            return None
+
+        bets_data = []
+        for bet in pending_bets:
+            bets_data.append({
+                'game_id': bet.event_id,
+                'bet_type': bet.bet_type.value,
+                'team': bet.event_name.split(' vs ')[0] if ' vs ' in bet.event_name else None,
+                'probability': bet.model_probability,
+            })
+
+        try:
+            return calculate_covariance(bets_data)
+        except Exception:
+            return None
 
     def print_summary(self) -> None:
         """Print comprehensive summary of betting performance."""

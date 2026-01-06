@@ -59,6 +59,49 @@ except ImportError:
     HAS_TRAINING_FEATURES = False
     print("Note: Training feature generator not available. Using simplified features.")
 
+# Import simulation engine for Monte Carlo predictions
+try:
+    from simulation_engine import (
+        GameSimulator,
+        TeamStats,
+        PlayerStats,
+        create_player_from_dict,
+        create_team_from_dict,
+    )
+    HAS_SIMULATION_ENGINE = True
+except ImportError:
+    HAS_SIMULATION_ENGINE = False
+
+# Import portfolio optimizer for bet sizing
+try:
+    from portfolio_optimizer import (
+        PortfolioOptimizer,
+        BetType as PortfolioBetType,
+        calculate_covariance,
+        optimize_portfolio_kelly,
+    )
+    HAS_PORTFOLIO_OPTIMIZER = True
+except ImportError:
+    HAS_PORTFOLIO_OPTIMIZER = False
+
+# Import news sentiment for qualitative intelligence
+try:
+    from news_sentiment import SentimentPipeline
+    HAS_SENTIMENT = True
+except ImportError:
+    HAS_SENTIMENT = False
+
+# Import market microstructure for steam/stale line detection
+try:
+    from market_microstructure import (
+        MarketMonitor,
+        ConsensusCalculator,
+        OddsFetcher as MarketOddsFetcher,
+    )
+    HAS_MARKET_MICRO = True
+except ImportError:
+    HAS_MARKET_MICRO = False
+
 # Global feature generator for player props (lazy loaded)
 _prop_feature_gen = None
 _player_feature_cache = {}  # Cache player features to avoid redundant API calls
@@ -605,6 +648,117 @@ def predict_spread(features: Dict, models: Dict) -> float:
 
     # Fallback: net rating / 3 + home advantage
     return (net_rating_diff / 3.0) + home_advantage
+
+
+def simulate_game_predictions(
+    home_team_data: Dict,
+    away_team_data: Dict,
+    home_players: List[Dict],
+    away_players: List[Dict],
+    n_simulations: int = 1000
+) -> Optional[Dict]:
+    """
+    Use Monte Carlo simulation for enhanced predictions.
+
+    Provides more accurate probability distributions than regression.
+    Captures pace effects, blowout scenarios, and player correlations.
+
+    Args:
+        home_team_data: Home team info dict
+        away_team_data: Away team info dict
+        home_players: List of home player stat dicts
+        away_players: List of away player stat dicts
+        n_simulations: Number of simulations (default 1000)
+
+    Returns:
+        Dictionary with simulation results or None if unavailable
+    """
+    if not HAS_SIMULATION_ENGINE:
+        return None
+
+    try:
+        # Create team objects
+        home_team = create_team_from_dict(home_team_data, home_players)
+        away_team = create_team_from_dict(away_team_data, away_players)
+
+        # Run simulation
+        simulator = GameSimulator(home_team, away_team)
+        results = simulator.run_simulation(n_simulations=n_simulations)
+
+        # Get betting probabilities
+        return {
+            'home_win_prob': results['home_win_prob'],
+            'away_win_prob': results['away_win_prob'],
+            'projected_home_score': results['home_score_mean'],
+            'projected_away_score': results['away_score_mean'],
+            'projected_margin': results['margin_mean'],
+            'margin_std': results['margin_std'],
+            'projected_total': results['total_mean'],
+            'total_std': results['total_std'],
+            'simulator': simulator,  # For prop calculations
+            'source': 'monte_carlo',
+        }
+
+    except Exception as e:
+        print(f"  Simulation error: {e}")
+        return None
+
+
+def optimize_bet_portfolio(
+    predictions: List[Dict],
+    bankroll: float = 1000,
+) -> Optional[Dict]:
+    """
+    Optimize bet sizing across all predictions using portfolio optimization.
+
+    Uses covariance-aware Kelly criterion to size bets accounting for
+    correlations between same-game bets.
+
+    Args:
+        predictions: List of prediction dicts with edge/probability
+        bankroll: Total bankroll
+
+    Returns:
+        Optimized portfolio or None if unavailable
+    """
+    if not HAS_PORTFOLIO_OPTIMIZER:
+        return None
+
+    try:
+        optimizer = PortfolioOptimizer(bankroll=bankroll)
+
+        for pred in predictions:
+            if pred.get('edge', 0) < 0.02:  # Skip low-edge bets
+                continue
+
+            # Determine bet type
+            bet_type_str = pred.get('type', 'moneyline')
+            if bet_type_str == 'moneyline':
+                bet_type = PortfolioBetType.MONEYLINE
+            elif bet_type_str == 'spread':
+                bet_type = PortfolioBetType.SPREAD
+            elif bet_type_str == 'total':
+                bet_type = PortfolioBetType.TOTAL
+            else:
+                bet_type = PortfolioBetType.PLAYER_PROP
+
+            optimizer.add_bet(
+                game_id=str(pred.get('game_id', '')),
+                bet_type=bet_type,
+                selection=pred.get('selection', ''),
+                odds=pred.get('odds', -110),
+                probability=pred.get('probability', 0.5),
+                team=pred.get('team'),
+                player=pred.get('player'),
+                side=pred.get('side'),
+            )
+
+        result = optimizer.optimize()
+        return result.to_dict()
+
+    except Exception as e:
+        print(f"  Portfolio optimization error: {e}")
+        return None
 
 
 def analyze_game(game: Dict, odds: Dict, models: Dict) -> Dict:
