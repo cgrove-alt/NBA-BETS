@@ -369,15 +369,30 @@ class BacktestReporter:
 
         # Format ALL games for sorting
         all_formatted_games = []
+        skipped_no_date = 0
         for game in games_data:
             features = game.get("moneyline_features", {})
             if not features:
                 continue
 
+            # CRITICAL FIX: Require valid game_date, never fall back to datetime.now()
+            # Using datetime.now() would leak future information into historical backtesting
+            game_date_raw = game.get("game_date")
+            if not game_date_raw:
+                skipped_no_date += 1
+                continue
+
             try:
-                game_date = datetime.strptime(game.get("game_date", "2024-01-01"), "%Y-%m-%d") if isinstance(game.get("game_date"), str) else datetime.now()
+                if isinstance(game_date_raw, str):
+                    game_date = datetime.strptime(game_date_raw, "%Y-%m-%d")
+                elif isinstance(game_date_raw, datetime):
+                    game_date = game_date_raw
+                else:
+                    skipped_no_date += 1
+                    continue
             except (ValueError, TypeError):
-                game_date = datetime.now()
+                skipped_no_date += 1
+                continue
 
             formatted_game = {
                 "game_id": f"{game.get('game_date', '')}_{game.get('home_team', '')}_{game.get('away_team', '')}",
@@ -391,6 +406,9 @@ class BacktestReporter:
                 "features": features,
             }
             all_formatted_games.append(formatted_game)
+
+        if skipped_no_date > 0:
+            print(f"  WARNING: Skipped {skipped_no_date} games with missing/invalid dates")
 
         if len(all_formatted_games) < 50:
             return {"error": f"Not enough games for backtest ({len(all_formatted_games)} < 50)"}
@@ -467,15 +485,29 @@ class BacktestReporter:
 
         # Format ALL games for sorting
         all_formatted_games = []
+        skipped_no_date = 0
         for game in games_data:
             features = game.get("spread_features", game.get("moneyline_features", {}))
             if not features:
                 continue
 
+            # CRITICAL FIX: Require valid game_date, never fall back to datetime.now()
+            game_date_raw = game.get("game_date")
+            if not game_date_raw:
+                skipped_no_date += 1
+                continue
+
             try:
-                game_date = datetime.strptime(game.get("game_date", "2024-01-01"), "%Y-%m-%d") if isinstance(game.get("game_date"), str) else datetime.now()
+                if isinstance(game_date_raw, str):
+                    game_date = datetime.strptime(game_date_raw, "%Y-%m-%d")
+                elif isinstance(game_date_raw, datetime):
+                    game_date = game_date_raw
+                else:
+                    skipped_no_date += 1
+                    continue
             except (ValueError, TypeError):
-                game_date = datetime.now()
+                skipped_no_date += 1
+                continue
 
             formatted_game = {
                 "game_id": f"{game.get('game_date', '')}_{game.get('home_team', '')}_{game.get('away_team', '')}",
@@ -489,6 +521,9 @@ class BacktestReporter:
                 "features": features,
             }
             all_formatted_games.append(formatted_game)
+
+        if skipped_no_date > 0:
+            print(f"  WARNING: Skipped {skipped_no_date} games with missing/invalid dates")
 
         if len(all_formatted_games) < 50:
             return {"error": f"Not enough games for backtest ({len(all_formatted_games)} < 50)"}
@@ -3929,24 +3964,41 @@ class ModelTrainingPipeline:
                 moneyline_model.save_model()
 
             # CALIBRATION: Fit and save calibrators for moneyline probabilities
+            # CRITICAL FIX: Split data BEFORE calibration to prevent leakage
             if HAS_CALIBRATION:
                 try:
                     print("\n  Fitting moneyline calibrator...")
-                    # Get predictions on training data for calibration
-                    X_scaled = moneyline_model.preprocess_features(X_ml, fit=False)
-                    if hasattr(moneyline_model.model, 'predict_proba'):
-                        y_prob = moneyline_model.model.predict_proba(X_scaled)[:, 1]
-                    else:
-                        # For ensemble wrappers
-                        y_prob = np.array([
-                            moneyline_model.predict(dict(zip(moneyline_model.feature_names, x)))["home_win_probability"]
-                            for x in X_ml.values
-                        ])
 
-                    # Fit calibrator
+                    # STEP 1: Create train/cal_val/test split BEFORE any predictions
+                    # This prevents calibrator from seeing test data
+                    n_samples = len(X_ml)
+                    n_test = int(n_samples * 0.2)  # 20% for final test
+                    n_cal_val = int((n_samples - n_test) * 0.25)  # 25% of training for calibration
+
+                    train_end = n_samples - n_test - n_cal_val
+                    cal_val_end = n_samples - n_test
+
+                    # Data splits (chronological order preserved)
+                    X_train_only = X_ml.iloc[:train_end]
+                    y_train_only = y_ml[:train_end]
+                    X_cal_val = X_ml.iloc[train_end:cal_val_end]
+                    y_cal_val = y_ml[train_end:cal_val_end]
+                    X_test = X_ml.iloc[cal_val_end:]
+                    y_test = y_ml[cal_val_end:]
+
+                    print(f"    Split: {len(X_train_only)} train, {len(X_cal_val)} cal_val, {len(X_test)} test")
+
+                    # STEP 2: Get predictions on CALIBRATION VALIDATION set only
+                    # (Model was already trained on full training set in .train() method)
+                    y_prob_cal = np.array([
+                        moneyline_model.predict(dict(zip(moneyline_model.feature_names, x)))["home_win_probability"]
+                        for x in X_cal_val.values
+                    ])
+
+                    # STEP 3: Fit calibrator on calibration validation predictions ONLY
                     from calibration import ModelCalibrator
                     ml_calibrator = ModelCalibrator("moneyline", include_advanced=True)
-                    ml_calibrator.fit(y_prob, y_ml, method="auto")
+                    ml_calibrator.fit(y_prob_cal, y_cal_val, method="auto")
 
                     if save_models:
                         calibration_dir = MODEL_DIR / "calibration"
@@ -3959,38 +4011,28 @@ class ModelTrainingPipeline:
                     }
                     print(f"  Moneyline calibrator saved (method: {ml_calibrator.best_method})")
 
-                    # LOG COMPREHENSIVE METRICS with TrainingMetricsLogger
-                    # CRITICAL FIX: Use train/test split for betting ROI to prevent leakage
+                    # STEP 4: LOG METRICS on HELD-OUT TEST set (never seen by calibrator)
                     try:
                         logger = TrainingMetricsLogger("moneyline", model_type="classifier")
 
-                        # Split data for honest evaluation (last 20% as test)
-                        n_samples = len(X_ml)
-                        n_test = int(n_samples * 0.2)
-                        test_idx = slice(n_samples - n_test, n_samples)
-                        train_idx = slice(0, n_samples - n_test)
-
-                        # Generate predictions on TEST set only for ROI
-                        X_test = X_ml.iloc[test_idx] if hasattr(X_ml, 'iloc') else X_ml[test_idx]
-                        y_test = y_ml[test_idx] if hasattr(y_ml, '__getitem__') else y_ml.iloc[test_idx]
-
-                        # Get test predictions
+                        # Get predictions on truly held-out test set
                         y_prob_test = np.array([
                             moneyline_model.predict(dict(zip(moneyline_model.feature_names, x)))["home_win_probability"]
                             for x in X_test.values
                         ])
 
-                        # Log classification metrics on ALL data (for completeness)
-                        y_pred = (y_prob > 0.5).astype(int)
-                        logger.log_classification_metrics(y_ml, y_pred, y_prob)
-                        logger.log_calibration_metrics(y_prob, y_ml)
+                        # Log classification metrics on TEST data only (honest evaluation)
+                        y_pred_test = (y_prob_test > 0.5).astype(int)
+                        logger.log_classification_metrics(y_test, y_pred_test, y_prob_test)
+                        logger.log_calibration_metrics(y_prob_test, y_test)
 
-                        # CRITICAL: Log betting ROI on TEST data only (honest evaluation)
+                        # Log betting ROI on TEST data only
                         logger.log_betting_roi(y_prob_test, np.array(y_test))
-                        logger.add_custom_metric("train_size", n_samples - n_test)
-                        logger.add_custom_metric("test_size", n_test)
+                        logger.add_custom_metric("train_size", len(X_train_only))
+                        logger.add_custom_metric("cal_val_size", len(X_cal_val))
+                        logger.add_custom_metric("test_size", len(X_test))
                         logger.add_custom_metric("calibration_method", ml_calibrator.best_method)
-                        logger.add_custom_metric("_roi_on_test_only", True)  # Flag for clarity
+                        logger.add_custom_metric("_leakage_free", True)  # Flag confirming proper split
                         if save_models:
                             logger.save()
                         print(logger.get_summary())
@@ -4042,20 +4084,35 @@ class ModelTrainingPipeline:
                 spread_model.save_model()
 
             # CALIBRATION: Classifier directly outputs probabilities
-            # No conversion needed (unlike the old SVR regressor)
+            # CRITICAL FIX: Split data BEFORE calibration to prevent leakage
             if HAS_CALIBRATION:
                 try:
                     print("\n  Fitting spread cover calibrator...")
-                    X_scaled = spread_model.preprocess_features(X_sp, fit=False)
 
-                    # Classifier directly outputs P(home_covers)
-                    y_prob_cover = spread_model.model.predict_proba(X_scaled)[:, 1]
-                    y_cover = y_sp  # Already 0/1 labels from prepare_training_data
+                    # STEP 1: Create train/cal_val/test split BEFORE any predictions
+                    n_samples = len(X_sp)
+                    n_test = int(n_samples * 0.2)  # 20% for final test
+                    n_cal_val = int((n_samples - n_test) * 0.25)  # 25% of training for calibration
 
-                    # Fit calibrator
+                    train_end = n_samples - n_test - n_cal_val
+                    cal_val_end = n_samples - n_test
+
+                    # Data splits (chronological order preserved)
+                    X_cal_val = X_sp.iloc[train_end:cal_val_end]
+                    y_cal_val = y_sp[train_end:cal_val_end]
+                    X_test = X_sp.iloc[cal_val_end:]
+                    y_test = y_sp[cal_val_end:]
+
+                    print(f"    Split: {train_end} train, {len(X_cal_val)} cal_val, {len(X_test)} test")
+
+                    # STEP 2: Get predictions on CALIBRATION VALIDATION set only
+                    X_cal_scaled = spread_model.preprocess_features(X_cal_val, fit=False)
+                    y_prob_cal = spread_model.model.predict_proba(X_cal_scaled)[:, 1]
+
+                    # STEP 3: Fit calibrator on calibration validation predictions ONLY
                     from calibration import ModelCalibrator
                     sp_calibrator = ModelCalibrator("spread", include_advanced=True)
-                    sp_calibrator.fit(y_prob_cover, y_cover, method="auto")
+                    sp_calibrator.fit(y_prob_cal, y_cal_val, method="auto")
 
                     if save_models:
                         calibration_dir = MODEL_DIR / "calibration"
@@ -4068,30 +4125,26 @@ class ModelTrainingPipeline:
                     }
                     print(f"  Spread calibrator saved (method: {sp_calibrator.best_method})")
 
-                    # LOG COMPREHENSIVE METRICS with TrainingMetricsLogger
+                    # STEP 4: LOG METRICS on HELD-OUT TEST set (never seen by calibrator)
                     try:
                         logger = TrainingMetricsLogger("spread", model_type="classifier")
 
-                        # Split data for honest evaluation (last 20% as test)
-                        n_samples = len(X_sp)
-                        n_test = int(n_samples * 0.2)
-                        test_idx = slice(n_samples - n_test, n_samples)
+                        # Get predictions on truly held-out test set
+                        X_test_scaled = spread_model.preprocess_features(X_test, fit=False)
+                        y_prob_test = spread_model.model.predict_proba(X_test_scaled)[:, 1]
 
-                        # Get test data
-                        y_prob_cover_test = y_prob_cover[test_idx]
-                        y_cover_test = y_cover[test_idx]
+                        # Log classification metrics on TEST data only
+                        y_pred_test = (y_prob_test > 0.5).astype(int)
+                        logger.log_classification_metrics(y_test, y_pred_test, y_prob_test)
+                        logger.log_calibration_metrics(y_prob_test, y_test)
 
-                        # Log classification metrics
-                        y_pred = (y_prob_cover > 0.5).astype(int)
-                        logger.log_classification_metrics(y_cover, y_pred, y_prob_cover)
-                        logger.log_calibration_metrics(y_prob_cover, y_cover)
-
-                        # CRITICAL: Log betting ROI on TEST data only (honest evaluation)
-                        logger.log_betting_roi(y_prob_cover_test, y_cover_test)
-                        logger.add_custom_metric("train_size", n_samples - n_test)
-                        logger.add_custom_metric("test_size", n_test)
+                        # Log betting ROI on TEST data only
+                        logger.log_betting_roi(y_prob_test, y_test)
+                        logger.add_custom_metric("train_size", train_end)
+                        logger.add_custom_metric("cal_val_size", len(X_cal_val))
+                        logger.add_custom_metric("test_size", len(X_test))
                         logger.add_custom_metric("calibration_method", sp_calibrator.best_method)
-                        logger.add_custom_metric("_roi_on_test_only", True)
+                        logger.add_custom_metric("_leakage_free", True)
                         if save_models:
                             logger.save()
                         print(logger.get_summary())
