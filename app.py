@@ -179,6 +179,7 @@ from model_trainer import (
     ModelTrainingPipeline,
     MoneylineModel,
     SpreadModel,
+    SpreadCoverClassifier,
     PlayerPropModel,
     ParlayCalculator,
 )
@@ -1251,16 +1252,40 @@ class Orchestrator:
         else:
             analysis.moneyline_prediction = self._feature_based_moneyline(moneyline_features)
 
-        # Spread prediction
-        if self.models_loaded and "spread" in self.pipeline.models:
+        # Spread prediction - need market spread_line for classifier
+        # Fetch market odds early to get the spread line
+        game_odds = self.get_game_odds(home_abbrev, away_abbrev)
+        spread_odds = game_odds.get("spread", {"home_line": -3.5})
+        market_spread_line = spread_odds.get("home_line", -3.5)
+        if isinstance(market_spread_line, str):
             try:
-                analysis.spread_prediction = self.pipeline.models["spread"].predict(spread_features)
-                # Apply calibration for more accurate cover probabilities
-                analysis.spread_prediction = self._calibrate_spread(analysis.spread_prediction)
+                market_spread_line = float(market_spread_line)
+            except ValueError:
+                market_spread_line = -3.5
+
+        if self.models_loaded and "spread" in self.pipeline.models:
+            spread_model = self.pipeline.models["spread"]
+            try:
+                # Check if using SpreadCoverClassifier (line-aware) or SpreadModel (regressor)
+                if isinstance(spread_model, SpreadCoverClassifier):
+                    # Classifier takes spread_line as input and outputs P(home_covers) directly
+                    analysis.spread_prediction = spread_model.predict(spread_features, spread_line=market_spread_line)
+                    # Convert classifier output to expected format
+                    cover_prob = analysis.spread_prediction.get("home_cover_probability", 0.5)
+                    analysis.spread_prediction["cover_probability"] = cover_prob
+                    # Apply calibration
+                    analysis.spread_prediction = self._calibrate_spread(analysis.spread_prediction)
+                else:
+                    # Legacy regressor model
+                    analysis.spread_prediction = spread_model.predict(spread_features)
+                    analysis.spread_prediction = self._calibrate_spread(analysis.spread_prediction)
             except Exception:
                 analysis.spread_prediction = self._feature_based_spread(spread_features)
         else:
             analysis.spread_prediction = self._feature_based_spread(spread_features)
+
+        # Store fetched odds for later use in recommendations
+        analysis.market_odds = game_odds
 
         # Generate recommendations
         analysis.recommendations = self._generate_game_recommendations(analysis, home_abbrev, away_abbrev)
@@ -1330,15 +1355,13 @@ class Orchestrator:
         """Generate betting recommendations for a game using REAL ODDS."""
         recommendations = []
 
-        # Get REAL odds for this game
-        game_odds = self.get_game_odds(home_abbrev, away_abbrev)
+        # Use pre-fetched odds from analyze_game (stored in analysis.market_odds)
+        # This avoids redundant API calls
+        game_odds = getattr(analysis, 'market_odds', None) or self.get_game_odds(home_abbrev, away_abbrev)
         ml_odds = game_odds.get("moneyline", {"home": -110, "away": -110})
         spread_odds = game_odds.get("spread", {"home_line": -3.5, "home_odds": -110, "away_line": 3.5, "away_odds": -110})
         total_odds = game_odds.get("total", {"line": 220.0, "over_odds": -110, "under_odds": -110})
         sportsbook = game_odds.get("sportsbook", "Default")
-
-        # Store odds in analysis
-        analysis.market_odds = game_odds
 
         # Get injury adjustments
         injury_data = self.get_injury_adjustment(home_abbrev, away_abbrev)
@@ -1409,18 +1432,12 @@ class Orchestrator:
                 sportsbook=sportsbook,
             ))
 
-        # Spread recommendation with REAL spread line - CORRECTED LOGIC
-        # This fixes the sign convention bug that was causing wrong-direction bets
+        # Spread recommendation with REAL spread line
         sp = analysis.spread_prediction
-        predicted_spread = sp.get("predicted_spread", 0)
-
-        # Apply injury adjustment to predicted spread
         injury_adj = injury_data.get("spread_adjustment", 0.0)
-        adjusted_spread = predicted_spread + injury_adj
 
         # Use REAL spread line from market
         real_spread_line = spread_odds.get("home_line", -3.5)
-        # Ensure spread line is a float (API may return string)
         if isinstance(real_spread_line, str):
             try:
                 real_spread_line = float(real_spread_line)
@@ -1429,39 +1446,60 @@ class Orchestrator:
         home_spread_odds = spread_odds.get("home_odds", -110)
         away_spread_odds = spread_odds.get("away_odds", -110)
 
-        # CRITICAL FIX: Use correct spread-to-probability conversion and direction logic
-        # determine_spread_bet_side() properly handles:
-        # - Which side to bet based on model vs market
-        # - Correct edge calculation in points
-        # - Proper probability using normal CDF (not linear approximation)
-        side, edge_points, cover_prob = determine_spread_bet_side(
-            model_spread=adjusted_spread,
-            market_spread=real_spread_line
-        )
+        # Get cover probability - two sources:
+        # 1. SpreadCoverClassifier outputs home_cover_probability directly
+        # 2. Legacy regressor requires conversion via determine_spread_bet_side()
+        home_cover_prob = sp.get("cover_probability") or sp.get("home_cover_probability")
 
-        # Only recommend if we have meaningful edge (at least 1 point)
-        # and the features were validated successfully
-        min_edge_points = 1.0
-        if edge_points >= min_edge_points and analysis.features_valid:
-            # Get the appropriate odds and implied probability for chosen side
+        if home_cover_prob is not None:
+            # Classifier path: We have direct P(home_covers)
+            # Determine which side to bet based on probability
+            if home_cover_prob > 0.5:
+                side = "home"
+                cover_prob = home_cover_prob
+                bet_odds = home_spread_odds
+                bet_line = real_spread_line
+                description = f"{analysis.home_team} {real_spread_line}"
+            else:
+                side = "away"
+                cover_prob = 1.0 - home_cover_prob  # P(away covers)
+                bet_odds = away_spread_odds
+                bet_line = -real_spread_line
+                description = f"{analysis.away_team} {bet_line:+.1f}"
+
+            implied_prob = self.american_to_implied_prob(bet_odds)
+            true_edge = cover_prob - implied_prob
+            reasoning_base = f"Model: {cover_prob:.1%} vs Market: {implied_prob:.1%}"
+        else:
+            # Legacy regressor path: convert predicted_spread to probability
+            predicted_spread = sp.get("predicted_spread", 0)
+            adjusted_spread = predicted_spread + injury_adj
+
+            side, edge_points, cover_prob = determine_spread_bet_side(
+                model_spread=adjusted_spread,
+                market_spread=real_spread_line
+            )
+
             if side == "home":
                 bet_odds = home_spread_odds
                 bet_line = real_spread_line
                 description = f"{analysis.home_team} {real_spread_line}"
-                implied_prob = self.american_to_implied_prob(home_spread_odds)
-            else:  # away
+            else:
                 bet_odds = away_spread_odds
-                bet_line = -real_spread_line  # Flip sign for away
+                bet_line = -real_spread_line
                 description = f"{analysis.away_team} {bet_line:+.1f}"
-                implied_prob = self.american_to_implied_prob(away_spread_odds)
 
-            # Calculate true edge (probability difference, not point difference)
+            implied_prob = self.american_to_implied_prob(bet_odds)
             true_edge = cover_prob - implied_prob
+            reasoning_base = f"Model: {adjusted_spread:+.1f} vs Line: {real_spread_line} ({edge_points:.1f}pt edge)"
 
-            # Evaluate bet using true probability edge
+        # Minimum edge threshold for spread bets
+        min_edge = 0.03  # 3% minimum edge
+        if true_edge >= min_edge and analysis.features_valid:
+            # Evaluate bet using probability edge
             spread_eval = self.strategy.evaluate_bet(cover_prob, implied_prob, "spread")
 
-            if spread_eval["is_recommended"] and true_edge > 0.02:  # Min 2% true edge
+            if spread_eval["is_recommended"]:
                 stake = self.strategy.calculate_kelly_stake(cover_prob, bet_odds, spread_eval["confidence"])
                 inj_note = f" (injury adj: {injury_adj:+.1f})" if abs(injury_adj) > 0.5 else ""
 
@@ -1470,12 +1508,12 @@ class Orchestrator:
                     description=description,
                     selection=side,
                     line=bet_line,
-                    probability=cover_prob,  # TRUE probability (no 75% cap!)
+                    probability=cover_prob,
                     confidence=spread_eval["confidence"],
-                    edge=true_edge,  # TRUE edge (probability diff, not points)
+                    edge=true_edge,
                     expected_value=spread_eval["expected_value"],
                     recommended_stake=stake,
-                    reasoning=f"Model: {adjusted_spread:+.1f} vs Line: {real_spread_line} ({edge_points:.1f}pt edge){inj_note}{line_movement_note}",
+                    reasoning=f"{reasoning_base}{inj_note}{line_movement_note}",
                     game_info={"home": home_abbrev, "away": away_abbrev},
                     odds=bet_odds,
                     implied_probability=implied_prob,

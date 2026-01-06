@@ -21,6 +21,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVR, SVC
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, VotingClassifier, StackingClassifier
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+# DIVERSITY MODELS: Add non-tree-based models to reduce ensemble correlation
+from sklearn.naive_bayes import GaussianNB
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -137,21 +142,137 @@ BACKTEST_THRESHOLDS = {
     }
 }
 
+# =============================================================================
+# SANITY LIMITS - IMPOSSIBLE METRICS DETECTION (DATA LEAKAGE PREVENTION)
+# =============================================================================
+# If ANY metric exceeds these limits, it indicates DATA LEAKAGE or a bug.
+# These are mathematically impossible for legitimate sports betting models.
+# Professional sports bettors achieve 3-8% ROI, 54-57% win rates.
+
+SANITY_LIMITS = {
+    "max_roi": 30.0,              # ROI > 30% is impossible (data leakage)
+    "max_win_rate": 62.0,         # Win rate > 62% is impossible at -110
+    "max_sharpe": 3.5,            # Sharpe > 3.5 exceeds hedge funds
+    "min_ece": 0.02,              # ECE < 0.02 is suspiciously perfect
+    "max_training_roi": 50.0,     # Training ROI > 50% = testing on train data
+}
+
+
+class DataLeakageError(Exception):
+    """Raised when impossible metrics indicate data leakage."""
+    pass
+
+
+def check_sanity_limits(
+    results: Dict,
+    context: str = "backtest",
+    raise_on_failure: bool = True
+) -> Tuple[bool, List[str]]:
+    """
+    Check if results exceed sanity limits indicating data leakage.
+
+    This is a CRITICAL safety check. If metrics are "too good to be true",
+    they indicate the model has seen future data (data leakage).
+
+    Args:
+        results: Results dictionary with metrics
+        context: Where this check is being run (for error messages)
+        raise_on_failure: If True, raise DataLeakageError on detection
+
+    Returns:
+        Tuple of (is_sane: bool, violations: List[str])
+
+    Raises:
+        DataLeakageError: If raise_on_failure=True and leakage detected
+    """
+    violations = []
+
+    # Check ROI
+    roi = results.get("overall_roi", results.get("roi", results.get("betting_roi_pct", 0)))
+    if roi is not None and roi > SANITY_LIMITS["max_roi"]:
+        violations.append(
+            f"IMPOSSIBLE ROI: {roi:.1f}% > {SANITY_LIMITS['max_roi']}% limit. "
+            f"This indicates DATA LEAKAGE - model is seeing future data!"
+        )
+
+    # Check win rate
+    win_rate = results.get("overall_win_rate", results.get("win_rate", results.get("bet_win_rate", 0)))
+    if win_rate is not None and win_rate > SANITY_LIMITS["max_win_rate"]:
+        violations.append(
+            f"IMPOSSIBLE WIN RATE: {win_rate:.1f}% > {SANITY_LIMITS['max_win_rate']}% limit. "
+            f"No legitimate model achieves >62% at -110 odds!"
+        )
+
+    # Check Sharpe ratio
+    sharpe = results.get("sharpe_ratio", results.get("sharpe", 0))
+    if sharpe is not None and sharpe > SANITY_LIMITS["max_sharpe"]:
+        violations.append(
+            f"IMPOSSIBLE SHARPE: {sharpe:.2f} > {SANITY_LIMITS['max_sharpe']} limit. "
+            f"This exceeds top hedge funds - indicates data leakage!"
+        )
+
+    # Check ECE (suspiciously perfect calibration)
+    ece = results.get("ece", results.get("metrics", {}).get("ece"))
+    if ece is not None and ece < SANITY_LIMITS["min_ece"]:
+        violations.append(
+            f"SUSPICIOUSLY PERFECT ECE: {ece:.4f} < {SANITY_LIMITS['min_ece']} limit. "
+            f"Calibration may be overfitting to validation data!"
+        )
+
+    is_sane = len(violations) == 0
+
+    if not is_sane:
+        error_msg = (
+            f"\n{'='*70}\n"
+            f"  DATA LEAKAGE DETECTED in {context}!\n"
+            f"{'='*70}\n"
+            f"  The following metrics are IMPOSSIBLE for legitimate betting models:\n\n"
+        )
+        for v in violations:
+            error_msg += f"  - {v}\n"
+        error_msg += (
+            f"\n  REQUIRED ACTIONS:\n"
+            f"  1. Check train/test data separation - ensure NO overlap\n"
+            f"  2. Verify features only use data BEFORE game date\n"
+            f"  3. Ensure calibration uses held-out data only\n"
+            f"  4. Check for schedule lookahead features\n"
+            f"{'='*70}\n"
+        )
+
+        print(error_msg, flush=True)
+
+        if raise_on_failure:
+            raise DataLeakageError(error_msg)
+
+    return is_sane, violations
+
 
 def check_improvement_thresholds(
     results: Dict,
-    bet_type: str
+    bet_type: str,
+    check_leakage: bool = True
 ) -> Tuple[bool, List[str]]:
     """
     Check if backtest results meet promotion thresholds.
 
+    IMPORTANT: This function now checks for DATA LEAKAGE first.
+    If metrics are impossibly good, it will raise DataLeakageError.
+
     Args:
         results: Backtest results dictionary with metrics
         bet_type: Type of bet ("moneyline", "spread", "prop")
+        check_leakage: If True, run sanity checks first (default True)
 
     Returns:
         Tuple of (passed: bool, failures: List[str])
+
+    Raises:
+        DataLeakageError: If sanity limits are exceeded (data leakage detected)
     """
+    # CRITICAL: Check for data leakage FIRST
+    if check_leakage:
+        check_sanity_limits(results, context=f"{bet_type} backtest", raise_on_failure=True)
+
     thresholds = BACKTEST_THRESHOLDS.get(bet_type, BACKTEST_THRESHOLDS["moneyline"])
     failures = []
 
@@ -203,15 +324,23 @@ class BacktestReporter:
         games_data: List[Dict],
         initial_bankroll: float = 10000.0,
         min_edge: float = 0.02,
+        holdout_fraction: float = 0.2,
     ) -> Dict:
         """
-        Run walk-forward backtest for moneyline model.
+        Run backtest for moneyline model on HOLDOUT data only.
+
+        CRITICAL FIX: Previous version tested on ALL data including training data,
+        causing massive overfitting (20%+ ROI that isn't real).
+
+        This version only evaluates on the last holdout_fraction of data,
+        which mirrors the train/test split used during model training.
 
         Args:
             model: Trained moneyline model with predict() method
             games_data: Historical games with outcomes
             initial_bankroll: Starting bankroll for simulation
             min_edge: Minimum edge to place bet
+            holdout_fraction: Fraction of data to use for testing (should match training split)
 
         Returns:
             Backtest results dictionary
@@ -238,17 +367,21 @@ class BacktestReporter:
             except Exception:
                 return 0.5, 0.5
 
-        # Format games for backtester
-        formatted_games = []
+        # Format ALL games for sorting
+        all_formatted_games = []
         for game in games_data:
-            # Get features from game data
             features = game.get("moneyline_features", {})
             if not features:
                 continue
 
+            try:
+                game_date = datetime.strptime(game.get("game_date", "2024-01-01"), "%Y-%m-%d") if isinstance(game.get("game_date"), str) else datetime.now()
+            except (ValueError, TypeError):
+                game_date = datetime.now()
+
             formatted_game = {
                 "game_id": f"{game.get('game_date', '')}_{game.get('home_team', '')}_{game.get('away_team', '')}",
-                "date": datetime.strptime(game.get("game_date", "2024-01-01"), "%Y-%m-%d") if isinstance(game.get("game_date"), str) else datetime.now(),
+                "date": game_date,
                 "home_team": game.get("home_team", "HOM"),
                 "away_team": game.get("away_team", "AWY"),
                 "home_odds": game.get("home_odds", -110),
@@ -257,17 +390,32 @@ class BacktestReporter:
                 "away_score": game.get("away_score", 0),
                 "features": features,
             }
-            formatted_games.append(formatted_game)
+            all_formatted_games.append(formatted_game)
 
-        if len(formatted_games) < 20:
-            return {"error": f"Not enough games for backtest ({len(formatted_games)} < 20)"}
+        if len(all_formatted_games) < 50:
+            return {"error": f"Not enough games for backtest ({len(all_formatted_games)} < 50)"}
 
-        # Run backtest
-        result = backtester.backtest_moneyline(formatted_games, model_predict_fn)
+        # Sort by date to ensure chronological order
+        all_formatted_games.sort(key=lambda x: x["date"])
+
+        # CRITICAL: Only use HOLDOUT data (last portion not seen during training)
+        n_total = len(all_formatted_games)
+        n_holdout = int(n_total * holdout_fraction)
+        holdout_games = all_formatted_games[-n_holdout:]
+
+        print(f"  HOLDOUT BACKTEST: Testing on {n_holdout} games (last {holdout_fraction:.0%})")
+        print(f"  Holdout period: {holdout_games[0]['date'].strftime('%Y-%m-%d')} to {holdout_games[-1]['date'].strftime('%Y-%m-%d')}")
+
+        # Run backtest on holdout only
+        result = backtester.backtest_moneyline(holdout_games, model_predict_fn)
 
         # Convert to dict with additional metrics
         result_dict = result.to_dict()
-        result_dict["games_tested"] = len(formatted_games)
+        result_dict["games_tested"] = len(holdout_games)
+        result_dict["total_games"] = n_total
+        result_dict["holdout_fraction"] = holdout_fraction
+        result_dict["holdout_start_date"] = holdout_games[0]["date"].strftime("%Y-%m-%d")
+        result_dict["holdout_end_date"] = holdout_games[-1]["date"].strftime("%Y-%m-%d")
 
         return result_dict
 
@@ -277,15 +425,19 @@ class BacktestReporter:
         games_data: List[Dict],
         initial_bankroll: float = 10000.0,
         min_edge: float = 0.02,
+        holdout_fraction: float = 0.2,
     ) -> Dict:
         """
-        Run walk-forward backtest for spread model.
+        Run backtest for spread model on HOLDOUT data only.
+
+        CRITICAL FIX: Only evaluates on holdout data that wasn't seen during training.
 
         Args:
             model: Trained spread model with predict() method
             games_data: Historical games with outcomes and spread lines
             initial_bankroll: Starting bankroll for simulation
             min_edge: Minimum edge to place bet
+            holdout_fraction: Fraction of data to use for testing
 
         Returns:
             Backtest results dictionary
@@ -313,16 +465,21 @@ class BacktestReporter:
             except Exception:
                 return 0, 0.5
 
-        # Format games for backtester
-        formatted_games = []
+        # Format ALL games for sorting
+        all_formatted_games = []
         for game in games_data:
             features = game.get("spread_features", game.get("moneyline_features", {}))
             if not features:
                 continue
 
+            try:
+                game_date = datetime.strptime(game.get("game_date", "2024-01-01"), "%Y-%m-%d") if isinstance(game.get("game_date"), str) else datetime.now()
+            except (ValueError, TypeError):
+                game_date = datetime.now()
+
             formatted_game = {
                 "game_id": f"{game.get('game_date', '')}_{game.get('home_team', '')}_{game.get('away_team', '')}",
-                "date": datetime.strptime(game.get("game_date", "2024-01-01"), "%Y-%m-%d") if isinstance(game.get("game_date"), str) else datetime.now(),
+                "date": game_date,
                 "home_team": game.get("home_team", "HOM"),
                 "away_team": game.get("away_team", "AWY"),
                 "spread_line": game.get("spread_line", 0),
@@ -331,17 +488,30 @@ class BacktestReporter:
                 "away_score": game.get("away_score", 0),
                 "features": features,
             }
-            formatted_games.append(formatted_game)
+            all_formatted_games.append(formatted_game)
 
-        if len(formatted_games) < 20:
-            return {"error": f"Not enough games for backtest ({len(formatted_games)} < 20)"}
+        if len(all_formatted_games) < 50:
+            return {"error": f"Not enough games for backtest ({len(all_formatted_games)} < 50)"}
 
-        # Run backtest
-        result = backtester.backtest_spread(formatted_games, model_predict_fn)
+        # Sort by date
+        all_formatted_games.sort(key=lambda x: x["date"])
+
+        # CRITICAL: Only use HOLDOUT data
+        n_total = len(all_formatted_games)
+        n_holdout = int(n_total * holdout_fraction)
+        holdout_games = all_formatted_games[-n_holdout:]
+
+        print(f"  HOLDOUT BACKTEST: Testing on {n_holdout} games (last {holdout_fraction:.0%})")
+        print(f"  Holdout period: {holdout_games[0]['date'].strftime('%Y-%m-%d')} to {holdout_games[-1]['date'].strftime('%Y-%m-%d')}")
+
+        # Run backtest on holdout only
+        result = backtester.backtest_spread(holdout_games, model_predict_fn)
 
         # Convert to dict
         result_dict = result.to_dict()
-        result_dict["games_tested"] = len(formatted_games)
+        result_dict["games_tested"] = len(holdout_games)
+        result_dict["total_games"] = n_total
+        result_dict["holdout_fraction"] = holdout_fraction
 
         return result_dict
 
@@ -666,6 +836,10 @@ class TrainingMetricsLogger:
         """
         Save metrics to JSON file.
 
+        IMPORTANT: This method now checks for impossible training metrics
+        that indicate data leakage. Training metrics are expected to be
+        optimistic, but extreme values (>50% ROI) indicate a bug.
+
         Args:
             directory: Directory to save to (default: training_metrics/)
 
@@ -677,6 +851,24 @@ class TrainingMetricsLogger:
 
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
+
+        # CRITICAL: Check for impossible training metrics (data leakage indicator)
+        training_roi = self.metrics.get("betting_roi_pct", 0)
+        if training_roi > SANITY_LIMITS["max_training_roi"]:
+            print(
+                f"\n  ⚠️  WARNING: IMPOSSIBLE TRAINING ROI DETECTED!\n"
+                f"      ROI: {training_roi:.1f}% > {SANITY_LIMITS['max_training_roi']}% limit\n"
+                f"      This indicates the model is being evaluated on TRAINING data,\n"
+                f"      not held-out test data. This is DATA LEAKAGE!\n"
+                f"      Action: Ensure log_betting_roi() uses TEST data only.\n",
+                flush=True
+            )
+            # Add warning flag to saved metrics
+            self.metrics["_warning_possible_data_leakage"] = True
+            self.metrics["_warning_message"] = (
+                f"Training ROI of {training_roi:.1f}% exceeds sanity limit of "
+                f"{SANITY_LIMITS['max_training_roi']}%. This indicates data leakage."
+            )
 
         filename = f"{self.model_name}_{self.timestamp}.json"
         filepath = directory / filename
@@ -1313,6 +1505,261 @@ class SpreadModel(BaseModelTrainer):
                 result["edge"] = float(np.clip(predicted_diff - spread_line, -20.0, 20.0))
 
             return result
+
+
+class SpreadCoverClassifier(BaseModelTrainer):
+    """
+    Line-aware spread cover classifier that outputs P(Home Covers).
+
+    CRITICAL FIX: The previous SpreadModel used SVR to predict point differential,
+    but the backtester expected 'home_cover_probability'. This resulted in 0 bets.
+
+    This classifier:
+    1. Takes spread_line as an INPUT FEATURE (line-aware)
+    2. Outputs P(home_covers) directly as a probability
+    3. Uses XGBoost with regularization to prevent overfitting
+    4. Conservative settings for 3-5% ROI target
+
+    The key insight is that the spread line contains valuable market information
+    and should be used as a feature, not just for evaluation.
+    """
+
+    def __init__(self):
+        super().__init__("spread_cover_classifier")
+
+        # Use XGBoost with conservative hyperparameters
+        # Heavy regularization to prevent overfitting
+        try:
+            from xgboost import XGBClassifier
+            self.model = XGBClassifier(
+                n_estimators=200,
+                max_depth=4,              # Shallow trees
+                learning_rate=0.03,       # Slow learning
+                min_child_weight=30,      # High regularization
+                subsample=0.7,            # Row sampling
+                colsample_bytree=0.7,     # Column sampling
+                reg_alpha=1.0,            # L1 regularization
+                reg_lambda=5.0,           # L2 regularization
+                random_state=42,
+                eval_metric='logloss',
+                use_label_encoder=False,
+            )
+            self._has_xgb = True
+        except ImportError:
+            # Fallback to GradientBoosting
+            self.model = GradientBoostingClassifier(
+                n_estimators=100,
+                max_depth=4,
+                learning_rate=0.05,
+                min_samples_leaf=20,
+                random_state=42,
+            )
+            self._has_xgb = False
+
+    def prepare_training_data(
+        self,
+        games_data: List[Dict],
+    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        """
+        Prepare training data with spread_line as a feature.
+
+        The spread line is included as a feature because it contains
+        valuable market information about the expected margin.
+
+        If spread_line is not available in training data, we estimate it from
+        net_rating_diff: spread ≈ -net_rating_diff * 0.4 + 3 (home advantage)
+
+        Returns:
+            Tuple of (features DataFrame with spread_line, cover labels)
+        """
+        features_list = []
+        labels = []
+        game_dates = []
+
+        for game in games_data:
+            features = game.get("spread_features", {})
+            actual_diff = game.get("point_differential", None)  # home - away
+            spread_line = game.get("spread_line", None)
+
+            if features and actual_diff is not None:
+                numeric_features = {
+                    k: v for k, v in features.items()
+                    if isinstance(v, (int, float)) and k not in [
+                        "home_team_id", "away_team_id", "injury_details"
+                    ]
+                }
+
+                # If no market spread_line, estimate from net_rating_diff
+                # Formula: spread ≈ -net_rating_diff * 0.4 + home_court_advantage
+                # Negative spread means home is favored
+                if spread_line is None:
+                    net_rating_diff = features.get("net_rating_diff", 0)
+                    # Home advantage typically ~3 points, net rating converts ~0.4 to spread
+                    estimated_spread = -net_rating_diff * 0.4 - 3.0
+                    spread_line = estimated_spread
+
+                # CRITICAL: Add spread_line as a feature
+                # This makes the model "line-aware"
+                numeric_features['spread_line'] = spread_line
+
+                features_list.append(numeric_features)
+                game_dates.append(game.get("game_date", "1900-01-01"))
+
+                # 1 if home covers spread (actual_diff > spread_line), 0 otherwise
+                # Note: If spread is -5.5 and home wins by 6, they cover (6 > -5.5)
+                labels.append(1 if actual_diff > spread_line else 0)
+
+        X = pd.DataFrame(features_list)
+        y = np.array(labels)
+
+        # Sort chronologically for time-series validation
+        if game_dates and len(game_dates) == len(X):
+            date_series = pd.Series(game_dates)
+            sort_indices = date_series.argsort().values
+            X = X.iloc[sort_indices].reset_index(drop=True)
+            y = y[sort_indices]
+
+        return X, y
+
+    def train(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        test_size: float = 0.2,
+        cv_folds: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Train the spread cover classifier with time-series validation.
+
+        Returns metrics on held-out test data.
+        """
+        if len(X) == 0:
+            return {"error": "No training data"}
+
+        # Store feature names
+        self.feature_names = list(X.columns)
+
+        # Time-series split (use last 20% for testing)
+        n_test = int(len(X) * test_size)
+        X_train = X.iloc[:-n_test]
+        y_train = y[:-n_test]
+        X_test = X.iloc[-n_test:]
+        y_test = y[-n_test:]
+
+        # Fit scaler on training data only
+        self.scaler.fit(X_train)
+        X_train_scaled = self.scaler.transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+
+        # Train model
+        self.model.fit(X_train_scaled, y_train)
+        self.is_fitted = True
+
+        # Evaluate on TEST data (honest metrics)
+        y_prob_test = self.model.predict_proba(X_test_scaled)[:, 1]
+        y_pred_test = (y_prob_test > 0.5).astype(int)
+
+        metrics = {
+            "test_accuracy": float(accuracy_score(y_test, y_pred_test)),
+            "test_precision": float(precision_score(y_test, y_pred_test, zero_division=0)),
+            "test_recall": float(recall_score(y_test, y_pred_test, zero_division=0)),
+            "test_f1": float(f1_score(y_test, y_pred_test, zero_division=0)),
+            "train_size": len(X_train),
+            "test_size": len(X_test),
+            "model_type": "spread_cover_classifier",
+        }
+
+        # Add AUC-ROC
+        try:
+            from sklearn.metrics import roc_auc_score
+            metrics["test_auc_roc"] = float(roc_auc_score(y_test, y_prob_test))
+        except ValueError:
+            metrics["test_auc_roc"] = None
+
+        print(f"  Spread Cover Classifier - Test Accuracy: {metrics['test_accuracy']:.1%}")
+        print(f"  Spread Cover Classifier - Test AUC-ROC: {metrics.get('test_auc_roc', 'N/A')}")
+
+        return metrics
+
+    def predict(self, features: Dict, spread_line: float) -> Dict[str, Any]:
+        """
+        Predict probability that home team covers the spread.
+
+        Args:
+            features: Spread features dictionary
+            spread_line: The betting line (e.g., -5.5 means home favored by 5.5)
+
+        Returns:
+            Dictionary with home_cover_probability for backtester compatibility
+        """
+        if not self.is_fitted:
+            raise ValueError("Model not fitted. Train or load a model first.")
+
+        numeric_features = {
+            k: v for k, v in features.items()
+            if isinstance(v, (int, float)) and k not in [
+                "home_team_id", "away_team_id", "injury_details"
+            ]
+        }
+
+        # Add spread_line as feature (line-aware prediction)
+        numeric_features['spread_line'] = spread_line
+
+        X = pd.DataFrame([numeric_features])
+
+        for col in self.feature_names:
+            if col not in X.columns:
+                X[col] = 0
+        X = X[self.feature_names]
+
+        X_scaled = self.preprocess_features(X, fit=False)
+        prob = self.model.predict_proba(X_scaled)[0]
+
+        # Clip probabilities to prevent extreme values
+        home_cover_prob = float(np.clip(prob[1], 0.05, 0.95))
+
+        return {
+            "home_cover_probability": home_cover_prob,
+            "away_cover_probability": 1.0 - home_cover_prob,
+            "prediction": "home_covers" if home_cover_prob > 0.5 else "away_covers",
+            "confidence": float(max(home_cover_prob, 1.0 - home_cover_prob)),
+            "spread_line": spread_line,
+        }
+
+    def save_model(self, directory: Path = None) -> Path:
+        """Save model to disk."""
+        if directory is None:
+            directory = MODEL_DIR
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        filepath = directory / f"{self.model_name}.pkl"
+        with open(filepath, "wb") as f:
+            pickle.dump({
+                "model": self.model,
+                "scaler": self.scaler,
+                "feature_names": self.feature_names,
+                "is_fitted": self.is_fitted,
+            }, f)
+        print(f"  Saved {self.model_name} to {filepath}")
+        return filepath
+
+    @classmethod
+    def load_model(cls, filepath: Path = None) -> "SpreadCoverClassifier":
+        """Load model from disk."""
+        if filepath is None:
+            filepath = MODEL_DIR / "spread_cover_classifier.pkl"
+        filepath = Path(filepath)
+
+        with open(filepath, "rb") as f:
+            data = pickle.load(f)
+
+        instance = cls()
+        instance.model = data["model"]
+        instance.scaler = data["scaler"]
+        instance.feature_names = data["feature_names"]
+        instance.is_fitted = data["is_fitted"]
+        return instance
 
 
 class QuantilePropModel(BaseModelTrainer):
@@ -2621,12 +3068,12 @@ class EnsembleMoneylineModel(BaseModelTrainer):
     def __init__(self):
         super().__init__("moneyline_ensemble")
 
-        # Base estimators - TIER 1 UPGRADE: Now includes Neural Network
+        # Base estimators - Now includes Neural Network + DIVERSE MODELS
         estimators = [
             ('lr', LogisticRegression(max_iter=1000, random_state=42)),
             ('rf', RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)),
             ('gb', GradientBoostingClassifier(n_estimators=100, max_depth=5, random_state=42)),
-            # TIER 1: Neural Network for capturing complex non-linear patterns
+            # Neural Network for capturing complex non-linear patterns
             ('mlp', MLPClassifier(
                 hidden_layer_sizes=(64, 32),  # Two hidden layers
                 activation='relu',
@@ -2641,6 +3088,11 @@ class EnsembleMoneylineModel(BaseModelTrainer):
                 n_iter_no_change=10,
                 random_state=42,
             )),
+            # DIVERSITY MODELS: Reduce ensemble correlation with non-tree models
+            # Naive Bayes: Fast, different inductive bias (independence assumption)
+            ('nb', GaussianNB()),
+            # Quadratic Discriminant Analysis: Quadratic decision boundaries
+            ('qda', QuadraticDiscriminantAnalysis(reg_param=0.1)),  # Regularized to avoid singularity
         ]
 
         if HAS_XGBOOST:
@@ -2944,6 +3396,10 @@ class TunedEnsembleMoneylineModel(BaseModelTrainer):
                 lgb_model = lgb.LGBMClassifier(random_state=42, verbose=-1)
                 tuned_lgb = self._tune_model(lgb_model, self.PARAM_GRIDS['lgb'], X_train_scaled, y_train, 'lgb')
                 estimators.append(('lgb', tuned_lgb))
+
+            # DIVERSITY MODELS: Add non-tree models (no tuning needed)
+            estimators.append(('nb', GaussianNB()))
+            estimators.append(('qda', QuadraticDiscriminantAnalysis(reg_param=0.1)))
         else:
             # Use default parameters
             estimators.append(('rf', RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)))
@@ -2952,6 +3408,9 @@ class TunedEnsembleMoneylineModel(BaseModelTrainer):
                 estimators.append(('xgb', xgb.XGBClassifier(n_estimators=100, max_depth=6, random_state=42, use_label_encoder=False, eval_metric='logloss')))
             if HAS_LIGHTGBM:
                 estimators.append(('lgb', lgb.LGBMClassifier(n_estimators=100, max_depth=6, random_state=42, verbose=-1)))
+            # DIVERSITY MODELS: Add non-tree models
+            estimators.append(('nb', GaussianNB()))
+            estimators.append(('qda', QuadraticDiscriminantAnalysis(reg_param=0.1)))
 
         # Create stacking classifier with XGBoost meta-learner (better than LR)
         if HAS_XGBOOST:
@@ -3501,14 +3960,37 @@ class ModelTrainingPipeline:
                     print(f"  Moneyline calibrator saved (method: {ml_calibrator.best_method})")
 
                     # LOG COMPREHENSIVE METRICS with TrainingMetricsLogger
+                    # CRITICAL FIX: Use train/test split for betting ROI to prevent leakage
                     try:
                         logger = TrainingMetricsLogger("moneyline", model_type="classifier")
+
+                        # Split data for honest evaluation (last 20% as test)
+                        n_samples = len(X_ml)
+                        n_test = int(n_samples * 0.2)
+                        test_idx = slice(n_samples - n_test, n_samples)
+                        train_idx = slice(0, n_samples - n_test)
+
+                        # Generate predictions on TEST set only for ROI
+                        X_test = X_ml.iloc[test_idx] if hasattr(X_ml, 'iloc') else X_ml[test_idx]
+                        y_test = y_ml[test_idx] if hasattr(y_ml, '__getitem__') else y_ml.iloc[test_idx]
+
+                        # Get test predictions
+                        y_prob_test = np.array([
+                            moneyline_model.predict(dict(zip(moneyline_model.feature_names, x)))["home_win_probability"]
+                            for x in X_test.values
+                        ])
+
+                        # Log classification metrics on ALL data (for completeness)
                         y_pred = (y_prob > 0.5).astype(int)
                         logger.log_classification_metrics(y_ml, y_pred, y_prob)
                         logger.log_calibration_metrics(y_prob, y_ml)
-                        logger.log_betting_roi(y_prob, y_ml)
-                        logger.add_custom_metric("train_size", len(X_ml))
+
+                        # CRITICAL: Log betting ROI on TEST data only (honest evaluation)
+                        logger.log_betting_roi(y_prob_test, np.array(y_test))
+                        logger.add_custom_metric("train_size", n_samples - n_test)
+                        logger.add_custom_metric("test_size", n_test)
                         logger.add_custom_metric("calibration_method", ml_calibrator.best_method)
+                        logger.add_custom_metric("_roi_on_test_only", True)  # Flag for clarity
                         if save_models:
                             logger.save()
                         print(logger.get_summary())
@@ -3542,11 +4024,16 @@ class ModelTrainingPipeline:
                 except Exception as e:
                     print(f"  Warning: Moneyline backtest failed: {e}")
 
-        # Train Spread Model (Regressor)
+        # Train Spread Cover Classifier (replaces SVR regressor)
+        # CRITICAL FIX: Using classification (predict cover vs not) instead of regression
+        # The classifier takes spread_line as input and directly outputs P(home_covers)
+        # This is more accurate than predicting point differential then converting to probability
         print("\n" + "=" * 50)
-        print("Training Spread Model (SVM Regressor)")
+        print("Training Spread Cover Classifier (XGBoost)")
+        print("  - Line-aware: spread_line is an input feature")
+        print("  - Outputs P(home_covers) directly")
         print("=" * 50)
-        spread_model = SpreadModel(use_classifier=False)
+        spread_model = SpreadCoverClassifier()
         X_sp, y_sp = spread_model.prepare_training_data(games_data)
         if len(X_sp) > 0:
             results["spread"] = spread_model.train(X_sp, y_sp)
@@ -3554,31 +4041,16 @@ class ModelTrainingPipeline:
             if save_models:
                 spread_model.save_model()
 
-            # CALIBRATION: For spread, we calibrate cover probabilities
-            # We need to convert spread predictions to cover probability
+            # CALIBRATION: Classifier directly outputs probabilities
+            # No conversion needed (unlike the old SVR regressor)
             if HAS_CALIBRATION:
                 try:
                     print("\n  Fitting spread cover calibrator...")
                     X_scaled = spread_model.preprocess_features(X_sp, fit=False)
-                    y_pred = spread_model.model.predict(X_scaled)
 
-                    # Convert predictions to cover probabilities
-                    # Using sigmoid transformation: edge -> probability
-                    # Positive edge (predicted > actual) = more likely to cover
-                    from scipy.special import expit
-
-                    # Extract spread lines from game data
-                    spread_lines = []
-                    for game in games_data:
-                        spread_lines.append(game.get("spread_line", 0))
-                    spread_lines = np.array(spread_lines[:len(y_pred)])
-
-                    # Edge = predicted - spread_line, convert to probability
-                    edges = y_pred - spread_lines if len(spread_lines) == len(y_pred) else y_pred
-                    y_prob_cover = expit(edges / 5.0)  # Scale factor of 5 points
-
-                    # Create cover labels (home team covers if actual > spread)
-                    y_cover = (y_sp > spread_lines).astype(int) if len(spread_lines) == len(y_sp) else (y_sp > 0).astype(int)
+                    # Classifier directly outputs P(home_covers)
+                    y_prob_cover = spread_model.model.predict_proba(X_scaled)[:, 1]
+                    y_cover = y_sp  # Already 0/1 labels from prepare_training_data
 
                     # Fit calibrator
                     from calibration import ModelCalibrator
@@ -3598,12 +4070,28 @@ class ModelTrainingPipeline:
 
                     # LOG COMPREHENSIVE METRICS with TrainingMetricsLogger
                     try:
-                        logger = TrainingMetricsLogger("spread", model_type="regressor")
-                        logger.log_regression_metrics(y_sp, y_pred)
+                        logger = TrainingMetricsLogger("spread", model_type="classifier")
+
+                        # Split data for honest evaluation (last 20% as test)
+                        n_samples = len(X_sp)
+                        n_test = int(n_samples * 0.2)
+                        test_idx = slice(n_samples - n_test, n_samples)
+
+                        # Get test data
+                        y_prob_cover_test = y_prob_cover[test_idx]
+                        y_cover_test = y_cover[test_idx]
+
+                        # Log classification metrics
+                        y_pred = (y_prob_cover > 0.5).astype(int)
+                        logger.log_classification_metrics(y_cover, y_pred, y_prob_cover)
                         logger.log_calibration_metrics(y_prob_cover, y_cover)
-                        logger.log_betting_roi(y_prob_cover, y_cover)
-                        logger.add_custom_metric("train_size", len(X_sp))
+
+                        # CRITICAL: Log betting ROI on TEST data only (honest evaluation)
+                        logger.log_betting_roi(y_prob_cover_test, y_cover_test)
+                        logger.add_custom_metric("train_size", n_samples - n_test)
+                        logger.add_custom_metric("test_size", n_test)
                         logger.add_custom_metric("calibration_method", sp_calibrator.best_method)
+                        logger.add_custom_metric("_roi_on_test_only", True)
                         if save_models:
                             logger.save()
                         print(logger.get_summary())
@@ -3766,8 +4254,23 @@ class ModelTrainingPipeline:
                 else:
                     model = MoneylineModel()
             elif "spread" in model_name:
-                use_classifier = "classifier" in model_name
-                model = SpreadModel(use_classifier=use_classifier)
+                # Use SpreadCoverClassifier for spread_cover_classifier.pkl
+                if "spread_cover_classifier" in model_name:
+                    # SpreadCoverClassifier.load_model is a classmethod that returns the loaded instance
+                    try:
+                        model = SpreadCoverClassifier.load_model(filepath)
+                        self.models[model_name] = model
+                        # Also register under "spread" key for app.py compatibility
+                        self.models["spread"] = model
+                        print(f"  Registered {model_name} as spread (classifier preferred)")
+                        continue  # Skip the normal load_model call below
+                    except Exception as e:
+                        print(f"Error loading {filepath}: {e}")
+                        continue
+                else:
+                    # Legacy SpreadModel (SVR regressor)
+                    use_classifier = "classifier" in model_name
+                    model = SpreadModel(use_classifier=use_classifier)
             elif "player_" in model_name:
                 # Extract prop type
                 parts = model_name.split("_")
