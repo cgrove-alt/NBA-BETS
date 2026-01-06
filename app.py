@@ -1823,13 +1823,90 @@ class Orchestrator:
             all_recommendations.extend(analysis.recommendations)
 
         # Add player props if requested
-        if include_props and player_props:
-            for player, lines in player_props.items():
-                # Determine opponent from schedule
-                opponent = self._find_player_opponent(player)
-                if opponent:
-                    prop_recs = self.analyze_player_props(player, opponent, lines)
-                    all_recommendations.extend(prop_recs)
+        prop_recommendations = []
+        if include_props:
+            print("\nAnalyzing player props...")
+
+            # If player_props provided manually, use those
+            if player_props:
+                for player, lines in player_props.items():
+                    opponent = self._find_player_opponent(player)
+                    if opponent:
+                        prop_recs = self.analyze_player_props(player, opponent, lines)
+                        prop_recommendations.extend(prop_recs)
+
+            # Otherwise, fetch props from API for each game
+            elif HAS_BALLDONTLIE and self.balldontlie:
+                from daily_predictions import get_player_props_for_game
+                from id_mapping import get_id_mapper
+
+                mapper = get_id_mapper()
+
+                for game in self.schedule:
+                    game_id = game.get("id")
+                    if not game_id:
+                        continue
+
+                    home_team = game.get("home_team", {}).get("abbreviation", "")
+                    away_team = game.get("visitor_team", {}).get("abbreviation", "")
+
+                    try:
+                        props_data = get_player_props_for_game(self.balldontlie, game_id)
+                        if not props_data:
+                            continue
+
+                        # Filter to key players (points line >= 15)
+                        key_players = {
+                            pid: props for pid, props in props_data.items()
+                            if props.get("points_line", 0) >= 15
+                        }
+
+                        # Process top 6 players per game
+                        sorted_players = sorted(
+                            key_players.items(),
+                            key=lambda x: x[1].get("points_line", 0),
+                            reverse=True
+                        )[:6]
+
+                        for player_id, props in sorted_players:
+                            # Get player name from mapper
+                            player_name = mapper.get_player_name(player_id)
+                            if not player_name:
+                                continue
+
+                            # Get player's team to determine opponent
+                            player_info = self.balldontlie.get_player(player_id)
+                            if not player_info:
+                                continue
+
+                            player_team = player_info.get("team", {}).get("abbreviation", "")
+                            if player_team == home_team:
+                                opponent = away_team
+                            elif player_team == away_team:
+                                opponent = home_team
+                            else:
+                                continue
+
+                            # Convert props to format expected by analyze_player_props
+                            prop_lines = {
+                                "points": props.get("points_line"),
+                                "rebounds": props.get("rebounds_line"),
+                                "assists": props.get("assists_line"),
+                                "threes": props.get("threes_line"),
+                            }
+                            # Filter out None values
+                            prop_lines = {k: v for k, v in prop_lines.items() if v is not None}
+
+                            if prop_lines:
+                                prop_recs = self.analyze_player_props(player_name, opponent, prop_lines)
+                                prop_recommendations.extend(prop_recs)
+
+                    except Exception as e:
+                        print(f"  Warning: Failed to fetch props for game {game_id}: {e}")
+
+            if prop_recommendations:
+                print(f"  Found {len(prop_recommendations)} player prop recommendations")
+                all_recommendations.extend(prop_recommendations)
 
         # Generate parlay recommendations
         parlay_legs = [
@@ -1870,14 +1947,59 @@ class Orchestrator:
     def _find_player_opponent(self, player_name: str) -> Optional[str]:
         """Find a player's opponent from today's schedule."""
         try:
-            player_id = get_player_id(player_name)
-            if not player_id:
+            if not HAS_BALLDONTLIE or not self.balldontlie:
                 return None
 
-            # This would require fetching player's team and matching to schedule
-            # Simplified: return None to skip
-            return None
-        except Exception:
+            # Search for player by name in Balldontlie API
+            # Note: API doesn't handle full names with spaces well
+            # Try searching by first name, then last name if needed
+            name_parts = player_name.split()
+            players = []
+
+            # Try first name (usually more unique)
+            if name_parts:
+                players = self.balldontlie.get_players(search=name_parts[0])
+
+            # If no results or too many, try last name
+            if not players or len(players) > 50:
+                if len(name_parts) > 1:
+                    players = self.balldontlie.get_players(search=name_parts[-1])
+
+            if not players:
+                return None
+
+            # Find exact match by full name
+            player_info = None
+            target_name = player_name.lower()
+            for p in players:
+                full_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+                if full_name.lower() == target_name:
+                    player_info = p
+                    break
+
+            # If no exact match, use first result
+            if not player_info:
+                player_info = players[0]
+
+            player_team = player_info.get("team", {}).get("abbreviation")
+            if not player_team:
+                return None
+
+            # Get today's games and find this team's game
+            games = self.balldontlie.get_todays_games()
+
+            for game in games:
+                home = game.get("home_team", {}).get("abbreviation")
+                away = game.get("visitor_team", {}).get("abbreviation")
+
+                if player_team == home:
+                    return away
+                elif player_team == away:
+                    return home
+
+            return None  # Player's team not playing today
+        except Exception as e:
+            print(f"Warning: Could not find opponent for {player_name}: {e}")
             return None
 
     def print_bet_slip(self, bet_slip: DailyBetSlip):
@@ -1982,8 +2104,8 @@ def main():
     #     }
     # ])
 
-    # Generate daily bet slip
-    bet_slip = orchestrator.generate_daily_bet_slip()
+    # Generate daily bet slip (with player props enabled)
+    bet_slip = orchestrator.generate_daily_bet_slip(include_props=True)
 
     # Print and save results
     orchestrator.print_bet_slip(bet_slip)
