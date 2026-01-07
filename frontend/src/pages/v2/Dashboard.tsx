@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Calendar, Flame, TrendingUp } from 'lucide-react';
 import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
 import { BetCard } from '../../components/v2/BetCard';
@@ -47,6 +48,7 @@ function isGameStarted(status: string | undefined): boolean {
  * - Performance snapshot
  */
 export function Dashboard() {
+  const navigate = useNavigate();
   const [selectedDate] = useState<string>(getTodayDate());
 
   // Fetch today's games
@@ -218,7 +220,10 @@ export function Dashboard() {
             <div className="space-y-3">
               {games.map((game, i) => (
                 <div key={game.game_id} className={`animate-stagger-${Math.min(i + 1, 5)}`}>
-                  <GameCard game={game} />
+                  <GameCard
+                    game={game}
+                    onClick={() => navigate('/predictions')}
+                  />
                 </div>
               ))}
             </div>
@@ -261,7 +266,7 @@ export function Dashboard() {
 /**
  * Game Card - Shows a single game matchup
  */
-function GameCard({ game }: { game: Game }) {
+function GameCard({ game, onClick }: { game: Game; onClick?: () => void }) {
   const gameTime = game.game_time
     ? new Date(game.game_time).toLocaleTimeString('en-US', {
         hour: 'numeric',
@@ -274,7 +279,7 @@ function GameCard({ game }: { game: Game }) {
   const isFinal = game.status === 'Final';
 
   return (
-    <Card hover className="cursor-pointer">
+    <Card hover className="cursor-pointer" onClick={onClick}>
       <div className="p-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           {/* Teams */}

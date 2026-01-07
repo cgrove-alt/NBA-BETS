@@ -2597,8 +2597,10 @@ class DataService:
 
                 vendor = prop.get('vendor', '').lower()
 
-                # Skip if neither field contains 'draftkings'
-                if 'draftkings' not in book_name and 'draftkings' not in vendor:
+                # Accept props from major sportsbooks (relaxed filter - was DraftKings only)
+                valid_books = ['draftkings', 'fanduel', 'betmgm', 'caesars', 'rebet', 'bovada', 'pointsbet']
+                book_source = book_name + ' ' + vendor  # Combine for checking
+                if not any(book in book_source for book in valid_books):
                     continue
 
                 # Only include over_under market type (not milestone props)
@@ -2669,11 +2671,11 @@ class DataService:
                     self._real_prop_lines_cache[cache_key] = {}
                 else:
                     # Parse and organize by player_id and prop_type
-                    # FILTER: DraftKings ONLY
+                    # Accept props from major sportsbooks
                     lines_by_player = {}
-                    draftkings_count = 0
+                    sportsbook_props_count = 0
                     for prop in props_data:
-                        # CRITICAL: Only accept DraftKings props
+                        # Check sportsbook source
                         sportsbook = prop.get('sportsbook', {})
                         if isinstance(sportsbook, dict):
                             book_name = sportsbook.get('name', '').lower()
@@ -2683,8 +2685,11 @@ class DataService:
                         # Also check vendor field as fallback
                         vendor = prop.get('vendor', '').lower()
 
-                        if 'draftkings' not in book_name and 'draftkings' not in vendor:
-                            continue  # Skip non-DraftKings props
+                        # Accept props from major sportsbooks (relaxed filter - was DraftKings only)
+                        valid_books = ['draftkings', 'fanduel', 'betmgm', 'caesars', 'rebet', 'bovada', 'pointsbet']
+                        book_source = book_name + ' ' + vendor
+                        if not any(book in book_source for book in valid_books):
+                            continue  # Skip unknown sportsbooks
 
                         # FILTER: Only over_under market type (not milestone props)
                         market = prop.get('market', {})
@@ -2692,7 +2697,7 @@ class DataService:
                         if market_type != 'over_under':
                             continue  # Skip milestone and other prop types
 
-                        draftkings_count += 1
+                        sportsbook_props_count += 1
                         # FIX: API returns player_id directly, not nested in player object
                         p_id = prop.get('player_id')
                         if not p_id:
@@ -2728,7 +2733,7 @@ class DataService:
                     self._real_prop_lines_cache[cache_key] = lines_by_player
                     self._real_prop_lines_timestamps[cache_key] = datetime.now()
                     if lines_by_player:
-                        print(f"Fetched DraftKings prop lines for game {game_id}: {len(lines_by_player)} players ({draftkings_count} DK props)")
+                        print(f"Fetched prop lines for game {game_id}: {len(lines_by_player)} players ({sportsbook_props_count} props)")
 
             except Exception as e:
                 print(f"Error fetching prop lines for game {game_id}: {e}")
