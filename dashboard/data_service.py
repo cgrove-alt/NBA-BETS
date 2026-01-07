@@ -2599,9 +2599,12 @@ class DataService:
 
                 # Accept props from major sportsbooks (relaxed filter - was DraftKings only)
                 valid_books = ['draftkings', 'fanduel', 'betmgm', 'caesars', 'rebet', 'bovada', 'pointsbet']
-                book_source = book_name + ' ' + vendor  # Combine for checking
-                if not any(book in book_source for book in valid_books):
-                    continue
+                book_source = book_name                # Skip if neither field contains 'draftkings'
+                # if 'draftkings' not in book_name and 'draftkings' not in vendor:
+                #     continue
+                
+                # UPDATE V5: Accept ALL vendors (Rebet, FanDuel, etc.) to ensure data flow
+                pass
 
                 # Only include over_under market type (not milestone props)
                 market = prop.get('market', {})
@@ -2685,11 +2688,9 @@ class DataService:
                         # Also check vendor field as fallback
                         vendor = prop.get('vendor', '').lower()
 
-                        # Accept props from major sportsbooks (relaxed filter - was DraftKings only)
-                        valid_books = ['draftkings', 'fanduel', 'betmgm', 'caesars', 'rebet', 'bovada', 'pointsbet']
-                        book_source = book_name + ' ' + vendor
-                        if not any(book in book_source for book in valid_books):
-                            continue  # Skip unknown sportsbooks
+                        # V5 FIX: Accept ALL sportsbooks (removed filter entirely)
+                        # Previously filtered to valid_books list, but this blocked Rebet data
+                        # Now we accept any vendor to ensure data flow
 
                         # FILTER: Only over_under market type (not milestone props)
                         market = prop.get('market', {})
