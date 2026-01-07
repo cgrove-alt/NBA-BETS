@@ -95,6 +95,7 @@ export async function getBestBets(params?: {
   minEdge?: number;
   propTypes?: string[];
   pickType?: string;
+  sortBy?: 'quality' | 'confidence' | 'edge';
 }): Promise<BestBetsResponse> {
   const { data } = await api.get<BestBetsResponse>('/best-bets', {
     params: {
@@ -102,6 +103,7 @@ export async function getBestBets(params?: {
       min_edge: params?.minEdge,
       prop_types: params?.propTypes?.join(','),
       pick_type: params?.pickType,
+      sort_by: params?.sortBy,
     },
   });
   return data;

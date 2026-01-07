@@ -731,11 +731,12 @@ def get_best_bets(
     min_edge: float = Query(4.0, ge=0, description="Minimum edge threshold in points"),
     prop_types: Optional[str] = Query(None, description="Comma-separated prop types to filter"),
     pick_type: Optional[str] = Query(None, description="Filter by OVER or UNDER"),
+    sort_by: str = Query("quality", description="Sort order: quality, confidence, or edge"),
 ):
     """Get best bets across all games based on confidence and edge thresholds.
 
-    Returns ALL bets meeting quality standards, sorted by composite score (confidence-50) * edge_pct.
-    Quality over quantity - we show every honest bet, but the best appear first.
+    Returns ALL bets meeting quality standards, sorted by user-selected criteria.
+    Sort options: quality (confidence * edge), confidence, or edge.
     """
     service = get_service()
 
@@ -814,9 +815,13 @@ def get_best_bets(
                     confidence=confidence,
                 ))
 
-    # Sort by composite quality score: (confidence - 50) * edge_pct
-    # This prioritizes bets with both high confidence AND high edge
-    best_bets.sort(key=lambda x: (x.confidence - 50) * abs(x.edge_pct), reverse=True)
+    # Sort based on user preference
+    if sort_by == "confidence":
+        best_bets.sort(key=lambda x: x.confidence, reverse=True)
+    elif sort_by == "edge":
+        best_bets.sort(key=lambda x: abs(x.edge_pct), reverse=True)
+    else:  # Default "quality" - composite score
+        best_bets.sort(key=lambda x: (x.confidence - 50) * abs(x.edge_pct), reverse=True)
 
     return BestBetsResponse(
         best_bets=best_bets,
@@ -826,6 +831,7 @@ def get_best_bets(
             "min_edge": min_edge,
             "prop_types": prop_type_filter,
             "pick_type": pick_type,
+            "sort_by": sort_by,
         },
     )
 

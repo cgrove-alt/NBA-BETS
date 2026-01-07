@@ -3,11 +3,11 @@ import { PROP_TYPES } from '../lib/types';
 import type { FilterState } from '../lib/types';
 
 const defaultFilters: FilterState = {
-  minConfidence: 0,
-  minEdge: 0,
+  minConfidence: 55,  // Match backend default
+  minEdge: 4,         // Match backend default
   propTypes: [...PROP_TYPES],
   pickType: null,
-  sortBy: 'confidence',
+  sortBy: 'quality',  // Match backend default (quality = confidence * edge)
   sortOrder: 'desc',
 };
 

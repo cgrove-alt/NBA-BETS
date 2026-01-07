@@ -28,6 +28,10 @@ export function FilterPanel({ filters, onFilterChange, resultCount }: FilterPane
     onFilterChange({ pickType: filters.pickType === pickType ? null : pickType });
   };
 
+  const handleSortByChange = (sortBy: string) => {
+    onFilterChange({ sortBy });
+  };
+
   return (
     <div className="bg-bg-secondary border border-border rounded-lg p-4 space-y-4">
       <div className="flex items-center justify-between">
@@ -42,12 +46,16 @@ export function FilterPanel({ filters, onFilterChange, resultCount }: FilterPane
         </label>
         <input
           type="range"
-          min="0"
-          max="100"
+          min="50"
+          max="80"
           value={filters.minConfidence}
           onChange={(e) => handleConfidenceChange(Number(e.target.value))}
           className="w-full h-2 bg-bg-tertiary rounded-lg appearance-none cursor-pointer accent-accent-primary"
         />
+        <div className="flex justify-between text-xs text-text-muted mt-1">
+          <span>50%</span>
+          <span>80%</span>
+        </div>
       </div>
 
       {/* Edge slider */}
@@ -120,6 +128,20 @@ export function FilterPanel({ filters, onFilterChange, resultCount }: FilterPane
             UNDER
           </button>
         </div>
+      </div>
+
+      {/* Sort By dropdown */}
+      <div>
+        <label className="text-xs text-text-secondary block mb-2">Sort By</label>
+        <select
+          value={filters.sortBy}
+          onChange={(e) => handleSortByChange(e.target.value)}
+          className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent-primary"
+        >
+          <option value="quality">Smart Sort (Quality)</option>
+          <option value="confidence">Highest Confidence</option>
+          <option value="edge">Biggest Edge</option>
+        </select>
       </div>
     </div>
   );
