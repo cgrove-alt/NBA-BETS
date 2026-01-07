@@ -2653,7 +2653,7 @@ class DataService:
                     self._real_prop_lines_cache[cache_key] = lines_by_player
                     self._real_prop_lines_timestamps[cache_key] = datetime.now()
                     if lines_by_player:
-                        print(f"Fetched FanDuel prop lines for game {game_id}: {len(lines_by_player)} players ({fanduel_count} FD props)")
+                        print(f"Fetched DraftKings prop lines for game {game_id}: {len(lines_by_player)} players ({draftkings_count} DK props)")
 
             except Exception as e:
                 print(f"Error fetching prop lines for game {game_id}: {e}")
