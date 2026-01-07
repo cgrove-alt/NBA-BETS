@@ -52,3 +52,4 @@ htmlcov/
 
 # Claude plans (local only)
 .claude/
+.vercel
