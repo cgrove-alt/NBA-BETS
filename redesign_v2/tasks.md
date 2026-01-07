@@ -1,14 +1,17 @@
 # Redesign V2 Tasks
 
 ## Phase 0: Critical Fixes (Data & API) - COMPLETE
-- [x] **Data Pipeline Check**: Backend API verified - CORS already configured for localhost:5173
-- [x] **Debug Empty State**: Fixed! Lowered default thresholds in `/api/best-bets`:
-    - `min_confidence`: 80% → 50% (model outputs 50-70% range)
-    - `min_edge`: 5% → 3%
-- [x] **Enable CORS**: Already configured in `backend/api.py` for localhost:5173, localhost:3000, and Vercel
-- [x] **Frontend Filter Thresholds**: Updated v2 pages to use realistic thresholds:
-    - Dashboard: minConfidence 50%, minEdge 3%
-    - AllPredictions presets adjusted for model's output range
+- [x] **Data Pipeline Check**: Backend verified running on port 8000. API endpoints responding correctly.
+    - `/api/games` returns 6 games for today
+    - `/api/best-bets` aggregates props from games with "ready" status
+- [x] **Debug Empty State**: Fixed! Props need to be fetched via POST `/api/games/{game_id}/props/start` before best-bets will populate.
+    - Started props fetch for all games
+    - In-progress games are "locked" for betting integrity (correct behavior)
+    - DAL @ SAC returned 70 best bets successfully
+- [x] **Enable CORS**: Already configured correctly in `backend/api.py`
+    - localhost:5173, localhost:3000, 127.0.0.1:5173 all allowed
+    - Vercel preview URLs supported via regex
+    - Vite proxy configured: `/api` -> `http://localhost:8000`
 
 ## Phase 1: Foundation & Setup - COMPLETE
 - [x] Initialize new Design System structure (colors, typography, shadows) in `index.css`
@@ -49,9 +52,14 @@
 
 ## Phase 3: Pages & Routing - COMPLETE
 - [x] Implement `Dashboard` (Home)
-    - Featured "Top Pick" hero section with BetCard
-    - More Picks grid with compact BetCards
-    - Today's Games list with game cards
+    - "Top Picks of the Day" hero section with featured BetCard
+    - Quick Bankroll Overview with PnLTicker
+    - **Integrity**: IMPLEMENTED - Games in progress show "LIVE" badge, "TAKE" buttons are locked/greyed out
+      - `isGameStarted()` function detects game status (Qtr, Half, OT, Final, In Progress)
+      - `locked` prop added to BetCardData interface
+      - All BetCard variants (featured, compact, list) handle locked state
+      - Also applied to AllPredictions page for consistency
+    - Today's Games list with game cards (LIVE/FINAL badges)
     - Quick performance stats (Week P&L, Win Rate)
     - Full bankroll overview on mobile
 - [x] Implement `AllPredictions` with filtering (Safe, High Reward, Whale Plays)

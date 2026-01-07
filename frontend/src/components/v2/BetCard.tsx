@@ -8,6 +8,8 @@ import {
   Zap,
   ChevronRight,
   Target,
+  Lock,
+  Radio,
 } from 'lucide-react';
 
 // Types
@@ -33,6 +35,8 @@ export interface BetCardData {
     label: string;
     type: 'positive' | 'negative' | 'neutral';
   }>;
+  /** If true, game has started - betting is locked for integrity */
+  locked?: boolean;
 }
 
 interface BetCardProps {
@@ -64,9 +68,10 @@ export function BetCard({
   const isPositiveEdge = bet.edge > 0;
   const isHighConfidence = bet.confidence >= 65;
   const isTopPick = bet.edge >= 15 && bet.confidence >= 60;
+  const isLocked = bet.locked === true;
 
-  // Determine card variant based on edge/confidence
-  const cardVariant = isTopPick ? 'gold' : isPositiveEdge ? 'success' : 'default';
+  // Determine card variant based on edge/confidence (dimmed if locked)
+  const cardVariant = isLocked ? 'default' : isTopPick ? 'gold' : isPositiveEdge ? 'success' : 'default';
 
   if (variant === 'featured') {
     return (
@@ -74,6 +79,7 @@ export function BetCard({
         bet={bet}
         cardVariant={cardVariant}
         isTopPick={isTopPick}
+        isLocked={isLocked}
         onTake={onTake}
         onExpand={onExpand}
         className={className}
@@ -86,6 +92,7 @@ export function BetCard({
       <ListBetCard
         bet={bet}
         isPositiveEdge={isPositiveEdge}
+        isLocked={isLocked}
         onTake={onTake}
         onExpand={onExpand}
         className={className}
@@ -99,6 +106,7 @@ export function BetCard({
       bet={bet}
       cardVariant={cardVariant}
       isHighConfidence={isHighConfidence}
+      isLocked={isLocked}
       onTake={onTake}
       onExpand={onExpand}
       className={className}
@@ -113,6 +121,7 @@ function FeaturedBetCard({
   bet,
   cardVariant,
   isTopPick,
+  isLocked,
   onTake,
   onExpand,
   className,
@@ -120,6 +129,7 @@ function FeaturedBetCard({
   bet: BetCardData;
   cardVariant: 'default' | 'success' | 'gold';
   isTopPick: boolean;
+  isLocked: boolean;
   onTake?: (bet: BetCardData) => void;
   onExpand?: (bet: BetCardData) => void;
   className?: string;
@@ -127,13 +137,18 @@ function FeaturedBetCard({
   return (
     <Card
       variant={cardVariant}
-      glow={isTopPick}
+      glow={isTopPick && !isLocked}
       hover={false}
-      className={`relative overflow-hidden ${className}`}
+      className={`relative overflow-hidden ${isLocked ? 'opacity-75' : ''} ${className}`}
     >
       {/* Top Pick Banner */}
-      {isTopPick && (
+      {isTopPick && !isLocked && (
         <div className="absolute top-0 left-0 right-0 h-1 gradient-gold" />
+      )}
+
+      {/* Locked Banner for games in progress */}
+      {isLocked && (
+        <div className="absolute top-0 left-0 right-0 h-1 bg-[#ff3355]" />
       )}
 
       <div className="p-6">
@@ -157,13 +172,18 @@ function FeaturedBetCard({
             </div>
           </div>
 
-          {/* Top Pick Badge */}
-          {isTopPick && (
+          {/* Live Badge (when locked) or Top Pick Badge */}
+          {isLocked ? (
+            <Badge variant="danger" glow className="gap-1">
+              <Radio className="w-3 h-3 animate-pulse" />
+              LIVE
+            </Badge>
+          ) : isTopPick ? (
             <Badge variant="premium" glow className="gap-1">
               <Zap className="w-3 h-3" />
               TOP PICK
             </Badge>
-          )}
+          ) : null}
         </div>
 
         {/* Main Pick - THE BIG TEXT */}
@@ -230,15 +250,28 @@ function FeaturedBetCard({
 
         {/* Action Buttons */}
         <div className="flex gap-3">
-          <Button
-            variant="action"
-            size="lg"
-            fullWidth
-            onClick={() => onTake?.(bet)}
-            icon={<Target className="w-5 h-5" />}
-          >
-            TAKE THIS BET
-          </Button>
+          {isLocked ? (
+            <Button
+              variant="secondary"
+              size="lg"
+              fullWidth
+              disabled
+              icon={<Lock className="w-5 h-5" />}
+              className="opacity-50 cursor-not-allowed"
+            >
+              GAME IN PROGRESS
+            </Button>
+          ) : (
+            <Button
+              variant="action"
+              size="lg"
+              fullWidth
+              onClick={() => onTake?.(bet)}
+              icon={<Target className="w-5 h-5" />}
+            >
+              TAKE THIS BET
+            </Button>
+          )}
           {onExpand && (
             <Button
               variant="secondary"
@@ -262,6 +295,7 @@ function CompactBetCard({
   bet,
   cardVariant,
   isHighConfidence,
+  isLocked,
   onTake,
   onExpand,
   className,
@@ -269,6 +303,7 @@ function CompactBetCard({
   bet: BetCardData;
   cardVariant: 'default' | 'success' | 'gold';
   isHighConfidence: boolean;
+  isLocked: boolean;
   onTake?: (bet: BetCardData) => void;
   onExpand?: (bet: BetCardData) => void;
   className?: string;
@@ -276,8 +311,8 @@ function CompactBetCard({
   return (
     <Card
       variant={cardVariant}
-      glow={isHighConfidence}
-      className={`${className}`}
+      glow={isHighConfidence && !isLocked}
+      className={`${isLocked ? 'opacity-75' : ''} ${className}`}
       onClick={() => onExpand?.(bet)}
     >
       <div className="p-4">
@@ -288,10 +323,17 @@ function CompactBetCard({
             <span className="text-text-muted text-xs">@</span>
             <TeamLogo abbrev={bet.matchup.homeAbbrev} size="sm" />
           </div>
-          <div className="flex items-center gap-1 text-xs text-text-muted">
-            <Clock className="w-3 h-3" />
-            {formatGameTime(bet.matchup.gameTime)}
-          </div>
+          {isLocked ? (
+            <Badge variant="danger" size="sm" glow>
+              <Radio className="w-2.5 h-2.5 animate-pulse mr-1" />
+              LIVE
+            </Badge>
+          ) : (
+            <div className="flex items-center gap-1 text-xs text-text-muted">
+              <Clock className="w-3 h-3" />
+              {formatGameTime(bet.matchup.gameTime)}
+            </div>
+          )}
         </div>
 
         {/* Pick */}
@@ -317,17 +359,30 @@ function CompactBetCard({
         </div>
 
         {/* Action */}
-        <Button
-          variant="action"
-          size="sm"
-          fullWidth
-          onClick={(e) => {
-            e.stopPropagation();
-            onTake?.(bet);
-          }}
-        >
-          TAKE
-        </Button>
+        {isLocked ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            fullWidth
+            disabled
+            className="opacity-50 cursor-not-allowed"
+          >
+            <Lock className="w-3 h-3 mr-1" />
+            LOCKED
+          </Button>
+        ) : (
+          <Button
+            variant="action"
+            size="sm"
+            fullWidth
+            onClick={(e) => {
+              e.stopPropagation();
+              onTake?.(bet);
+            }}
+          >
+            TAKE
+          </Button>
+        )}
       </div>
     </Card>
   );
@@ -339,12 +394,14 @@ function CompactBetCard({
 function ListBetCard({
   bet,
   isPositiveEdge,
+  isLocked,
   onTake,
   onExpand,
   className,
 }: {
   bet: BetCardData;
   isPositiveEdge: boolean;
+  isLocked: boolean;
   onTake?: (bet: BetCardData) => void;
   onExpand?: (bet: BetCardData) => void;
   className?: string;
@@ -356,6 +413,7 @@ function ListBetCard({
         bg-bg-card border border-border
         hover:bg-bg-card-hover hover:border-[rgba(255,255,255,0.1)]
         transition-all duration-200 cursor-pointer
+        ${isLocked ? 'opacity-75' : ''}
         ${className}
       `}
       onClick={() => onExpand?.(bet)}
@@ -377,6 +435,14 @@ function ListBetCard({
         </div>
       </div>
 
+      {/* Live Badge (when locked) */}
+      {isLocked && (
+        <Badge variant="danger" size="sm" glow>
+          <Radio className="w-2.5 h-2.5 animate-pulse mr-1" />
+          LIVE
+        </Badge>
+      )}
+
       {/* Confidence */}
       <div className="flex items-center gap-2">
         <ConfidenceMeter value={bet.confidence} size="xs" />
@@ -387,16 +453,27 @@ function ListBetCard({
       <EdgeBadge edge={bet.edge} size="sm" />
 
       {/* Action */}
-      <Button
-        variant={isPositiveEdge ? 'success' : 'secondary'}
-        size="sm"
-        onClick={(e) => {
-          e.stopPropagation();
-          onTake?.(bet);
-        }}
-      >
-        TAKE
-      </Button>
+      {isLocked ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled
+          className="opacity-50 cursor-not-allowed"
+        >
+          <Lock className="w-3 h-3" />
+        </Button>
+      ) : (
+        <Button
+          variant={isPositiveEdge ? 'success' : 'secondary'}
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTake?.(bet);
+          }}
+        >
+          TAKE
+        </Button>
+      )}
     </div>
   );
 }

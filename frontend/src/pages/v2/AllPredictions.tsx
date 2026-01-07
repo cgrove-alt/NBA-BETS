@@ -20,6 +20,22 @@ import { getBestBets, getGames } from '../../lib/api';
 import type { Game } from '../../lib/types';
 import { getTodayDate } from '../../components/game/DateSelector';
 
+/**
+ * Check if a game has started based on its status
+ * Games are locked once they start to prevent retroactive betting
+ */
+function isGameStarted(status: string | undefined): boolean {
+  if (!status) return false;
+
+  const startedPatterns = [
+    'Qtr', 'Quarter', 'Half', 'OT', 'Final', 'In Progress', 'Live',
+  ];
+
+  return startedPatterns.some(pattern =>
+    status.toLowerCase().includes(pattern.toLowerCase())
+  );
+}
+
 // Filter presets
 type FilterPreset = 'all' | 'safe' | 'high-reward' | 'whale';
 
@@ -107,6 +123,7 @@ export function AllPredictions() {
   }, [games]);
 
   // Transform and filter bets
+  // CRITICAL: Lock bets for games that have already started (betting integrity)
   const bets: BetCardData[] = useMemo(() => {
     const bestBets = bestBetsData?.best_bets || [];
 
@@ -117,6 +134,9 @@ export function AllPredictions() {
 
     return filtered.map((bet) => {
       const game = gamesMap.get(bet.game_id);
+      const gameStatus = game?.status;
+      const isLocked = isGameStarted(gameStatus);
+
       return {
         id: `${bet.game_id}-${bet.player_id}-${bet.prop_type}`,
         matchup: {
@@ -125,7 +145,7 @@ export function AllPredictions() {
           awayTeam: game?.visitor_team?.abbreviation || 'AWAY',
           awayAbbrev: game?.visitor_team?.abbreviation || '---',
           gameTime: game?.game_time || new Date().toISOString(),
-          status: 'upcoming' as const,
+          status: isLocked ? 'live' as const : 'upcoming' as const,
         },
         pick: {
           type: 'prop' as const,
@@ -139,6 +159,7 @@ export function AllPredictions() {
           bet.edge_pct > 10 ? { label: 'High Edge', type: 'positive' as const } : null,
           bet.confidence > 70 ? { label: 'High Conf', type: 'positive' as const } : null,
         ].filter(Boolean) as BetCardData['signals'],
+        locked: isLocked, // Lock betting for games in progress
       };
     });
   }, [bestBetsData, gamesMap, propTypeFilter]);

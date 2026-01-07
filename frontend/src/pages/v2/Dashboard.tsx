@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Calendar, Flame, TrendingUp } from 'lucide-react';
 import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
@@ -13,6 +13,29 @@ import { BetCardSkeleton, GameCardSkeleton } from '../../components/v2/LoadingSk
 import { getGames, getBestBets } from '../../lib/api';
 import type { Game } from '../../lib/types';
 import { getTodayDate } from '../../components/game/DateSelector';
+
+/**
+ * Check if a game has started based on its status
+ * Games are locked once they start to prevent retroactive betting
+ */
+function isGameStarted(status: string | undefined): boolean {
+  if (!status) return false;
+
+  // Game statuses that indicate the game has started or ended
+  const startedPatterns = [
+    'Qtr',           // "1st Qtr", "2nd Qtr", etc.
+    'Quarter',       // Alternative format
+    'Half',          // "Halftime", "1st Half", "2nd Half"
+    'OT',            // Overtime
+    'Final',         // Game ended
+    'In Progress',   // Generic in-progress
+    'Live',          // Live game
+  ];
+
+  return startedPatterns.some(pattern =>
+    status.toLowerCase().includes(pattern.toLowerCase())
+  );
+}
 
 /**
  * Dashboard - The Oracle Home Page
@@ -56,29 +79,46 @@ export function Dashboard() {
   const games = gamesData?.games || [];
   const bestBets = bestBetsData?.best_bets || [];
 
+  // Create a map of game_id -> game data for quick lookup
+  const gamesMap = useMemo(() => {
+    const map = new Map<string, Game>();
+    games.forEach((game) => map.set(game.game_id, game));
+    return map;
+  }, [games]);
+
   // Transform best bets to BetCardData format
-  const topPicks: BetCardData[] = bestBets.slice(0, 5).map((bet) => ({
-    id: `${bet.game_id}-${bet.player_id}-${bet.prop_type}`,
-    matchup: {
-      homeTeam: 'Home', // Would need to lookup from games
-      homeAbbrev: bet.team,
-      awayTeam: 'Away',
-      awayAbbrev: '---',
-      gameTime: new Date().toISOString(),
-      status: 'upcoming' as const,
-    },
-    pick: {
-      type: 'prop' as const,
-      selection: `${bet.player_name} ${bet.pick} ${bet.line} ${bet.prop_type}`,
-      odds: -110, // Default odds
-    },
-    edge: bet.edge_pct,
-    confidence: bet.confidence,
-    signals: [
-      { label: `${bet.prop_type}`, type: 'neutral' as const },
-      bet.edge_pct > 10 ? { label: 'High Value', type: 'positive' as const } : null,
-    ].filter(Boolean) as BetCardData['signals'],
-  }));
+  // CRITICAL: Lock bets for games that have already started (betting integrity)
+  const topPicks: BetCardData[] = useMemo(() => {
+    return bestBets.slice(0, 5).map((bet) => {
+      const game = gamesMap.get(bet.game_id);
+      const gameStatus = game?.status;
+      const isLocked = isGameStarted(gameStatus);
+
+      return {
+        id: `${bet.game_id}-${bet.player_id}-${bet.prop_type}`,
+        matchup: {
+          homeTeam: game?.home_team?.name || 'Home',
+          homeAbbrev: game?.home_team?.abbreviation || bet.team,
+          awayTeam: game?.visitor_team?.name || 'Away',
+          awayAbbrev: game?.visitor_team?.abbreviation || '---',
+          gameTime: game?.game_time || new Date().toISOString(),
+          status: isLocked ? 'live' as const : 'upcoming' as const,
+        },
+        pick: {
+          type: 'prop' as const,
+          selection: `${bet.player_name} ${bet.pick} ${bet.line} ${bet.prop_type}`,
+          odds: -110, // Default odds
+        },
+        edge: bet.edge_pct,
+        confidence: bet.confidence,
+        signals: [
+          { label: `${bet.prop_type}`, type: 'neutral' as const },
+          bet.edge_pct > 10 ? { label: 'High Value', type: 'positive' as const } : null,
+        ].filter(Boolean) as BetCardData['signals'],
+        locked: isLocked, // Lock betting for games in progress
+      };
+    });
+  }, [bestBets, gamesMap]);
 
   // Handle bet action
   const handleTakeBet = (bet: BetCardData) => {
