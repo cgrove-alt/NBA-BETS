@@ -11,10 +11,46 @@ Manages model versions with:
 import json
 import shutil
 import pickle
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
+
+# Add parent for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Import model classes for pickle compatibility
+try:
+    import model_classes as portable_models
+    MODEL_CLASSES_AVAILABLE = True
+except ImportError:
+    portable_models = None
+    MODEL_CLASSES_AVAILABLE = False
+
+try:
+    import train_complete_balldontlie as training_module
+    TRAINING_MODULE_AVAILABLE = True
+except ImportError:
+    training_module = None
+    TRAINING_MODULE_AVAILABLE = False
+
+
+class RegistryModelUnpickler(pickle.Unpickler):
+    """Custom unpickler for model registry that handles __main__ remapping."""
+
+    def find_class(self, module, name):
+        # First try portable model_classes module
+        if module == '__main__' and MODEL_CLASSES_AVAILABLE:
+            if hasattr(portable_models, name):
+                return getattr(portable_models, name)
+
+        # Fall back to training module
+        if module == '__main__' and TRAINING_MODULE_AVAILABLE:
+            if hasattr(training_module, name):
+                return getattr(training_module, name)
+
+        return super().find_class(module, name)
 
 
 @dataclass
@@ -343,7 +379,7 @@ class ModelRegistry:
 
         try:
             with open(model_path, 'rb') as f:
-                return pickle.load(f)
+                return RegistryModelUnpickler(f).load()
         except Exception as e:
             print(f"Error loading model: {e}")
             return None
