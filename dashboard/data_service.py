@@ -3938,11 +3938,14 @@ class DataService:
 
             # =============================================================
             # MATCHUP ADJUSTMENT - Adjust prediction based on player's history vs this team
+            # Skip this in background threads to avoid API rate limiting
             # =============================================================
             matchup_adjustment = 1.0
             matchup_notes = []
 
-            if player_id and opponent_team_id and season_value > 0:
+            # Only do matchup adjustment if not skipping slow features
+            # (This makes API calls to fetch player history vs opponent)
+            if not skip_slow_features and player_id and opponent_team_id and season_value > 0:
                 try:
                     # Map model_key to prop_type for matchup lookup
                     matchup_prop_type = {
