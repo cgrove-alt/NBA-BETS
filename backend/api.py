@@ -727,12 +727,16 @@ def get_game_odds(game_id: str):
 
 @app.get("/api/best-bets", response_model=BestBetsResponse)
 def get_best_bets(
-    min_confidence: float = Query(50.0, ge=0, le=100, description="Minimum confidence threshold (model outputs 50-70%)"),
-    min_edge: float = Query(3.0, ge=0, description="Minimum edge threshold"),
+    min_confidence: float = Query(55.0, ge=0, le=100, description="Minimum confidence threshold (model outputs 50-70%)"),
+    min_edge: float = Query(4.0, ge=0, description="Minimum edge threshold in points"),
     prop_types: Optional[str] = Query(None, description="Comma-separated prop types to filter"),
     pick_type: Optional[str] = Query(None, description="Filter by OVER or UNDER"),
 ):
-    """Get best bets across all games based on confidence and edge thresholds."""
+    """Get best bets across all games based on confidence and edge thresholds.
+
+    Returns ALL bets meeting quality standards, sorted by composite score (confidence-50) * edge_pct.
+    Quality over quantity - we show every honest bet, but the best appear first.
+    """
     service = get_service()
 
     # Get all games
@@ -810,8 +814,9 @@ def get_best_bets(
                     confidence=confidence,
                 ))
 
-    # Sort by confidence descending, then by edge descending
-    best_bets.sort(key=lambda x: (x.confidence, abs(x.edge)), reverse=True)
+    # Sort by composite quality score: (confidence - 50) * edge_pct
+    # This prioritizes bets with both high confidence AND high edge
+    best_bets.sort(key=lambda x: (x.confidence - 50) * abs(x.edge_pct), reverse=True)
 
     return BestBetsResponse(
         best_bets=best_bets,
