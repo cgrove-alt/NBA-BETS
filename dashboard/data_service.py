@@ -1312,12 +1312,13 @@ class DataService:
 
         return default_stats
 
-    def _get_recent_stats(self, player_id: int, num_games: int = 5) -> Dict:
+    def _get_recent_stats(self, player_id: int, num_games: int = 5, use_cache: bool = True) -> Dict:
         """Get player's recent game stats from Balldontlie for trend analysis.
 
         Args:
             player_id: Balldontlie player ID
             num_games: Number of recent games to analyze (default 5)
+            use_cache: If True, check cache first (default True)
 
         Returns:
             Dictionary with recent averages and trends:
@@ -1332,6 +1333,13 @@ class DataService:
         """
         if not self.balldontlie or not player_id:
             return {}
+
+        # Check cache first (1 hour TTL for recent stats)
+        cache_key = f"recent_stats_{player_id}"
+        if use_cache:
+            cached = self.cache.get(cache_key)
+            if cached:
+                return cached
 
         try:
             # Fetch recent game stats for this player
@@ -1414,7 +1422,7 @@ class DataService:
             min_consistency = 1 - (min_std / max(avg_min, 1)) if avg_min > 0 else 0.7
             min_consistency = max(0.3, min(1.0, min_consistency))
 
-            return {
+            result = {
                 'recent_pts_avg': round(avg_pts, 1),
                 'recent_reb_avg': round(avg_reb, 1),
                 'recent_ast_avg': round(avg_ast, 1),
@@ -1435,6 +1443,10 @@ class DataService:
                 'min_std': round(min_std, 2),
                 'min_consistency': round(min_consistency, 2),
             }
+
+            # Cache result for 1 hour to avoid repeated API calls
+            self.cache.set(cache_key, result, "player_stats")
+            return result
 
         except Exception as e:
             print(f"Error fetching recent stats for player {player_id}: {e}")
@@ -1568,6 +1580,14 @@ class DataService:
         if not self.balldontlie or not team_abbrev:
             return defaults
 
+        # Check cache first (rest info valid for 1 hour)
+        if game_date is None:
+            game_date = datetime.now().strftime('%Y-%m-%d')
+        cache_key = f"team_rest_{team_abbrev}_{game_date}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+
         try:
             from id_mapping import TEAM_ABBREV_TO_BDL
             team_id = TEAM_ABBREV_TO_BDL.get(team_abbrev.upper())
@@ -1597,7 +1617,9 @@ class DataService:
 
             if not games:
                 # No games in last 7 days - well rested but possibly rusty
-                return {'days_rest': 7, 'is_back_to_back': 0, 'fatigue_factor': -0.1}
+                result = {'days_rest': 7, 'is_back_to_back': 0, 'fatigue_factor': -0.1}
+                self.cache.set(cache_key, result, "team_rest")
+                return result
 
             # Find most recent completed game
             completed_games = [
@@ -1606,7 +1628,9 @@ class DataService:
             ]
 
             if not completed_games:
-                return {'days_rest': 3, 'is_back_to_back': 0, 'fatigue_factor': 0}
+                result = {'days_rest': 3, 'is_back_to_back': 0, 'fatigue_factor': 0}
+                self.cache.set(cache_key, result, "team_rest")
+                return result
 
             # Sort by date descending, get most recent
             completed_games.sort(key=lambda x: x.get('date', ''), reverse=True)
@@ -1627,11 +1651,13 @@ class DataService:
             else:
                 fatigue_factor = -0.1  # Rust from too much rest
 
-            return {
+            result = {
                 'days_rest': min(days_rest, 7),
                 'is_back_to_back': is_back_to_back,
                 'fatigue_factor': fatigue_factor
             }
+            self.cache.set(cache_key, result, "team_rest")
+            return result
 
         except Exception as e:
             print(f"Error getting rest info for {team_abbrev}: {e}")
@@ -2272,14 +2298,27 @@ class DataService:
             except Exception as e:
                 print(f"Background: Could not load injury data: {e}", flush=True)
 
-            def create_player_dict(player_id, stats):
-                """Convert Balldontlie stats to our player dict format with recent stats."""
+            def create_player_dict(player_id, stats, skip_api_calls=False):
+                """Convert Balldontlie stats to our player dict format with recent stats.
+
+                Args:
+                    player_id: Player ID
+                    stats: Season stats from batch API call
+                    skip_api_calls: If True, skip individual API calls and use season averages
+                """
                 player_info = all_players.get(player_id, {})
                 # Parse minutes from 'MM:SS' string to float (Bug 12d fix)
                 min_float = _parse_minutes(stats.get('min', 0))
 
-                # Fetch REAL recent stats (last 5 games) for trend analysis
-                recent_stats = self._get_recent_stats(player_id, num_games=5)
+                # For fast background fetch, skip individual API calls to avoid rate limiting
+                # Use cached stats if available, otherwise use season averages as fallback
+                if skip_api_calls:
+                    # Try cache first, but don't make new API call
+                    cache_key = f"recent_stats_{player_id}"
+                    recent_stats = self.cache.get(cache_key) or {}
+                else:
+                    # Fetch REAL recent stats (last 5 games) for trend analysis
+                    recent_stats = self._get_recent_stats(player_id, num_games=5)
 
                 # Use recent stats if available, else fall back to season averages
                 recent_pts = recent_stats.get('recent_pts_avg', stats.get('pts', 0) or 0)
@@ -2340,11 +2379,11 @@ class DataService:
             if away_injured_names:
                 print(f"Background: Excluding {len(away_injured_names)} injured {away_abbrev} players: {away_injured_names}", flush=True)
 
-            # HOME TEAM PROPS
+            # HOME TEAM PROPS (skip individual API calls to avoid rate limiting)
             home_props = []
             for pid in home_player_ids[:8]:
                 if pid in stats_by_player:
-                    player = create_player_dict(pid, stats_by_player[pid])
+                    player = create_player_dict(pid, stats_by_player[pid], skip_api_calls=True)
 
                     # Skip injured players (OUT or DOUBTFUL status)
                     player_name = player.get('player_name', '').lower()
@@ -2369,11 +2408,11 @@ class DataService:
             self.cache.set(f"props_{home_abbrev}_{away_abbrev}", home_props, "player_props")
             print(f"Background: Completed {len(home_props)} home player predictions", flush=True)
 
-            # AWAY TEAM PROPS
+            # AWAY TEAM PROPS (skip individual API calls to avoid rate limiting)
             away_props = []
             for pid in away_player_ids[:8]:
                 if pid in stats_by_player:
-                    player = create_player_dict(pid, stats_by_player[pid])
+                    player = create_player_dict(pid, stats_by_player[pid], skip_api_calls=True)
 
                     # Skip injured players (OUT or DOUBTFUL status)
                     player_name = player.get('player_name', '').lower()
