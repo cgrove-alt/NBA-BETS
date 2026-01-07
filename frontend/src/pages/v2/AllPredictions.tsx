@@ -1,0 +1,329 @@
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import {
+  Filter,
+  Shield,
+  Flame,
+  Zap,
+  Loader2,
+  X,
+  SlidersHorizontal,
+} from 'lucide-react';
+import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
+import { BetCard } from '../../components/v2/BetCard';
+import type { BetCardData } from '../../components/v2/BetCard';
+import type { BankrollData } from '../../components/v2/BankrollSummary';
+import { Card } from '../../components/v2/Card';
+import { Button } from '../../components/v2/Button';
+import { Badge } from '../../components/v2/Badge';
+import { getBestBets, getGames } from '../../lib/api';
+import type { Game } from '../../lib/types';
+import { getTodayDate } from '../../components/game/DateSelector';
+
+// Filter presets
+type FilterPreset = 'all' | 'safe' | 'high-reward' | 'whale';
+
+interface FilterConfig {
+  minConfidence: number;
+  minEdge: number;
+  label: string;
+  icon: React.ReactNode;
+  description: string;
+}
+
+const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
+  all: {
+    minConfidence: 50,
+    minEdge: 0,
+    label: 'All Picks',
+    icon: <Filter className="w-4 h-4" />,
+    description: 'All available predictions',
+  },
+  safe: {
+    minConfidence: 65,
+    minEdge: 3,
+    label: 'Safe Bets',
+    icon: <Shield className="w-4 h-4" />,
+    description: 'High confidence, lower risk',
+  },
+  'high-reward': {
+    minConfidence: 55,
+    minEdge: 10,
+    label: 'High Reward',
+    icon: <Flame className="w-4 h-4" />,
+    description: 'High edge value opportunities',
+  },
+  whale: {
+    minConfidence: 70,
+    minEdge: 15,
+    label: 'Whale Plays',
+    icon: <Zap className="w-4 h-4" />,
+    description: 'Premium picks for big bettors',
+  },
+};
+
+/**
+ * AllPredictions - Browse all betting predictions
+ *
+ * Features:
+ * - Filter presets (Safe, High Reward, Whale Plays)
+ * - Search and sort
+ * - Grid/List view toggle
+ * - Prop type filters
+ */
+export function AllPredictions() {
+  const [selectedPreset, setSelectedPreset] = useState<FilterPreset>('all');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [propTypeFilter, setPropTypeFilter] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+
+  const selectedDate = getTodayDate();
+  const filterConfig = FILTER_PRESETS[selectedPreset];
+
+  // Fetch games for context
+  const { data: gamesData } = useQuery({
+    queryKey: ['games', selectedDate],
+    queryFn: () => getGames(selectedDate),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Fetch best bets with current filter
+  const { data: bestBetsData, isLoading } = useQuery({
+    queryKey: ['bestBets', filterConfig.minConfidence, filterConfig.minEdge],
+    queryFn: () =>
+      getBestBets({
+        minConfidence: filterConfig.minConfidence,
+        minEdge: filterConfig.minEdge,
+      }),
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const games = gamesData?.games || [];
+  const gamesMap = useMemo(() => {
+    const map = new Map<string, Game>();
+    games.forEach((g) => map.set(g.game_id, g));
+    return map;
+  }, [games]);
+
+  // Transform and filter bets
+  const bets: BetCardData[] = useMemo(() => {
+    const bestBets = bestBetsData?.best_bets || [];
+
+    // Apply prop type filter
+    const filtered = propTypeFilter
+      ? bestBets.filter((b) => b.prop_type === propTypeFilter)
+      : bestBets;
+
+    return filtered.map((bet) => {
+      const game = gamesMap.get(bet.game_id);
+      return {
+        id: `${bet.game_id}-${bet.player_id}-${bet.prop_type}`,
+        matchup: {
+          homeTeam: game?.home_team?.abbreviation || 'HOME',
+          homeAbbrev: game?.home_team?.abbreviation || '---',
+          awayTeam: game?.visitor_team?.abbreviation || 'AWAY',
+          awayAbbrev: game?.visitor_team?.abbreviation || '---',
+          gameTime: game?.game_time || new Date().toISOString(),
+          status: 'upcoming' as const,
+        },
+        pick: {
+          type: 'prop' as const,
+          selection: `${bet.player_name} ${bet.pick} ${bet.line} ${bet.prop_type}`,
+          odds: -110,
+        },
+        edge: bet.edge_pct,
+        confidence: bet.confidence,
+        signals: [
+          { label: bet.prop_type, type: 'neutral' as const },
+          bet.edge_pct > 10 ? { label: 'High Edge', type: 'positive' as const } : null,
+          bet.confidence > 70 ? { label: 'High Conf', type: 'positive' as const } : null,
+        ].filter(Boolean) as BetCardData['signals'],
+      };
+    });
+  }, [bestBetsData, gamesMap, propTypeFilter]);
+
+  // Get unique prop types for filter
+  const propTypes = useMemo(() => {
+    const types = new Set<string>();
+    bestBetsData?.best_bets?.forEach((b) => types.add(b.prop_type));
+    return Array.from(types);
+  }, [bestBetsData]);
+
+  // Mock bankroll data
+  const bankrollData: BankrollData = {
+    totalBankroll: 5000,
+    todayPnL: 245.50,
+    weekPnL: 892.00,
+    monthPnL: 2150.00,
+    allTimeROI: 12.5,
+    winRate: 58.3,
+    activeBets: 3,
+    pendingBets: 2,
+  };
+
+  const handleTakeBet = (bet: BetCardData) => {
+    console.log('Taking bet:', bet);
+  };
+
+  const handleExpandBet = (bet: BetCardData) => {
+    console.log('Expanding bet:', bet);
+  };
+
+  return (
+    <ResponsiveLayout bankroll={bankrollData} activePage="predictions">
+      <div className="space-y-6 pb-20 md:pb-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-text-primary">Predictions</h1>
+            <p className="text-sm text-text-muted mt-1">
+              {bets.length} picks available
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<SlidersHorizontal className="w-4 h-4" />}
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            Filters
+          </Button>
+        </div>
+
+        {/* Filter Presets - Scrollable on mobile */}
+        <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-hide">
+          {(Object.entries(FILTER_PRESETS) as [FilterPreset, FilterConfig][]).map(
+            ([key, config]) => (
+              <Button
+                key={key}
+                variant={selectedPreset === key ? 'primary' : 'ghost'}
+                size="sm"
+                icon={config.icon}
+                onClick={() => setSelectedPreset(key)}
+                className="whitespace-nowrap shrink-0"
+              >
+                {config.label}
+              </Button>
+            )
+          )}
+        </div>
+
+        {/* Filter Description */}
+        <Card variant="glass" className="p-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[rgba(0,212,255,0.1)]">
+              {filterConfig.icon}
+            </div>
+            <div>
+              <div className="font-semibold text-text-primary">{filterConfig.label}</div>
+              <div className="text-sm text-text-muted">{filterConfig.description}</div>
+            </div>
+            <div className="ml-auto text-right hidden sm:block">
+              <div className="text-xs text-text-muted">Confidence ≥ {filterConfig.minConfidence}%</div>
+              <div className="text-xs text-text-muted">Edge ≥ {filterConfig.minEdge}%</div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Advanced Filters (collapsible) */}
+        {showFilters && (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-text-primary">Filter by Prop Type</h3>
+              {propTypeFilter && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<X className="w-3 h-3" />}
+                  onClick={() => setPropTypeFilter(null)}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {propTypes.map((type) => (
+                <Badge
+                  key={type}
+                  variant={propTypeFilter === type ? 'success' : 'default'}
+                  size="md"
+                  className="cursor-pointer"
+                  onClick={() =>
+                    setPropTypeFilter(propTypeFilter === type ? null : type)
+                  }
+                >
+                  {type}
+                </Badge>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* View Mode Toggle (desktop only) */}
+        <div className="hidden md:flex justify-end gap-2">
+          <Button
+            variant={viewMode === 'grid' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setViewMode('grid')}
+          >
+            Grid
+          </Button>
+          <Button
+            variant={viewMode === 'list' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setViewMode('list')}
+          >
+            List
+          </Button>
+        </div>
+
+        {/* Bets Grid/List */}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-text-muted" />
+          </div>
+        ) : bets.length > 0 ? (
+          viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {bets.map((bet) => (
+                <BetCard
+                  key={bet.id}
+                  bet={bet}
+                  variant="compact"
+                  onTake={handleTakeBet}
+                  onExpand={handleExpandBet}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {bets.map((bet) => (
+                <BetCard
+                  key={bet.id}
+                  bet={bet}
+                  variant="list"
+                  onTake={handleTakeBet}
+                  onExpand={handleExpandBet}
+                />
+              ))}
+            </div>
+          )
+        ) : (
+          <Card className="p-12 text-center">
+            <div className="text-text-muted mb-2">No predictions match your filters</div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setSelectedPreset('all');
+                setPropTypeFilter(null);
+              }}
+            >
+              Reset Filters
+            </Button>
+          </Card>
+        )}
+      </div>
+    </ResponsiveLayout>
+  );
+}
