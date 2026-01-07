@@ -21,36 +21,59 @@ import concurrent.futures
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import model classes for pickle compatibility
-# These classes must be imported before loading pickled models
+# IMPORTANT: Use model_classes.py which contains minimal, portable class definitions
+# that work WITHOUT heavy training dependencies (XGBoost, LightGBM, CatBoost imports)
+try:
+    import model_classes as portable_models
+    from model_classes import (
+        PropEnsembleModel,
+        QuantilePropModel,
+        PositionAwarePropEnsemble,
+        SpreadEnsembleWrapper as PortableSpreadWrapper,
+        EnsembleMoneylineWrapper as PortableMoneylineWrapper,
+    )
+    MODEL_CLASSES_AVAILABLE = True
+except ImportError:
+    portable_models = None
+    PropEnsembleModel = None
+    QuantilePropModel = None
+    PositionAwarePropEnsemble = None
+    PortableSpreadWrapper = None
+    PortableMoneylineWrapper = None
+    MODEL_CLASSES_AVAILABLE = False
+
+# Fallback to training module if model_classes not available
 try:
     import train_complete_balldontlie as training_module
-    from train_complete_balldontlie import (
-        QuantilePropModel,
-        PropEnsembleModel,
-        PositionAwarePropEnsemble,
-    )
     TRAINING_MODULE_AVAILABLE = True
 except ImportError:
-    # Fallback: models will fail to load but won't crash
     training_module = None
-    QuantilePropModel = None
-    PropEnsembleModel = None
-    PositionAwarePropEnsemble = None
     TRAINING_MODULE_AVAILABLE = False
 
 
 class ModelUnpickler(pickle.Unpickler):
-    """Custom unpickler that remaps __main__ to training module.
+    """Custom unpickler that remaps __main__ to portable model classes.
 
     When models are trained by running train_complete_balldontlie.py directly,
     pickle saves class references as __main__.ClassName. This unpickler
-    remaps those to train_complete_balldontlie.ClassName for proper loading.
+    remaps those to model_classes.ClassName for proper loading.
+
+    Priority:
+    1. Look in model_classes (portable, no heavy dependencies)
+    2. Fall back to train_complete_balldontlie (full training module)
+    3. Default pickle behavior
     """
     def find_class(self, module, name):
+        # First, try portable model_classes module (preferred)
+        if module == '__main__' and MODEL_CLASSES_AVAILABLE:
+            if hasattr(portable_models, name):
+                return getattr(portable_models, name)
+
+        # Fall back to training module
         if module == '__main__' and TRAINING_MODULE_AVAILABLE:
-            # Try to get class from training module
             if hasattr(training_module, name):
                 return getattr(training_module, name)
+
         return super().find_class(module, name)
 
 
@@ -709,13 +732,26 @@ class DataService:
         model_dir = Path(__file__).parent.parent / "models"
 
         # Custom unpickler to handle class name mismatches
-        class ModelUnpickler(pickle.Unpickler):
+        # Use portable classes from model_classes.py when available
+        class LocalModelUnpickler(pickle.Unpickler):
             def find_class(self, module, name):
-                # Map old class names to our local wrapper classes
+                # Map class names to our local/portable wrapper classes
                 if name == 'SpreadEnsembleWrapper':
+                    if MODEL_CLASSES_AVAILABLE and PortableSpreadWrapper:
+                        return PortableSpreadWrapper
                     return SpreadEnsembleWrapper
                 if name == 'EnsembleMoneylineWrapper':
+                    if MODEL_CLASSES_AVAILABLE and PortableMoneylineWrapper:
+                        return PortableMoneylineWrapper
                     return EnsembleMoneylineWrapper
+                # Try portable model classes for __main__ references
+                if module == '__main__' and MODEL_CLASSES_AVAILABLE:
+                    if hasattr(portable_models, name):
+                        return getattr(portable_models, name)
+                # Fall back to training module
+                if module == '__main__' and TRAINING_MODULE_AVAILABLE:
+                    if hasattr(training_module, name):
+                        return getattr(training_module, name)
                 # Fall back to default behavior
                 return super().find_class(module, name)
 
@@ -724,7 +760,7 @@ class DataService:
             ml_path = model_dir / "moneyline_ensemble.pkl"
             if ml_path.exists():
                 with open(ml_path, "rb") as f:
-                    loaded = ModelUnpickler(f).load()
+                    loaded = LocalModelUnpickler(f).load()
                 # Extract model from dict wrapper if needed
                 if isinstance(loaded, dict) and 'model' in loaded:
                     self._moneyline_model = loaded['model']
@@ -750,7 +786,7 @@ class DataService:
                     fb_path = model_dir / fallback
                     if fb_path.exists():
                         with open(fb_path, "rb") as f:
-                            loaded = ModelUnpickler(f).load()
+                            loaded = LocalModelUnpickler(f).load()
                         if isinstance(loaded, dict) and 'model' in loaded:
                             self._moneyline_model = loaded['model']
                             self._moneyline_scaler = loaded.get('scaler')
@@ -770,7 +806,7 @@ class DataService:
             spread_path = model_dir / "spread_ensemble.pkl"
             if spread_path.exists():
                 with open(spread_path, "rb") as f:
-                    loaded = ModelUnpickler(f).load()
+                    loaded = LocalModelUnpickler(f).load()
                 # Extract model from dict wrapper if needed
                 if isinstance(loaded, dict) and 'model' in loaded:
                     self._spread_model = loaded['model']
@@ -810,7 +846,7 @@ class DataService:
                         position_aware_path = model_dir / f"player_{prop_type}_position_aware.pkl"
                         if position_aware_path.exists():
                             with open(position_aware_path, "rb") as f:
-                                loaded = ModelUnpickler(f).load()
+                                loaded = LocalModelUnpickler(f).load()
                             # Position-aware model is pickled as a dict with position_models and general_model
                             if isinstance(loaded, dict) and 'position_models' in loaded:
                                 self._position_aware_models[prop_type] = loaded
@@ -827,7 +863,7 @@ class DataService:
                 prop_path = model_dir / f"player_{prop_type}.pkl"
                 if prop_path.exists():
                     with open(prop_path, "rb") as f:
-                        loaded = ModelUnpickler(f).load()
+                        loaded = LocalModelUnpickler(f).load()
                     # Store full model data for proper feature alignment
                     if isinstance(loaded, dict):
                         self._prop_model_data[prop_type] = {
