@@ -3868,12 +3868,14 @@ class DataService:
 
             # =============================================================
             # INJURY ADJUSTMENT - Boost prediction if opponent missing defenders
+            # Skip in background threads to avoid slow operations
             # =============================================================
             injury_adjustment = 1.0
             injury_confidence_penalty = 0.0
             injury_notes = []
 
-            if injury_manager and opponent_team_id:
+            # Only do opponent injury check if not skipping slow features
+            if not skip_slow_features and injury_manager and opponent_team_id:
                 try:
                     # Calculate opponent's injury impact
                     opp_injury_impact = injury_manager.calculate_injury_impact(opponent_team_id)
@@ -3904,37 +3906,41 @@ class DataService:
 
             # =============================================================
             # PLAYER INJURY & TRAVEL FATIGUE ADJUSTMENTS (New - Tier 1.2)
+            # Skip in background threads to avoid slow operations
             # =============================================================
             player_name = player.get("player_name", "")
             player_team = player.get("team", "") or player.get("team_abbreviation", "")
             is_home = player.get("is_home", True)
 
-            # Check if THIS player is injured (reduce prediction or skip)
-            player_injury_factor = self._get_injury_adjustment(player_name, player_team)
-            if player_injury_factor < 1.0:
-                # Player is questionable/doubtful - reduce prediction
-                pred_value *= player_injury_factor
-                if player_injury_factor < 0.5:
-                    injury_notes.append(f"Player injury ({player_injury_factor*100:.0f}% avail)")
+            # Only do injury adjustments if not skipping slow features
+            # (These functions query the injury fetcher which can be slow)
+            if not skip_slow_features:
+                # Check if THIS player is injured (reduce prediction or skip)
+                player_injury_factor = self._get_injury_adjustment(player_name, player_team)
+                if player_injury_factor < 1.0:
+                    # Player is questionable/doubtful - reduce prediction
+                    pred_value *= player_injury_factor
+                    if player_injury_factor < 0.5:
+                        injury_notes.append(f"Player injury ({player_injury_factor*100:.0f}% avail)")
 
-            # Boost if teammate is out (more usage for remaining players)
-            teammate_boost = self._get_teammate_injury_boost(player_name, player_team, prop_label)
-            if teammate_boost > 0:
-                pred_value += teammate_boost
-                injury_notes.append(f"Teammate out (+{teammate_boost:.1f})")
+                # Boost if teammate is out (more usage for remaining players)
+                teammate_boost = self._get_teammate_injury_boost(player_name, player_team, prop_label)
+                if teammate_boost > 0:
+                    pred_value += teammate_boost
+                    injury_notes.append(f"Teammate out (+{teammate_boost:.1f})")
 
-            # Apply travel fatigue (away teams only)
-            travel_factor = self._get_travel_fatigue_adjustment(
-                team_abbrev=player_team,
-                opponent_abbrev=opponent_abbrev,
-                days_rest=player.get("days_rest", 1),
-                is_home=is_home
-            )
-            if travel_factor < 1.0:
-                pred_value *= travel_factor
-                travel_pct = (1.0 - travel_factor) * 100
-                if travel_pct >= 3:  # Only note if significant
-                    injury_notes.append(f"Travel fatigue (-{travel_pct:.0f}%)")
+                # Apply travel fatigue (away teams only)
+                travel_factor = self._get_travel_fatigue_adjustment(
+                    team_abbrev=player_team,
+                    opponent_abbrev=opponent_abbrev,
+                    days_rest=player.get("days_rest", 1),
+                    is_home=is_home
+                )
+                if travel_factor < 1.0:
+                    pred_value *= travel_factor
+                    travel_pct = (1.0 - travel_factor) * 100
+                    if travel_pct >= 3:  # Only note if significant
+                        injury_notes.append(f"Travel fatigue (-{travel_pct:.0f}%)")
 
             # =============================================================
             # MATCHUP ADJUSTMENT - Adjust prediction based on player's history vs this team
