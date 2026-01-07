@@ -34,9 +34,10 @@ export function Dashboard() {
   });
 
   // Fetch best bets across all games
+  // Note: Model confidence outputs range 50-70%, so use lower thresholds
   const { data: bestBetsData, isLoading: bestBetsLoading } = useQuery({
     queryKey: ['bestBets'],
-    queryFn: () => getBestBets({ minConfidence: 55, minEdge: 5 }),
+    queryFn: () => getBestBets({ minConfidence: 50, minEdge: 3 }),
     staleTime: 5 * 60 * 1000,
   });
 

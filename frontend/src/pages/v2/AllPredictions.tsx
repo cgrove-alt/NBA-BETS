@@ -31,6 +31,7 @@ interface FilterConfig {
   description: string;
 }
 
+// Note: Model confidence outputs range 50-70%, adjust thresholds accordingly
 const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
   all: {
     minConfidence: 50,
@@ -40,25 +41,25 @@ const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
     description: 'All available predictions',
   },
   safe: {
-    minConfidence: 65,
+    minConfidence: 58,
     minEdge: 3,
     label: 'Safe Bets',
     icon: <Shield className="w-4 h-4" />,
-    description: 'High confidence, lower risk',
+    description: 'Higher confidence picks',
   },
   'high-reward': {
-    minConfidence: 55,
-    minEdge: 10,
+    minConfidence: 52,
+    minEdge: 8,
     label: 'High Reward',
     icon: <Flame className="w-4 h-4" />,
     description: 'High edge value opportunities',
   },
   whale: {
-    minConfidence: 70,
-    minEdge: 15,
+    minConfidence: 60,
+    minEdge: 10,
     label: 'Whale Plays',
     icon: <Zap className="w-4 h-4" />,
-    description: 'Premium picks for big bettors',
+    description: 'Best confidence + edge combo',
   },
 };
 

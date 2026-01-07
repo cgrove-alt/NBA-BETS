@@ -1,5 +1,15 @@
 # Redesign V2 Tasks
 
+## Phase 0: Critical Fixes (Data & API) - COMPLETE
+- [x] **Data Pipeline Check**: Backend API verified - CORS already configured for localhost:5173
+- [x] **Debug Empty State**: Fixed! Lowered default thresholds in `/api/best-bets`:
+    - `min_confidence`: 80% → 50% (model outputs 50-70% range)
+    - `min_edge`: 5% → 3%
+- [x] **Enable CORS**: Already configured in `backend/api.py` for localhost:5173, localhost:3000, and Vercel
+- [x] **Frontend Filter Thresholds**: Updated v2 pages to use realistic thresholds:
+    - Dashboard: minConfidence 50%, minEdge 3%
+    - AllPredictions presets adjusted for model's output range
+
 ## Phase 1: Foundation & Setup - COMPLETE
 - [x] Initialize new Design System structure (colors, typography, shadows) in `index.css`
     - Cyberpunk/Fintech color palette with neon accents (green, cyan, purple, orange, red, gold)
