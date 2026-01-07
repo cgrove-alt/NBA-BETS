@@ -2913,6 +2913,20 @@ class DataService:
             elif minutes_std > 8:
                 confidence -= 2  # was -3 (reduced penalty)
 
+        # Factor 8: Easy Matchup Boost (weak opponent defense)
+        # opp_def_strength < -3 means defense allows more points than average
+        if features:
+            opp_def_strength = features.get("opp_def_strength", 0)
+            if opp_def_strength < -3:
+                confidence += 5  # Easy matchup vs weak defense
+
+        # Factor 9: Hit Rate Boost (player beats the line consistently)
+        # Use last_10_hit_rate if available, otherwise estimate from consistency
+        if features:
+            hit_rate = features.get("last_10_hit_rate", None)
+            if hit_rate is not None and hit_rate > 0.6:
+                confidence += 5  # Proven winner - beats line >60% of time
+
         # Cap at reasonable range - WIDENED from 55-65% to 50-85%
         # With improved training (OT normalization, blowout weighting, regression-to-mean)
         # the model should be more accurate and can express higher confidence
