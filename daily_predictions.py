@@ -49,6 +49,7 @@ try:
         PlayerStatsCalculator,
         PositionDefenseCalculator,
         TeamStatsCalculator,
+        SpreadEnsembleWrapper,
         calculate_pace_adjusted_features,
         calculate_vegas_total_features,
         calculate_blowout_risk_features,
@@ -575,31 +576,38 @@ def load_models() -> Dict:
     """Load all prediction models."""
     models = {}
 
-    # Moneyline
-    ml_path = MODEL_DIR / "moneyline_ensemble_tuned.pkl"
+    # Moneyline - try stacking model first, then fall back to ensemble
+    ml_path = MODEL_DIR / "moneyline_stacking.pkl"
+    if not ml_path.exists():
+        ml_path = MODEL_DIR / "moneyline_ensemble.pkl"  # Fallback
     if ml_path.exists():
         try:
             with open(ml_path, 'rb') as f:
                 data = pickle.load(f)
                 models['moneyline'] = data.get('model', data) if isinstance(data, dict) else data
+            print(f"    Loaded moneyline from {ml_path.name}")
         except Exception as e:
             print(f"    Warning: Could not load moneyline model: {e}")
 
-    # Spread
-    spread_path = MODEL_DIR / "spread_svm_regressor.pkl"
+    # Spread - try stacking model first, then fall back to ensemble
+    spread_path = MODEL_DIR / "spread_stacking.pkl"
+    if not spread_path.exists():
+        spread_path = MODEL_DIR / "spread_ensemble.pkl"  # Fallback
     if spread_path.exists():
         try:
             with open(spread_path, 'rb') as f:
                 data = pickle.load(f)
                 models['spread'] = data.get('model', data) if isinstance(data, dict) else data
+            print(f"    Loaded spread from {spread_path.name}")
         except Exception as e:
             print(f"    Warning: Could not load spread model: {e}")
 
     # Player prop models - load available models
     for prop_type in ['points', 'rebounds', 'assists', 'threes', 'pra']:
         # Try different model files in order of preference
-        # IMPORTANT: Ensemble models come first (trained with 150 features)
+        # IMPORTANT: Stacking models come first, then ensemble
         model_paths = [
+            MODEL_DIR / f"player_{prop_type}_stacking.pkl",  # New stacking models
             MODEL_DIR / f"player_{prop_type}_ensemble.pkl",  # Ensemble with 150 features
             MODEL_DIR / f"player_{prop_type}_line_classifier.pkl",
             MODEL_DIR / f"player_{prop_type}_position_aware.pkl",
@@ -1295,6 +1303,48 @@ def predict_player_prop(
                         predicted_value = float(np.mean(base_preds))
                     else:
                         # Fallback to season average from features
+                        predicted_value = features.get('season_pts_avg', 15.0)
+
+                    # Convert to probability using normal CDF
+                    std = line * 0.20 if line > 0 else 5.0
+                    z_score = (predicted_value - line) / max(std, 1)
+                    over_prob = float(norm.cdf(z_score))
+                    edge = (over_prob - 0.524) * 100
+
+                # Handle StackingRegressor format (has 'base_models' key)
+                elif isinstance(model_data, dict) and 'base_models' in model_data and 'meta_model' in model_data:
+                    base_models = model_data['base_models']
+                    meta_model = model_data['meta_model']
+                    scaler = model_data.get('scaler')
+                    feature_names = model_data.get('feature_names', [])
+
+                    # Build feature array matching training features
+                    X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
+                    X = X[feature_names].fillna(0)
+
+                    # Scale if scaler available
+                    if scaler is not None:
+                        X_scaled = scaler.transform(X)
+                    else:
+                        X_scaled = X.values
+
+                    # Get base model predictions
+                    base_preds = []
+                    for name, model in base_models.items():
+                        try:
+                            pred = model.predict(X_scaled)[0]
+                            if -50 < pred < 100:  # Sanity check
+                                base_preds.append(pred)
+                        except Exception:
+                            continue
+
+                    # Use meta model for stacking
+                    if meta_model is not None and base_preds:
+                        meta_features = np.array(base_preds).reshape(1, -1)
+                        predicted_value = float(meta_model.predict(meta_features)[0])
+                    elif base_preds:
+                        predicted_value = float(np.mean(base_preds))
+                    else:
                         predicted_value = features.get('season_pts_avg', 15.0)
 
                     # Convert to probability using normal CDF
