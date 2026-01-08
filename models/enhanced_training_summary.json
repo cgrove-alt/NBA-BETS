@@ -1,0 +1,12 @@
+{
+  "training_date": "2026-01-08 09:27:44",
+  "samples": 347,
+  "features": 72,
+  "models_trained": [
+    "points",
+    "rebounds",
+    "assists",
+    "threes",
+    "pra"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "date": "2026-01-07",
+  "games_analyzed": 12,
+  "predictions_analyzed": 1030,
+  "overall_metrics": {
+    "count": 869,
+    "rmse": 5.988,
+    "mae": 4.069,
+    "r2": 0.626,
+    "bias": -0.738
+  },
+  "error_breakdown": {
+    "data": {
+      "count": 46,
+      "avg_error": 15.19
+    },
+    "features": {
+      "count": 176,
+      "avg_error": 6.95
+    },
+    "variance": {
+      "count": 613,
+      "avg_error": 1.86
+    },
+    "model": {
+      "count": 34,
+      "avg_error": 13.87
+    },
+    "injury": {
+      "count": 161,
+      "avg_error": 1.99
+    }
+  },
+  "key_findings": [
+    "HIGH INJURY RATE: 161 players DNP unexpectedly",
+    "PRA: High RMSE (9.4) - needs investigation"
+  ],
+  "recommendations": [
+    "IMPROVE DATA: Integrate real-time injury feeds (ESPN, Rotowire)",
+    "ENHANCE FEATURES: Add Four Factors (eFG%, TOV%, ORB%, FT/FGA)",
+    "UPGRADE MODEL: Implement stacked ensemble with meta-learner"
+  ]
+}
