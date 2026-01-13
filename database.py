@@ -290,6 +290,7 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_odds_game ON betting_odds(game_id)",
             "CREATE INDEX IF NOT EXISTS idx_injuries_player ON injuries(player_id)",
             "CREATE INDEX IF NOT EXISTS idx_injuries_date ON injuries(reported_date)",
+            "CREATE INDEX IF NOT EXISTS idx_injuries_player_date ON injuries(player_id, reported_date)",
             "CREATE INDEX IF NOT EXISTS idx_bets_status ON bets(status)",
             "CREATE INDEX IF NOT EXISTS idx_predictions_game ON model_predictions(game_id)",
         ]
