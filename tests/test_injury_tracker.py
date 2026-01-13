@@ -225,9 +225,11 @@ class TestFetchCurrentInjuries(unittest.TestCase):
         """Set up test environment."""
         clear_injury_cache()
 
+    @patch('injury_tracker_v3.fetch_injuries_from_balldontlie')
     @patch('injury_tracker_v3.scrape_nba_injuries')
-    def test_fetch_from_nba_com(self, mock_scrape):
+    def test_fetch_from_nba_com(self, mock_scrape, mock_bdl):
         """Test fetching from NBA.com scraper."""
+        mock_bdl.return_value = []  # Balldontlie returns nothing
         mock_injuries = [
             InjuryReport("Player A", status=InjuryStatus.OUT, source="nba.com"),
             InjuryReport("Player B", status=InjuryStatus.QUESTIONABLE, source="nba.com"),
@@ -240,10 +242,12 @@ class TestFetchCurrentInjuries(unittest.TestCase):
         self.assertEqual(injuries[0].source, "nba.com")
         mock_scrape.assert_called_once()
 
+    @patch('injury_tracker_v3.fetch_injuries_from_balldontlie')
     @patch('injury_tracker_v3.scrape_espn_injuries')
     @patch('injury_tracker_v3.scrape_nba_injuries')
-    def test_fallback_to_espn(self, mock_nba, mock_espn):
+    def test_fallback_to_espn(self, mock_nba, mock_espn, mock_bdl):
         """Test fallback to ESPN when NBA.com fails."""
+        mock_bdl.return_value = []  # Balldontlie returns nothing
         mock_nba.return_value = []  # NBA.com returns nothing
         mock_espn.return_value = [
             InjuryReport("Player A", status=InjuryStatus.OUT, source="espn"),
@@ -256,9 +260,11 @@ class TestFetchCurrentInjuries(unittest.TestCase):
         mock_nba.assert_called_once()
         mock_espn.assert_called_once()
 
+    @patch('injury_tracker_v3.fetch_injuries_from_balldontlie')
     @patch('injury_tracker_v3.scrape_nba_injuries')
-    def test_cache_is_used(self, mock_scrape):
+    def test_cache_is_used(self, mock_scrape, mock_bdl):
         """Test that cache is used on subsequent calls."""
+        mock_bdl.return_value = []  # Balldontlie returns nothing
         mock_injuries = [InjuryReport("Player A", status=InjuryStatus.OUT)]
         mock_scrape.return_value = mock_injuries
 
