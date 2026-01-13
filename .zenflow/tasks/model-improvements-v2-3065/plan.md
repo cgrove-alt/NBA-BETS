@@ -360,6 +360,7 @@ Save to `{@artifacts_path}/plan.md`.
 **Goal**: Add travel, betting market features, confidence scoring to improve edge quality
 
 ### [ ] Task 2.1: Create travel_fatigue.py Module
+<!-- chat-id: 7c3fdb6f-5ca9-4424-a8b6-2394113696cf -->
 **Priority**: P0 (Critical - ~2 points impact on back-to-backs)
 **Location**: Root directory
 **Estimated Effort**: 6 hours
