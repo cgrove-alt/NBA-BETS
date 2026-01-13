@@ -201,7 +201,7 @@ Save to `{@artifacts_path}/plan.md`.
 
 ---
 
-### [ ] Task 1.4: Integrate Injury Checks into Prediction Pipeline
+### [x] Task 1.4: Integrate Injury Checks into Prediction Pipeline
 <!-- chat-id: 539e218e-f3c5-41ed-b54f-9db447797038 -->
 **Priority**: P0 (Critical - prevents 161 DNP errors)
 **Location**: `daily_predictions.py` (line ~500)

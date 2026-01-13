@@ -33,6 +33,7 @@ from balldontlie_api import BalldontlieAPI
 from feature_engineering import generate_game_features, PlayerPropFeatureGenerator, InjuryReportManager
 from scipy.stats import norm
 from data_fetcher import fetch_player_stats_bdl
+from injury_tracker_v3 import fetch_current_injuries, is_player_available, InjuryStatus
 
 # Import prop injury boost calculation
 try:
@@ -1500,6 +1501,28 @@ def main():
     games = []
     odds_data = {}
 
+    # Fetch current injuries BEFORE generating predictions (Task 1.4)
+    print("\n  Fetching injury reports...")
+    try:
+        target_date_dt = datetime.strptime(target_date, "%Y-%m-%d")
+        current_injuries = fetch_current_injuries(target_date_dt)
+
+        # Build lookup dict: {player_id: status}
+        injury_lookup = {}
+        for injury_report in current_injuries:
+            if injury_report.player_id:
+                injury_lookup[injury_report.player_id] = injury_report.status
+
+        # Print summary
+        out_count = sum(1 for inj in current_injuries if inj.status == InjuryStatus.OUT)
+        doubtful_count = sum(1 for inj in current_injuries if inj.status == InjuryStatus.DOUBTFUL)
+        questionable_count = sum(1 for inj in current_injuries if inj.status == InjuryStatus.QUESTIONABLE)
+        print(f"  Found {len(current_injuries)} injured players: {out_count} OUT, {doubtful_count} DOUBTFUL, {questionable_count} QUESTIONABLE")
+    except Exception as e:
+        print(f"  Warning: Could not fetch injury data: {e}")
+        injury_lookup = {}
+        current_injuries = []
+
     if api:
         try:
             games = api.get_games(dates=[target_date])
@@ -1680,6 +1703,19 @@ def main():
                         if player_name.lower() in injured_players:
                             continue
 
+                        # CHECK INJURY STATUS using injury_tracker_v3 (Task 1.4)
+                        uncertainty_flag = None
+                        if player_id in injury_lookup:
+                            status = injury_lookup[player_id]
+                            if status in [InjuryStatus.OUT, InjuryStatus.DOUBTFUL]:
+                                # Skip prediction for OUT or DOUBTFUL players
+                                print(f"    Skipping {player_name} ({status.value})")
+                                continue
+                            elif status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
+                                # Generate prediction but flag as HIGH_UNCERTAINTY
+                                uncertainty_flag = "HIGH_UNCERTAINTY"
+                                print(f"    Warning: {player_name} is {status.value} - flagging as HIGH_UNCERTAINTY")
+
                         # CRITICAL: Look up the correct Balldontlie ID for stats
                         # Props API uses different IDs than active players endpoint
                         bdl_stats_id = None
@@ -1718,6 +1754,9 @@ def main():
                                     opponent_injured=opponent_injured,
                                     teammate_injured=teammate_injured
                                 )
+                                # Add uncertainty_flag to prediction (Task 1.4)
+                                if uncertainty_flag:
+                                    pred['uncertainty_flag'] = uncertainty_flag
                                 analysis['player_props'].append(pred)
                                 all_player_props.append({
                                     'game': f"{analysis['away_team']}@{analysis['home_team']}",
