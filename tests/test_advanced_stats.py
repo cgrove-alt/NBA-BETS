@@ -382,6 +382,83 @@ class TestPaceCalculations:
         assert 'off_rating' in game_data
         assert 100 < game_data['off_rating'] < 130
 
+    def test_calculate_pace_season(self):
+        """Test pace calculation over full season"""
+        team_id = 1
+
+        # Add 10 games with varying pace
+        for i in range(10):
+            date = (datetime(2024, 10, 1) + timedelta(days=i)).strftime('%Y-%m-%d')
+            # Possessions around 100
+            self.calc.add_game(team_id, date, {
+                'fgm': 40,
+                'fga': 85,
+                'fg3m': 12,
+                'fta': 20,
+                'oreb': 10,
+                'tov': 12,
+                'pts': 110
+            })
+
+        pace = self.calc.calculate_pace(team_id, '2024-10-11', window='season')
+
+        # Should be around 95-105
+        assert 90 < pace < 110
+
+    def test_calculate_pace_last5(self):
+        """Test pace calculation for last 5 games"""
+        team_id = 1
+
+        # Add 10 games: first 5 slow, last 5 fast
+        for i in range(10):
+            date = (datetime(2024, 10, 1) + timedelta(days=i)).strftime('%Y-%m-%d')
+            # First 5: ~95 poss, Last 5: ~105 poss
+            poss = 95 if i < 5 else 105
+            self.calc.add_game(team_id, date, {
+                'fgm': 40,
+                'fga': 85,
+                'fg3m': 12,
+                'fta': 20,
+                'oreb': 10,
+                'tov': 12,
+                'pts': 110,
+                'poss': poss
+            })
+
+        pace_last5 = self.calc.calculate_pace(team_id, '2024-10-11', window='last5')
+        pace_season = self.calc.calculate_pace(team_id, '2024-10-11', window='season')
+
+        # Last 5 should be higher than season average
+        assert pace_last5 > pace_season
+
+    def test_adjust_for_pace_per_100(self):
+        """Test pace adjustment to per-100 possessions"""
+        # Player scores 25 points with team pace of 100
+        adjusted = self.calc.adjust_for_pace(25, 100, per_100=True)
+
+        # Should be 25 per 100
+        assert adjusted == 25.0
+
+        # Player scores 25 points with team pace of 80 (slow)
+        adjusted_slow = self.calc.adjust_for_pace(25, 80, per_100=True)
+
+        # Should be higher: 25/80*100 = 31.25
+        assert adjusted_slow > 25
+
+    def test_adjust_for_pace_per_game(self):
+        """Test pace adjustment to league-average pace"""
+        # Fast-paced team (110 pace), player scores 30 points
+        adjusted = self.calc.adjust_for_pace(30, 110, per_100=False)
+
+        # Adjusted to 100 pace: 30/110*100 = 27.27
+        assert adjusted < 30
+
+    def test_calculate_pace_no_data(self):
+        """Test pace returns league average when no data"""
+        pace = self.calc.calculate_pace(999, '2024-10-26')
+
+        assert pace == self.calc.LEAGUE_AVG['pace']
+
 
 class TestFourFactorDifferential:
     """Test differential calculations between two teams."""

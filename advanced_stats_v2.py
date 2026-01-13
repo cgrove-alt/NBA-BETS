@@ -291,9 +291,12 @@ class FourFactorsCalculator:
 
         # Composite Four Factor Score (weighted)
         # Note: For TOV%, lower is better, so we invert it
+        # Avoid division by zero
+        tov_pct_safe = features['season_tov_pct'] if features['season_tov_pct'] > 0 else self.LEAGUE_AVG['tov_pct']
+
         composite = (
             self.FACTOR_WEIGHTS['efg_pct'] * (features['season_efg_pct'] / self.LEAGUE_AVG['efg_pct']) +
-            self.FACTOR_WEIGHTS['tov_pct'] * (self.LEAGUE_AVG['tov_pct'] / features['season_tov_pct']) +
+            self.FACTOR_WEIGHTS['tov_pct'] * (self.LEAGUE_AVG['tov_pct'] / tov_pct_safe) +
             self.FACTOR_WEIGHTS['orb_pct'] * (features['season_orb_pct'] / self.LEAGUE_AVG['orb_pct']) +
             self.FACTOR_WEIGHTS['ft_rate'] * (features['season_ft_rate'] / self.LEAGUE_AVG['ft_rate'])
         )

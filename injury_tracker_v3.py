@@ -239,15 +239,41 @@ def fetch_injuries_from_balldontlie(date: datetime) -> List[InjuryReport]:
     try:
         api = BalldontlieAPI()
 
-        # Note: Balldontlie API v2 provides player status
-        # This is a placeholder - actual implementation depends on API structure
-        # Check API docs: https://docs.balldontlie.io
+        # Fetch current injuries from Balldontlie API
+        # API returns list of dicts with player injury data
+        injuries_data = api.get_injuries()
 
-        # Example structure (adjust based on actual API):
-        # injuries_data = api.get_injuries(date=date.strftime('%Y-%m-%d'))
+        injuries = []
+        for injury_dict in injuries_data:
+            try:
+                # Extract player info
+                player = injury_dict.get('player', {})
+                team = injury_dict.get('team', {})
 
-        logger.info("Balldontlie API injury fetch not yet implemented")
-        return []
+                # Parse status from API
+                status_text = injury_dict.get('status', 'Unknown')
+                status = InjuryStatus.from_string(status_text)
+
+                # Create InjuryReport
+                injury = InjuryReport(
+                    player_name=f"{player.get('first_name', '')} {player.get('last_name', '')}".strip(),
+                    player_id=player.get('id'),
+                    team_abbrev=team.get('abbreviation', ''),
+                    team_id=team.get('id'),
+                    status=status,
+                    injury_type=injury_dict.get('injury_type', ''),
+                    injury_detail=injury_dict.get('description', ''),
+                    report_date=date,
+                    source="balldontlie",
+                )
+                injuries.append(injury)
+
+            except Exception as e:
+                logger.warning(f"Error parsing injury data: {e}")
+                continue
+
+        logger.info(f"Fetched {len(injuries)} injuries from Balldontlie API")
+        return injuries
 
     except Exception as e:
         logger.error(f"Error fetching from Balldontlie API: {e}")
