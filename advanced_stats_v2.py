@@ -386,6 +386,63 @@ class FourFactorsCalculator:
 
         return features
 
+    def calculate_pace(self, team_id: int, game_date: str, window: str = 'season') -> float:
+        """
+        Calculate team's pace (possessions per 48 minutes).
+
+        Args:
+            team_id: Team identifier
+            game_date: Target date (exclusive)
+            window: 'season', 'last10', 'last5', or 'last3'
+
+        Returns:
+            Average pace for the specified window
+        """
+        if team_id not in self.team_games:
+            return self.LEAGUE_AVG['pace']
+
+        # Filter to games before target date
+        games = [(d, s) for d, s in self.team_games[team_id] if d < game_date]
+
+        if not games:
+            return self.LEAGUE_AVG['pace']
+
+        # Select window
+        if window == 'last10':
+            games = games[-10:]
+        elif window == 'last5':
+            games = games[-5:]
+        elif window == 'last3':
+            games = games[-3:]
+        # else: use all games (season)
+
+        # Calculate average pace
+        paces = [g[1].get('poss', 100) * (48 / 48) for g in games]  # Normalize to 48 min
+        return round(np.mean(paces), 2) if paces else self.LEAGUE_AVG['pace']
+
+    def adjust_for_pace(self, stat_value: float, team_pace: float,
+                       per_100: bool = True) -> float:
+        """
+        Adjust a stat for pace to normalize comparisons.
+
+        Args:
+            stat_value: Raw stat value (e.g., points, rebounds)
+            team_pace: Team's pace (possessions per 48 min)
+            per_100: If True, return per-100 possessions; if False, return per-game
+
+        Returns:
+            Pace-adjusted stat value
+        """
+        if team_pace <= 0:
+            team_pace = self.LEAGUE_AVG['pace']
+
+        if per_100:
+            # Convert to per 100 possessions
+            return round(stat_value / team_pace * 100, 2)
+        else:
+            # Adjust to league-average pace
+            return round(stat_value / team_pace * self.LEAGUE_AVG['pace'], 2)
+
     def _get_default_features(self) -> Dict:
         """Return default features when insufficient data."""
         features = {}
