@@ -64,6 +64,7 @@ Save to `{@artifacts_path}/plan.md`.
 **Goal**: Fix critical issues preventing accurate predictions (DNP errors, add Four Factors, upgrade meta-learner)
 
 ### [ ] Task 1.1: Create injury_tracker_v3.py Module
+<!-- chat-id: 31482dd8-b23e-4669-9253-f6f8348bfa39 -->
 **Priority**: P0 (Critical - eliminates 161 DNP errors)
 **Location**: Root directory
 **Estimated Effort**: 8 hours

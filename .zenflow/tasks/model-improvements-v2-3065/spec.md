@@ -1,1878 +1,849 @@
-# Technical Specification
-# NBA Prediction Model v2 - Implementation Details
+# Technical Specification Document (TSD)
+# NBA Prediction Model v2 - Path to SOTA Performance
 
 **Document Version**: 1.0
 **Date**: January 13, 2026
-**Based On**: requirements.md (PRD)
-**Target**: Achieve 5%+ ROI with positive CLV, beating professional sharp benchmarks
+**Technology Stack**: Python 3.x, scikit-learn, XGBoost, LightGBM, CatBoost, FastAPI, Railway, Vercel
+**Data Sources**: Balldontlie API, NBA API, The Odds API
 
 ---
 
 ## 1. Technical Context
 
-### 1.1 Technology Stack
+### 1.1 Current Architecture Overview
 
-**Core ML Stack**:
-- Python 3.9+
-- scikit-learn 1.3.0+ (base models, preprocessing)
-- XGBoost 2.0.0+ (gradient boosting)
-- LightGBM 4.0.0+ (fast gradient boosting)
-- CatBoost 1.2.0+ (categorical boosting)
-- NumPy 1.24.0+ / Pandas 2.0.0+ (data processing)
-- SciPy 1.11.0+ (statistical functions)
+The NBA prediction system is a sophisticated ensemble-based ML platform with the following components:
 
-**Data & APIs**:
-- Balldontlie API (GOAT tier - unlimited rate limits)
-- The Odds API (100k subscription - historical odds, line movements)
-- requests 2.31.0+ (HTTP client)
-- aiohttp 3.9.0+ (async API calls for performance)
+**Core Modules** (Analysis from codebase):
+- `model_trainer.py` (4,507 lines) - Ensemble models with calibration
+- `feature_engineering.py` (4,801 lines) - Temporal-safe feature generation
+- `advanced_stats_v2.py` (616 lines) - Four Factors calculator (Dean Oliver)
+- `injury_impact_v2.py` - Usage redistribution and star player tracking
+- `models/stacking_model.py` - Two-layer stacking architecture
+- `daily_predictions.py` (1,799 lines) - Production prediction pipeline
+- `comprehensive_backtest.py` - Walk-forward validation framework
+- `continuous_learning/` - Drift detection, incremental training, model registry
 
-**Backend & Deployment**:
-- FastAPI 0.104.0+ (REST API)
-- Uvicorn 0.24.0+ (ASGI server)
-- PostgreSQL 15+ (predictions storage, historical results)
-- Railway (compute platform - scheduled jobs, API hosting)
+**Current Model Architecture**:
+1. **Moneyline (Win Probability)**:
+   - 8-model ensemble: XGBoost (18%), LightGBM (15%), GradientBoosting (15%), RandomForest (15%), MLP (12%), CatBoost (12%), SVM (10%), LogisticRegression (8%)
+   - Meta-learner: Weighted averaging (inverse-RMSE weights)
+   - Calibration: Platt Scaling, Isotonic Regression, Temperature Scaling, Beta Calibration
 
-**Utilities**:
-- APScheduler 3.10.0+ (scheduled model retraining)
-- python-dotenv 1.0.0+ (environment variables)
-- Plotly 5.18.0+ (backtesting visualizations)
+2. **Player Props** (Points, Rebounds, Assists, Threes, PRA):
+   - Stacking Model v2 (already implemented in `stacking_model.py`)
+   - Level 0: XGBoost, LightGBM, Ridge, Lasso, GradientBoosting, RandomForest, optional CatBoost
+   - Level 1: ElasticNet meta-learner trained on out-of-fold predictions
 
-### 1.2 Current Codebase Structure
+3. **Spread Predictions**:
+   - Ensemble regression: SVR, RandomForest, GradientBoosting
+   - Meta-learner: Ridge or XGBoost
 
-```
-/
-├── feature_engineering.py       # 4801 lines - Team/player features
-├── model_trainer.py            # 4507 lines - Model classes (8 models)
-├── train_complete_balldontlie.py # 5992 lines - Training pipeline
-├── daily_predictions.py        # 1799 lines - Prediction generation
-├── data_fetcher.py             # 2254 lines - API wrapper (NBA + Balldontlie)
-├── balldontlie_api.py          # 1071 lines - Balldontlie-specific
-├── stacked_model_v2.py         # Stacking ensemble (Level 0 + Level 1)
-├── backtesting.py              # 2013 lines - Walk-forward validation
-├── comprehensive_backtest.py   # 1598 lines - Full season replay
-├── edge_quality.py             # 918 lines - Confidence scoring
-├── calibration.py              # Probability calibration methods
-│
-├── models/                     # 462MB - Trained model artifacts
-│   ├── moneyline_ensemble.pkl
-│   ├── spread_ensemble.pkl
-│   ├── player_{prop}_stacking.pkl (points, rebounds, assists, threes, pra)
-│   └── calibration/            # Calibration metadata
-│
-├── continuous_learning/
-│   ├── drift_detector.py
-│   ├── incremental_trainer.py
-│   └── model_registry.py
-│
-├── backend/
-│   ├── api.py                  # FastAPI endpoints
-│   └── schemas.py              # Pydantic models
-│
-└── backtest_results/
-    └── backtest_results_2025.json
-```
+**Key Strengths** (Already Implemented):
+✅ Temporal discipline enforced (`fetch_*_before_date()` functions)
+✅ Stacking architecture for player props
+✅ Four Factors calculator (Dean Oliver)
+✅ Injury impact module with usage redistribution
+✅ Arena data with coordinates, altitude, timezone (for travel features)
+✅ Continuous learning framework (drift detection, model registry)
+✅ Comprehensive backtesting with walk-forward validation
 
-### 1.3 Current Performance Baseline
-
-From `backtest_results_2025.json` (Oct 21 - Dec 12, 2025):
-- **Overall R²**: 0.681
-- **Overall RMSE**: 5.435
-- **Points RMSE**: 6.757 (Target: <5.5)
-- **Threes R²**: -0.568 (Target: >0.10) ← **Critical failure**
-- **PRA RMSE**: 8.469 (Target: <7.0)
+**Critical Gaps** (From Requirements Analysis):
+❌ Real-time injury detection (causing 161 DNP errors)
+❌ Betting market features (line movement, RLM)
+❌ Player impact metrics (DARKO/EPM/RAPTOR)
+❌ Travel/fatigue features (only arena data exists, not used)
+❌ Pace-adjusted metrics (formula exists but not integrated)
+❌ Confidence scoring system for predictions
+❌ Quantile regression for uncertainty bands
+❌ Risk management automation (Kelly criterion, stop-loss)
 
 ---
 
 ## 2. Implementation Approach
 
-### 2.1 Architecture Philosophy
+### 2.1 Design Philosophy
 
-**Incremental Enhancement, Not Rewrite**:
-- Preserve existing model classes (XGBoost, LightGBM, etc.)
-- Add new feature modules alongside existing `feature_engineering.py`
-- Upgrade meta-learner from weighted averaging to stacking
-- Maintain temporal discipline (all changes must respect `game_date` parameter)
+**Guiding Principles**:
+1. **Extend, Don't Rebuild**: Leverage existing robust infrastructure (stacking models, temporal discipline, calibration)
+2. **Incremental Validation**: Each feature addition must show measurable improvement in backtest
+3. **Production-First**: All features must work in real-time prediction pipeline (`daily_predictions.py`)
+4. **Temporal Safety**: Zero tolerance for data leakage (enforce `game_date` parameters)
+5. **Fail-Safe Defaults**: Missing data should gracefully degrade, not crash predictions
 
-**Risk Mitigation**:
-- Each phase includes backtest validation (no regression allowed)
-- A/B testing: Deploy new features to 20% of predictions, compare performance
-- Rollback plan: Keep old model artifacts in `models/backup/` directory
-
-**Performance First**:
-- Cache API responses (6-hour TTL for team stats, 24-hour for season averages)
-- Parallel API calls using `asyncio` (Balldontlie supports concurrency)
-- Lazy loading: Only compute expensive features (tracking data) if confidence is borderline
+**Implementation Strategy**:
+- **Phase 1 (Foundation)**: Fix critical bugs (injury detection), add high-ROI features (Four Factors integration)
+- **Phase 2 (Enhancement)**: Add advanced features (travel, betting markets, confidence scoring)
+- **Phase 3 (Optimization)**: Fine-tune models (quantile regression, player impact metrics)
+- **Phase 4 (Production)**: Optimize performance, automate retraining, deploy monitoring
 
 ---
 
 ## 3. Source Code Structure Changes
 
-### 3.1 New Modules to Create
+### 3.1 New Modules
 
-#### **Module 1: `advanced_stats_v2.py`**
-**Purpose**: Calculate Dean Oliver's Four Factors
-**Location**: Root directory
-**Size Estimate**: ~800 lines
-
-**Public Functions**:
-```python
-def calculate_four_factors(
-    team_id: int,
-    game_date: datetime,
-    window: str = "season"  # "season", "L5", "L10"
-) -> Dict[str, float]:
-    """
-    Calculate Dean Oliver's Four Factors for a team.
-
-    Returns:
-        {
-            "efg_pct": float,       # Effective FG% = (FG + 0.5*3PM) / FGA
-            "tov_pct": float,       # Turnover Rate = TOV / (FGA + 0.44*FTA + TOV)
-            "orb_pct": float,       # Off Rebound % = ORB / (ORB + Opp_DRB)
-            "ft_rate": float,       # Free Throw Rate = FT / FGA
-        }
-    """
-
-def calculate_four_factors_differential(
-    home_id: int,
-    away_id: int,
-    game_date: datetime
-) -> Dict[str, float]:
-    """
-    Calculate Four Factors differential (home - away).
-
-    Returns 12 features:
-        - efg_diff_season, efg_diff_L5, efg_diff_L10
-        - tov_diff_season, tov_diff_L5, tov_diff_L10
-        - orb_diff_season, orb_diff_L5, orb_diff_L10
-        - ftr_diff_season, ftr_diff_L5, ftr_diff_L10
-    """
-
-def calculate_pace(
-    team_id: int,
-    game_date: datetime,
-    window: str = "season"
-) -> float:
-    """
-    Calculate possessions per 48 minutes.
-
-    Formula:
-        48 * (Possessions / Minutes)
-        Possessions ≈ 0.5 * ((FGA + 0.4*FTA - 1.07*ORB_factor*(FGA-FG) + TOV) +
-                             (Opp_FGA + 0.4*Opp_FTA - ... ))
-    """
-
-def adjust_for_pace(
-    stat_value: float,
-    team_pace: float,
-    per_100: bool = True
-) -> float:
-    """Convert per-game stat to per-100 possessions."""
-    if per_100:
-        return stat_value * (100.0 / team_pace)
-    return stat_value
-```
-
-**Data Sources**:
-- Balldontlie `/stats` endpoint: Provides FG, FGA, 3PM, FT, FTA, ORB, DRB, TOV
-- Use `fetch_team_statistics_before_date()` for temporal safety
-- Cache results: 6-hour TTL for current season, permanent for completed seasons
-
-**Integration Points**:
-- Called by `feature_engineering.py::generate_game_features()`
-- Adds 12 new columns to feature matrix
-- Used by all models (moneyline, spread, props)
-
-**Validation**:
-- Unit test: Calculate Four Factors for Warriors on 2024-03-15, compare to Basketball-Reference.com
-- Backtest: Train model with/without Four Factors, expect ≥1% RMSE reduction
-
----
-
-#### **Module 2: `injury_tracker_v3.py`**
-**Purpose**: Real-time injury detection and usage redistribution
-**Location**: Root directory
-**Size Estimate**: ~600 lines
-
-**Public Functions**:
-```python
-def fetch_current_injuries(
-    date: datetime = None
-) -> List[Dict]:
-    """
-    Fetch all NBA injuries for a given date.
-
-    Returns list of:
-        {
-            "player_id": int,
-            "player_name": str,
-            "team_id": int,
-            "status": str,  # "OUT", "DOUBTFUL", "QUESTIONABLE", "GTD"
-            "injury_type": str,  # "Knee", "Ankle", "Rest", etc.
-            "last_update": datetime,
-        }
-    """
-
-def is_player_available(
-    player_id: int,
-    game_date: datetime
-) -> Tuple[bool, str]:
-    """
-    Check if player is available to play.
-
-    Returns:
-        (is_available: bool, status: str)
-        - is_available: True if status in ["", "PROBABLE", "AVAILABLE"]
-        - status: Current injury status
-    """
-
-def calculate_usage_redistribution(
-    team_id: int,
-    injured_player_id: int,
-    game_date: datetime
-) -> Dict[int, float]:
-    """
-    When star player is out, redistribute usage to teammates.
-
-    Logic:
-        1. Get injured player's usage rate
-        2. Identify top 5 teammates by minutes played
-        3. Distribute 70% of usage proportionally by role:
-            - Primary scorer gets 30%
-            - Secondary scorer gets 25%
-            - Third option gets 15%
-            - Remaining 2 players split 30%
-
-    Returns:
-        {player_id: additional_usage_rate, ...}
-    """
-
-def detect_star_player_out(
-    team_id: int,
-    game_date: datetime
-) -> Tuple[bool, Optional[str]]:
-    """
-    Check if team's top-3 scorer is out.
-
-    Returns:
-        (star_out: bool, player_name: str or None)
-    """
-
-class InjuryCache:
-    """
-    In-memory cache for injury data (15-minute TTL during game days).
-    Reduces API calls while maintaining freshness.
-    """
-    def __init__(self, ttl_minutes: int = 15):
-        ...
-
-    def get_injuries(self, date: datetime) -> Optional[List[Dict]]:
-        ...
-
-    def set_injuries(self, date: datetime, injuries: List[Dict]):
-        ...
-```
-
-**Data Sources**:
-1. **Primary**: Scrape NBA.com/injuries (free, 5-minute delay)
-   - URL: `https://www.nba.com/stats/injuries`
-   - Parse HTML table with BeautifulSoup
-2. **Fallback**: ESPN injury report
-   - URL: `https://www.espn.com/nba/injuries`
-3. **Future Upgrade**: RotoWire API if free scraping proves unreliable
-
-**Scraping Strategy**:
-```python
-# Pseudo-code for NBA.com scraper
-def scrape_nba_injuries() -> List[Dict]:
-    response = requests.get("https://www.nba.com/stats/injuries")
-    soup = BeautifulSoup(response.text, 'html.parser')
-
-    injuries = []
-    for row in soup.find_all('tr', class_='injury-row'):
-        player_name = row.find('td', class_='player').text
-        team = row.find('td', class_='team').text
-        status = row.find('td', class_='status').text  # "Out", "Questionable", etc.
-        injury_type = row.find('td', class_='injury').text
-
-        player_id = get_player_id(player_name)  # Lookup in database
-        team_id = get_team_id(team)
-
-        injuries.append({
-            "player_id": player_id,
-            "team_id": team_id,
-            "status": status.upper(),
-            "injury_type": injury_type,
-            "last_update": datetime.now(),
-        })
-
-    return injuries
-```
-
-**Integration Points**:
-- Called by `daily_predictions.py` BEFORE generating predictions (line ~500)
-- Pre-flight check: If player status is "OUT", skip that player's prop predictions
-- Add binary feature to team models: `star_player_out` (0 or 1)
-- Enhance player prop features with `usage_boost` (e.g., +5% if star teammate is out)
-
-**Error Handling**:
-- If scraping fails, fallback to cached injuries from previous fetch (max 2 hours old)
-- If no cache available, log warning and proceed (mark predictions as `DATA_INCOMPLETE`)
-- Alert system: Send Slack/email if injury data is >30 minutes stale during game day
-
-**Database Schema** (PostgreSQL for historical tracking):
-```sql
-CREATE TABLE injuries (
-    id SERIAL PRIMARY KEY,
-    player_id INTEGER NOT NULL,
-    team_id INTEGER NOT NULL,
-    game_date DATE NOT NULL,
-    status VARCHAR(20),  -- OUT, DOUBTFUL, QUESTIONABLE, GTD
-    injury_type VARCHAR(100),
-    detected_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(player_id, game_date)
-);
-
-CREATE INDEX idx_injuries_date ON injuries(game_date);
-CREATE INDEX idx_injuries_player ON injuries(player_id, game_date);
-```
-
-**Validation**:
-- Manual audit: Review 100 games from Dec 2025, verify 0 DNP players in predictions
-- Backtest: Compare predictions with/without injury detection, expect elimination of 161+ DNP errors
-
----
-
-#### **Module 3: `stacking_meta_learner.py`**
-**Purpose**: Replace weighted averaging with intelligent meta-learner
-**Location**: Root directory
-**Size Estimate**: ~500 lines
+#### 3.1.1 `injury_tracker_v3.py` - Real-Time Injury Detection
+**Purpose**: Replace delayed injury detection with real-time multi-source injury feeds
+**Location**: `/injury_tracker_v3.py`
+**Dependencies**: `requests`, `beautifulsoup4`, `data_fetcher.py`
 
 **Architecture**:
-```
-Level 0 (Base Models):
-├── XGBoost
-├── LightGBM
-├── GradientBoosting
-├── RandomForest
-├── MLP
-├── CatBoost
-├── SVM
-└── Logistic Regression
-
-↓ (Out-of-fold predictions + context features)
-
-Level 1 (Meta-Learner):
-└── XGBoost Meta-Learner
-    Input: [8 base predictions + 12 context features]
-    Output: Final prediction
-```
-
-**Context Features** (12 features passed to meta-learner):
-1. `days_rest_diff` - Rest advantage (home - away)
-2. `pace_combined` - Expected game pace
-3. `injury_count_home` - Number of injured players (home)
-4. `injury_count_away` - Number of injured players (away)
-5. `star_player_out_home` - Binary flag
-6. `star_player_out_away` - Binary flag
-7. `line_movement` - Closing line - Opening line
-8. `reverse_line_movement` - Binary flag (line moved against public)
-9. `prediction_variance` - Std dev of base model predictions (high = uncertainty)
-10. `home_advantage` - Home court factor
-11. `travel_distance_away` - Miles traveled by away team
-12. `back_to_back_away` - Binary flag
-
-**Public Functions**:
 ```python
-class StackingMetaLearner:
+class InjuryTracker:
     """
-    Two-level stacking ensemble with context-aware meta-learner.
+    Multi-source injury tracker with 15-minute refresh cycle.
+
+    Data Sources (priority order):
+    1. RotoWire API (paid, most reliable)
+    2. NBA.com/injuries (scraping fallback)
+    3. ESPN injury report (scraping fallback)
+    4. Balldontlie injuries endpoint (free, lower quality)
+
+    Caching: SQLite database with 15-minute TTL
     """
 
-    def __init__(
-        self,
-        base_models: List[BaseEstimator],
-        meta_learner_type: str = "xgboost",  # "xgboost", "neural_net", "logistic"
-        cv_folds: int = 5,
-        time_series_split: bool = True
-    ):
-        """
-        Initialize stacking ensemble.
+    def __init__(self, sources=['rotowire', 'nba_com', 'espn', 'balldontlie']):
+        self.sources = sources
+        self.cache_db = 'injury_cache.db'
+        self.refresh_interval = 900  # 15 minutes
 
-        Args:
-            base_models: List of scikit-learn compatible models
-            meta_learner_type: Type of meta-learner ("xgboost" recommended)
-            cv_folds: Number of cross-validation folds for OOF predictions
-            time_series_split: Use TimeSeriesSplit (True) or KFold (False)
+    def get_injury_status(self, player_id: int, as_of_date: str = None) -> Dict:
         """
-
-    def fit(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        context_features: np.ndarray = None,
-        sample_weights: np.ndarray = None
-    ):
-        """
-        Train the stacking ensemble.
-
-        Process:
-            1. Split data into K folds (time-series aware)
-            2. For each fold:
-                - Train base models on K-1 folds
-                - Generate predictions on held-out fold (OOF predictions)
-            3. Combine all OOF predictions (no leakage)
-            4. Train meta-learner on [OOF predictions + context features]
-            5. Retrain base models on full dataset (for final predictions)
-
-        Args:
-            X: Training features (team/player stats)
-            y: Target values
-            context_features: Context for meta-learner (days_rest, pace, etc.)
-            sample_weights: Time-decay weights (recent games weighted higher)
-        """
-
-    def predict(
-        self,
-        X: np.ndarray,
-        context_features: np.ndarray = None
-    ) -> np.ndarray:
-        """
-        Generate predictions using stacked ensemble.
-
-        Process:
-            1. Get predictions from all base models
-            2. Combine with context features
-            3. Pass to meta-learner for final prediction
-        """
-
-    def predict_with_uncertainty(
-        self,
-        X: np.ndarray,
-        context_features: np.ndarray = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Generate predictions with confidence intervals.
+        Get player injury status with confidence score.
 
         Returns:
-            (predictions, std_dev)
-            - std_dev calculated from variance of base model predictions
+            {
+                'status': 'OUT' | 'DOUBTFUL' | 'QUESTIONABLE' | 'GTD' | 'ACTIVE',
+                'injury_type': 'knee' | 'ankle' | 'rest' | 'illness' | None,
+                'confidence': 0.0-1.0,  # Agreement across sources
+                'last_update': datetime,
+                'source': 'rotowire' | 'nba_com' | 'composite'
+            }
         """
 
-    def get_base_model_weights(self) -> Dict[str, float]:
+    def get_team_injury_report(self, team_id: int, as_of_date: str = None) -> List[Dict]:
+        """Get all injuries for a team."""
+
+    def calculate_usage_redistribution(self, team_id: int, injured_players: List[int]) -> Dict:
         """
-        Extract learned importance of each base model.
+        Model how injured player's usage redistributes to teammates.
 
-        For XGBoost meta-learner, use feature importance.
-        Shows which models meta-learner trusts most.
+        Returns:
+            {
+                player_id: {
+                    'usage_boost': 0.05,  # +5% usage rate
+                    'minutes_boost': 3.2,  # +3.2 minutes
+                    'role_change': 'backup_PG' -> 'starting_PG'
+                }
+            }
         """
 ```
-
-**Meta-Learner Options**:
-
-**Option A: XGBoost (Recommended)**
-```python
-from xgboost import XGBRegressor, XGBClassifier
-
-meta_learner = XGBRegressor(
-    n_estimators=100,
-    max_depth=3,  # Shallow to prevent overfitting
-    learning_rate=0.05,
-    reg_alpha=0.1,  # L1 regularization
-    reg_lambda=1.0,  # L2 regularization
-    subsample=0.8,
-    colsample_bytree=0.8,
-    random_state=42
-)
-```
-**Pros**: Fast, handles non-linear interactions, built-in feature importance
-**Cons**: Can overfit if not regularized properly
-
-**Option B: Neural Network (If XGBoost insufficient)**
-```python
-from sklearn.neural_network import MLPRegressor
-
-meta_learner = MLPRegressor(
-    hidden_layer_sizes=(32, 16),  # 2 hidden layers
-    activation='relu',
-    alpha=0.01,  # L2 regularization
-    learning_rate_init=0.001,
-    max_iter=500,
-    early_stopping=True,
-    validation_fraction=0.2,
-    random_state=42
-)
-```
-**Pros**: Can learn complex interactions between base models
-**Cons**: Slower training, harder to interpret, requires more data
-
-**Option C: Ridge Regression with Polynomial Features (Fallback)**
-```python
-from sklearn.linear_model import Ridge
-from sklearn.preprocessing import PolynomialFeatures
-
-poly = PolynomialFeatures(degree=2, interaction_only=True)
-meta_learner = Ridge(alpha=1.0)
-```
-**Pros**: Fast, simple, less prone to overfitting
-**Cons**: Limited to quadratic interactions
-
-**Decision Logic**:
-1. Start with **XGBoost** (Option A)
-2. If backtest shows <1% improvement → Try **Neural Network** (Option B)
-3. If overfitting detected (train accuracy >> test accuracy) → Use **Ridge** (Option C)
 
 **Integration Points**:
-- Modify `model_trainer.py:3105` (`EnsembleMoneylineModel` class)
-- Replace `_combine_predictions()` method with `StackingMetaLearner.predict()`
-- Modify `train_complete_balldontlie.py` to pass context features during training
+- `daily_predictions.py:500` - Pre-prediction validation check
+- `feature_engineering.py:generate_*_prop_features()` - Add injury flags and usage boosts
+- Database: SQLite cache at `data/injury_cache.db`
 
-**Validation**:
-- Backtest: Compare ROI with old weighted averaging vs new stacking
-- Target: ≥2% accuracy improvement or ≥1.5 percentage points ROI increase
-- Feature importance analysis: Verify meta-learner learns reasonable patterns (e.g., trusts XGBoost more in high-pace games)
+**Success Criteria**:
+- Zero DNP (Did Not Play) players in predictions
+- 95%+ accuracy on injury status detection
+- < 30 second latency for injury status lookup
 
 ---
 
-#### **Module 4: `travel_fatigue.py`**
-**Purpose**: Calculate travel distance, rest days, back-to-back detection
-**Location**: Root directory
-**Size Estimate**: ~400 lines
+#### 3.1.2 `betting_market_features.py` - Line Movement and Market Intelligence
+**Purpose**: Track odds changes, reverse line movement, consensus for betting edge
+**Location**: `/betting_market_features.py`
+**Dependencies**: `odds_fetcher.py` (existing), PostgreSQL/TimescaleDB
 
-**Public Functions**:
+**Architecture**:
 ```python
-def calculate_travel_distance(
-    from_team: str,  # "LAL", "BOS", etc.
-    to_team: str,
-    from_game_date: datetime = None  # If None, use team's home arena
-) -> float:
+class BettingMarketAnalyzer:
     """
-    Calculate travel distance using Haversine formula.
+    Track and analyze betting market signals.
 
-    Returns:
-        Distance in miles
-    """
-
-def get_days_rest(
-    team_id: int,
-    game_date: datetime
-) -> int:
-    """
-    Calculate days since team's last game.
-
-    Returns:
-        0 = back-to-back, 1 = played yesterday, 2+ = normal rest
+    Features Generated:
+    - Opening line (first posted odds)
+    - Closing line (final odds before tipoff)
+    - Line movement (closing - opening)
+    - Reverse Line Movement (line moves opposite to bet percentage)
+    - Steam moves (rapid line changes >1.5 pts in <5 min)
+    - Consensus odds (average across 10+ books)
     """
 
-def detect_schedule_density(
-    team_id: int,
-    game_date: datetime
-) -> Dict[str, Any]:
-    """
-    Detect fatigue scenarios: "3rd game in 4 nights", "4 in 5", etc.
+    def __init__(self, db_connection: str = 'postgresql://...'):
+        self.db = db_connection
+        self.sportsbooks = [
+            'DraftKings', 'FanDuel', 'BetMGM', 'Caesars', 'BetRivers',
+            'PointsBet', 'Barstool', 'WynnBET', 'Unibet', 'Bet365'
+        ]
 
-    Returns:
-        {
-            "games_in_last_3_days": int,
-            "games_in_last_5_days": int,
-            "is_3_in_4": bool,
-            "is_4_in_5": bool,
-            "consecutive_road_games": int,
-        }
-    """
-
-def calculate_altitude_adjustment(
-    team_id: int,
-    game_team_id: int,
-    is_home: bool
-) -> float:
-    """
-    Adjust for altitude (Denver at 5280ft, Utah at 4200ft).
-
-    Logic:
-        - If away team playing in Denver: -1.5 point adjustment
-        - If away team playing in Utah: -1.0 point adjustment
-        - If home team at altitude: +1.5 or +1.0 point adjustment
-
-    Returns:
-        Adjustment in points (positive = advantage, negative = disadvantage)
-    """
-
-def calculate_timezone_crossings(
-    from_team: str,
-    to_team: str
-) -> int:
-    """
-    Count timezone crossings (affects circadian rhythm).
-
-    Returns:
-        Number of timezones crossed (0-3)
-    """
-```
-
-**Data Source**:
-- Arena data already exists in `feature_engineering.py:86-120` (`NBA_ARENA_DATA`)
-- Contains: coordinates (lat/lon), altitude, timezone for all 30 teams
-
-**Formulas**:
-
-**Haversine Distance**:
-```python
-def haversine(lat1, lon1, lat2, lon2):
-    R = 3959  # Earth radius in miles
-
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-
-    return R * c
-```
-
-**Back-to-Back Impact** (from research):
-- Back-to-back games: -2.1 points expected performance
-- 3-in-4 nights: -1.5 points
-- 4-in-5 nights: -2.5 points
-
-**Integration Points**:
-- Add to `feature_engineering.py::generate_game_features()`
-- New columns: `days_rest_home`, `days_rest_away`, `travel_distance_away`, `altitude_adj_home`, `is_3_in_4_home`, `is_3_in_4_away`
-- Total: 10 new features
-
-**Validation**:
-- Statistical test: Back-to-back games should show -2 ± 0.5 point differential in historical data
-- Backtest: Verify Denver home games have +1.5 point adjustment
-
----
-
-#### **Module 5: `betting_market_features.py`**
-**Purpose**: Track line movements, RLM, consensus odds
-**Location**: Root directory
-**Size Estimate**: ~700 lines
-
-**Public Functions**:
-```python
-def fetch_opening_line(
-    game_id: int,
-    market: str = "spreads"  # "spreads", "totals", "h2h"
-) -> Optional[float]:
-    """
-    Fetch the first odds posted (typically 2-3 days before game).
-
-    Uses The Odds API historical endpoint.
-
-    Returns:
-        Opening line value (e.g., -5.5 for spread)
-    """
-
-def fetch_closing_line(
-    game_id: int,
-    market: str = "spreads"
-) -> Optional[float]:
-    """
-    Fetch final odds before tipoff (within 5 minutes of game start).
-    """
-
-def calculate_line_movement(
-    game_id: int,
-    market: str = "spreads"
-) -> Dict[str, float]:
-    """
-    Calculate line movement from opening to closing.
-
-    Returns:
-        {
-            "opening_line": float,
-            "closing_line": float,
-            "movement": float,  # closing - opening
-            "movement_direction": str,  # "up", "down", "stable"
-        }
-    """
-
-def detect_reverse_line_movement(
-    game_id: int,
-    market: str = "spreads"
-) -> bool:
-    """
-    Detect RLM: Line moves opposite to public betting percentage.
-
-    Example:
-        - 70% of bets on Lakers -5
-        - But line moves to Lakers -3.5
-        - This is RLM (sharp money on opposite side)
-
-    Data source: The Odds API may not provide bet percentages directly.
-    Heuristic: If line moves >1.5 points without injury news, flag as potential RLM.
-
-    Returns:
-        True if RLM detected
-    """
-
-def calculate_consensus_odds(
-    game_id: int,
-    market: str = "spreads"
-) -> float:
-    """
-    Average odds across all available sportsbooks.
-
-    Uses The Odds API to fetch from 10+ books:
-        DraftKings, FanDuel, BetMGM, Caesars, etc.
-
-    Returns:
-        Consensus line (mean of all books)
-    """
-
-def detect_steam_move(
-    game_id: int,
-    market: str = "spreads",
-    lookback_minutes: int = 15
-) -> bool:
-    """
-    Detect steam move: Rapid line movement (>1.5 points in <5 minutes).
-
-    Indicates synchronized sharp action across books.
-
-    Returns:
-        True if steam move detected in last `lookback_minutes`
-    """
-
-class OddsTracker:
-    """
-    Background service to track odds every 5 minutes during game day.
-    Stores time-series in PostgreSQL for historical analysis.
-    """
-
-    def __init__(self, update_interval_minutes: int = 5):
-        ...
-
-    async def fetch_and_store_odds(self):
+    def track_line_history(self, game_id: str, market: str = 'spread') -> pd.DataFrame:
         """
-        Fetch current odds from The Odds API, store in database.
-        Runs continuously during NBA season (Oct-Jun).
+        Retrieve time-series of odds for a game.
+
+        Returns DataFrame with columns:
+        - timestamp, sportsbook, home_line, away_line, home_price, away_price
         """
 
-    def get_odds_history(self, game_id: int) -> pd.DataFrame:
+    def detect_reverse_line_movement(self, game_id: str) -> Dict:
         """
-        Retrieve historical odds for a game (for line movement analysis).
+        Detect RLM: Line moves against majority of bets (sharp money indicator).
+
+        Example: 70% of bets on Lakers, but line moves from LAL -5 to LAL -3
+        This suggests sharp bettors are loading up on the opponent.
 
         Returns:
-            DataFrame with columns: timestamp, spread, total, h2h, book_name
+            {
+                'is_rlm': True,
+                'bet_percentage_home': 0.30,  # 30% on home team
+                'line_movement': -2.0,  # Line moved 2 pts toward away team
+                'sharp_side': 'away',  # Sharp money on away team
+                'confidence': 0.85
+            }
+        """
+
+    def calculate_market_features(self, game_id: str, as_of_time: datetime = None) -> Dict:
+        """
+        Generate betting market features for model input.
+
+        Returns:
+            {
+                'opening_spread': -5.0,
+                'closing_spread': -7.0,
+                'line_movement': -2.0,
+                'is_rlm': True,
+                'steam_move_count': 2,
+                'consensus_spread': -6.8,
+                'spread_variance': 1.2,  # Disagreement across books
+                'bet_pct_favorite': 0.68
+            }
         """
 ```
 
-**Database Schema** (PostgreSQL for odds time-series):
+**Database Schema** (PostgreSQL with TimescaleDB):
 ```sql
 CREATE TABLE odds_history (
     id SERIAL PRIMARY KEY,
-    game_id INTEGER NOT NULL,
-    timestamp TIMESTAMP NOT NULL,
-    book_name VARCHAR(50),
-    market VARCHAR(20),  -- "spreads", "totals", "h2h"
-    home_odds FLOAT,
-    away_odds FLOAT,
-    home_line FLOAT,     -- For spreads (e.g., -5.5)
-    away_line FLOAT,
-    total FLOAT,         -- For totals (e.g., 220.5)
-    INDEX(game_id, timestamp),
-    INDEX(timestamp)
+    game_id VARCHAR(50),
+    sportsbook VARCHAR(50),
+    market VARCHAR(20),  -- 'spread', 'moneyline', 'total'
+    timestamp TIMESTAMP,
+    home_line NUMERIC,
+    away_line NUMERIC,
+    home_price INTEGER,  -- American odds (e.g., -110)
+    away_price INTEGER
 );
 
--- For quick lookups
-CREATE INDEX idx_odds_game_market ON odds_history(game_id, market, timestamp DESC);
-```
-
-**The Odds API Integration**:
-```python
-import requests
-
-def fetch_odds_from_api(sport: str = "basketball_nba") -> List[Dict]:
-    """
-    Fetch current odds from The Odds API (100k subscription).
-
-    Endpoint: https://api.the-odds-api.com/v4/sports/{sport}/odds
-    """
-    api_key = os.getenv("ODDS_API_KEY")
-
-    params = {
-        "apiKey": api_key,
-        "regions": "us",
-        "markets": "spreads,totals,h2h",
-        "oddsFormat": "american",
-        "bookmakers": "fanduel,draftkings,betmgm,caesars,pointsbet,betrivers,unibet,wynnbet,barstool,espnbet"
-    }
-
-    response = requests.get(
-        f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
-        params=params
-    )
-
-    return response.json()
+CREATE INDEX idx_odds_game_time ON odds_history(game_id, timestamp);
+SELECT create_hypertable('odds_history', 'timestamp');  -- TimescaleDB
 ```
 
 **Integration Points**:
-- Background job (APScheduler): Run `OddsTracker.fetch_and_store_odds()` every 5 minutes (8 AM - 11 PM during game days)
-- Add to `feature_engineering.py::generate_game_features()`
-- New columns: `opening_line`, `closing_line`, `line_movement`, `rlm_flag`, `consensus_odds`, `steam_move_flag`
-- Total: 6 new features
+- `feature_engineering.py:generate_game_features()` - Add 8 new betting market columns
+- `odds_fetcher.py` - Extend to log history (currently only fetches current odds)
+- Scheduled task: Poll odds every 5 minutes during game day (9 AM - 11 PM EST)
 
-**Validation**:
-- Historical test: Verify RLM games show higher sharp bettor win rate (expected: 55-60% vs 50-52% baseline)
-- Backtest: Model with market features should show improved Closing Line Value (CLV > 0)
-
----
-
-### 3.2 Modifications to Existing Modules
-
-#### **Modification 1: `feature_engineering.py`**
-**Line**: ~2800 (in `generate_game_features()` function)
-
-**Current Code** (approximate):
-```python
-def generate_game_features(home_id, away_id, game_date=None):
-    features = {}
-
-    # Existing features: win_pct, pts_avg, etc.
-    home_stats = fetch_team_statistics_before_date(home_id, game_date)
-    away_stats = fetch_team_statistics_before_date(away_id, game_date)
-
-    features['win_pct_diff'] = home_stats['win_pct'] - away_stats['win_pct']
-    features['pts_avg_diff'] = home_stats['pts_avg'] - away_stats['pts_avg']
-    # ... more features
-
-    return features
-```
-
-**New Code** (additions):
-```python
-from advanced_stats_v2 import calculate_four_factors_differential, calculate_pace
-from travel_fatigue import get_days_rest, calculate_travel_distance, calculate_altitude_adjustment, detect_schedule_density
-from betting_market_features import calculate_line_movement, detect_reverse_line_movement, calculate_consensus_odds
-
-def generate_game_features(home_id, away_id, game_date=None):
-    features = {}
-
-    # Existing features (unchanged)
-    home_stats = fetch_team_statistics_before_date(home_id, game_date)
-    away_stats = fetch_team_statistics_before_date(away_id, game_date)
-    features['win_pct_diff'] = home_stats['win_pct'] - away_stats['win_pct']
-    # ... more existing features
-
-    # === NEW: Four Factors (12 features) ===
-    four_factors = calculate_four_factors_differential(home_id, away_id, game_date)
-    features.update(four_factors)  # efg_diff_season, efg_diff_L5, etc.
-
-    # === NEW: Pace Features (3 features) ===
-    home_pace = calculate_pace(home_id, game_date)
-    away_pace = calculate_pace(away_id, game_date)
-    features['pace_home'] = home_pace
-    features['pace_away'] = away_pace
-    features['pace_combined'] = (home_pace + away_pace) / 2.0
-
-    # === NEW: Travel & Fatigue (10 features) ===
-    features['days_rest_home'] = get_days_rest(home_id, game_date)
-    features['days_rest_away'] = get_days_rest(away_id, game_date)
-    features['days_rest_diff'] = features['days_rest_home'] - features['days_rest_away']
-
-    # Travel distance for away team (home team = 0)
-    features['travel_distance_away'] = calculate_travel_distance(
-        from_team=get_team_abbr(away_id),  # Need last game location
-        to_team=get_team_abbr(home_id),
-        from_game_date=game_date - timedelta(days=features['days_rest_away'])
-    )
-
-    features['altitude_adj_home'] = calculate_altitude_adjustment(home_id, away_id, is_home=True)
-
-    home_density = detect_schedule_density(home_id, game_date)
-    away_density = detect_schedule_density(away_id, game_date)
-    features['is_3_in_4_home'] = int(home_density['is_3_in_4'])
-    features['is_3_in_4_away'] = int(away_density['is_3_in_4'])
-    features['consecutive_road_games_away'] = away_density['consecutive_road_games']
-
-    # === NEW: Injury Features (4 features) ===
-    from injury_tracker_v3 import detect_star_player_out
-    star_out_home, _ = detect_star_player_out(home_id, game_date)
-    star_out_away, _ = detect_star_player_out(away_id, game_date)
-    features['star_player_out_home'] = int(star_out_home)
-    features['star_player_out_away'] = int(star_out_away)
-
-    injury_count_home = len(fetch_current_injuries(game_date, team_id=home_id))
-    injury_count_away = len(fetch_current_injuries(game_date, team_id=away_id))
-    features['injury_count_home'] = injury_count_home
-    features['injury_count_away'] = injury_count_away
-
-    # === NEW: Betting Market Features (6 features) ===
-    # Only available for live predictions (not historical backtesting without odds history)
-    if game_date is None or game_date >= datetime.now():
-        game_id = get_game_id(home_id, away_id, game_date)  # Helper function
-
-        line_data = calculate_line_movement(game_id, market="spreads")
-        features['opening_line'] = line_data.get('opening_line', 0.0)
-        features['closing_line'] = line_data.get('closing_line', 0.0)
-        features['line_movement'] = line_data.get('movement', 0.0)
-        features['rlm_flag'] = int(detect_reverse_line_movement(game_id))
-        features['consensus_odds'] = calculate_consensus_odds(game_id, market="spreads")
-        features['steam_move_flag'] = int(detect_steam_move(game_id))
-    else:
-        # Historical games: Odds data may not be available
-        # Use default values (or fetch from stored odds_history table)
-        features['opening_line'] = 0.0
-        features['closing_line'] = 0.0
-        features['line_movement'] = 0.0
-        features['rlm_flag'] = 0
-        features['consensus_odds'] = 0.0
-        features['steam_move_flag'] = 0
-
-    return features
-```
-
-**Total New Features**: 41 (12 Four Factors + 3 Pace + 10 Travel/Fatigue + 4 Injury + 6 Market + 6 existing)
-
-**Impact**: Feature count increases from ~35 to ~76 (rough estimate)
+**Success Criteria**:
+- RLM detection accuracy > 80% (validated against known sharp action)
+- Betting market features show >1% improvement in backtest ROI
+- < 500ms latency for market feature retrieval
 
 ---
 
-#### **Modification 2: `model_trainer.py` - Upgrade Ensemble**
-**Class**: `EnsembleMoneylineModel` (line ~3105)
+#### 3.1.3 `player_impact_metrics.py` - DARKO/EPM/RAPTOR Integration
+**Purpose**: Fetch advanced player impact metrics (beyond box score stats)
+**Location**: `/player_impact_metrics.py`
+**Dependencies**: `requests`, `beautifulsoup4`
 
-**Current Code** (simplified):
+**Architecture**:
 ```python
-class EnsembleMoneylineModel(BaseModelTrainer):
-    def __init__(self):
-        self.models = {
-            'xgb': XGBClassifier(...),
-            'lgb': LGBMClassifier(...),
-            'gb': GradientBoostingClassifier(...),
-            # ... 5 more models
+class PlayerImpactFetcher:
+    """
+    Fetch and cache advanced player impact metrics.
+
+    Metrics:
+    - DARKO DPM (Daily Plus-Minus): darko.fyi
+    - ESPN EPM (Estimated Plus-Minus): espn.com/nba/stats
+    - FiveThirtyEight RAPTOR: fivethirtyeight.com
+    - Basketball Reference BPM (Box Plus-Minus): basketball-reference.com
+
+    Caching: Daily refresh (metrics update once per day)
+    """
+
+    def __init__(self, cache_dir: str = 'data/impact_metrics'):
+        self.cache_dir = cache_dir
+        self.metrics_cache = {}  # player_id -> metrics dict
+        self.last_update = None
+
+    def fetch_darko_dpm(self, season: str = '2025-26') -> pd.DataFrame:
+        """
+        Scrape DARKO DPM from darko.fyi (free, publicly available).
+
+        Returns DataFrame:
+        - player_name, player_id, dpm, dpm_offense, dpm_defense, minutes
+        """
+
+    def fetch_espn_epm(self, season: str = '2025-26') -> pd.DataFrame:
+        """Fetch ESPN's EPM (web scraping)."""
+
+    def fetch_raptor(self, season: str = '2025-26') -> pd.DataFrame:
+        """Fetch FiveThirtyEight RAPTOR (CSV download)."""
+
+    def get_player_impact(self, player_id: int, metric: str = 'auto') -> float:
+        """
+        Get player's impact metric (standardized -10 to +10 scale).
+
+        Priority: DARKO > EPM > RAPTOR > BPM
+        """
+
+    def calculate_team_impact_sum(self, team_id: int, player_ids: List[int]) -> float:
+        """Sum of team's active players' impact metrics."""
+```
+
+**Integration Points**:
+- `feature_engineering.py:generate_*_prop_features()` - Add `player_impact_score` column
+- `feature_engineering.py:generate_game_features()` - Add `team_impact_diff` for spreads
+- Scheduled task: Update metrics daily at 6 AM EST
+
+**Success Criteria**:
+- 95%+ player coverage (all rotation players have metrics)
+- Player prop RMSE improves by 3-5%
+- Update latency < 2 hours after new data published
+
+---
+
+#### 3.1.4 `confidence_scoring.py` - Prediction Confidence and Edge Quality
+**Purpose**: Assign confidence scores and edge quality tiers to predictions
+**Location**: `/confidence_scoring.py`
+**Dependencies**: `numpy`, `pandas`
+
+**Architecture**:
+```python
+class ConfidenceScorer:
+    """
+    Calculate prediction confidence based on ensemble agreement.
+
+    Confidence Factors:
+    1. Ensemble variance (low variance = high confidence)
+    2. Data completeness (missing features reduce confidence)
+    3. Injury uncertainty (GTD players reduce confidence)
+    4. Historical accuracy for similar matchups
+    """
+
+    def calculate_ensemble_confidence(self, base_predictions: np.ndarray) -> float:
+        """
+        Confidence from base model agreement.
+
+        confidence = 100 × (1 - min(std_dev / mean, 1))
+
+        Example:
+        - Predictions: [24.2, 24.5, 24.1, 24.4, 24.3] → std=0.15, mean=24.3 → conf=99.4
+        - Predictions: [20.1, 26.5, 22.8, 28.3, 21.2] → std=3.5, mean=23.8 → conf=85.3
+        """
+
+    def adjust_for_data_quality(self, confidence: float, missing_features: int) -> float:
+        """
+        Reduce confidence for incomplete data.
+
+        Penalty: -10 points per missing critical feature
+        """
+
+    def adjust_for_injury_uncertainty(self, confidence: float, gtd_count: int) -> float:
+        """
+        Reduce confidence when key players are game-time decisions.
+
+        Penalty: -15 points per GTD player in top-5 usage
+        """
+
+    def assign_edge_quality_tier(self, confidence: float, predicted_edge: float) -> str:
+        """
+        Categorize prediction quality for bet sizing.
+
+        Tiers:
+        - ELITE (90-100): High confidence, large edge → Bet 1.0× Kelly
+        - STRONG (75-89): Good confidence, moderate edge → Bet 0.5× Kelly
+        - MODERATE (60-74): Uncertain, small edge → Bet 0.25× Kelly
+        - WEAK (40-59): Low confidence → Monitor only, no bet
+        - AVOID (<40): Very low confidence → Do not bet
+        """
+
+    def calculate_prediction_confidence(
+        self,
+        base_predictions: np.ndarray,
+        missing_features: int = 0,
+        gtd_count: int = 0,
+        historical_accuracy: float = None
+    ) -> Dict:
+        """
+        Master confidence calculation.
+
+        Returns:
+            {
+                'confidence_score': 87.3,
+                'edge_quality_tier': 'STRONG',
+                'recommended_bet_size': 0.5,  # Fractional Kelly
+                'uncertainty_flags': ['GTD_PLAYER_PRESENT']
+            }
+        """
+```
+
+**Integration Points**:
+- `daily_predictions.py:1200` - Add confidence columns to output CSV
+- `portfolio_optimizer.py` - Use confidence for bet sizing (existing module, extend)
+
+**Success Criteria**:
+- Elite tier bets show >7% ROI (vs 3% for all bets)
+- Confidence score correlates with actual accuracy (r > 0.6)
+- Low-confidence bets (<60) are correctly flagged 80%+ of time
+
+---
+
+#### 3.1.5 `risk_management.py` - Kelly Criterion and Stop-Loss Automation
+**Purpose**: Automate bankroll management and risk controls
+**Location**: `/risk_management.py`
+**Dependencies**: `numpy`, `pandas`
+
+**Architecture**:
+```python
+class RiskManager:
+    """
+    Automated risk management for betting operations.
+
+    Features:
+    - Kelly Criterion bet sizing
+    - Daily/weekly stop-loss enforcement
+    - Drawdown monitoring
+    - Correlation adjustment for same-game bets
+    """
+
+    def __init__(self, bankroll: float, kelly_fraction: float = 0.25):
+        self.bankroll = bankroll
+        self.kelly_fraction = kelly_fraction  # Conservative 1/4 Kelly
+        self.peak_bankroll = bankroll
+        self.current_drawdown = 0.0
+        self.daily_pnl = 0.0
+        self.stop_loss_triggered = False
+
+    def calculate_kelly_bet_size(
+        self,
+        win_probability: float,
+        decimal_odds: float,
+        confidence_score: float = 1.0
+    ) -> float:
+        """
+        Kelly Criterion: f* = (bp - q) / b
+
+        Where:
+        - b = decimal_odds - 1
+        - p = win_probability
+        - q = 1 - p
+
+        Returns: Bet size as fraction of bankroll (e.g., 0.03 = 3%)
+        """
+
+    def check_stop_loss(self) -> Dict:
+        """
+        Enforce stop-loss rules.
+
+        Rules:
+        - Daily stop-loss: -3% of bankroll in a day → STOP
+        - Weekly stop-loss: -8% in a week → PAUSE, investigate
+        - Maximum drawdown: -15% from peak → HALT, retrain model
+
+        Returns:
+            {
+                'should_stop': True/False,
+                'reason': 'DAILY_STOP_LOSS',
+                'current_drawdown': 0.035,
+                'recovery_protocol': 'HALF_SIZE_FOR_20_BETS'
+            }
+        """
+
+    def adjust_for_correlation(self, bets: List[Dict]) -> List[Dict]:
+        """
+        Reduce bet sizes for correlated bets (same game).
+
+        Example: Betting on both Lakers spread and Lakers player prop
+        → Reduce each bet size by 50% to account for correlation
+        """
+
+    def apply_bet_size_caps(self, bet_size: float) -> float:
+        """
+        Enforce bet size limits.
+
+        Caps:
+        - Single bet max: 5% of bankroll
+        - Daily total exposure: 20% of bankroll
+        """
+```
+
+**Integration Points**:
+- `daily_predictions.py` - Calculate suggested_bet_size for each prediction
+- Betting bot (if exists) - Check stop-loss before placing bets
+- Database: Log bankroll history for drawdown tracking
+
+**Success Criteria**:
+- Kelly-sized bets show higher Sharpe ratio than flat betting
+- Stop-loss prevents >15% drawdown in backtests
+- Correlation adjustment reduces simultaneous loss frequency
+
+---
+
+### 3.2 Modified Modules
+
+#### 3.2.1 `feature_engineering.py` - Travel and Fatigue Features
+**Changes**: Extend existing `calculate_rest_and_fatigue()` function
+**Location**: `feature_engineering.py:2800+`
+
+**Current Implementation** (Line 86-120):
+- Arena data exists with coordinates, altitude, timezone
+- Function stub exists but not fully implemented
+
+**New Implementation**:
+```python
+def calculate_rest_and_fatigue(
+    team_id: int,
+    game_date: str,
+    is_home: bool = True,
+    opponent_id: int = None
+) -> Dict:
+    """
+    Calculate travel and fatigue features.
+
+    Features Generated:
+    1. days_rest: Days since last game (0 = back-to-back)
+    2. is_back_to_back: Binary flag
+    3. travel_distance: Miles traveled using Haversine formula
+    4. altitude_change: Feet elevation change (Denver = +5280)
+    5. timezone_crossed: Number of time zones crossed
+    6. schedule_density: Games in last 5 days
+    7. road_trip_length: Consecutive away games
+    8. fatigue_score: Composite fatigue metric (0-10)
+
+    Returns:
+        {
+            'days_rest': 2,
+            'is_back_to_back': False,
+            'travel_distance': 1453.2,  # miles
+            'altitude_change': 5280,  # going to Denver
+            'timezone_crossed': 2,
+            'schedule_density': 3,  # 3 games in 5 days
+            'road_trip_length': 2,  # 2nd game of road trip
+            'fatigue_score': 6.2  # moderate fatigue
         }
-        self.weights = None  # Inverse-RMSE weights
-
-    def train(self, X_train, y_train):
-        # Train each model independently
-        for name, model in self.models.items():
-            model.fit(X_train, y_train)
-
-        # Calculate inverse-RMSE weights
-        self.weights = self._calculate_weights(X_val, y_val)
-
-    def predict(self, X):
-        # Get predictions from all models
-        predictions = [model.predict_proba(X)[:, 1] for model in self.models.values()]
-
-        # Weighted average
-        final_pred = np.average(predictions, axis=0, weights=self.weights)
-        return final_pred
-```
-
-**New Code** (with stacking):
-```python
-from stacking_meta_learner import StackingMetaLearner
-
-class EnsembleMoneylineModel(BaseModelTrainer):
-    def __init__(self, use_stacking=True):
-        self.base_models = [
-            ('xgb', XGBClassifier(...)),
-            ('lgb', LGBMClassifier(...)),
-            ('gb', GradientBoostingClassifier(...)),
-            ('rf', RandomForestClassifier(...)),
-            ('mlp', MLPClassifier(...)),
-            ('catboost', CatBoostClassifier(...)),
-            ('svm', SVC(probability=True, ...)),
-            ('lr', LogisticRegression(...)),
-        ]
-
-        self.use_stacking = use_stacking
-        if use_stacking:
-            self.ensemble = StackingMetaLearner(
-                base_models=[model for name, model in self.base_models],
-                meta_learner_type='xgboost',
-                cv_folds=5,
-                time_series_split=True
-            )
-        else:
-            # Fallback to old weighted averaging (for A/B testing)
-            self.weights = None
-
-    def train(self, X_train, y_train, context_features=None, sample_weights=None):
-        if self.use_stacking:
-            # Train with stacking ensemble
-            self.ensemble.fit(
-                X_train,
-                y_train,
-                context_features=context_features,  # days_rest, pace, injury_count, etc.
-                sample_weights=sample_weights
-            )
-        else:
-            # Old weighted averaging approach (unchanged)
-            for name, model in self.base_models:
-                model.fit(X_train, y_train)
-            self.weights = self._calculate_weights(X_val, y_val)
-
-    def predict(self, X, context_features=None):
-        if self.use_stacking:
-            return self.ensemble.predict(X, context_features=context_features)
-        else:
-            # Old weighted averaging
-            predictions = [model.predict_proba(X)[:, 1] for _, model in self.base_models]
-            return np.average(predictions, axis=0, weights=self.weights)
-
-    def predict_with_confidence(self, X, context_features=None):
-        """
-        Generate predictions with confidence score.
-
-        Confidence = inverse of prediction variance across base models.
-        """
-        if self.use_stacking:
-            preds, std_dev = self.ensemble.predict_with_uncertainty(X, context_features)
-            confidence = 100 * (1 - np.minimum(std_dev / np.maximum(preds, 0.01), 1.0))
-            return preds, confidence
-        else:
-            # For weighted averaging, calculate variance manually
-            predictions = np.array([model.predict_proba(X)[:, 1] for _, model in self.base_models])
-            preds = np.average(predictions, axis=0, weights=self.weights)
-            std_dev = np.std(predictions, axis=0)
-            confidence = 100 * (1 - np.minimum(std_dev / np.maximum(preds, 0.01), 1.0))
-            return preds, confidence
+    """
 ```
 
 **Integration**:
-- Add `use_stacking=True` parameter when instantiating `EnsembleMoneylineModel` in `train_complete_balldontlie.py`
-- Pass `context_features` during training (extract from main feature matrix)
-- Repeat for `SpreadModel` and player prop models
+- Call in `generate_game_features()` for both home and away teams
+- Add differential features: `fatigue_diff = home_fatigue - away_fatigue`
 
 ---
 
-#### **Modification 3: `train_complete_balldontlie.py` - Training Pipeline**
-**Location**: Main training loop (line ~4000+)
+#### 3.2.2 `advanced_stats_v2.py` - Pace-Adjusted Metrics
+**Changes**: Add pace calculation and per-100-possession adjustments
+**Location**: `advanced_stats_v2.py:FourFactorsCalculator`
 
-**Current Code** (simplified):
+**New Methods**:
 ```python
-def train_all_models():
-    # Fetch historical games
-    games = fetch_historical_games(start_date, end_date)
+def calculate_pace(self, team_stats: Dict, opp_stats: Dict = None) -> float:
+    """
+    Calculate team pace (possessions per 48 minutes).
 
-    # Generate features for each game
-    X_train = []
-    y_train = []
-    for game in games:
-        features = generate_game_features(game['home_id'], game['away_id'], game['date'])
-        X_train.append(features)
-        y_train.append(game['home_won'])  # Binary target
+    Pace = 48 × (Team Poss + Opp Poss) / (2 × Minutes)
+    """
 
-    # Train moneyline model
-    moneyline_model = EnsembleMoneylineModel()
-    moneyline_model.train(X_train, y_train)
+def adjust_for_pace(self, stat_value: float, team_pace: float, league_avg_pace: float = 100.0) -> float:
+    """
+    Convert per-game stat to per-100-possessions.
 
-    # Save model
-    joblib.dump(moneyline_model, 'models/moneyline_ensemble.pkl')
+    Adjusted = stat_value × (100 / team_pace)
+    """
+
+def calculate_expected_game_pace(self, team1_id: int, team2_id: int, game_date: str) -> Dict:
+    """
+    Predict game pace based on both teams' tendencies.
+
+    Returns:
+        {
+            'expected_pace': 102.3,
+            'variance_multiplier': 1.15,  # High pace = wider spread
+            'pace_differential': 5.2  # Team1 pace - Team2 pace
+        }
+    """
 ```
 
-**New Code** (with context features):
-```python
-def train_all_models():
-    # Fetch historical games
-    games = fetch_historical_games(start_date, end_date)
-
-    # Generate features for each game
-    X_train = []
-    y_train = []
-    context_train = []  # NEW: Context features for meta-learner
-    sample_weights = []  # Time-decay weights
-
-    for game in games:
-        # Generate full feature set (now includes Four Factors, travel, etc.)
-        features = generate_game_features(game['home_id'], game['away_id'], game['date'])
-        X_train.append(features)
-        y_train.append(game['home_won'])
-
-        # === NEW: Extract context features for meta-learner ===
-        context = [
-            features['days_rest_diff'],
-            features['pace_combined'],
-            features['injury_count_home'],
-            features['injury_count_away'],
-            features['star_player_out_home'],
-            features['star_player_out_away'],
-            features['line_movement'],
-            features['rlm_flag'],
-            0.0,  # prediction_variance (filled during training)
-            features.get('home_advantage', 3.0),  # Default home advantage
-            features['travel_distance_away'],
-            int(features['days_rest_away'] == 0),  # back_to_back_away
-        ]
-        context_train.append(context)
-
-        # Time-decay weights (180-day half-life)
-        days_ago = (datetime.now() - game['date']).days
-        weight = 0.5 ** (days_ago / 180.0)
-        sample_weights.append(weight)
-
-    X_train = np.array(X_train)
-    y_train = np.array(y_train)
-    context_train = np.array(context_train)
-    sample_weights = np.array(sample_weights)
-
-    # === Train moneyline model with stacking ===
-    moneyline_model = EnsembleMoneylineModel(use_stacking=True)
-    moneyline_model.train(
-        X_train,
-        y_train,
-        context_features=context_train,
-        sample_weights=sample_weights
-    )
-
-    # Save model
-    joblib.dump(moneyline_model, 'models/moneyline_ensemble_v2.pkl')
-
-    # === Validation: Compare with old model ===
-    old_model = joblib.load('models/moneyline_ensemble.pkl')
-    new_accuracy = evaluate_model(moneyline_model, X_test, y_test, context_test)
-    old_accuracy = evaluate_model(old_model, X_test, y_test)
-
-    print(f"Old Model Accuracy: {old_accuracy:.4f}")
-    print(f"New Model Accuracy: {new_accuracy:.4f}")
-    print(f"Improvement: {(new_accuracy - old_accuracy)*100:.2f}%")
-
-    # Only replace old model if new model is better
-    if new_accuracy > old_accuracy:
-        print("✅ New model is better! Deploying...")
-        os.rename('models/moneyline_ensemble.pkl', 'models/backup/moneyline_ensemble_old.pkl')
-        os.rename('models/moneyline_ensemble_v2.pkl', 'models/moneyline_ensemble.pkl')
-    else:
-        print("⚠️ New model is not better. Keeping old model.")
-```
+**Integration**:
+- Add to `generate_game_features()` - Include `expected_pace`, `pace_diff` columns
+- Use `variance_multiplier` in spread predictions for confidence intervals
 
 ---
 
-#### **Modification 4: `daily_predictions.py` - Add Injury Check**
-**Location**: Before generating predictions (line ~500)
+#### 3.2.3 `model_trainer.py` - Quantile Regression Enhancements
+**Changes**: Extend existing `QuantilePropModel` to all prediction types
+**Location**: `model_trainer.py:1818` (QuantilePropModel class)
 
-**New Code** (add at start of prediction loop):
+**Enhancements**:
 ```python
-from injury_tracker_v3 import fetch_current_injuries, is_player_available
+class QuantilePropModel:
+    """
+    Multi-quantile regression for uncertainty quantification.
 
-def generate_daily_predictions(date=None):
-    if date is None:
-        date = datetime.now()
+    Trains 3 models:
+    - 10th percentile (conservative lower bound)
+    - 50th percentile (median prediction)
+    - 90th percentile (optimistic upper bound)
+    """
 
-    # === NEW: Fetch injuries BEFORE predictions ===
-    print(f"Fetching injury data for {date.strftime('%Y-%m-%d')}...")
-    injuries = fetch_current_injuries(date)
-    print(f"Found {len(injuries)} injured players")
+    def predict_with_intervals(self, X: pd.DataFrame) -> pd.DataFrame:
+        """
+        Return predictions with uncertainty bands.
 
-    # Build lookup dict for fast access
-    injury_lookup = {inj['player_id']: inj['status'] for inj in injuries}
-
-    # Fetch today's games
-    games = fetch_todays_games(date)
-
-    all_predictions = []
-    for game in games:
-        home_id = game['home_team_id']
-        away_id = game['away_team_id']
-
-        # Generate team features (moneyline, spread)
-        team_features = generate_game_features(home_id, away_id, date)
-
-        # Predict moneyline
-        ml_model = load_model('moneyline_ensemble.pkl')
-        ml_pred, ml_confidence = ml_model.predict_with_confidence([team_features])
-
-        # Generate player prop predictions
-        home_roster = fetch_team_roster(home_id)
-        away_roster = fetch_team_roster(away_id)
-
-        for player in home_roster + away_roster:
-            player_id = player['id']
-
-            # === NEW: Check injury status ===
-            if player_id in injury_lookup:
-                status = injury_lookup[player_id]
-                if status in ["OUT", "DOUBTFUL"]:
-                    print(f"⚠️ Skipping {player['name']} - Status: {status}")
-                    continue  # Don't predict for unavailable players
-                elif status in ["QUESTIONABLE", "GTD"]:
-                    print(f"⚠️ Warning: {player['name']} is {status} - Low confidence prediction")
-                    # Continue but flag prediction
-                    uncertainty_flag = "HIGH_UNCERTAINTY"
-                else:
-                    uncertainty_flag = None
-            else:
-                uncertainty_flag = None
-
-            # Generate player prop features
-            prop_features = generate_points_prop_features(player_id, home_id, away_id, date)
-
-            # Predict
-            points_model = load_model('player_points_stacking.pkl')
-            pred = points_model.predict([prop_features])[0]
-
-            all_predictions.append({
-                'player_name': player['name'],
-                'team': player['team'],
-                'prop': 'points',
-                'prediction': pred,
-                'confidence': ml_confidence[0],
-                'uncertainty_flag': uncertainty_flag,
-            })
-
-    # Save predictions to CSV
-    df = pd.DataFrame(all_predictions)
-    df.to_csv(f'predictions/predictions_{date.strftime("%Y%m%d")}.csv', index=False)
-
-    return df
+        Returns DataFrame with columns:
+        - pred_low (10th percentile)
+        - pred_median (50th percentile)
+        - pred_high (90th percentile)
+        - pred_range (high - low)
+        """
 ```
+
+**Integration**:
+- Call in `daily_predictions.py` for all prop predictions
+- Add bet sizing logic: Wide ranges (>8 pts) → reduce bet size by 50%
 
 ---
 
 ## 4. Data Model / API / Interface Changes
 
-### 4.1 Feature Matrix Schema
+### 4.1 Database Schema Changes
 
-**Current**: ~35 features per game
-**New**: ~76 features per game
-
-**New Feature Groups**:
-1. **Four Factors** (12): efg_diff_season, efg_diff_L5, efg_diff_L10, tov_diff_season, ..., ftr_diff_L10
-2. **Pace** (3): pace_home, pace_away, pace_combined
-3. **Travel/Fatigue** (10): days_rest_home, days_rest_away, days_rest_diff, travel_distance_away, altitude_adj_home, is_3_in_4_home, is_3_in_4_away, consecutive_road_games_away, timezone_crossings, ...
-4. **Injury** (4): star_player_out_home, star_player_out_away, injury_count_home, injury_count_away
-5. **Betting Market** (6): opening_line, closing_line, line_movement, rlm_flag, consensus_odds, steam_move_flag
-
-### 4.2 Prediction Output Schema
-
-**Current CSV Output**:
-```
-game_id, home_team, away_team, prediction, confidence
-```
-
-**New CSV Output** (enhanced):
-```csv
-game_id,game_time,home_team,away_team,prediction_type,predicted_value,confidence_score,edge_quality_tier,pred_low,pred_median,pred_high,key_injuries,days_rest_diff,pace_projection,line_movement,bet_recommendation,suggested_bet_size,uncertainty_flags
-123,2026-01-15 19:00,LAL,BOS,moneyline,0.65,85,Elite,0.60,0.65,0.70,"",2,101.5,+1.5,BET,2.5%,""
-123,2026-01-15 19:00,LAL,BOS,spread,-4.5,82,Strong,-6.2,-4.5,-2.8,"",2,101.5,+1.5,BET,2.0%,""
-123,2026-01-15 19:00,LAL,BOS,player_points_LeBron,26.8,78,Strong,22.5,26.8,31.2,"",2,101.5,+1.5,BET,1.5%,""
-```
-
-**New Columns**:
-- `pred_low`, `pred_median`, `pred_high`: 10th/50th/90th percentile predictions
-- `key_injuries`: Comma-separated list of injured star players
-- `days_rest_diff`: Rest advantage (home - away)
-- `pace_projection`: Expected game pace
-- `line_movement`: Closing line - Opening line
-- `bet_recommendation`: "BET", "MONITOR", "AVOID"
-- `suggested_bet_size`: Kelly % (e.g., "2.5%" = bet 2.5% of bankroll)
-- `uncertainty_flags`: "HIGH_UNCERTAINTY", "DATA_INCOMPLETE", etc.
-
-### 4.3 Database Schema Additions
-
-**Table: `odds_history`** (new)
+#### 4.1.1 New Table: `injury_status`
 ```sql
-CREATE TABLE odds_history (
-    id SERIAL PRIMARY KEY,
-    game_id INTEGER NOT NULL,
-    timestamp TIMESTAMP NOT NULL,
-    book_name VARCHAR(50),
-    market VARCHAR(20),
-    home_odds FLOAT,
-    away_odds FLOAT,
-    home_line FLOAT,
-    away_line FLOAT,
-    total FLOAT
-);
-CREATE INDEX idx_odds_game ON odds_history(game_id, timestamp DESC);
-```
-
-**Table: `injuries`** (new)
-```sql
-CREATE TABLE injuries (
+CREATE TABLE injury_status (
     id SERIAL PRIMARY KEY,
     player_id INTEGER NOT NULL,
     team_id INTEGER NOT NULL,
     game_date DATE NOT NULL,
-    status VARCHAR(20),
-    injury_type VARCHAR(100),
-    detected_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(player_id, game_date)
+    status VARCHAR(20),  -- OUT, DOUBTFUL, QUESTIONABLE, GTD, ACTIVE
+    injury_type VARCHAR(50),
+    source VARCHAR(50),
+    confidence NUMERIC(3,2),
+    last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(player_id, game_date, source)
 );
-CREATE INDEX idx_injuries_date ON injuries(game_date);
 ```
 
-**Table: `predictions_history`** (existing, add columns)
+#### 4.1.2 New Table: `odds_history` (TimescaleDB)
 ```sql
-ALTER TABLE predictions_history
-ADD COLUMN confidence_score FLOAT,
-ADD COLUMN edge_quality_tier VARCHAR(20),
-ADD COLUMN pred_low FLOAT,
-ADD COLUMN pred_high FLOAT,
-ADD COLUMN uncertainty_flags VARCHAR(100);
+CREATE TABLE odds_history (
+    id SERIAL PRIMARY KEY,
+    game_id VARCHAR(50) NOT NULL,
+    sportsbook VARCHAR(50) NOT NULL,
+    market VARCHAR(20) NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    home_line NUMERIC,
+    away_line NUMERIC,
+    home_price INTEGER,
+    away_price INTEGER
+);
+
+SELECT create_hypertable('odds_history', 'timestamp');
 ```
 
-### 4.4 API Endpoints (FastAPI)
-
-**New Endpoint: `/api/predictions/{date}`**
-```python
-@app.get("/api/predictions/{date}")
-async def get_predictions(date: str):
-    """
-    Fetch predictions for a specific date.
-
-    Args:
-        date: YYYY-MM-DD format
-
-    Returns:
-        JSON array of predictions with confidence, edge quality, etc.
-    """
-    predictions = load_predictions_from_csv(f"predictions/predictions_{date}.csv")
-    return predictions.to_dict(orient='records')
+#### 4.1.3 New Table: `player_impact_metrics`
+```sql
+CREATE TABLE player_impact_metrics (
+    id SERIAL PRIMARY KEY,
+    player_id INTEGER NOT NULL,
+    season VARCHAR(10) NOT NULL,
+    metric_name VARCHAR(20) NOT NULL,
+    metric_value NUMERIC(5,2),
+    last_update DATE,
+    UNIQUE(player_id, season, metric_name)
+);
 ```
 
-**New Endpoint: `/api/injuries/{date}`**
-```python
-@app.get("/api/injuries/{date}")
-async def get_injuries(date: str = None):
-    """
-    Fetch current injury report.
+### 4.2 Enhanced Prediction Output Format
 
-    Returns:
-        JSON array of injured players with status
-    """
-    from injury_tracker_v3 import fetch_current_injuries
-
-    if date:
-        date_obj = datetime.strptime(date, "%Y-%m-%d")
-    else:
-        date_obj = datetime.now()
-
-    injuries = fetch_current_injuries(date_obj)
-    return injuries
-```
-
-**New Endpoint: `/api/line-movement/{game_id}`**
-```python
-@app.get("/api/line-movement/{game_id}")
-async def get_line_movement(game_id: int):
-    """
-    Fetch line movement history for a game.
-
-    Returns:
-        JSON with opening_line, closing_line, movement, RLM flag
-    """
-    from betting_market_features import calculate_line_movement
-
-    line_data = calculate_line_movement(game_id, market="spreads")
-    return line_data
+**CSV Columns**:
+```csv
+game_id,game_time,home_team,away_team,prediction_type,predicted_value,
+confidence_score,edge_quality_tier,pred_low,pred_median,pred_high,
+suggested_bet_size,bet_recommendation,key_injuries,days_rest_diff,
+pace_projection,line_movement,uncertainty_flags
 ```
 
 ---
 
 ## 5. Delivery Phases (Incremental, Testable Milestones)
 
-### Phase 1: Foundation (Weeks 1-2) - Critical Fixes
-
-**Goal**: Fix critical issues preventing accurate predictions
-
-**Tasks**:
-1. ✅ Create `injury_tracker_v3.py` module
-   - Build NBA.com injury scraper
-   - Implement `fetch_current_injuries()` and `is_player_available()`
-   - Add PostgreSQL `injuries` table
-   - **Test**: Manual audit of 100 recent games, verify 0 DNP players missed
-
-2. ✅ Create `advanced_stats_v2.py` module
-   - Implement Four Factors calculations
-   - Add rolling averages (season, L5, L10)
-   - **Test**: Compare calculations to Basketball-Reference.com for 10 random teams
-
-3. ✅ Integrate Four Factors into `feature_engineering.py`
-   - Modify `generate_game_features()` to call `calculate_four_factors_differential()`
-   - **Test**: Verify 12 new columns added to feature matrix
-
-4. ✅ Create `stacking_meta_learner.py` module
-   - Implement `StackingMetaLearner` class with XGBoost meta-learner
-   - Add OOF (out-of-fold) prediction logic
-   - **Test**: Unit test with synthetic data, verify no leakage
-
-5. ✅ Upgrade `model_trainer.py` ensemble classes
-   - Modify `EnsembleMoneylineModel` to use `StackingMetaLearner`
-   - Add `use_stacking` parameter for A/B testing
-   - **Test**: Train on 100 games, verify model trains without errors
-
-6. ✅ Modify `train_complete_balldontlie.py` training pipeline
-   - Extract context features for meta-learner
-   - Pass to `StackingMetaLearner.fit()`
-   - **Test**: Full training run on 2 seasons, compare accuracy to baseline
-
-7. ✅ Add injury check to `daily_predictions.py`
-   - Call `fetch_current_injuries()` before predictions
-   - Skip players with "OUT" or "DOUBTFUL" status
-   - **Test**: Generate predictions for today, verify no OUT players predicted
-
-8. ✅ **Validation: Run comprehensive backtest**
-   - Backtest 2024-25 season (Oct - Apr)
-   - Compare metrics to baseline (backtest_results_2025.json)
-   - **Success Criteria**:
-     - Overall RMSE: < 5.3 (from 5.4)
-     - Points RMSE: < 6.5 (from 6.8)
-     - Threes R²: > -0.4 (from -0.57)
-     - Zero DNP errors (from 161)
-
-**Deliverables**:
-- 3 new Python modules (injury_tracker_v3.py, advanced_stats_v2.py, stacking_meta_learner.py)
-- Modified feature_engineering.py, model_trainer.py, train_complete_balldontlie.py, daily_predictions.py
-- Backtest report showing improvement over baseline
-- PostgreSQL `injuries` table populated
-
-**Risk**: If Four Factors don't improve accuracy by ≥1%, investigate feature importance to diagnose
-
----
-
-### Phase 2: Enhancement (Weeks 3-4) - Advanced Features
-
-**Goal**: Add travel, betting market features, confidence scoring
+### Phase 1: Foundation (Week 1-2)
+**Goal**: Fix critical issues, establish baseline
 
 **Tasks**:
-1. ✅ Create `travel_fatigue.py` module
-   - Implement distance calculations (Haversine formula)
-   - Add `get_days_rest()`, `detect_schedule_density()`, `calculate_altitude_adjustment()`
-   - **Test**: Verify Denver home games show +1.5 pt adjustment
+1. Injury Tracker v3 (5 days)
+2. Four Factors Integration (3 days)
+3. Temporal Discipline Audit (2 days)
+4. Meta-Learner Upgrade (2 days)
 
-2. ✅ Integrate travel features into `feature_engineering.py`
-   - Add 10 new columns (days_rest, travel_distance, altitude, etc.)
-   - **Test**: Backtest shows back-to-back games correlate with -2 pts
+**Success Criteria**:
+- Zero DNP players ✅
+- Player props R² ≥ 0.70 ✅
+- Points RMSE ≤ 6.5 ✅
 
-3. ✅ Create `betting_market_features.py` module
-   - Integrate The Odds API for opening/closing lines
-   - Implement `calculate_line_movement()`, `detect_reverse_line_movement()`
-   - Add PostgreSQL `odds_history` table
-   - **Test**: Verify RLM detection on 50 historical games
-
-4. ✅ Set up `OddsTracker` background job
-   - APScheduler job to fetch odds every 5 minutes
-   - Store in PostgreSQL `odds_history` table
-   - **Test**: Run for 1 day, verify odds are captured
-
-5. ✅ Integrate market features into `feature_engineering.py`
-   - Add 6 new columns (opening_line, line_movement, rlm_flag, etc.)
-   - **Test**: Verify features populated for live games
-
-6. ✅ Implement confidence scoring in `model_trainer.py`
-   - Modify `predict_with_confidence()` to calculate variance-based confidence
-   - **Test**: High-agreement predictions should have confidence > 80%
-
-7. ✅ Add confidence and edge quality to `daily_predictions.py` output
-   - Calculate edge quality tiers (Elite, Strong, Moderate, Weak, Avoid)
-   - Add to CSV output
-   - **Test**: Generate predictions, verify confidence and tier columns exist
-
-8. ✅ **Validation: Run comprehensive backtest with filters**
-   - Backtest 2024-25 season
-   - Filter to only bet on Elite + Strong tiers
-   - **Success Criteria**:
-     - Overall RMSE: < 5.0 (from 5.3)
-     - ROI (Elite tier): > 5%
-     - Positive CLV (beat closing line on average)
-
-**Deliverables**:
-- 2 new Python modules (travel_fatigue.py, betting_market_features.py)
-- PostgreSQL `odds_history` table populated
-- APScheduler background job for odds tracking
-- Enhanced prediction CSV with confidence and edge quality
-- Backtest report showing ROI > 3%
-
----
-
-### Phase 3: Optimization (Weeks 5-6) - Fine-Tuning
-
-**Goal**: Integrate player impact metrics, quantile regression, risk management
+### Phase 2: Enhancement (Week 3-4)
+**Goal**: Add features with proven ROI
 
 **Tasks**:
-1. ✅ Create `player_impact_fetcher.py` module
-   - Scrape or fetch DARKO DPM, ESPN EPM, or FiveThirtyEight RAPTOR
-   - Cache daily (24-hour TTL)
-   - **Test**: Verify impact metrics fetched for all starters
+1. Travel and Fatigue Features (4 days)
+2. Betting Market Features (5 days)
+3. Confidence Scoring (3 days)
+4. Kelly Criterion Bet Sizing (2 days)
 
-2. ✅ Integrate player impact into player prop features
-   - Modify `generate_points_prop_features()` to include impact metric
-   - **Test**: Backtest player props, expect ≥5% RMSE reduction
+**Success Criteria**:
+- Backtest ROI ≥ 3.5% ✅
+- Elite tier ROI ≥ 7% ✅
 
-3. ✅ Implement quantile regression in `model_trainer.py`
-   - Add `QuantilePropModel` for 10th/50th/90th percentiles
-   - Train for all prop types
-   - **Test**: Empirical coverage matches theoretical (10% below low, 10% above high)
-
-4. ✅ Add prediction bands to `daily_predictions.py` output
-   - Columns: pred_low, pred_median, pred_high
-   - **Test**: Wide bands (>8 pts) should correlate with low confidence
-
-5. ✅ Create `risk_management.py` module
-   - Implement Kelly criterion bet sizing
-   - Add stop-loss rules (daily, weekly, max drawdown)
-   - **Test**: Backtest with Kelly vs flat betting, verify higher Sharpe ratio
-
-6. ✅ Add bet sizing to `daily_predictions.py` output
-   - Calculate suggested_bet_size using Kelly criterion
-   - Apply confidence-based adjustments (Elite = 1.0x Kelly, Strong = 0.5x, etc.)
-   - **Test**: Verify bet sizes sum to <20% of bankroll per day
-
-7. ✅ **Validation: Full end-to-end backtest**
-   - Backtest 2 seasons (2023-24, 2024-25)
-   - Apply Kelly bet sizing with stop-loss rules
-   - **Success Criteria**:
-     - Overall RMSE: < 4.8
-     - Points RMSE: < 5.5
-     - Threes R²: > 0.10
-     - ROI (All bets): > 3%
-     - ROI (Elite tier): > 7%
-     - Sharpe ratio: > 1.5
-     - Max drawdown: < 15%
-
-**Deliverables**:
-- 2 new Python modules (player_impact_fetcher.py, risk_management.py)
-- Quantile regression models for all prop types
-- Enhanced prediction CSV with bet sizing and prediction bands
-- Comprehensive backtest report (2 seasons, ROI, Sharpe, drawdown)
-
----
-
-### Phase 4: Productionization (Weeks 7-8) - Deployment
-
-**Goal**: Deploy to production, set up monitoring, start live betting
+### Phase 3: Optimization (Week 5-6)
+**Goal**: Integrate advanced analytics
 
 **Tasks**:
-1. ✅ Optimize prediction generation speed
-   - Profile `daily_predictions.py`, identify bottlenecks
-   - Add caching for team statistics (6-hour TTL)
-   - Parallelize API calls with `asyncio`
-   - **Test**: Generate all predictions for 15 games in < 5 minutes
+1. Player Impact Metrics (4 days)
+2. Pace-Adjusted Metrics (2 days)
+3. Quantile Regression (3 days)
+4. Stop-Loss Automation (2 days)
 
-2. ✅ Set up automated retraining pipeline
-   - Railway scheduled job: Full retrain every 14 days
-   - Incremental update every 3 days (meta-learner only)
-   - **Test**: Trigger manual retrain, verify completes in < 4 hours
+**Success Criteria**:
+- Player props R² ≥ 0.75 ✅
+- Points RMSE < 5.5 ✅
+- Backtest ROI ≥ 5% ✅
 
-3. ✅ Implement drift detection in `continuous_learning/drift_detector.py`
-   - Monitor RMSE daily
-   - Alert if RMSE increases >10% for 3 consecutive days
-   - **Test**: Simulate drift with synthetic data, verify alert triggers
+### Phase 4: Productionization (Week 7-8)
+**Goal**: Deploy and monitor
 
-4. ✅ Create HTML backtesting report
-   - Use Jinja2 templates for HTML generation
-   - Add Plotly charts (ROI curve, calibration plot, reliability diagram)
-   - **Test**: Generate report for 2024-25 season, verify visualizations
+**Tasks**:
+1. Performance Optimization (3 days)
+2. Retraining Automation (3 days)
+3. API Endpoints (2 days)
+4. Backtesting Reports (2 days)
+5. Go-Live Preparation (2 days)
 
-5. ✅ Set up FastAPI endpoints
-   - `/api/predictions/{date}` - Fetch predictions
-   - `/api/injuries/{date}` - Fetch injury report
-   - `/api/line-movement/{game_id}` - Fetch line movement
-   - **Test**: Hit each endpoint, verify JSON response
-
-6. ✅ Deploy to Railway
-   - Push code to GitHub
-   - Configure Railway scheduled jobs (prediction generation, retraining)
-   - Set up PostgreSQL database
-   - **Test**: Generate predictions on Railway, verify output
-
-7. ✅ **Paper Trading (Week 8)**
-   - Track hypothetical bets for 7 days
-   - Compare predictions to actual outcomes
-   - Calculate ROI, Sharpe, max drawdown
-   - **Success Criteria**: ROI > 3%, confidence matches actual win rate
-
-8. ✅ **Go-Live (End of Week 8)**
-   - Start live betting with 10% of intended bankroll (e.g., $500)
-   - Strict stop-loss rules (3% daily, 8% weekly)
-   - Daily monitoring of bankroll, ROI, CLV
-   - **Success Criteria**: Positive ROI after 30 bets, positive CLV
-
-**Deliverables**:
-- Optimized prediction pipeline (< 5 min for all games)
-- Railway deployment with scheduled jobs
-- HTML backtesting reports
-- FastAPI endpoints for predictions, injuries, line movement
-- 7-day paper trading results
-- Live betting dashboard (optional)
+**Success Criteria**:
+- Prediction latency < 5 min ✅
+- API latency p95 < 500ms ✅
+- Automated retraining operational ✅
 
 ---
 
 ## 6. Verification Approach
 
-### 6.1 Unit Tests
+### 6.1 Unit Testing
 
-**Test Coverage Target**: 80%+ for critical modules
+**Test Coverage**: 80%+ for critical modules
 
-**Key Test Cases**:
+**Key Test Suites**:
+- `tests/test_temporal_discipline.py` - Temporal leakage detection
+- `tests/test_injury_tracker.py` - Injury detection accuracy
+- `tests/test_features.py` - Feature engineering validation
+- `tests/test_confidence.py` - Confidence scoring
 
-1. **`advanced_stats_v2.py`**:
-   - `test_four_factors_calculation()`: Compare to Basketball-Reference for 10 teams
-   - `test_pace_calculation()`: Verify formula correctness
-   - `test_temporal_discipline()`: Ensure no future data used
+### 6.2 Backtest Validation
 
-2. **`injury_tracker_v3.py`**:
-   - `test_scraper()`: Verify scraping returns valid data structure
-   - `test_dnp_detection()`: Mock injured player, verify `is_player_available()` returns False
-   - `test_usage_redistribution()`: Verify usage sums to 100%
+**Methodology**: Walk-forward validation with temporal splits
 
-3. **`stacking_meta_learner.py`**:
-   - `test_oof_predictions()`: Verify no leakage (OOF predictions don't use holdout set for training)
-   - `test_meta_learner_training()`: Train on synthetic data, verify convergence
-   - `test_confidence_calculation()`: High variance → low confidence
+**Test Periods**:
+- Training: 2023-24 + 2024-25 (Oct-Mar)
+- Validation: 2024-25 (Apr-Jun)
+- Test: 2025-26 (Oct-Dec)
 
-4. **`travel_fatigue.py`**:
-   - `test_haversine_distance()`: Compare to known distances (LAL → BOS = ~2600 miles)
-   - `test_back_to_back_detection()`: Verify correct identification
-   - `test_altitude_adjustment()`: Denver home games should show +1.5 pts
-
-5. **`betting_market_features.py`**:
-   - `test_line_movement_calculation()`: Mock opening/closing lines, verify delta
-   - `test_rlm_detection()`: Mock scenario with line moving opposite to public
-   - `test_odds_api_integration()`: Hit The Odds API (in staging environment), verify response
-
-**Run Tests**:
-```bash
-pytest tests/ --cov=. --cov-report=html
-```
-
-### 6.2 Integration Tests
-
-**Test Scenarios**:
-
-1. **End-to-End Prediction Generation**:
-   - Generate predictions for a historical date (e.g., 2025-11-15)
-   - Verify output CSV contains all expected columns
-   - Verify no DNP players in output
-   - Assert: RMSE on that date < 6.0
-
-2. **Temporal Leakage Check**:
-   - Select 100 random historical games
-   - For each game, generate features using `game_date` parameter
-   - Verify no features use data from after `game_date`
-   - Use data inspection: Check max date in fetched statistics
-
-3. **API Integration**:
-   - Hit `/api/predictions/2026-01-13` endpoint
-   - Verify JSON response contains predictions with confidence scores
-   - Hit `/api/injuries/2026-01-13`
-   - Verify JSON response contains injured players
-
-4. **Background Jobs**:
-   - Trigger `OddsTracker.fetch_and_store_odds()` manually
-   - Verify odds stored in PostgreSQL `odds_history` table
-   - Check: All games for today have ≥5 sportsbook entries
-
-### 6.3 Backtesting Validation
-
-**Backtest Protocol**:
-
-1. **Historical Replay**:
-   - Use `comprehensive_backtest.py` to replay 2024-25 season
-   - Walk-forward validation: Train on games before date, test on games after
-   - No lookahead bias (enforce temporal discipline)
-
-2. **Metrics to Track**:
-   - **Accuracy Metrics**: RMSE, MAE, R², Bias for each prop type
-   - **Betting Metrics**: ROI, Win Rate, Sharpe Ratio, Max Drawdown
-   - **Calibration**: Brier Score, Expected Calibration Error (ECE)
-   - **Market Metrics**: Closing Line Value (CLV), Reverse Line Movement Win Rate
-
-3. **Sanity Checks**:
-   - ROI > 15% → Flag as potential leakage
-   - Win Rate > 60% → Flag as unrealistic
-   - Sharpe Ratio > 3.0 → Investigate
-   - If any flag triggers, audit for temporal leakage
-
-4. **Comparison to Baseline**:
-   - Load `backtest_results_2025.json` (baseline)
-   - Run backtest with new model
-   - Calculate delta for each metric
-   - **Success Criteria**: New model shows ≥1% RMSE improvement OR ≥1.5 pp ROI increase
-
-**Backtest Report Format** (JSON):
-```json
-{
-  "backtest_date": "2026-01-13",
-  "season": "2024-25",
-  "games_processed": 1230,
-  "start_date": "2024-10-22",
-  "end_date": "2025-04-13",
-  "model_version": "v2.0_stacking",
-  "metrics": {
-    "overall": {
-      "count": 45000,
-      "rmse": 4.85,
-      "mae": 3.21,
-      "r2": 0.758,
-      "bias": -0.15
-    },
-    "points": {"rmse": 5.42, "r2": 0.512, ...},
-    "threes": {"rmse": 1.52, "r2": 0.125, ...},
-    ...
-  },
-  "betting_results": {
-    "total_bets": 2500,
-    "wins": 1375,
-    "losses": 1125,
-    "win_rate": 0.55,
-    "roi": 0.047,
-    "sharpe_ratio": 1.68,
-    "max_drawdown": 0.128,
-    "closing_line_value": 0.025
-  },
-  "by_tier": {
-    "elite": {"bets": 450, "roi": 0.082, "win_rate": 0.592},
-    "strong": {"bets": 850, "roi": 0.051, "win_rate": 0.561},
-    ...
-  }
-}
-```
-
-### 6.4 Live Validation (Paper Trading)
-
-**Week 8 Protocol**:
-
-1. **Daily Predictions**:
-   - Generate predictions each morning (9 AM)
-   - Save to `predictions/predictions_{date}.csv`
-   - Do NOT place real bets
-
-2. **Outcome Tracking**:
-   - After games finish, scrape actual results
-   - Compare to predictions, calculate RMSE
-   - Track hypothetical bankroll (starting $5,000)
-
-3. **Daily Review**:
-   - Which predictions were accurate?
-   - Which predictions missed badly? (error > 10 pts)
-   - Were injured players detected correctly?
-   - Did confidence scores match actual accuracy?
-
-4. **Week-End Report**:
-   - Total bets: X
-   - Win rate: Y%
-   - ROI: Z%
-   - Sharpe ratio: W
-   - Worst miss: Player A, error = N pts
-   - **Go/No-Go Decision**: If ROI > 3% and CLV > 0, approve live betting
-
-### 6.5 Continuous Monitoring (Post-Deployment)
-
-**Daily Checks**:
-- RMSE: Should be < 5.5 for player props
-- DNP errors: Should be 0
-- API failures: Should be < 1% of calls
-- Prediction generation time: Should be < 5 minutes
-
-**Weekly Checks**:
-- ROI: Should be positive (>0%)
-- Closing Line Value: Should be positive
-- Max drawdown: Should be < 15%
-- Drift detection: If RMSE increases >10%, trigger retrain
-
-**Monthly Checks**:
-- Full backtest on last 30 days
-- Compare to sharp bettor benchmarks (55-58% ATS, 3-5% ROI)
-- Feature importance analysis: Are new features being used?
-- Model calibration: Are probabilities accurate?
+**Validation Metrics**:
+| Metric | Baseline | Target |
+|--------|----------|--------|
+| Player Props R² | 0.681 | ≥ 0.750 |
+| Points RMSE | 6.757 | < 5.5 |
+| Threes R² | -0.568 | > 0.10 |
+| PRA RMSE | 8.469 | < 7.0 |
+| Betting ROI | TBD | > 3% |
+| Elite ROI | TBD | > 7% |
+| Sharpe Ratio | TBD | > 1.5 |
 
 ---
 
 ## 7. Technical Risks and Mitigation
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| **Four Factors don't improve accuracy** | Low | Medium | Validate with research papers; if <1% improvement, investigate feature importance |
-| **XGBoost meta-learner overfits** | Medium | Medium | Use strong regularization (alpha=0.1, lambda=1.0); shallow trees (max_depth=3); cross-validation |
-| **Injury scraping breaks (NBA.com changes HTML)** | Medium | High | Monitor scraper daily; add ESPN as fallback; budget for RotoWire API upgrade |
-| **The Odds API rate limits exceeded** | Low | Medium | 100k subscription should be sufficient (~300 calls/day); add caching with 5-min TTL |
-| **Prediction generation too slow (>5 min)** | Medium | Low | Profile code, add caching for team stats; parallelize API calls with asyncio |
-| **Model retraining takes >4 hours** | Low | Low | Optimize hyperparameters; use Dask for distributed training if needed |
-| **Backtest shows no improvement over baseline** | Medium | High | Investigate feature importance; verify temporal discipline; check for data quality issues |
-| **Live betting loses money (negative ROI)** | Medium | High | Start with 10% bankroll; strict stop-loss rules (3% daily, 8% weekly); revert to old model if needed |
-| **Temporal leakage in new features** | Low | Critical | Automated tests for every feature function; audit 100 random games |
-| **Deployment failures on Railway** | Low | Medium | Test in staging environment; use Docker for reproducibility; monitor with Sentry |
+| Risk | Probability | Impact | Mitigation |
+|------|-------------|--------|------------|
+| API Rate Limits | Low | High | Multiple sources, caching |
+| Injury Scraping Breaks | Medium | High | Multi-source, monitoring |
+| Model Overfitting | Medium | High | Temporal validation, OOS testing |
+| Slow Retraining | Medium | Low | Distributed training, optimization |
+| Market Inefficiency | Medium | High | Focus on props, monitor CLV |
 
 ---
 
-## 8. Dependencies and Prerequisites
+## 8. Dependencies and External Integrations
 
-### 8.1 External Dependencies (Already Secured ✅)
-- ✅ Balldontlie API (GOAT tier - unlimited rate limits)
-- ✅ The Odds API (100k subscription - historical odds, line movements)
+### 8.1 External APIs
 
-### 8.2 Additional Dependencies (Nice-to-Have)
-- ⚠️ RotoWire Injury API (~$100/month) - **Start with free scraping, upgrade if needed**
-- 🔄 DARKO DPM / ESPN EPM / FiveThirtyEight RAPTOR - **Scraping (free) or paid API**
+| API | Purpose | Rate Limit | Cost | Fallback |
+|-----|---------|-----------|------|----------|
+| Balldontlie | Primary data | 600 req/min | Free | NBA API |
+| RotoWire | Injury data | 1000/day | $100/mo | Scraping |
+| The Odds API | Betting odds | 500/day | $50/mo | Manual |
+| DARKO | Player impact | N/A | Free | EPM |
 
-### 8.3 Infrastructure (Already Secured ✅)
-- ✅ Railway (compute, scheduled jobs, PostgreSQL)
-- ✅ GitHub (version control)
-- ✅ Vercel (frontend dashboard, if needed)
+### 8.2 Infrastructure
 
-### 8.4 Python Packages (Install)
-```bash
-pip install scikit-learn==1.3.0 xgboost==2.0.0 lightgbm==4.0.0 catboost==1.2.0
-pip install numpy==1.24.0 pandas==2.0.0 scipy==1.11.0
-pip install requests==2.31.0 aiohttp==3.9.0
-pip install fastapi==0.104.0 uvicorn==0.24.0 pydantic==2.5.0
-pip install apscheduler==3.10.0 python-dotenv==1.0.0
-pip install plotly==5.18.0 jinja2==3.1.2
-pip install beautifulsoup4==4.12.0 lxml==4.9.0  # For web scraping
-pip install psycopg2-binary==2.9.0  # PostgreSQL driver
-pip install pytest==7.4.0 pytest-cov==4.1.0  # Testing
-```
+- PostgreSQL with TimescaleDB (odds history)
+- Redis (optional caching)
+- Railway (backend hosting)
+- Vercel (frontend hosting)
 
 ---
 
-## 9. Success Criteria Summary
+## 9. Acceptance Criteria Summary
 
-**Phase 1 (Foundation) - Week 2**:
-- ✅ Zero DNP (Did Not Play) errors in predictions
-- ✅ Overall RMSE < 5.3 (from 5.4)
-- ✅ Threes R² > -0.4 (from -0.57)
-- ✅ Backtest shows no regression
+### Phase 1 (Foundation)
+- ✅ Zero DNP players in predictions
+- ✅ Four Factors show ≥1% RMSE reduction
+- ✅ Temporal leakage tests pass
 
-**Phase 2 (Enhancement) - Week 4**:
-- ✅ Overall RMSE < 5.0
-- ✅ ROI (Elite tier) > 5%
-- ✅ Positive CLV (beat closing line)
-- ✅ Confidence scores correlate with actual accuracy
+### Phase 2 (Enhancement)
+- ✅ Denver home advantage validated (+1.5 pts)
+- ✅ Elite tier ROI > 7%
+- ✅ Kelly Sharpe > flat betting
 
-**Phase 3 (Optimization) - Week 6**:
-- ✅ Overall RMSE < 4.8
-- ✅ Points RMSE < 5.5
-- ✅ Threes R² > 0.10
-- ✅ ROI (All bets) > 3%
-- ✅ ROI (Elite tier) > 7%
-- ✅ Sharpe ratio > 1.5
-- ✅ Max drawdown < 15%
+### Phase 3 (Optimization)
+- ✅ Player props R² ≥ 0.75
+- ✅ All prop targets met
+- ✅ ROI ≥ 5%, Sharpe > 1.5
 
-**Phase 4 (Production) - Week 8**:
-- ✅ Paper trading ROI > 3% (7 days)
-- ✅ Prediction generation < 5 minutes
-- ✅ Live betting with 10% bankroll deployed
-- ✅ Positive ROI after 30 live bets
-
-**Long-Term (Month 3+)**:
-- ✅ Sustained ROI > 5% over 1000+ bets
-- ✅ Positive CLV consistently
-- ✅ Sharpe ratio > 1.5
-- ✅ Beat professional sharp benchmarks (55-58% ATS, 5-8% ROI)
+### Phase 4 (Production)
+- ✅ Prediction latency < 5 min
+- ✅ API operational
+- ✅ Automated retraining
+- ✅ Zero downtime
 
 ---
 
-## 10. Next Steps
+## 10. Conclusion
 
-1. ✅ **User Reviews and Approves This Spec** → Proceed to Planning step
-2. ✅ Create detailed implementation plan (break down tasks, estimate hours)
-3. ✅ Set up development environment (install dependencies, PostgreSQL)
-4. ✅ Begin Phase 1: Foundation (injury detection, Four Factors, stacking meta-learner)
-5. ✅ Run first backtest, compare to baseline
-6. ✅ Iterate based on results, proceed to Phase 2
+This technical specification provides a detailed implementation roadmap to achieve SOTA NBA prediction performance. The approach leverages existing infrastructure while systematically addressing critical gaps identified in the requirements analysis.
 
-**Estimated Timeline**: 8 weeks (2 weeks per phase)
-**Estimated Effort**: ~200-250 hours (full-time equivalent)
+**Key Technical Decisions**:
+1. Extend existing stacking architecture (proven effective)
+2. Multi-source injury feeds for 95%+ accuracy
+3. PostgreSQL + TimescaleDB for odds history
+4. XGBoost meta-learner (start simple, upgrade if needed)
+5. Conservative 1/4 Kelly for risk management
 
----
+**Next Steps**:
+1. Review and approve specification
+2. Set up infrastructure (PostgreSQL, API keys)
+3. Begin Phase 1 implementation
+4. Run comprehensive backtest after each phase
+5. Deploy to production after validation
 
-**End of Technical Specification**
+The model is architecturally sound and positioned for industry-leading performance through systematic execution of this phased implementation plan.
