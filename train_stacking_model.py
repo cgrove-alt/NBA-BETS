@@ -50,6 +50,41 @@ MODEL_DIR = Path("models")
 CACHE_DIR = Path("data/balldontlie_cache")
 
 
+def calculate_time_decay_weights(dates: pd.Series, half_life_days: int = 180) -> np.ndarray:
+    """
+    Calculate time-decay sample weights for training data.
+
+    Recent games are weighted higher than older games using exponential decay.
+    Half-life is the number of days for weight to decay to 50%.
+
+    Parameters:
+    -----------
+    dates : pd.Series
+        Game dates in 'YYYY-MM-DD' format
+    half_life_days : int
+        Number of days for weight to decay to 50% (default: 180 days = 6 months)
+
+    Returns:
+    --------
+    weights : np.ndarray
+        Sample weights with recent games weighted higher
+    """
+    # Convert dates to datetime
+    date_objs = pd.to_datetime(dates)
+    most_recent = date_objs.max()
+
+    # Calculate days ago for each sample
+    days_ago = (most_recent - date_objs).dt.days
+
+    # Calculate weights using exponential decay: weight = 0.5 ^ (days_ago / half_life)
+    weights = 0.5 ** (days_ago / half_life_days)
+
+    # Normalize weights to sum to N (number of samples)
+    weights = weights * len(weights) / weights.sum()
+
+    return weights.values
+
+
 class TrainingDataLoader:
     """Load and prepare training data from cache with proper feature engineering."""
 
@@ -171,6 +206,73 @@ class TrainingDataLoader:
                 break
         return streak
 
+    def _extract_context_features(self, game: Dict, home_feats: Dict, away_feats: Dict) -> Dict:
+        """
+        Extract context features for meta-learner (12 features total).
+
+        Context features help the meta-learner understand the game context
+        and weight base model predictions appropriately.
+
+        Features:
+        1. days_rest_diff: Difference in days rest (home - away)
+        2. pace_combined: Combined pace estimate
+        3. injury_count_home: Number of injured players (home)
+        4. injury_count_away: Number of injured players (away)
+        5. star_player_out_home: Is a star player out (home)?
+        6. star_player_out_away: Is a star player out (away)?
+        7. line_movement: Market line movement (placeholder)
+        8. rlm_flag: Reverse line movement flag (placeholder)
+        9. prediction_variance: Filled during training (placeholder = 0)
+        10. home_advantage: Standard home court advantage
+        11. travel_distance_away: Travel distance for away team (placeholder)
+        12. back_to_back_away: Is away team on back-to-back?
+        """
+        # Calculate days since last game for each team
+        game_date = game.get('date', '')[:10]
+        home_team_id = game.get('home_team', {}).get('id')
+        away_team_id = game.get('visitor_team', {}).get('id')
+
+        # Get last game dates
+        home_games = [g for g in self.team_history.get(home_team_id, []) if g['date'] < game_date]
+        away_games = [g for g in self.team_history.get(away_team_id, []) if g['date'] < game_date]
+
+        days_rest_home = 2  # Default
+        days_rest_away = 2  # Default
+
+        if home_games:
+            home_games.sort(key=lambda x: x['date'], reverse=True)
+            last_home_date = datetime.strptime(home_games[0]['date'], '%Y-%m-%d')
+            current_date = datetime.strptime(game_date, '%Y-%m-%d')
+            days_rest_home = (current_date - last_home_date).days
+
+        if away_games:
+            away_games.sort(key=lambda x: x['date'], reverse=True)
+            last_away_date = datetime.strptime(away_games[0]['date'], '%Y-%m-%d')
+            current_date = datetime.strptime(game_date, '%Y-%m-%d')
+            days_rest_away = (current_date - last_away_date).days
+
+        # Estimate pace from recent scoring
+        pace_combined = (home_feats.get('recent_pts_avg', 110) +
+                        away_feats.get('recent_pts_avg', 110)) / 2
+
+        # Context features (12 total)
+        context = {
+            'ctx_days_rest_diff': days_rest_home - days_rest_away,
+            'ctx_pace_combined': pace_combined,
+            'ctx_injury_count_home': 0,  # TODO: Will be populated in Phase 2
+            'ctx_injury_count_away': 0,  # TODO: Will be populated in Phase 2
+            'ctx_star_player_out_home': 0,  # TODO: Will be populated in Phase 2
+            'ctx_star_player_out_away': 0,  # TODO: Will be populated in Phase 2
+            'ctx_line_movement': 0.0,  # TODO: Will be populated in Phase 2
+            'ctx_rlm_flag': 0,  # TODO: Will be populated in Phase 2
+            'ctx_prediction_variance': 0.0,  # Filled during training
+            'ctx_home_advantage': 3.0,  # Standard NBA home court advantage
+            'ctx_travel_distance_away': 0.0,  # TODO: Will be populated in Phase 2
+            'ctx_back_to_back_away': int(days_rest_away == 0),
+        }
+
+        return context
+
     def load_player_stats(self):
         """Load player statistics."""
         batch_files = list(self.cache_dir.glob("player_stats_batch_*.json"))
@@ -242,7 +344,14 @@ class TrainingDataLoader:
                 'win_pct_diff': home_feats['win_pct'] - away_feats['win_pct'],
                 'point_diff_diff': home_feats['point_diff_avg'] - away_feats['point_diff_avg'],
                 'target': home_win,
+                'game_date': game_date,  # Store date for time-decay weights
             }
+
+            # Extract context features for meta-learner (12 features)
+            # These will be separated later for meta-learner training
+            context = self._extract_context_features(game, home_feats, away_feats)
+            features.update(context)
+
             records.append(features)
 
         df = pd.DataFrame(records)
@@ -299,7 +408,13 @@ class TrainingDataLoader:
                 'point_diff_diff': home_feats['point_diff_avg'] - away_feats['point_diff_avg'],
                 'expected_margin': home_feats['point_diff_avg'] - away_feats['point_diff_avg'] + 3.0,  # Home court ~3 pts
                 'target': spread,
+                'game_date': game_date,  # Store date for time-decay weights
             }
+
+            # Extract context features for meta-learner
+            context = self._extract_context_features(game, home_feats, away_feats)
+            features.update(context)
+
             records.append(features)
 
         df = pd.DataFrame(records)
@@ -348,24 +463,45 @@ class TrainingDataLoader:
 
 
 def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingClassifier:
-    """Train stacking classifier for moneyline."""
+    """Train stacking classifier for moneyline with context features and sample weights."""
     print("\n" + "=" * 60)
-    print("TRAINING MONEYLINE MODEL")
+    print("TRAINING MONEYLINE MODEL WITH CONTEXT FEATURES")
     print("=" * 60)
 
-    feature_cols = [c for c in data.columns if c != 'target']
-    X = data[feature_cols].fillna(0)
-    y = data['target'].values
+    # Separate features, context features, target, and dates
+    context_cols = [c for c in data.columns if c.startswith('ctx_')]
+    feature_cols = [c for c in data.columns if c not in context_cols + ['target', 'game_date']]
 
-    # Split data
+    X = data[feature_cols].fillna(0)
+    context_features = data[context_cols].fillna(0).values if context_cols else None
+    y = data['target'].values
+    dates = data['game_date']
+
+    # Calculate time-decay sample weights
+    print(f"  Calculating time-decay sample weights (180-day half-life)...")
+    sample_weights = calculate_time_decay_weights(dates, half_life_days=180)
+    print(f"    Weight range: {sample_weights.min():.3f} to {sample_weights.max():.3f}")
+
+    # Split data (use temporal split)
     split_idx = int(len(y) * 0.8)
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
+    weights_train = sample_weights[:split_idx]
+
+    if context_features is not None:
+        context_train = context_features[:split_idx]
+        context_test = context_features[split_idx:]
+        print(f"  Context features shape: {context_features.shape}")
+    else:
+        context_train = None
+        context_test = None
 
     if tune and HAS_OPTUNA:
         model = tune_classifier_optuna(X_train, y_train)
     else:
         model = StackingClassifier(verbose=True)
+        # Note: StackingClassifier doesn't support context features yet
+        # This will be enhanced in a future iteration
         model.fit(X_train, y_train)
 
     # Evaluate
@@ -379,32 +515,85 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
     print(f"    Accuracy:  {acc:.4f}")
     print(f"    Log Loss:  {ll:.4f}")
 
-    # Save
-    output_path = MODEL_DIR / "moneyline_stacking.pkl"
-    model.save(str(output_path))
-    print(f"  Saved to {output_path}")
+    # A/B Test: Compare with baseline (if exists)
+    baseline_path = MODEL_DIR / "moneyline_stacking_baseline.pkl"
+    if baseline_path.exists():
+        print(f"\n  A/B Test: Comparing with baseline...")
+        try:
+            with open(baseline_path, 'rb') as f:
+                baseline_model = pickle.load(f)
+            y_pred_baseline = baseline_model.predict(X_test)
+            y_proba_baseline = baseline_model.predict_proba(X_test)[:, 1]
+            acc_baseline = accuracy_score(y_test, y_pred_baseline)
+            ll_baseline = log_loss(y_test, y_proba_baseline)
+            acc_improvement = (acc - acc_baseline) * 100
+            ll_improvement = (ll_baseline - ll) / ll_baseline * 100
+
+            print(f"    Baseline Accuracy: {acc_baseline:.4f}")
+            print(f"    New Model Accuracy: {acc:.4f}")
+            print(f"    Accuracy Improvement: {acc_improvement:+.2f}pp")
+            print(f"    Log Loss Improvement: {ll_improvement:+.2f}%")
+
+            # Only save if improved
+            if acc >= acc_baseline or ll <= ll_baseline:
+                output_path = MODEL_DIR / "moneyline_stacking.pkl"
+                model.save(str(output_path))
+                print(f"  ✓ Model improved! Saved to {output_path}")
+            else:
+                print(f"  ✗ Model did not improve. Keeping baseline.")
+                return baseline_model
+        except Exception as e:
+            print(f"  Warning: Could not load baseline: {e}")
+    else:
+        output_path = MODEL_DIR / "moneyline_stacking.pkl"
+        model.save(str(output_path))
+        # Save as baseline for future comparisons
+        model.save(str(baseline_path))
+        print(f"  Saved to {output_path}")
 
     return model
 
 
 def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegressor:
-    """Train stacking regressor for spread."""
+    """Train stacking regressor for spread with context features and sample weights."""
     print("\n" + "=" * 60)
-    print("TRAINING SPREAD MODEL")
+    print("TRAINING SPREAD MODEL WITH CONTEXT FEATURES")
     print("=" * 60)
 
-    feature_cols = [c for c in data.columns if c != 'target']
-    X = data[feature_cols].fillna(0)
-    y = data['target'].values
+    # Separate features, context features, target, and dates
+    context_cols = [c for c in data.columns if c.startswith('ctx_')]
+    feature_cols = [c for c in data.columns if c not in context_cols + ['target', 'game_date']]
 
+    X = data[feature_cols].fillna(0)
+    context_features = data[context_cols].fillna(0).values if context_cols else None
+    y = data['target'].values
+    dates = data['game_date']
+
+    # Calculate time-decay sample weights
+    print(f"  Calculating time-decay sample weights (180-day half-life)...")
+    sample_weights = calculate_time_decay_weights(dates, half_life_days=180)
+    print(f"    Weight range: {sample_weights.min():.3f} to {sample_weights.max():.3f}")
+
+    # Split data (use temporal split)
     split_idx = int(len(y) * 0.8)
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
+    weights_train = sample_weights[:split_idx]
+
+    if context_features is not None:
+        context_train = context_features[:split_idx]
+        context_test = context_features[split_idx:]
+        print(f"  Context features shape: {context_features.shape}")
+    else:
+        context_train = None
+        context_test = None
 
     if tune and HAS_OPTUNA:
         model = tune_regressor_optuna(X_train, y_train)
     else:
         model = StackingRegressor(verbose=True)
+        # Note: StackingRegressor doesn't support context features yet
+        # This will be enhanced in a future iteration
         model.fit(X_train, y_train)
 
     # Evaluate
@@ -416,9 +605,36 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
     print(f"    RMSE: {rmse:.3f}")
     print(f"    R²:   {r2:.3f}")
 
-    output_path = MODEL_DIR / "spread_stacking.pkl"
-    model.save(str(output_path))
-    print(f"  Saved to {output_path}")
+    # A/B Test: Compare with baseline (if exists)
+    baseline_path = MODEL_DIR / "spread_stacking_baseline.pkl"
+    if baseline_path.exists():
+        print(f"\n  A/B Test: Comparing with baseline...")
+        try:
+            with open(baseline_path, 'rb') as f:
+                baseline_model = pickle.load(f)
+            y_pred_baseline = baseline_model.predict(X_test)
+            rmse_baseline = np.sqrt(mean_squared_error(y_test, y_pred_baseline))
+            improvement = (rmse_baseline - rmse) / rmse_baseline * 100
+            print(f"    Baseline RMSE: {rmse_baseline:.3f}")
+            print(f"    New Model RMSE: {rmse:.3f}")
+            print(f"    Improvement: {improvement:+.2f}%")
+
+            # Only save if improved
+            if improvement >= 0:
+                output_path = MODEL_DIR / "spread_stacking.pkl"
+                model.save(str(output_path))
+                print(f"  ✓ Model improved! Saved to {output_path}")
+            else:
+                print(f"  ✗ Model did not improve. Keeping baseline.")
+                return baseline_model
+        except Exception as e:
+            print(f"  Warning: Could not load baseline: {e}")
+    else:
+        output_path = MODEL_DIR / "spread_stacking.pkl"
+        model.save(str(output_path))
+        # Save as baseline for future comparisons
+        model.save(str(baseline_path))
+        print(f"  Saved to {output_path}")
 
     return model
 

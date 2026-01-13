@@ -274,7 +274,8 @@ Save to `{@artifacts_path}/plan.md`.
 
 ---
 
-### [ ] Task 1.6: Update Training Pipeline with Context Features
+### [x] Task 1.6: Update Training Pipeline with Context Features
+<!-- chat-id: 6d128848-1d37-46e2-8652-acc423414a19 -->
 **Priority**: P0 (Critical - enables meta-learner)
 **Location**: `train_balldontlie_final.py` or `train_stacking_model.py`
 **Estimated Effort**: 6 hours
