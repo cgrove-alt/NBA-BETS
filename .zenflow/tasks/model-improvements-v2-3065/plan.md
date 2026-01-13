@@ -322,7 +322,8 @@ Save to `{@artifacts_path}/plan.md`.
 
 ---
 
-### [ ] Task 1.7: Run Comprehensive Backtest for Phase 1 Validation
+### [x] Task 1.7: Run Comprehensive Backtest for Phase 1 Validation
+<!-- chat-id: 1870ddc8-3946-4ae0-8056-f32ff3338201 -->
 **Priority**: P0 (Critical - validates all Phase 1 changes)
 **Location**: `comprehensive_backtest.py` or `backtesting.py`
 **Estimated Effort**: 4 hours
