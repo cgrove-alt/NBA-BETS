@@ -191,8 +191,14 @@ class FourFactorsCalculator:
             team_id: Team identifier
             game_date: Date in YYYY-MM-DD format
             stats: Team stats dictionary with fgm, fga, fg3m, fta, orb/oreb, tov, etc.
+                   If 'poss' key is present in stats, it will be used directly.
+                   Otherwise, possessions will be estimated using the NBA formula.
             opponent_id: Opponent team ID (optional)
             opp_stats: Opponent stats (optional)
+
+        Note:
+            The stats dict is spread into the game data, so any additional keys
+            (e.g., 'poss', 'minutes_played') will be preserved for later use.
         """
         # Calculate Four Factors
         four_factors = self.calculate_four_factors(stats, opp_stats)
@@ -419,8 +425,8 @@ class FourFactorsCalculator:
             games = games[-3:]
         # else: use all games (season)
 
-        # Calculate average pace
-        paces = [g[1].get('poss', 100) * (48 / 48) for g in games]  # Normalize to 48 min
+        # Calculate average pace (possessions already normalized to 48 minutes)
+        paces = [g[1].get('poss', 100) for g in games]
         return round(np.mean(paces), 2) if paces else self.LEAGUE_AVG['pace']
 
     def adjust_for_pace(self, stat_value: float, team_pace: float,
@@ -510,7 +516,7 @@ class StyleClashCalculator:
             if fga > 0:
                 fg3a_rates.append(fg3a / fga)
                 ft_rates.append(fta / fga)
-            paces.append(poss * (48 / 48))  # Normalize to 48 minutes
+            paces.append(poss)  # Possessions already normalized to 48 minutes
             if poss > 0:
                 off_ratings.append(pts / poss * 100)
 
