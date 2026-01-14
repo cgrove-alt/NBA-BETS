@@ -359,8 +359,8 @@ Save to `{@artifacts_path}/plan.md`.
 ## PHASE 2: ENHANCEMENT (Weeks 3-4) - Advanced Features
 **Goal**: Add travel, betting market features, confidence scoring to improve edge quality
 
-### [ ] Task 2.1: Create travel_fatigue.py Module
-<!-- chat-id: 7c3fdb6f-5ca9-4424-a8b6-2394113696cf -->
+### [x] Task 2.1: Create travel_fatigue.py Module
+<!-- chat-id: CURRENT_SESSION -->
 **Priority**: P0 (Critical - ~2 points impact on back-to-backs)
 **Location**: Root directory
 **Estimated Effort**: 6 hours
