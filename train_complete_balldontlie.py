@@ -2777,6 +2777,56 @@ def calculate_vegas_total_features(vegas_total: float, player_features: Dict,
     }
 
 
+def calculate_regression_adjustment_features(player_features: Dict, games_played: int) -> Dict:
+    """
+    Calculate regression-to-mean adjustment features.
+
+    Hot streaks cool off, cold streaks warm up. This prevents over-predicting
+    based on small samples or recent hot/cold stretches.
+
+    Args:
+        player_features: Player's stat averages (season and recent)
+        games_played: Number of games played this season
+
+    Returns:
+        Dictionary of regression adjustment features
+    """
+    # More games = more stable, less regression needed
+    regression_weight = 0.4 * (1 - min(games_played, 50) / 50)
+
+    # Points regression
+    pts_season = player_features.get('season_pts_avg', 15)
+    pts_recent = player_features.get('recent_pts_avg', pts_season)
+    pts_deviation = pts_recent - pts_season
+
+    # Rebounds regression
+    reb_season = player_features.get('season_reb_avg', 5)
+    reb_recent = player_features.get('recent_reb_avg', reb_season)
+    reb_deviation = reb_recent - reb_season
+
+    # Assists regression
+    ast_season = player_features.get('season_ast_avg', 3)
+    ast_recent = player_features.get('recent_ast_avg', ast_season)
+    ast_deviation = ast_recent - ast_season
+
+    # 3PM regression (higher variance stat, more regression)
+    fg3_season = player_features.get('season_fg3m_avg', 1)
+    fg3_recent = player_features.get('recent_fg3m_avg', fg3_season)
+    fg3_deviation = fg3_recent - fg3_season
+
+    return {
+        'pts_deviation_from_mean': round(pts_deviation, 2),
+        'pts_regression_adjustment': round(-pts_deviation * regression_weight, 2),
+        'pts_regressed_estimate': round(pts_recent - (pts_deviation * regression_weight), 2),
+        'reb_deviation_from_mean': round(reb_deviation, 2),
+        'reb_regression_adjustment': round(-reb_deviation * regression_weight, 2),
+        'ast_deviation_from_mean': round(ast_deviation, 2),
+        'ast_regression_adjustment': round(-ast_deviation * regression_weight, 2),
+        'fg3_deviation_from_mean': round(fg3_deviation, 2),
+        'fg3_regression_adjustment': round(-fg3_deviation * regression_weight * 1.2, 2),  # Extra regression for high-variance stat
+    }
+
+
 # =============================================================================
 # DATA PROCESSING
 # =============================================================================
@@ -3077,42 +3127,13 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
                 )
                 enhanced_features.update(vegas_total_features)
 
-                # ============================================================
-                # REGRESSION-TO-MEAN FEATURES
-                # Hot streaks cool off, cold streaks warm up
-                # ============================================================
-                games_played = enhanced_features.get('games_played', 10)
-
-                # Points regression
-                pts_season = enhanced_features.get('season_pts_avg', 15)
-                pts_recent = enhanced_features.get('recent_pts_avg', pts_season)
-                pts_deviation = pts_recent - pts_season
-                # More games = more stable, less regression needed
-                regression_weight = 0.4 * (1 - min(games_played, 50) / 50)
-                enhanced_features['pts_deviation_from_mean'] = round(pts_deviation, 2)
-                enhanced_features['pts_regression_adjustment'] = round(-pts_deviation * regression_weight, 2)
-                enhanced_features['pts_regressed_estimate'] = round(pts_recent - (pts_deviation * regression_weight), 2)
-
-                # Rebounds regression
-                reb_season = enhanced_features.get('season_reb_avg', 5)
-                reb_recent = enhanced_features.get('recent_reb_avg', reb_season)
-                reb_deviation = reb_recent - reb_season
-                enhanced_features['reb_deviation_from_mean'] = round(reb_deviation, 2)
-                enhanced_features['reb_regression_adjustment'] = round(-reb_deviation * regression_weight, 2)
-
-                # Assists regression
-                ast_season = enhanced_features.get('season_ast_avg', 3)
-                ast_recent = enhanced_features.get('recent_ast_avg', ast_season)
-                ast_deviation = ast_recent - ast_season
-                enhanced_features['ast_deviation_from_mean'] = round(ast_deviation, 2)
-                enhanced_features['ast_regression_adjustment'] = round(-ast_deviation * regression_weight, 2)
-
-                # 3PM regression (higher variance stat, more regression)
-                fg3_season = enhanced_features.get('season_fg3_avg', 1)
-                fg3_recent = enhanced_features.get('recent_fg3_avg', fg3_season)
-                fg3_deviation = fg3_recent - fg3_season
-                enhanced_features['fg3_deviation_from_mean'] = round(fg3_deviation, 2)
-                enhanced_features['fg3_regression_adjustment'] = round(-fg3_deviation * regression_weight * 1.2, 2)  # Extra regression for high-variance stat
+                # NEW: Regression-to-mean adjustment features
+                games_played = enhanced_features.get('season_games', 10)
+                regression_features = calculate_regression_adjustment_features(
+                    player_features=enhanced_features,
+                    games_played=games_played
+                )
+                enhanced_features.update(regression_features)
 
                 player_data.append({
                     'player_id': player_id,
