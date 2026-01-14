@@ -6,19 +6,25 @@ predictions from multiple base models using a meta-learner. The stacking approac
 uses out-of-fold (OOF) predictions to prevent data leakage and overfitting.
 
 Key Features:
-- Out-of-fold prediction generation using TimeSeriesSplit
+- Out-of-fold prediction generation using TimeSeriesSplit or KFold
+  * Each base model is cloned and retrained on K-1 folds
+  * Predictions are made on the held-out fold (prevents data leakage)
 - Multiple meta-learner options (XGBoost, Neural Network, Ridge Regression)
-- Context feature integration for enhanced prediction
-- Sample weight support with time-decay
+- Context feature integration for enhanced prediction (12 contextual features)
+- Sample weight support with time-decay (prioritizes recent games)
 - Uncertainty quantification via prediction variance
 - Temporal discipline to prevent future data leakage
 
-Expected Impact: 2-4% accuracy improvement over simple weighted averaging
+Expected Impact:
+- Provides rigorous ensemble learning without overfitting
+- Actual performance improvement depends on base model diversity
+- Must be validated through backtesting on held-out data
 """
 
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple, Optional, Union, Any
+from sklearn.base import clone
 from sklearn.model_selection import TimeSeriesSplit, KFold
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
@@ -212,15 +218,28 @@ class StackingMetaLearner:
                 else:
                     weights_train = None
 
-                # Clone and train base model on fold
-                # Note: We assume base models are already fitted, so we just use them
-                # In production, you'd clone and refit here
+                # CRITICAL: Clone the base model to prevent data leakage
+                # Each fold must train on ONLY the training data for that fold
                 try:
-                    # Generate predictions on validation fold
-                    if hasattr(base_model, 'predict'):
-                        val_predictions = base_model.predict(X_val)
+                    cloned_model = clone(base_model)
+
+                    # Train cloned model on training fold only
+                    if weights_train is not None:
+                        # Check if model supports sample_weight
+                        if hasattr(cloned_model, 'fit'):
+                            fit_params = cloned_model.fit.__code__.co_varnames
+                            if 'sample_weight' in fit_params:
+                                cloned_model.fit(X_train, y_train, sample_weight=weights_train)
+                            else:
+                                logger.warning(f"{model_name} does not support sample_weight, training without weights")
+                                cloned_model.fit(X_train, y_train)
+                        else:
+                            cloned_model.fit(X_train, y_train)
                     else:
-                        raise AttributeError(f"Model {model_name} does not have predict method")
+                        cloned_model.fit(X_train, y_train)
+
+                    # Generate predictions on validation fold (model has NOT seen this data)
+                    val_predictions = cloned_model.predict(X_val)
 
                     # Store OOF predictions
                     oof_predictions[val_idx, model_idx] = val_predictions
@@ -231,8 +250,9 @@ class StackingMetaLearner:
 
                 except Exception as e:
                     logger.error(f"Error generating OOF predictions for {model_name} on fold {fold_idx}: {e}")
-                    # Fill with mean prediction as fallback
-                    oof_predictions[val_idx, model_idx] = np.mean(y_train)
+                    logger.error(f"Exception details: {str(e)}")
+                    # Re-raise the exception to fail fast rather than silently producing bad results
+                    raise RuntimeError(f"Failed to generate OOF predictions for {model_name} on fold {fold_idx}") from e
 
             # Store average performance
             avg_rmse = np.mean(fold_scores)
@@ -291,6 +311,10 @@ class StackingMetaLearner:
             # Normalize context features
             context_features_scaled = self.context_scaler.fit_transform(context_features)
 
+            # Store context feature names for feature importance
+            n_context = context_features.shape[1]
+            self.context_feature_names = [f"Context_{i+1}" for i in range(n_context)]
+
             # Combine OOF predictions with context features
             meta_features = np.hstack([oof_predictions, context_features_scaled])
             logger.info(f"Combined features shape: {meta_features.shape}")
@@ -298,6 +322,7 @@ class StackingMetaLearner:
             logger.info(f"  - Context features: {context_features_scaled.shape[1]}")
         else:
             meta_features = oof_predictions
+            self.context_feature_names = None
             logger.info("\nNo context features provided, using only base model predictions")
 
         # Step 3: Normalize meta-features
@@ -313,15 +338,20 @@ class StackingMetaLearner:
             meta_features_scaled = self.poly_features.fit_transform(meta_features_scaled)
             logger.info(f"Applied polynomial features, new shape: {meta_features_scaled.shape}")
 
-        # Train meta-learner
+        # Train meta-learner with sample weights if provided
         if sample_weights is not None:
-            if hasattr(self.meta_learner, 'fit') and 'sample_weight' in self.meta_learner.fit.__code__.co_varnames:
+            # XGBoost, sklearn models, and most ML libraries support sample_weight
+            try:
                 self.meta_learner.fit(meta_features_scaled, y, sample_weight=sample_weights)
-            else:
-                logger.warning("Meta-learner does not support sample_weight, training without weights")
+                logger.info(f"Training meta-learner with sample weights (mean weight: {np.mean(sample_weights):.4f})")
+            except TypeError as e:
+                # Fallback if sample_weight not supported
+                logger.warning(f"Meta-learner does not support sample_weight: {e}")
+                logger.warning("Training without sample weights")
                 self.meta_learner.fit(meta_features_scaled, y)
         else:
             self.meta_learner.fit(meta_features_scaled, y)
+            logger.info("Training meta-learner without sample weights")
 
         # Step 5: Calculate base model weights (for interpretability)
         self._calculate_base_model_weights(oof_predictions, y)
