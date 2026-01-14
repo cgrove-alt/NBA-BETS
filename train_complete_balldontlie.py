@@ -88,6 +88,9 @@ except ImportError:
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 import argparse
 
+# Import travel fatigue calculator for Phase 2 features
+from travel_fatigue import TravelFatigueCalculator
+
 warnings.filterwarnings('ignore')
 
 # Model save directory
@@ -1294,6 +1297,29 @@ class TeamStatsCalculator:
             'days_rest': days_rest,
             'is_back_to_back': days_rest <= 1,
         }
+
+    def get_recent_games_before_date(self, team_id: int, before_date: str, limit: int = 10) -> List[Dict]:
+        """
+        Get recent games for a team before a specific date.
+        Used for comprehensive travel/fatigue/schedule analysis.
+
+        Returns:
+            List of game dicts with 'date', 'venue_abbrev', 'is_home', 'home_team_id', etc.
+        """
+        if team_id not in self.team_games:
+            return []
+
+        games = [(d, s) for d, s in self.team_games[team_id] if d < before_date]
+        if not games:
+            return []
+
+        games.sort(key=lambda x: x[0], reverse=True)
+        recent_games = games[:limit]
+
+        # Convert to list of dicts for TravelFatigueCalculator
+        return [{'date': d, 'home_team_id': team_id if s.get('is_home') else s.get('opponent_id'), **s}
+                for d, s in recent_games]
+
 
 
 # =============================================================================
@@ -2847,6 +2873,7 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
     player_calc = PlayerStatsCalculator(window=10)
     position_defense_calc = PositionDefenseCalculator()  # TIER 2.2: Track position-specific defense
     elo_system = EloRatingSystem(k_factor=20.0, home_advantage=100.0)  # NEW: Elo ratings
+    travel_calc = TravelFatigueCalculator()  # PHASE 2: Travel fatigue features
 
     team_data = []
     player_data = []
@@ -2886,35 +2913,31 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
         home_last_game = team_calc.get_last_game_info(home_team_id, game_date)
         away_last_game = team_calc.get_last_game_info(away_team_id, game_date)
 
-        # Calculate travel fatigue for home team (usually minimal - playing at home)
-        home_travel_features = {'travel_distance': 0.0, 'timezone_change': 0, 'altitude_change': 0,
-                                 'altitude_disadvantage': 0.0, 'travel_fatigue_score': 0.0, 'coast_to_coast': 0}
-        home_days_rest = 2
-        home_is_b2b = False
-        if home_last_game:
-            home_days_rest = home_last_game['days_rest']
-            home_is_b2b = home_last_game['is_back_to_back']
-            # Home team: travel from last game venue to home
-            if home_last_game.get('venue_abbrev'):
-                home_travel_features = calc_travel_fatigue_features(
-                    home_last_game['venue_abbrev'], home_team_abbrev,
-                    home_days_rest, home_is_b2b
-                )
+        # PHASE 2: Get comprehensive travel/fatigue/schedule features using new module
+        home_recent_games = team_calc.get_recent_games_before_date(home_team_id, game_date, limit=7)
+        away_recent_games = team_calc.get_recent_games_before_date(away_team_id, game_date, limit=7)
 
-        # Calculate travel fatigue for away team (usually significant)
-        away_travel_features = {'travel_distance': 0.0, 'timezone_change': 0, 'altitude_change': 0,
-                                 'altitude_disadvantage': 0.0, 'travel_fatigue_score': 0.0, 'coast_to_coast': 0}
-        away_days_rest = 2
-        away_is_b2b = False
-        if away_last_game:
-            away_days_rest = away_last_game['days_rest']
-            away_is_b2b = away_last_game['is_back_to_back']
-            # Away team: travel from last game venue to this game (home team's arena)
-            if away_last_game.get('venue_abbrev'):
-                away_travel_features = calc_travel_fatigue_features(
-                    away_last_game['venue_abbrev'], home_team_abbrev,
-                    away_days_rest, away_is_b2b
-                )
+        home_travel_features = travel_calc.get_travel_features(
+            team_id=home_team_id,
+            game_date=game_date,
+            opponent_id=away_team_id,
+            is_home=True,
+            team_games=home_recent_games
+        )
+
+        away_travel_features = travel_calc.get_travel_features(
+            team_id=away_team_id,
+            game_date=game_date,
+            opponent_id=home_team_id,
+            is_home=False,
+            team_games=away_recent_games
+        )
+
+        # Extract backward-compatible values for existing features
+        home_days_rest = home_travel_features.get('days_rest', 2)
+        home_is_b2b = home_travel_features.get('is_back_to_back', 0) == 1
+        away_days_rest = away_travel_features.get('days_rest', 2)
+        away_is_b2b = away_travel_features.get('is_back_to_back', 0) == 1
 
         # === NEW: SCHEDULE SPOT ANALYSIS ===
         # Analyze schedule-based situational spots for both teams
