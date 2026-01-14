@@ -814,6 +814,170 @@ class SeasonBacktester:
             # Use defaults if no opponent/position info
             features.update(self.position_defense_calc._get_default_features('F'))
 
+        # MISSING FEATURES FIX: Add 30 critical features for ensemble models
+        # These were missing and causing poor predictions
+
+        # 1. PACE ADJUSTMENT FEATURES (10 features)
+        home_pace = features.get('team_pace', 100.0)
+        opp_pace = features.get('opp_pace', 100.0)
+        expected_game_pace = (home_pace + opp_pace) / 2.0
+        league_avg_pace = 100.0
+
+        pace_vs_average = (expected_game_pace - league_avg_pace) / league_avg_pace
+        pace_multiplier = expected_game_pace / league_avg_pace
+
+        # Stat-specific pace adjustments
+        pace_pts_adjustment = (pace_multiplier - 1.0) * season_pts_avg * 0.5
+        pace_reb_adjustment = (pace_multiplier - 1.0) * season_reb_avg * 0.3
+        pace_ast_adjustment = (pace_multiplier - 1.0) * season_ast_avg * 0.4
+        pace_fg3_adjustment = (pace_multiplier - 1.0) * season_fg3m_avg * 0.4
+
+        is_high_pace_game = 1 if expected_game_pace > 102 else 0
+        is_low_pace_game = 1 if expected_game_pace < 98 else 0
+        total_multiplier = pace_multiplier  # Alias for compatibility
+
+        features.update({
+            'expected_game_pace': expected_game_pace,
+            'pace_vs_average': pace_vs_average,
+            'pace_multiplier': pace_multiplier,
+            'pace_pts_adjustment': pace_pts_adjustment,
+            'pace_reb_adjustment': pace_reb_adjustment,
+            'pace_ast_adjustment': pace_ast_adjustment,
+            'pace_fg3_adjustment': pace_fg3_adjustment,
+            'is_high_pace_game': is_high_pace_game,
+            'is_low_pace_game': is_low_pace_game,
+            'total_multiplier': total_multiplier,
+        })
+
+        # 2. REGRESSION ADJUSTMENT FEATURES (12 features)
+        # Bayesian regression toward mean based on sample size
+        sample_weight = min(1.0, len(games) / 20.0)  # Full weight at 20 games
+
+        # League averages for regression
+        league_avg_pts = 14.0
+        league_avg_reb = 5.0
+        league_avg_ast = 3.0
+        league_avg_fg3m = 1.2
+
+        # Regressed estimates (weighted average of player stats and league average)
+        pts_regressed_estimate = sample_weight * season_pts_avg + (1 - sample_weight) * league_avg_pts
+        reb_regressed_estimate = sample_weight * season_reb_avg + (1 - sample_weight) * league_avg_reb
+        ast_regressed_estimate = sample_weight * season_ast_avg + (1 - sample_weight) * league_avg_ast
+        fg3_regressed_estimate = sample_weight * season_fg3m_avg + (1 - sample_weight) * league_avg_fg3m
+
+        # Regression adjustments (difference from raw average)
+        pts_regression_adjustment = pts_regressed_estimate - season_pts_avg
+        reb_regression_adjustment = reb_regressed_estimate - season_reb_avg
+        ast_regression_adjustment = ast_regressed_estimate - season_ast_avg
+        fg3_regression_adjustment = fg3_regressed_estimate - season_fg3m_avg
+
+        # Deviation from mean (recent vs season)
+        pts_deviation_from_mean = np.mean(pts) - season_pts_avg if pts else 0
+        reb_deviation_from_mean = np.mean(reb) - season_reb_avg if reb else 0
+        ast_deviation_from_mean = np.mean(ast) - season_ast_avg if ast else 0
+        fg3_deviation_from_mean = np.mean(fg3m) - season_fg3m_avg if fg3m else 0
+
+        # Variance penalties (penalize high variance players)
+        pts_cv = (np.std(season_pts) / season_pts_avg) if season_pts_avg > 0 else 0
+        reb_cv = (np.std(season_reb) / season_reb_avg) if season_reb_avg > 0 else 0
+        ast_cv = (np.std(season_ast) / season_ast_avg) if season_ast_avg > 0 else 0
+        fg3_cv = (np.std(season_fg3m) / season_fg3m_avg) if season_fg3m_avg > 0 else 0
+
+        pts_variance_penalty = pts_cv * -2.0  # Negative = penalty
+        reb_variance_penalty = reb_cv * -1.5
+        ast_variance_penalty = ast_cv * -1.5
+        fg3_variance_penalty = fg3_cv * -2.0
+
+        features.update({
+            'pts_regressed_estimate': pts_regressed_estimate,
+            'pts_regression_adjustment': pts_regression_adjustment,
+            'pts_deviation_from_mean': pts_deviation_from_mean,
+            'pts_variance_penalty': pts_variance_penalty,
+            'reb_regression_adjustment': reb_regression_adjustment,
+            'reb_deviation_from_mean': reb_deviation_from_mean,
+            'reb_variance_penalty': reb_variance_penalty,
+            'ast_regression_adjustment': ast_regression_adjustment,
+            'ast_deviation_from_mean': ast_deviation_from_mean,
+            'ast_variance_penalty': ast_variance_penalty,
+            'fg3_regression_adjustment': fg3_regression_adjustment,
+            'fg3_deviation_from_mean': fg3_deviation_from_mean,
+            'fg3_variance_penalty': fg3_variance_penalty,
+        })
+
+        # 3. RECENCY RATIO FEATURES (4 features)
+        # Ratio of recent performance to season average
+        pts_recency_ratio = (np.mean(pts) / season_pts_avg) if season_pts_avg > 0 else 1.0
+        reb_recency_ratio = (np.mean(reb) / season_reb_avg) if season_reb_avg > 0 else 1.0
+        ast_recency_ratio = (np.mean(ast) / season_ast_avg) if season_ast_avg > 0 else 1.0
+        fg3_recency_ratio = (np.mean(fg3m) / season_fg3m_avg) if season_fg3m_avg > 0 else 1.0
+
+        features.update({
+            'pts_recency_ratio': pts_recency_ratio,
+            'reb_recency_ratio': reb_recency_ratio,
+            'ast_recency_ratio': ast_recency_ratio,
+            'fg3_recency_ratio': fg3_recency_ratio,
+        })
+
+        # 4. PER-100-POSSESSION FEATURES (4 features)
+        # Normalize stats to per-100-possession basis
+        possessions_per_game = expected_game_pace  # Use calculated pace
+
+        pts_per_100_poss = (season_pts_avg / possessions_per_game) * 100 if possessions_per_game > 0 else season_pts_avg
+        reb_per_100_poss = (season_reb_avg / possessions_per_game) * 100 if possessions_per_game > 0 else season_reb_avg
+        ast_per_100_poss = (season_ast_avg / possessions_per_game) * 100 if possessions_per_game > 0 else season_ast_avg
+
+        features.update({
+            'pts_per_100_poss': pts_per_100_poss,
+            'reb_per_100_poss': reb_per_100_poss,
+            'ast_per_100_poss': ast_per_100_poss,
+        })
+
+        # 5. MINUTES PROJECTION FEATURES (4 features - simplified)
+        # Coefficient of variation for minutes
+        minutes_cv = (np.std(season_mins) / season_min_avg) if season_min_avg > 0 else 0
+
+        # Minutes recency ratio
+        minutes_recency_ratio = (np.mean(mins) / season_min_avg) if season_min_avg > 0 else 1.0
+
+        # Expected minutes reduction (placeholder - can enhance with injury data)
+        expected_min_reduction = 0.0
+        projected_min_factor = 1.0
+
+        features.update({
+            'minutes_cv': minutes_cv,
+            'minutes_recency_ratio': minutes_recency_ratio,
+            'expected_min_reduction': expected_min_reduction,
+            'projected_min_factor': projected_min_factor,
+        })
+
+        # 6. VEGAS/TOTAL FEATURES (5 features - using defaults for now)
+        # TODO: Integrate real vegas totals from odds API
+        vegas_total = 220.0  # Default league average total
+        total_vs_average = 0.0
+        total_pts_boost = 0.0
+        is_high_total_game = 0  # vegas_total > 230
+        is_low_total_game = 0   # vegas_total < 210
+
+        features.update({
+            'vegas_total': vegas_total,
+            'total_vs_average': total_vs_average,
+            'total_pts_boost': total_pts_boost,
+            'is_high_total_game': is_high_total_game,
+            'is_low_total_game': is_low_total_game,
+        })
+
+        # 7. BLOWOUT/SPREAD FEATURES (3 features - using defaults for now)
+        # TODO: Integrate real spreads from odds API
+        spread_magnitude = 0.0  # Point spread
+        blowout_probability = 0.0
+        is_likely_blowout = 0
+
+        features.update({
+            'spread_magnitude': spread_magnitude,
+            'blowout_probability': blowout_probability,
+            'is_likely_blowout': is_likely_blowout,
+        })
+
         return features
 
     def _calc_bpm(self, games) -> float:
