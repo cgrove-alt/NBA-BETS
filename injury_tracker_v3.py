@@ -547,8 +547,11 @@ def detect_star_player_out(team_id: int, game_date: datetime) -> Tuple[bool, Lis
     """
     Detect if a star player (top-3 scorer on team) is out for a game.
 
+    Uses actual PPG stats from database to identify top-3 scorers on the team.
+    Falls back to heuristic (any OUT player) if stats unavailable.
+
     Args:
-        team_id: Team's ID
+        team_id: Team's ID (database ID, not NBA API ID)
         game_date: Date of the game
 
     Returns:
@@ -561,25 +564,82 @@ def detect_star_player_out(team_id: int, game_date: datetime) -> Tuple[bool, Lis
     """
     injuries = fetch_current_injuries(game_date)
 
-    # Get team's injured players
+    # Get team's injured players (must be OUT or DOUBTFUL)
     team_injuries = [inj for inj in injuries if inj.team_id == team_id and inj.is_unavailable()]
 
     if not team_injuries:
         return False, []
 
-    # Check if any injured player is a star (simplified check)
-    # In production, this should query actual PPG stats from database
-    star_players_out = []
+    # Query database for team's top scorers
+    if not DATABASE_AVAILABLE:
+        logger.warning("Database not available, using heuristic for star detection")
+        # Fallback: assume any OUT player might be a star
+        star_players_out = [inj.player_name for inj in team_injuries if inj.status == InjuryStatus.OUT]
+        return len(star_players_out) > 0, star_players_out
 
-    for injury in team_injuries:
-        # TODO: Query player stats to determine if top-3 scorer
-        # For now, use heuristic: any OUT player might be impactful
-        if injury.status == InjuryStatus.OUT:
-            star_players_out.append(injury.player_name)
+    try:
+        db = DatabaseManager()
 
-    has_star_out = len(star_players_out) > 0
+        # Get most recent player stats for this team before game_date
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT p.id, p.nba_id, p.name, ps.pts_avg, ps.snapshot_date
+                FROM players p
+                JOIN player_stats_snapshot ps ON p.id = ps.player_id
+                WHERE p.team_id = ?
+                  AND ps.snapshot_date < ?
+                  AND p.active = 1
+                ORDER BY ps.snapshot_date DESC, ps.pts_avg DESC
+            """, (team_id, game_date.strftime('%Y-%m-%d')))
 
-    return has_star_out, star_players_out
+            rows = cursor.fetchall()
+
+        if not rows:
+            # No stats available, use fallback heuristic
+            logger.warning(f"No player stats found for team {team_id}, using fallback heuristic")
+            star_players_out = [inj.player_name for inj in team_injuries if inj.status == InjuryStatus.OUT]
+            return len(star_players_out) > 0, star_players_out
+
+        # Get top 3 scorers (most recent stats snapshot)
+        # Group by player and take most recent snapshot for each
+        player_stats = {}
+        for row in rows:
+            player_id = row[1]  # nba_id
+            if player_id not in player_stats:
+                player_stats[player_id] = {
+                    'name': row[2],
+                    'pts_avg': row[3] or 0.0,
+                }
+
+        # Sort by PPG and get top 3
+        top_scorers = sorted(player_stats.items(), key=lambda x: x[1]['pts_avg'], reverse=True)[:3]
+        top_scorer_ids = {player_id for player_id, _ in top_scorers if player_id is not None}
+
+        # Check which injured players are top-3 scorers
+        star_players_out = []
+        for injury in team_injuries:
+            if injury.player_id in top_scorer_ids:
+                ppg = player_stats.get(injury.player_id, {}).get('pts_avg', 0.0)
+                logger.info(f"Star player out: {injury.player_name} ({ppg:.1f} PPG)")
+                star_players_out.append(injury.player_name)
+
+        # Also flag any OUT player averaging ≥18 PPG (STAR_PLAYER_MIN_PPG threshold)
+        for injury in team_injuries:
+            if injury.player_id not in top_scorer_ids:
+                ppg = player_stats.get(injury.player_id, {}).get('pts_avg', 0.0)
+                if ppg >= STAR_PLAYER_MIN_PPG and injury.player_name not in star_players_out:
+                    logger.info(f"High-scorer out: {injury.player_name} ({ppg:.1f} PPG)")
+                    star_players_out.append(injury.player_name)
+
+        has_star_out = len(star_players_out) > 0
+        return has_star_out, star_players_out
+
+    except Exception as e:
+        logger.error(f"Error detecting star players: {e}")
+        # Fallback to heuristic
+        star_players_out = [inj.player_name for inj in team_injuries if inj.status == InjuryStatus.OUT]
+        return len(star_players_out) > 0, star_players_out
 
 
 def calculate_usage_redistribution(
@@ -591,32 +651,160 @@ def calculate_usage_redistribution(
     Calculate how an injured star player's usage is redistributed to teammates.
 
     When a high-usage player is out, their touches/shots are redistributed based on:
-    - Remaining players' usage rates
-    - Positional similarity
-    - Minutes played
+    - Remaining players' usage rates (proportional redistribution)
+    - Positional similarity (guards get guard usage, forwards get forward usage)
+    - Minutes played (starters get more than bench players)
+
+    Redistribution algorithm:
+    1. Query injured player's USG% (e.g., 28%)
+    2. Query teammates' current USG% and position
+    3. Redistribute proportionally based on current usage
+       - Top-5 usage players split 70% of freed usage
+       - Remaining rotation players split 30%
 
     Args:
-        team_id: Team's ID
-        injured_player_id: Injured player's ID
+        team_id: Team's ID (database ID)
+        injured_player_id: Injured player's NBA API ID
         game_date: Date of the game
 
     Returns:
-        Dictionary mapping player_id -> additional_usage_percentage
+        Dictionary mapping player_nba_id -> additional_usage_percentage
 
     Example:
-        >>> redistribution = calculate_usage_redistribution(1, 237, datetime(2025, 1, 15))
+        >>> redistribution = calculate_usage_redistribution(1, 2544, datetime(2025, 1, 15))
         >>> # {201935: 4.2, 203954: 3.8, 1629029: 2.1}
-        >>> # Meaning player 201935 gets +4.2% usage
+        >>> # Meaning player 201935 gets +4.2% usage when player 2544 is out
     """
-    # TODO: Implement actual usage redistribution logic
-    # This requires querying:
-    # 1. Injured player's usage rate (USG%)
-    # 2. Team roster and their current usage rates
-    # 3. Historical redistribution patterns when this player missed games
+    if not DATABASE_AVAILABLE:
+        logger.warning("Database not available for usage redistribution")
+        return {}
 
-    # For now, return empty dict (placeholder)
-    logger.warning("Usage redistribution not yet implemented")
-    return {}
+    try:
+        db = DatabaseManager()
+
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 1. Get injured player's most recent usage rate
+            cursor.execute("""
+                SELECT p.name, p.position, ps.usg_pct, ps.minutes_avg
+                FROM players p
+                JOIN player_stats_snapshot ps ON p.id = ps.player_id
+                WHERE p.nba_id = ?
+                  AND ps.snapshot_date < ?
+                ORDER BY ps.snapshot_date DESC
+                LIMIT 1
+            """, (injured_player_id, game_date.strftime('%Y-%m-%d')))
+
+            injured_row = cursor.fetchone()
+
+            if not injured_row:
+                logger.warning(f"No stats found for injured player {injured_player_id}")
+                return {}
+
+            injured_name = injured_row[0]
+            injured_position = injured_row[1] or ""
+            injured_usage = injured_row[2] or 0.0
+            injured_minutes = injured_row[3] or 0.0
+
+            logger.info(f"Injured player: {injured_name} (USG: {injured_usage:.1f}%, MIN: {injured_minutes:.1f})")
+
+            # If usage is very low (<10%), no meaningful redistribution
+            if injured_usage < 10.0:
+                logger.info(f"Injured player usage too low ({injured_usage:.1f}%), no redistribution")
+                return {}
+
+            # 2. Get teammate stats (active players on same team)
+            cursor.execute("""
+                SELECT p.nba_id, p.name, p.position, ps.usg_pct, ps.minutes_avg
+                FROM players p
+                JOIN player_stats_snapshot ps ON p.id = ps.player_id
+                WHERE p.team_id = ?
+                  AND p.nba_id != ?
+                  AND p.active = 1
+                  AND ps.snapshot_date < ?
+                ORDER BY ps.snapshot_date DESC, ps.usg_pct DESC
+            """, (team_id, injured_player_id, game_date.strftime('%Y-%m-%d')))
+
+            teammate_rows = cursor.fetchall()
+
+        if not teammate_rows:
+            logger.warning(f"No teammate stats found for team {team_id}")
+            return {}
+
+        # 3. Build teammate usage dictionary (most recent stats per player)
+        teammates = {}
+        for row in teammate_rows:
+            player_nba_id = row[0]
+            if player_nba_id not in teammates:
+                teammates[player_nba_id] = {
+                    'name': row[1],
+                    'position': row[2] or "",
+                    'usg_pct': row[3] or 0.0,
+                    'minutes_avg': row[4] or 0.0,
+                }
+
+        # Filter to rotation players (minutes > 10 per game)
+        rotation = {pid: stats for pid, stats in teammates.items() if stats['minutes_avg'] > 10.0}
+
+        if not rotation:
+            logger.warning("No rotation players found for redistribution")
+            return {}
+
+        # 4. Calculate positional similarity weights
+        # Same position group gets higher weight
+        position_group = injured_position[0] if injured_position else ""  # G, F, or C
+
+        for pid, stats in rotation.items():
+            teammate_pos = stats['position'][0] if stats['position'] else ""
+            # Positional bonus: +50% weight if same position group
+            pos_bonus = 1.5 if teammate_pos == position_group else 1.0
+            stats['pos_weight'] = pos_bonus
+
+        # 5. Redistribute usage proportionally
+        # Top-5 usage players get 70% of freed usage, others get 30%
+        top5_players = sorted(rotation.items(), key=lambda x: x[1]['usg_pct'], reverse=True)[:5]
+        top5_ids = {pid for pid, _ in top5_players}
+
+        # Calculate total weighted usage for each group
+        top5_weighted_usage = sum(
+            rotation[pid]['usg_pct'] * rotation[pid]['pos_weight']
+            for pid in top5_ids
+        )
+        other_weighted_usage = sum(
+            rotation[pid]['usg_pct'] * rotation[pid]['pos_weight']
+            for pid in rotation if pid not in top5_ids
+        )
+
+        redistribution = {}
+
+        # Redistribute 70% to top-5 players
+        if top5_weighted_usage > 0:
+            for pid in top5_ids:
+                weighted_usage = rotation[pid]['usg_pct'] * rotation[pid]['pos_weight']
+                share = weighted_usage / top5_weighted_usage
+                additional_usage = injured_usage * 0.70 * share
+                redistribution[pid] = round(additional_usage, 2)
+                logger.debug(f"  {rotation[pid]['name']}: +{additional_usage:.2f}% usage (top-5)")
+
+        # Redistribute 30% to other rotation players
+        if other_weighted_usage > 0:
+            for pid in rotation:
+                if pid not in top5_ids:
+                    weighted_usage = rotation[pid]['usg_pct'] * rotation[pid]['pos_weight']
+                    share = weighted_usage / other_weighted_usage
+                    additional_usage = injured_usage * 0.30 * share
+                    redistribution[pid] = round(additional_usage, 2)
+                    logger.debug(f"  {rotation[pid]['name']}: +{additional_usage:.2f}% usage (bench)")
+
+        total_redistributed = sum(redistribution.values())
+        logger.info(f"Redistributed {total_redistributed:.1f}% usage (from {injured_usage:.1f}% freed)")
+
+        return redistribution
+
+    except Exception as e:
+        logger.error(f"Error calculating usage redistribution: {e}")
+        return {}
 
 
 # =============================================================================
