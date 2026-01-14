@@ -1,51 +1,51 @@
 {
-  "games_processed": 100,
+  "games_processed": 596,
   "games_with_errors": 0,
   "start_date": "2025-10-21",
-  "end_date": "2025-11-03",
-  "total_predictions": 9329,
+  "end_date": "2026-01-13",
+  "total_predictions": 88047,
   "metrics": {
     "points": {
-      "count": 1169,
-      "rmse": 7.055,
-      "mae": 5.721,
-      "r2": 0.302,
-      "bias": 0.159
+      "count": 10627,
+      "rmse": 6.786,
+      "mae": 5.136,
+      "r2": 0.36,
+      "bias": -1.804
     },
     "rebounds": {
-      "count": 1158,
-      "rmse": 2.602,
-      "mae": 1.97,
-      "r2": 0.313,
-      "bias": -0.256
+      "count": 10665,
+      "rmse": 3.103,
+      "mae": 2.368,
+      "r2": 0.054,
+      "bias": -1.584
     },
     "assists": {
-      "count": 994,
-      "rmse": 2.24,
-      "mae": 1.593,
-      "r2": 0.214,
-      "bias": -0.84
+      "count": 9044,
+      "rmse": 2.08,
+      "mae": 1.597,
+      "r2": 0.308,
+      "bias": 0.535
     },
     "threes": {
-      "count": 766,
-      "rmse": 1.789,
-      "mae": 1.319,
-      "r2": -0.968,
-      "bias": -1.207
+      "count": 6837,
+      "rmse": 1.782,
+      "mae": 1.299,
+      "r2": -0.671,
+      "bias": -1.158
     },
     "pra": {
-      "count": 1266,
-      "rmse": 8.548,
-      "mae": 6.974,
-      "r2": 0.496,
-      "bias": 0.86
+      "count": 11532,
+      "rmse": 8.986,
+      "mae": 6.813,
+      "r2": 0.438,
+      "bias": -3.642
     }
   },
   "overall": {
-    "count": 5353,
-    "rmse": 5.568,
-    "mae": 3.81,
-    "r2": 0.652,
-    "bias": -0.146
+    "count": 48705,
+    "rmse": 5.703,
+    "mae": 3.731,
+    "r2": 0.644,
+    "bias": -1.666
   }
 }
