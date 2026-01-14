@@ -71,27 +71,25 @@ from data_fetcher import (
     get_player_injury_status,
 )
 
-# Phase 2 enhancements: Travel, Betting Market, and Enhanced Injury Features
-from travel_fatigue import (
-    get_days_rest,
-    calculate_travel_distance,
-    calculate_altitude_adjustment,
-    detect_schedule_density,
-)
-from betting_market_features import (
-    fetch_opening_line,
-    fetch_closing_line,
-    calculate_line_movement,
-    detect_reverse_line_movement,
-    calculate_consensus_odds,
-    detect_steam_move,
-)
-from injury_tracker_v3 import (
-    fetch_current_injuries,
-    is_player_available,
-    detect_star_player_out,
-    calculate_usage_redistribution,
-)
+# Phase 2 enhancements: Betting Market and Enhanced Injury Features
+try:
+    from betting_market_features import BettingMarketFeatures
+    HAS_BETTING_MARKET_FEATURES = True
+except ImportError:
+    HAS_BETTING_MARKET_FEATURES = False
+    print("Warning: betting_market_features.py not found. Market features will use defaults.")
+
+try:
+    from injury_tracker_v3 import (
+        fetch_current_injuries,
+        is_player_available,
+        detect_star_player_out,
+        calculate_usage_redistribution,
+    )
+    HAS_INJURY_TRACKER_V3 = True
+except ImportError:
+    HAS_INJURY_TRACKER_V3 = False
+    print("Warning: injury_tracker_v3.py not found. Using existing injury system.")
 
 
 # Position mapping for analysis
@@ -1421,6 +1419,12 @@ class MatchupFeatureGenerator:
         self.positional_analyzer = PositionalAnalyzer(season)
         self.injury_manager = injury_manager or InjuryReportManager(season)
 
+        # Phase 2: Initialize betting market features tracker
+        if HAS_BETTING_MARKET_FEATURES:
+            self.betting_market = BettingMarketFeatures()
+        else:
+            self.betting_market = None
+
         # Instance-level caching to avoid duplicate API calls
         self._team_features_cache = {}  # {(team_id, is_home): features}
         self._h2h_cache = None
@@ -1672,24 +1676,33 @@ class MatchupFeatureGenerator:
             features["injury_details"] = injury_features.get("injury_details")
 
             # Phase 2: Enhanced injury features from injury_tracker_v3
-            try:
-                # Detect star player absences for both teams
-                home_star_out = detect_star_player_out(home_team_id, game_date) if game_date else False
-                away_star_out = detect_star_player_out(away_team_id, game_date) if game_date else False
+            if HAS_INJURY_TRACKER_V3 and game_date:
+                try:
+                    # Detect star player absences for both teams
+                    home_star_out = detect_star_player_out(home_team_id, game_date)
+                    away_star_out = detect_star_player_out(away_team_id, game_date)
 
-                # Get injury counts (count of injured players)
-                injuries = fetch_current_injuries(game_date) if game_date else []
-                home_injury_count = sum(1 for inj in injuries if inj.get('team_id') == home_team_id)
-                away_injury_count = sum(1 for inj in injuries if inj.get('team_id') == away_team_id)
+                    # Get injury counts (count of injured players)
+                    injuries = fetch_current_injuries(game_date)
+                    home_injury_count = sum(1 for inj in injuries if inj.get('team_id') == home_team_id)
+                    away_injury_count = sum(1 for inj in injuries if inj.get('team_id') == away_team_id)
 
-                features.update({
-                    "star_player_out_home": int(home_star_out),
-                    "star_player_out_away": int(away_star_out),
-                    "injury_count_home": home_injury_count,
-                    "injury_count_away": away_injury_count,
-                })
-            except Exception as e:
-                # Fallback to defaults if injury_tracker_v3 unavailable
+                    features.update({
+                        "star_player_out_home": int(home_star_out),
+                        "star_player_out_away": int(away_star_out),
+                        "injury_count_home": home_injury_count,
+                        "injury_count_away": away_injury_count,
+                    })
+                except Exception as e:
+                    # Fallback to defaults if injury_tracker_v3 unavailable
+                    features.update({
+                        "star_player_out_home": 0,
+                        "star_player_out_away": 0,
+                        "injury_count_home": 0,
+                        "injury_count_away": 0,
+                    })
+            else:
+                # Module not available or no game_date, use defaults
                 features.update({
                     "star_player_out_home": 0,
                     "star_player_out_away": 0,
@@ -1698,46 +1711,48 @@ class MatchupFeatureGenerator:
                 })
 
             # Phase 2: Betting market features
-            try:
-                # Construct a game_id for odds lookup (you may need to adjust this based on your data structure)
-                # For now, use a placeholder approach - in production, you'd have an actual game_id
-                game_id = f"{home_team_id}_{away_team_id}_{game_date}" if game_date else None
+            if self.betting_market is not None and game_date:
+                try:
+                    # Get team names for game_id construction
+                    from data_fetcher import get_team_name
+                    home_team_name = get_team_name(home_team_id) or f"team_{home_team_id}"
+                    away_team_name = get_team_name(away_team_id) or f"team_{away_team_id}"
 
-                if game_id:
-                    # Fetch betting market data
-                    opening_line = fetch_opening_line(game_id, "spread")
-                    closing_line = fetch_closing_line(game_id, "spread")
-                    line_movement = calculate_line_movement(game_id, "spread")
-                    rlm_flag = detect_reverse_line_movement(game_id, "spread")
-                    consensus_odds = calculate_consensus_odds(game_id, "spread")
-                    steam_move_flag = detect_steam_move(game_id, "spread")
+                    # Construct game_id (format: home_away_YYYY-MM-DD)
+                    # This matches The Odds API format
+                    game_id = f"{home_team_name}_{away_team_name}_{game_date}"
+
+                    # Get all market features using the unified interface
+                    market_features = self.betting_market.get_market_features(
+                        game_id, home_team_name, away_team_name
+                    )
 
                     features.update({
-                        "opening_line": opening_line if opening_line is not None else 0.0,
-                        "closing_line": closing_line if closing_line is not None else 0.0,
-                        "line_movement": line_movement if line_movement is not None else 0.0,
-                        "rlm_flag": int(rlm_flag) if rlm_flag is not None else 0,
-                        "consensus_odds": consensus_odds if consensus_odds is not None else 0.0,
-                        "steam_move_flag": int(steam_move_flag) if steam_move_flag is not None else 0,
+                        "opening_line": market_features.get('opening_line', 0.0),
+                        "closing_line": market_features.get('closing_line', 0.0),
+                        "line_movement": market_features.get('line_movement', 0.0),
+                        "rlm_flag": int(market_features.get('rlm_flag', False)),
+                        "consensus_odds": market_features.get('consensus_odds', -110),
+                        "steam_move_flag": int(market_features.get('steam_move_flag', False)),
                     })
-                else:
-                    # No game_id available, use defaults
+                except Exception as e:
+                    # Fallback to defaults if betting market data unavailable
                     features.update({
                         "opening_line": 0.0,
                         "closing_line": 0.0,
                         "line_movement": 0.0,
                         "rlm_flag": 0,
-                        "consensus_odds": 0.0,
+                        "consensus_odds": -110,
                         "steam_move_flag": 0,
                     })
-            except Exception as e:
-                # Fallback to defaults if betting market data unavailable
+            else:
+                # No betting market tracker or no game_date, use defaults
                 features.update({
                     "opening_line": 0.0,
                     "closing_line": 0.0,
                     "line_movement": 0.0,
                     "rlm_flag": 0,
-                    "consensus_odds": 0.0,
+                    "consensus_odds": -110,
                     "steam_move_flag": 0,
                 })
 

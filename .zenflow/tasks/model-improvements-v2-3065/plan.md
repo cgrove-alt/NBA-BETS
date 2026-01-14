@@ -499,6 +499,15 @@ Save to `{@artifacts_path}/plan.md`.
 **Files to Create/Modify**:
 - MODIFY: `feature_engineering.py` (add ~80 lines to generate_game_features())
 
+**Completion Notes**:
+- ✅ Added 4 enhanced injury features using `injury_tracker_v3` (star_player_out_home/away, injury_count_home/away)
+- ✅ Added 6 betting market features using `BettingMarketFeatures` class (opening_line, closing_line, line_movement, rlm_flag, consensus_odds, steam_move_flag)
+- ✅ Fixed import errors - using class-based approach with proper error handling
+- ✅ Module imports successfully without errors
+- ℹ️  Travel/fatigue features (10) already existed in codebase (lines 1598-1639) - no new travel features added
+- ⚠️  Total new features: 10 (4 injury + 6 market), not 16 as originally planned
+- ✅ All features have graceful fallback to defaults when modules unavailable or data missing
+
 ---
 
 ### [ ] Task 2.4: Implement Model Confidence Scoring
