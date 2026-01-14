@@ -71,6 +71,28 @@ from data_fetcher import (
     get_player_injury_status,
 )
 
+# Phase 2 enhancements: Travel, Betting Market, and Enhanced Injury Features
+from travel_fatigue import (
+    get_days_rest,
+    calculate_travel_distance,
+    calculate_altitude_adjustment,
+    detect_schedule_density,
+)
+from betting_market_features import (
+    fetch_opening_line,
+    fetch_closing_line,
+    calculate_line_movement,
+    detect_reverse_line_movement,
+    calculate_consensus_odds,
+    detect_steam_move,
+)
+from injury_tracker_v3 import (
+    fetch_current_injuries,
+    is_player_available,
+    detect_star_player_out,
+    calculate_usage_redistribution,
+)
+
 
 # Position mapping for analysis
 POSITION_GROUPS = {
@@ -1648,6 +1670,76 @@ class MatchupFeatureGenerator:
             injury_flat = {k: v for k, v in injury_features.items() if k != "injury_details"}
             features.update(injury_flat)
             features["injury_details"] = injury_features.get("injury_details")
+
+            # Phase 2: Enhanced injury features from injury_tracker_v3
+            try:
+                # Detect star player absences for both teams
+                home_star_out = detect_star_player_out(home_team_id, game_date) if game_date else False
+                away_star_out = detect_star_player_out(away_team_id, game_date) if game_date else False
+
+                # Get injury counts (count of injured players)
+                injuries = fetch_current_injuries(game_date) if game_date else []
+                home_injury_count = sum(1 for inj in injuries if inj.get('team_id') == home_team_id)
+                away_injury_count = sum(1 for inj in injuries if inj.get('team_id') == away_team_id)
+
+                features.update({
+                    "star_player_out_home": int(home_star_out),
+                    "star_player_out_away": int(away_star_out),
+                    "injury_count_home": home_injury_count,
+                    "injury_count_away": away_injury_count,
+                })
+            except Exception as e:
+                # Fallback to defaults if injury_tracker_v3 unavailable
+                features.update({
+                    "star_player_out_home": 0,
+                    "star_player_out_away": 0,
+                    "injury_count_home": 0,
+                    "injury_count_away": 0,
+                })
+
+            # Phase 2: Betting market features
+            try:
+                # Construct a game_id for odds lookup (you may need to adjust this based on your data structure)
+                # For now, use a placeholder approach - in production, you'd have an actual game_id
+                game_id = f"{home_team_id}_{away_team_id}_{game_date}" if game_date else None
+
+                if game_id:
+                    # Fetch betting market data
+                    opening_line = fetch_opening_line(game_id, "spread")
+                    closing_line = fetch_closing_line(game_id, "spread")
+                    line_movement = calculate_line_movement(game_id, "spread")
+                    rlm_flag = detect_reverse_line_movement(game_id, "spread")
+                    consensus_odds = calculate_consensus_odds(game_id, "spread")
+                    steam_move_flag = detect_steam_move(game_id, "spread")
+
+                    features.update({
+                        "opening_line": opening_line if opening_line is not None else 0.0,
+                        "closing_line": closing_line if closing_line is not None else 0.0,
+                        "line_movement": line_movement if line_movement is not None else 0.0,
+                        "rlm_flag": int(rlm_flag) if rlm_flag is not None else 0,
+                        "consensus_odds": consensus_odds if consensus_odds is not None else 0.0,
+                        "steam_move_flag": int(steam_move_flag) if steam_move_flag is not None else 0,
+                    })
+                else:
+                    # No game_id available, use defaults
+                    features.update({
+                        "opening_line": 0.0,
+                        "closing_line": 0.0,
+                        "line_movement": 0.0,
+                        "rlm_flag": 0,
+                        "consensus_odds": 0.0,
+                        "steam_move_flag": 0,
+                    })
+            except Exception as e:
+                # Fallback to defaults if betting market data unavailable
+                features.update({
+                    "opening_line": 0.0,
+                    "closing_line": 0.0,
+                    "line_movement": 0.0,
+                    "rlm_flag": 0,
+                    "consensus_odds": 0.0,
+                    "steam_move_flag": 0,
+                })
 
         # CRITICAL: Validate and clip all features to realistic ranges
         features = validate_features_dict(features, warn=True)

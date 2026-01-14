@@ -457,7 +457,8 @@ Save to `{@artifacts_path}/plan.md`.
 
 ---
 
-### [ ] Task 2.3: Integrate Travel and Market Features into feature_engineering.py
+### [x] Task 2.3: Integrate Travel and Market Features into feature_engineering.py
+<!-- chat-id: 3c3eaf4f-fadb-46c2-85e1-c257f9fde51b -->
 **Priority**: P0 (Critical - adds 16 new features)
 **Location**: `feature_engineering.py` (line ~2800, in `generate_game_features()`)
 **Estimated Effort**: 6 hours
