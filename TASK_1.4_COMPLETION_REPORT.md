@@ -15,7 +15,7 @@
 Successfully integrated the injury tracking system (`injury_tracker_v3.py`) into the daily predictions pipeline (`daily_predictions.py`). This critical enhancement prevents DNP (Did Not Play) errors by checking player injury status before generating predictions.
 
 ### Key Achievement
-**Eliminated 161 expected DNP errors** by implementing real-time injury status checking.
+**Expected to reduce DNP errors by ~95%** (from 161 baseline to ~8 expected) by implementing real-time injury status checking.
 
 ---
 
@@ -95,9 +95,10 @@ Created comprehensive test: `test_injury_integration.py`
 - Poor betting outcomes for injured players
 
 ### After Integration
-- **0 expected DNP errors** (58 players skipped in sample)
+- **~8 expected DNP errors** (95% detection rate, down from 161 baseline)
 - Real-time injury data from multiple sources
-- 31 players flagged with HIGH_UNCERTAINTY
+- 58 players skipped in sample (OUT/DOUBTFUL)
+- 31 players flagged with HIGH_UNCERTAINTY (QUESTIONABLE/GTD)
 - Clear warnings printed during prediction
 - Better risk management for bettors
 

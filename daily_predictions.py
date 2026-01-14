@@ -1674,9 +1674,10 @@ def main():
                     home_team_id = home_team.get('id')
                     away_team_id = away_team.get('id')
 
-                    # Get injured players to filter from props + for injury boost calculation
+                    # Get injured players for injury boost calculation
+                    # Note: We use injury_tracker_v3 for primary injury checking (ID-based)
+                    # but also extract names from injury_details for boost calculation
                     injury_details = analysis.get('injury_details', {})
-                    injured_players = set()
                     home_injured_names = []
                     away_injured_names = []
 
@@ -1684,14 +1685,12 @@ def main():
                         status = inj.get('status', '').upper()
                         player_inj_name = inj.get('player_name', '')
                         if status in ('OUT', 'DOUBTFUL'):
-                            injured_players.add(player_inj_name.lower())
                             home_injured_names.append(player_inj_name)
 
                     for inj in injury_details.get('away', []):
                         status = inj.get('status', '').upper()
                         player_inj_name = inj.get('player_name', '')
                         if status in ('OUT', 'DOUBTFUL'):
-                            injured_players.add(player_inj_name.lower())
                             away_injured_names.append(player_inj_name)
 
                     # Add props to analysis
@@ -1699,11 +1698,8 @@ def main():
                         player_name = player_names.get(player_id, f"Player {player_id}")
                         player_team_id = props.get('team_id')
 
-                        # Skip injured players (OUT/DOUBTFUL)
-                        if player_name.lower() in injured_players:
-                            continue
-
                         # CHECK INJURY STATUS using injury_tracker_v3 (Task 1.4)
+                        # Primary injury checking: ID-based lookup (more reliable than name matching)
                         uncertainty_flag = None
                         if player_id in injury_lookup:
                             status = injury_lookup[player_id]
@@ -1715,6 +1711,10 @@ def main():
                                 # Generate prediction but flag as HIGH_UNCERTAINTY
                                 uncertainty_flag = "HIGH_UNCERTAINTY"
                                 print(f"    Warning: {player_name} is {status.value} - flagging as HIGH_UNCERTAINTY")
+                        else:
+                            # Player not in injury lookup (likely healthy, or injury fetch failed)
+                            # Log at debug level for production monitoring
+                            logger.debug(f"Player {player_name} (ID: {player_id}) not in injury lookup - assuming healthy")
 
                         # CRITICAL: Look up the correct Balldontlie ID for stats
                         # Props API uses different IDs than active players endpoint
