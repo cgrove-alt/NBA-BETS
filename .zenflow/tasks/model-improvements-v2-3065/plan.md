@@ -118,40 +118,54 @@ Save to `{@artifacts_path}/plan.md`.
 **Location**: Root directory (already exists)
 **Estimated Effort**: 6 hours
 
+**Completion Status**:
+- ✅ Code implementation complete
+- ✅ Unit tests complete (39 tests, 100% pass rate)
+- ✅ Temporal discipline verified
+- ✅ Rolling windows implemented
+- ✅ Pace calculations added
+- ✅ Bug fixes applied (divide-by-zero, dead code removal)
+- ⏳ **Backtest validation DEFERRED to Task 1.7**
+- ⏳ **Performance improvement measurement DEFERRED to Task 1.7**
+- ⏳ **Basketball-Reference external validation DEFERRED (used synthetic test data)**
+
 **Implementation Steps**:
-1. Review existing `advanced_stats_v2.py` module
-2. Verify Four Factors calculations are correct:
+1. ✅ Review existing `advanced_stats_v2.py` module
+2. ✅ Verify Four Factors calculations are correct:
    - **eFG%** = (FG + 0.5 × 3PM) / FGA
    - **TOV%** = TOV / (FGA + 0.44 × FTA + TOV)
    - **ORB%** = ORB / (ORB + Opp_DRB)
    - **FT/FGA** = FT / FGA
 
-3. Add rolling window calculations if missing:
+3. ✅ Add rolling window calculations if missing:
    - Season average
    - Last 5 games (L5)
    - Last 10 games (L10)
 
-4. Add `calculate_four_factors_differential()` function:
+4. ✅ Add `calculate_four_factors_differential()` function:
    - Returns 12 features: {factor}_{window}_diff for all combinations
    - Example: `efg_season_diff`, `efg_L5_diff`, etc.
 
-5. Add pace calculations:
+5. ✅ Add pace calculations:
    - `calculate_pace(team_id, game_date, window)` - Possessions per 48 min
    - `adjust_for_pace(stat_value, team_pace, per_100)` - Convert to per-100
 
-6. Ensure temporal discipline:
+6. ✅ Ensure temporal discipline:
    - All functions accept `game_date` parameter
    - Only use data BEFORE game_date
 
 **Verification Steps**:
-- Unit test: Calculate Four Factors for Warriors on 2024-03-15, compare to Basketball-Reference.com
-- Temporal test: Fetch features for Oct 25, 2025, assert no data from Oct 26+
-- Backtest: Train model with/without Four Factors, expect ≥1% RMSE reduction
-- **Success Metric**: Backtest shows ≥1% RMSE improvement
+- ✅ Unit test: 39 comprehensive tests created and passing
+- ⏳ External validation: Used synthetic data (Basketball-Reference scraping deferred)
+- ✅ Temporal test: Verified no future data leakage
+- ⏳ **Backtest: DEFERRED to Task 1.7** - Train model with/without Four Factors, expect ≥1% RMSE reduction
+- ⏳ **Success Metric**: Will be validated in Task 1.7 Comprehensive Backtest
 
 **Files to Create/Modify**:
-- MODIFY: `advanced_stats_v2.py` (enhance existing ~800 lines)
-- CREATE: `tests/test_advanced_stats.py` (~150 lines)
+- MODIFY: `advanced_stats_v2.py` (682 lines, +66 net)
+- CREATE: `tests/test_advanced_stats.py` (763 lines, 39 tests)
+
+**Note**: Performance improvement claims (1-2% RMSE reduction) are based on Dean Oliver's research and remain unvalidated against this specific model. Actual impact will be measured in Task 1.7.
 
 ---
 
