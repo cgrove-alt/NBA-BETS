@@ -405,7 +405,8 @@ Save to `{@artifacts_path}/plan.md`.
 
 ---
 
-### [ ] Task 2.2: Create betting_market_features.py Module
+### [x] Task 2.2: Create betting_market_features.py Module
+<!-- chat-id: 60a0897c-4316-4a3c-a2ef-880260788886 -->
 **Priority**: P1 (High - 3-5% ROI improvement via CLV)
 **Location**: Root directory
 **Estimated Effort**: 8 hours
