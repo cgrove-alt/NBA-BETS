@@ -79,6 +79,63 @@ def smart_fillna_features(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def calculate_uncertainty_flags(
+    features: Dict,
+    confidence_score: float,
+    is_player_gtd: bool = False,
+    missing_feature_count: int = 0,
+    required_features: List[str] = None
+) -> Dict[str, Any]:
+    """
+    Calculate uncertainty flags for predictions.
+
+    Args:
+        features: Feature dictionary
+        confidence_score: Model confidence score (0-100)
+        is_player_gtd: Is player Game-Time Decision?
+        missing_feature_count: Number of missing features
+        required_features: List of required feature names
+
+    Returns:
+        Dictionary with uncertainty flags and reasons
+    """
+    flags = []
+    uncertainty_level = "LOW"
+
+    # Check for GTD player status
+    if is_player_gtd:
+        flags.append("HIGH_UNCERTAINTY")
+        flags.append("PLAYER_GTD")
+        uncertainty_level = "HIGH"
+
+    # Check for incomplete data
+    if missing_feature_count >= 3:
+        flags.append("DATA_INCOMPLETE")
+        if uncertainty_level != "HIGH":
+            uncertainty_level = "MEDIUM"
+
+    # Check confidence score
+    if confidence_score < 40:
+        flags.append("LOW_CONFIDENCE")
+        uncertainty_level = "HIGH"
+    elif confidence_score < 60 and uncertainty_level == "LOW":
+        uncertainty_level = "MEDIUM"
+
+    # Check for missing critical features
+    if required_features:
+        missing_critical = [f for f in required_features if f not in features or features[f] is None]
+        if len(missing_critical) > 0:
+            flags.append(f"MISSING_CRITICAL_FEATURES: {', '.join(missing_critical[:3])}")
+            uncertainty_level = "HIGH"
+
+    return {
+        "uncertainty_flags": flags,
+        "uncertainty_level": uncertainty_level,
+        "has_uncertainty": len(flags) > 0,
+        "flag_count": len(flags)
+    }
+
+
 # Try to import XGBoost and LightGBM (optional but recommended)
 try:
     import xgboost as xgb
@@ -3014,6 +3071,134 @@ class PlayerPropModel(BaseModelTrainer):
                 result["edge"] = predicted_value - prop_line
 
             return result
+
+    def predict_with_confidence(self, features: Dict, prop_line: Optional[float] = None, context_features: Optional[np.ndarray] = None) -> Tuple[Dict[str, Any], float]:
+        """
+        Predict player prop outcome with confidence score.
+
+        Args:
+            features: Player prop features dictionary
+            prop_line: The betting line to evaluate
+            context_features: Additional context features (12 features)
+
+        Returns:
+            Tuple[Dict[str, Any], float]
+                (predictions, confidence_score)
+                confidence_score ranges from 0-100
+        """
+        if not self.is_fitted:
+            raise ValueError("Model not fitted. Train or load a model first.")
+
+        numeric_features = {
+            k: v for k, v in features.items()
+            if isinstance(v, (int, float)) and k != "player_id"
+        }
+
+        X = pd.DataFrame([numeric_features])
+
+        for col in self.feature_names:
+            if col not in X.columns:
+                X[col] = 0
+        X = X[self.feature_names]
+
+        X_scaled = self.preprocess_features(X, fit=False)
+
+        # Use stacking ensemble with uncertainty if available
+        if self.stacking_ensemble is not None:
+            if self.use_classifier:
+                # For classification, get probability and uncertainty
+                predictions, confidence_scores = self.stacking_ensemble.predict_with_uncertainty(
+                    X_scaled, context_features=context_features
+                )
+                over_prob = float(np.clip(predictions[0], 0.0, 1.0))
+                confidence_score = float(confidence_scores[0])
+
+                result = {
+                    "over_probability": over_prob,
+                    "under_probability": 1.0 - over_prob,
+                    "prediction": "over" if over_prob > 0.5 else "under",
+                    "confidence": over_prob if over_prob > 0.5 else 1.0 - over_prob,
+                    "prop_type": self.prop_type,
+                }
+            else:
+                # For regression, get prediction and uncertainty
+                predictions, confidence_scores = self.stacking_ensemble.predict_with_uncertainty(
+                    X_scaled, context_features=context_features
+                )
+                predicted_value = float(predictions[0])
+                confidence_score = float(confidence_scores[0])
+
+                result = {
+                    "predicted_value": predicted_value,
+                    "prop_type": self.prop_type,
+                }
+
+                if prop_line is not None:
+                    result["prop_line"] = prop_line
+                    result["prediction"] = "over" if predicted_value > prop_line else "under"
+                    result["edge"] = predicted_value - prop_line
+        else:
+            # For standard model, calculate confidence from base model predictions
+            if self.use_classifier:
+                prob = self.model.predict_proba(X_scaled)[0]
+                over_prob = float(np.clip(prob[1], 0.0, 1.0))
+
+                # Get individual base model predictions if available
+                base_predictions = []
+                if hasattr(self.model, 'estimators_'):
+                    for estimator in self.model.estimators_:
+                        try:
+                            base_pred = estimator.predict_proba(X_scaled)[0][1]
+                            base_predictions.append(base_pred)
+                        except:
+                            pass
+
+                if len(base_predictions) > 1:
+                    std_dev = float(np.std(base_predictions))
+                    confidence_score = 100.0 * (1.0 - min(std_dev / max(over_prob, 0.1), 1.0))
+                else:
+                    confidence_score = 100.0 * max(over_prob, 1.0 - over_prob)
+
+                result = {
+                    "over_probability": over_prob,
+                    "under_probability": 1.0 - over_prob,
+                    "prediction": "over" if over_prob > 0.5 else "under",
+                    "confidence": over_prob if over_prob > 0.5 else 1.0 - over_prob,
+                    "prop_type": self.prop_type,
+                }
+            else:
+                predicted_value = self.model.predict(X_scaled)[0]
+
+                # Get individual base model predictions if available
+                base_predictions = []
+                if hasattr(self.model, 'estimators_'):
+                    for estimator in self.model.estimators_:
+                        try:
+                            base_pred = estimator.predict(X_scaled)[0]
+                            base_predictions.append(base_pred)
+                        except:
+                            pass
+
+                if len(base_predictions) > 1:
+                    std_dev = float(np.std(base_predictions))
+                    mean_pred = float(np.mean(base_predictions))
+                    confidence_score = 100.0 * (1.0 - min(std_dev / max(abs(mean_pred), 1.0), 1.0))
+                else:
+                    # Default confidence based on model type
+                    confidence_score = 70.0
+
+                result = {
+                    "predicted_value": predicted_value,
+                    "prop_type": self.prop_type,
+                }
+
+                if prop_line is not None:
+                    result["prop_line"] = prop_line
+                    result["prediction"] = "over" if predicted_value > prop_line else "under"
+                    result["edge"] = predicted_value - prop_line
+
+        confidence_score = float(np.clip(confidence_score, 0.0, 100.0))
+        return result, confidence_score
 
 
 class XGBoostMoneylineModel(BaseModelTrainer):

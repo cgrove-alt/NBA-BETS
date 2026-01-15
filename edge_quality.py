@@ -20,10 +20,10 @@ from enum import Enum
 
 class EdgeTier(Enum):
     """Classification of edge quality."""
-    ELITE = "elite"       # 85-100: High confidence, max Kelly
-    STRONG = "strong"     # 70-84: Good confidence, 75% Kelly
-    MODERATE = "moderate" # 55-69: Moderate confidence, 50% Kelly
-    WEAK = "weak"         # 40-54: Low confidence, 25% Kelly
+    ELITE = "elite"       # 90-100: High confidence, max Kelly
+    STRONG = "strong"     # 75-89: Good confidence, 50% Kelly
+    MODERATE = "moderate" # 60-74: Moderate confidence, 25% Kelly
+    WEAK = "weak"         # 40-59: Low confidence, monitor only
     AVOID = "avoid"       # 0-39: Not trustworthy, skip bet
 
 
@@ -65,9 +65,9 @@ class EdgeQualityScorer:
     # Kelly multipliers by tier
     KELLY_MULTIPLIERS = {
         EdgeTier.ELITE: 1.0,      # Full quarter-Kelly
-        EdgeTier.STRONG: 0.75,    # 75% of base Kelly
-        EdgeTier.MODERATE: 0.50,  # Half Kelly
-        EdgeTier.WEAK: 0.25,      # Quarter of base Kelly
+        EdgeTier.STRONG: 0.50,    # 50% of base Kelly
+        EdgeTier.MODERATE: 0.25,  # 25% of base Kelly
+        EdgeTier.WEAK: 0.0,       # Monitor only - don't bet
         EdgeTier.AVOID: 0.0,      # Don't bet
     }
 
@@ -599,11 +599,11 @@ class EdgeQualityScorer:
             all_factors_negative.append(f"Small edge ({edge:.1%})")
 
         # Determine tier
-        if overall_score >= 85:
+        if overall_score >= 90:
             tier = EdgeTier.ELITE
-        elif overall_score >= 70:
+        elif overall_score >= 75:
             tier = EdgeTier.STRONG
-        elif overall_score >= 55:
+        elif overall_score >= 60:
             tier = EdgeTier.MODERATE
         elif overall_score >= 40:
             tier = EdgeTier.WEAK

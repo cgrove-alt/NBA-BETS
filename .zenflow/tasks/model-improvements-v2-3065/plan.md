@@ -524,7 +524,8 @@ Save to `{@artifacts_path}/plan.md`.
 
 ---
 
-### [ ] Task 2.4: Implement Model Confidence Scoring
+### [x] Task 2.4: Implement Model Confidence Scoring
+<!-- chat-id: a325fe31-3323-44ab-9daf-c5a446a265d0 -->
 **Priority**: P1 (High - 70% higher ROI when filtering)
 **Location**: `model_trainer.py` and `edge_quality.py`
 **Estimated Effort**: 4 hours
