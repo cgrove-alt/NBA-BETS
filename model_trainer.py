@@ -87,14 +87,6 @@ except ImportError:
     HAS_XGBOOST = False
     print("XGBoost not installed. Run: pip install xgboost")
 
-# Try to import StackingMetaLearner for advanced ensemble
-try:
-    from stacking_meta_learner import StackingMetaLearner
-    HAS_STACKING_META_LEARNER = True
-except ImportError:
-    HAS_STACKING_META_LEARNER = False
-    print("StackingMetaLearner not available. Using standard stacking.")
-
 # Import calibration module for probability calibration
 try:
     from calibration import ModelCalibrator, calibrate_moneyline_probability
@@ -3126,11 +3118,8 @@ class EnsembleMoneylineModel(BaseModelTrainer):
     models may miss, improving overall ensemble diversity and accuracy.
     """
 
-    def __init__(self, use_stacking: bool = True):
+    def __init__(self):
         super().__init__("moneyline_ensemble")
-
-        self.use_stacking = use_stacking
-        self.stacking_ensemble = None
 
         # Base estimators - Now includes Neural Network + DIVERSE MODELS
         estimators = [
@@ -3178,9 +3167,6 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             n_jobs=-1,
         )
 
-        # Store base model references for stacking meta-learner
-        self.base_estimators = estimators
-
     def prepare_training_data(self, games_data: List[Dict]) -> Tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data - SORTED CHRONOLOGICALLY."""
         features_list = []
@@ -3219,28 +3205,8 @@ class EnsembleMoneylineModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
         use_time_series_cv: bool = True,
-        context_features: Optional[np.ndarray] = None,
-        sample_weights: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
-        """Train the ensemble model with walk-forward validation.
-
-        Parameters:
-        -----------
-        X : pd.DataFrame
-            Feature matrix
-        y : np.ndarray
-            Target labels
-        test_size : float
-            Proportion of data for testing
-        cv_folds : int
-            Number of cross-validation folds
-        use_time_series_cv : bool
-            Whether to use time-series validation
-        context_features : Optional[np.ndarray]
-            Context features for meta-learner (N × 12 array)
-        sample_weights : Optional[np.ndarray]
-            Sample weights for training (e.g., time-decay weights)
-        """
+        """Train the ensemble model with walk-forward validation."""
         if use_time_series_cv:
             # TIME-SERIES WALK-FORWARD VALIDATION
             n_samples = len(X)
@@ -3249,67 +3215,17 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             X_test = X.iloc[-test_samples:]
             y_train = y[:-test_samples]
             y_test = y[-test_samples:]
-
-            # Split context features and sample weights if provided
-            if context_features is not None:
-                context_train = context_features[:-test_samples]
-                context_test = context_features[-test_samples:]
-            else:
-                context_train = context_test = None
-
-            if sample_weights is not None:
-                weights_train = sample_weights[:-test_samples]
-                weights_test = sample_weights[-test_samples:]
-            else:
-                weights_train = weights_test = None
-
             print(f"\n  Using TIME-SERIES validation (walk-forward)")
         else:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42, stratify=y
             )
 
-            if context_features is not None:
-                # Need to split context features similarly
-                indices = np.arange(len(X))
-                train_idx, test_idx = train_test_split(
-                    indices, test_size=test_size, random_state=42, stratify=y
-                )
-                context_train = context_features[train_idx]
-                context_test = context_features[test_idx]
-            else:
-                context_train = context_test = None
-
-            if sample_weights is not None:
-                indices = np.arange(len(X))
-                train_idx, test_idx = train_test_split(
-                    indices, test_size=test_size, random_state=42, stratify=y
-                )
-                weights_train = sample_weights[train_idx]
-                weights_test = sample_weights[test_idx]
-            else:
-                weights_train = weights_test = None
-
         X_train_scaled = self.preprocess_features(X_train, fit=True)
         X_test_scaled = self.preprocess_features(X_test, fit=False)
 
-        # For classification tasks (moneyline), use the standard StackingClassifier
-        # StackingMetaLearner is better suited for regression tasks (player props)
-        # Context features and sample weights are tracked for future use
-        if context_features is not None or sample_weights is not None:
-            print("Training ensemble model (context features/weights noted for future use)...")
-            # Store context info for potential future enhancements
-            self._has_context = context_features is not None
-            self._has_weights = sample_weights is not None
-        else:
-            print("Training ensemble model (this may take a few minutes)...")
-
-        # Use standard StackingClassifier
-        if weights_train is not None and hasattr(self.model, 'fit') and 'sample_weight' in self.model.fit.__code__.co_varnames:
-            # Some estimators support sample_weight
-            self.model.fit(X_train_scaled, y_train, sample_weight=weights_train)
-        else:
-            self.model.fit(X_train_scaled, y_train)
+        print("Training ensemble model (this may take a few minutes)...")
+        self.model.fit(X_train_scaled, y_train)
         self.is_fitted = True
 
         y_pred = self.model.predict(X_test_scaled)
@@ -3324,28 +3240,17 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             "test_size": len(X_test),
             "num_base_estimators": len(self.model.estimators_),
             "validation_type": "time_series" if use_time_series_cv else "random",
-            "using_stacking_meta_learner": self.stacking_ensemble is not None,
         }
 
         print(f"\nEnsemble Moneyline Model Training Results:")
         print(f"  Accuracy: {self.training_metrics['accuracy']:.4f}")
         print(f"  F1 Score: {self.training_metrics['f1']:.4f}")
         print(f"  Base Estimators: {self.training_metrics['num_base_estimators']}")
-        if self.stacking_ensemble is not None:
-            print(f"  Using StackingMetaLearner: Yes")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, context_features: Optional[np.ndarray] = None) -> Dict[str, float]:
-        """Predict home team win probability.
-
-        Parameters:
-        -----------
-        features : Dict
-            Game features dictionary
-        context_features : Optional[np.ndarray]
-            Context features for meta-learner (1 × 12 array)
-        """
+    def predict(self, features: Dict) -> Dict[str, float]:
+        """Predict home team win probability."""
         if not self.is_fitted:
             raise ValueError("Model not fitted. Train or load a model first.")
 
@@ -3361,10 +3266,8 @@ class EnsembleMoneylineModel(BaseModelTrainer):
         X = X[self.feature_names]
 
         X_scaled = self.preprocess_features(X, fit=False)
-
-        # Use standard StackingClassifier
-        # Context features stored for reference but not used in classification
         prob = self.model.predict_proba(X_scaled)[0]
+
         home_prob = float(np.clip(prob[1], 0.0, 1.0))
         away_prob = float(np.clip(prob[0], 0.0, 1.0))
 
@@ -3372,80 +3275,8 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             "home_win_probability": home_prob,
             "away_win_probability": away_prob,
             "predicted_winner": "home" if home_prob > 0.5 else "away",
-            "confidence": float(np.clip(max(home_prob, away_prob), 0.0, 1.0)),
+            "confidence": float(np.clip(max(prob), 0.0, 1.0)),
         }
-
-    def predict_with_confidence(self, features: Dict, context_features: Optional[np.ndarray] = None) -> Tuple[Dict[str, float], float]:
-        """Predict home team win probability with confidence score.
-
-        Parameters:
-        -----------
-        features : Dict
-            Game features dictionary
-        context_features : Optional[np.ndarray]
-            Context features for meta-learner (1 × 12 array)
-
-        Returns:
-        --------
-        Tuple[Dict[str, float], float]
-            (predictions, confidence_score)
-            confidence_score ranges from 0-100, where:
-            - 90-100: Elite (high agreement among models)
-            - 75-89: Strong
-            - 60-74: Moderate
-            - < 60: Weak
-        """
-        if not self.is_fitted:
-            raise ValueError("Model not fitted. Train or load a model first.")
-
-        numeric_features = {
-            k: v for k, v in features.items()
-            if isinstance(v, (int, float)) and k not in ["home_team_id", "away_team_id"]
-        }
-
-        X = pd.DataFrame([numeric_features])
-        for col in self.feature_names:
-            if col not in X.columns:
-                X[col] = 0
-        X = X[self.feature_names]
-
-        X_scaled = self.preprocess_features(X, fit=False)
-
-        # Calculate confidence from base model predictions
-        prob = self.model.predict_proba(X_scaled)[0]
-        home_prob = float(np.clip(prob[1], 0.0, 1.0))
-        away_prob = float(np.clip(prob[0], 0.0, 1.0))
-
-        # Get individual base model predictions to calculate variance
-        base_predictions = []
-        if hasattr(self.model, 'estimators_'):
-            for estimator in self.model.estimators_:
-                try:
-                    base_pred = estimator.predict_proba(X_scaled)[0][1]
-                    base_predictions.append(base_pred)
-                except:
-                    pass
-
-        if len(base_predictions) > 1:
-            # Calculate standard deviation of base model predictions
-            std_dev = float(np.std(base_predictions))
-            # Convert uncertainty to confidence (lower variance = higher confidence)
-            # Confidence = 100 × (1 - min(std_dev / mean, 1.0))
-            confidence_score = 100.0 * (1.0 - min(std_dev / max(home_prob, 0.1), 1.0))
-        else:
-            # Fallback: use probability as confidence
-            confidence_score = 100.0 * max(home_prob, away_prob)
-
-        confidence_score = float(np.clip(confidence_score, 0.0, 100.0))
-
-        predictions = {
-            "home_win_probability": home_prob,
-            "away_win_probability": away_prob,
-            "predicted_winner": "home" if home_prob > 0.5 else "away",
-            "confidence": float(np.clip(max(home_prob, away_prob), 0.0, 1.0)),
-        }
-
-        return predictions, confidence_score
 
 
 class TunedEnsembleMoneylineModel(BaseModelTrainer):
