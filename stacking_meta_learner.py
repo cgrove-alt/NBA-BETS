@@ -274,6 +274,29 @@ class StackingMetaLearner:
             self.oof_scores[model_name] = avg_rmse
             logger.info(f"  {model_name} OOF RMSE: {avg_rmse:.4f}")
 
+        # CRITICAL: After generating OOF predictions, train each base model on the FULL training set
+        # This is necessary so the models can be used for final predictions
+        logger.info("\nTraining base models on full training set...")
+        for model_idx, base_model in enumerate(self.base_models):
+            model_name = base_model.__class__.__name__
+            try:
+                if sample_weights is not None:
+                    # Check if model supports sample_weight
+                    if hasattr(base_model, 'fit'):
+                        fit_params = base_model.fit.__code__.co_varnames
+                        if 'sample_weight' in fit_params:
+                            base_model.fit(X, y, sample_weight=sample_weights)
+                        else:
+                            base_model.fit(X, y)
+                    else:
+                        base_model.fit(X, y)
+                else:
+                    base_model.fit(X, y)
+                logger.info(f"  Trained {model_name} on full dataset ({len(X)} samples)")
+            except Exception as e:
+                logger.error(f"Error training {model_name} on full dataset: {e}")
+                raise
+
         return oof_predictions
 
     def fit(
@@ -467,7 +490,11 @@ class StackingMetaLearner:
         # Get base model predictions
         base_predictions = np.zeros((X.shape[0], len(self.base_models)))
         for idx, model in enumerate(self.base_models):
-            base_predictions[:, idx] = model.predict(X)
+            # For classification, use predict_proba to get probabilities
+            if self.task_type == 'classification' and hasattr(model, 'predict_proba'):
+                base_predictions[:, idx] = model.predict_proba(X)[:, 1]
+            else:
+                base_predictions[:, idx] = model.predict(X)
 
         # Calculate prediction variance (uncertainty)
         prediction_variance = np.var(base_predictions, axis=1)

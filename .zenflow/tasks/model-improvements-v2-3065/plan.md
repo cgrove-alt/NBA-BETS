@@ -251,7 +251,7 @@ Save to `{@artifacts_path}/plan.md`.
 
 ---
 
-### [ ] Task 1.5: Upgrade model_trainer.py with Stacking Ensemble
+### [x] Task 1.5: Upgrade model_trainer.py with Stacking Ensemble
 <!-- chat-id: f1a764a8-ef8e-47cf-b71b-959642ab9098 -->
 **Priority**: P0 (Critical - architectural improvement)
 **Location**: `model_trainer.py` (line ~3105)

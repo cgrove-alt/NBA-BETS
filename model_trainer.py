@@ -1837,14 +1837,17 @@ class QuantilePropModel(BaseModelTrainer):
     asymmetric uncertainty around the prediction.
     """
 
-    def __init__(self, prop_type: str = "points"):
+    def __init__(self, prop_type: str = "points", use_stacking: bool = True):
         """
         Initialize quantile prop model.
 
         Args:
             prop_type: Type of prop ("points", "rebounds", "assists", "threes", "pra")
+            use_stacking: If True, uses StackingMetaLearner with context features
         """
         self.prop_type = prop_type
+        self.use_stacking = use_stacking
+        self.stacking_ensembles = {}  # Separate stacking ensemble for each quantile
         model_name = f"player_{prop_type}_quantile"
         super().__init__(model_name)
 
@@ -1870,6 +1873,16 @@ class QuantilePropModel(BaseModelTrainer):
             ),
         }
         self.model = self.quantile_models[0.50]  # Default median model for compatibility
+
+        # Base models for regression stacking (used for all quantiles)
+        self.base_models = [
+            RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42),
+            GradientBoostingRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42),
+        ]
+        if HAS_XGBOOST:
+            self.base_models.append(xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42))
+        if HAS_LIGHTGBM:
+            self.base_models.append(lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42))
 
     def prepare_training_data(
         self,
@@ -1936,8 +1949,11 @@ class QuantilePropModel(BaseModelTrainer):
         y: np.ndarray,
         test_size: float = 0.2,
         cv_folds: int = 5,
+        use_time_series_cv: bool = True,
+        context_features: Optional[np.ndarray] = None,
+        sample_weights: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
-        """Train all three quantile models."""
+        """Train all three quantile models with optional stacking."""
         # Time-series split
         n_samples = len(X)
         test_samples = int(n_samples * test_size)
@@ -1946,20 +1962,79 @@ class QuantilePropModel(BaseModelTrainer):
         y_train = y[:-test_samples]
         y_test = y[-test_samples:]
 
+        if context_features is not None:
+            context_train = context_features[:-test_samples]
+            context_test = context_features[-test_samples:]
+        else:
+            context_train = context_test = None
+
+        if sample_weights is not None:
+            weights_train = sample_weights[:-test_samples]
+        else:
+            weights_train = None
+
         X_train_scaled = self.preprocess_features(X_train, fit=True)
         X_test_scaled = self.preprocess_features(X_test, fit=False)
 
         print(f"\n  Training Quantile Prop Model ({self.prop_type})...")
         print(f"  Training samples: {len(X_train)}, Test samples: {len(X_test)}")
 
-        # Train all three quantile models
-        predictions = {}
-        for quantile, model in self.quantile_models.items():
-            print(f"    Training quantile {quantile}...")
-            model.fit(X_train_scaled, y_train)
-            predictions[quantile] = model.predict(X_test_scaled)
+        # Use StackingMetaLearner if enabled and available
+        if self.use_stacking and HAS_STACKING_META_LEARNER and context_features is not None:
+            print("  Using StackingMetaLearner for quantile predictions...")
 
-        self.is_fitted = True
+            # Note: We train a single stacking ensemble on the median target
+            # Then use the base models' variance to estimate quantiles
+            self.stacking_ensembles[0.50] = StackingMetaLearner(
+                base_models=self.base_models,
+                meta_learner_type='xgboost',
+                cv_folds=cv_folds,
+                time_series_split=use_time_series_cv,
+                random_state=42,
+                task_type='regression'
+            )
+
+            self.stacking_ensembles[0.50].fit(
+                X_train_scaled,
+                y_train,
+                context_features=context_train,
+                sample_weights=weights_train
+            )
+
+            # Get predictions with uncertainty
+            y_pred_median_arr, confidence_scores = self.stacking_ensembles[0.50].predict_with_uncertainty(
+                X_test_scaled, context_features=context_test
+            )
+
+            # Calculate std_dev from confidence scores
+            # confidence = 100 * (1 - min(std_dev / mean, 1.0))
+            # Solving for std_dev: std_dev = mean * (1 - confidence/100)
+            std_dev = np.abs(y_pred_median_arr) * (1.0 - confidence_scores / 100.0)
+
+            # Estimate quantiles from median + std_dev
+            # q45 ≈ median - 0.126 * std_dev (10th percentile offset)
+            # q55 ≈ median + 0.126 * std_dev (90th percentile offset)
+            predictions = {
+                0.45: y_pred_median_arr - 0.126 * std_dev,
+                0.50: y_pred_median_arr,
+                0.55: y_pred_median_arr + 0.126 * std_dev,
+            }
+            y_pred_median = predictions[0.50]
+
+            self.is_fitted = True
+
+        else:
+            # Train all three quantile models separately (original approach)
+            predictions = {}
+            for quantile, model in self.quantile_models.items():
+                print(f"    Training quantile {quantile}...")
+                if weights_train is not None:
+                    model.fit(X_train_scaled, y_train, sample_weight=weights_train)
+                else:
+                    model.fit(X_train_scaled, y_train)
+                predictions[quantile] = model.predict(X_test_scaled)
+
+            self.is_fitted = True
 
         # Calculate metrics using median prediction
         y_pred_median = predictions[0.50]
@@ -1976,6 +2051,7 @@ class QuantilePropModel(BaseModelTrainer):
             "test_size": len(X_test),
             "quantile_crossings": int(crossings),
             "quantiles_trained": list(self.quantile_models.keys()),
+            "using_stacking_meta_learner": len(self.stacking_ensembles) > 0,
         }
 
         print(f"  Quantile {self.prop_type.title()} Model Results:")
@@ -1983,10 +2059,12 @@ class QuantilePropModel(BaseModelTrainer):
         print(f"    MAE: {self.training_metrics['mae']:.2f}")
         print(f"    R²: {self.training_metrics['r2']:.4f}")
         print(f"    Quantile crossings: {crossings} (should be 0)")
+        if len(self.stacking_ensembles) > 0:
+            print(f"    Using StackingMetaLearner: Yes")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, prop_line: Optional[float] = None) -> Dict[str, Any]:
+    def predict(self, features: Dict, prop_line: Optional[float] = None, context_features: Optional[np.ndarray] = None) -> Dict[str, Any]:
         """
         Predict with quantile-based implied probability.
 
@@ -2007,10 +2085,24 @@ class QuantilePropModel(BaseModelTrainer):
         X = X[self.feature_names]
         X_scaled = self.preprocess_features(X, fit=False)
 
-        # Get predictions from all quantiles
-        q45 = self.quantile_models[0.45].predict(X_scaled)[0]
-        q50 = self.quantile_models[0.50].predict(X_scaled)[0]  # Median
-        q55 = self.quantile_models[0.55].predict(X_scaled)[0]
+        # Use stacking ensemble if available
+        if 0.50 in self.stacking_ensembles:
+            predictions, confidence_scores = self.stacking_ensembles[0.50].predict_with_uncertainty(
+                X_scaled, context_features=context_features
+            )
+            q50 = predictions[0]
+
+            # Calculate std_dev from confidence score
+            std_dev = abs(q50) * (1.0 - confidence_scores[0] / 100.0)
+
+            # Estimate quantiles from median + std_dev
+            q45 = q50 - 0.126 * std_dev
+            q55 = q50 + 0.126 * std_dev
+        else:
+            # Get predictions from all quantile models
+            q45 = self.quantile_models[0.45].predict(X_scaled)[0]
+            q50 = self.quantile_models[0.50].predict(X_scaled)[0]  # Median
+            q55 = self.quantile_models[0.55].predict(X_scaled)[0]
 
         result = {
             "predicted_value": float(q50),  # Use median as main prediction
@@ -2567,16 +2659,19 @@ class PlayerPropModel(BaseModelTrainer):
     Predicts various player statistics (points, rebounds, assists, etc.).
     """
 
-    def __init__(self, prop_type: str = "points", use_classifier: bool = False):
+    def __init__(self, prop_type: str = "points", use_classifier: bool = False, use_stacking: bool = True):
         """
         Initialize player prop model.
 
         Args:
             prop_type: Type of prop ("points", "rebounds", "assists", "threes", "pra")
             use_classifier: If True, classifies over/under; if False, predicts value
+            use_stacking: If True, uses StackingMetaLearner with context features
         """
         self.prop_type = prop_type
         self.use_classifier = use_classifier
+        self.use_stacking = use_stacking
+        self.stacking_ensemble = None
 
         model_name = f"player_{prop_type}_{'classifier' if use_classifier else 'regressor'}"
         super().__init__(model_name)
@@ -2590,6 +2685,15 @@ class PlayerPropModel(BaseModelTrainer):
                 random_state=42,
                 n_jobs=-1,
             )
+            # Base models for classification stacking
+            self.base_models = [
+                RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42),
+                GradientBoostingClassifier(n_estimators=100, max_depth=5, random_state=42),
+            ]
+            if HAS_XGBOOST:
+                self.base_models.append(xgb.XGBClassifier(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42))
+            if HAS_LIGHTGBM:
+                self.base_models.append(lgb.LGBMClassifier(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42))
         else:
             self.model = RandomForestRegressor(
                 n_estimators=100,
@@ -2598,6 +2702,15 @@ class PlayerPropModel(BaseModelTrainer):
                 random_state=42,
                 n_jobs=-1,
             )
+            # Base models for regression stacking
+            self.base_models = [
+                RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42),
+                GradientBoostingRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42),
+            ]
+            if HAS_XGBOOST:
+                self.base_models.append(xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42))
+            if HAS_LIGHTGBM:
+                self.base_models.append(lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42))
 
     def prepare_training_data(
         self,
@@ -2683,6 +2796,9 @@ class PlayerPropModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
         tune_hyperparameters: bool = False,
+        use_time_series_cv: bool = True,
+        context_features: Optional[np.ndarray] = None,
+        sample_weights: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
         """
         Train the player prop model.
@@ -2693,26 +2809,80 @@ class PlayerPropModel(BaseModelTrainer):
             test_size: Proportion of data for testing
             cv_folds: Number of cross-validation folds
             tune_hyperparameters: Whether to perform grid search
+            use_time_series_cv: Use time-series cross-validation
+            context_features: Additional context features (12 features)
+            sample_weights: Sample weights for training
 
         Returns:
             Dictionary with training metrics
         """
-        # Split data
-        if self.use_classifier:
+        # Split data with time-series awareness
+        if use_time_series_cv and len(X) > 100:
+            split_idx = int(len(X) * (1 - test_size))
+            X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+            y_train, y_test = y[:split_idx], y[split_idx:]
+
+            if context_features is not None:
+                context_train = context_features[:split_idx]
+                context_test = context_features[split_idx:]
+            else:
+                context_train = context_test = None
+
+            if sample_weights is not None:
+                weights_train = sample_weights[:split_idx]
+            else:
+                weights_train = None
+        elif self.use_classifier:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42, stratify=y
             )
+            context_train = context_test = None
+            weights_train = None
         else:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42
             )
+            context_train = context_test = None
+            weights_train = None
 
         # Preprocess
         X_train_scaled = self.preprocess_features(X_train, fit=True)
         X_test_scaled = self.preprocess_features(X_test, fit=False)
 
-        # Hyperparameter tuning
-        if tune_hyperparameters:
+        # Use StackingMetaLearner if enabled and available
+        if self.use_stacking and HAS_STACKING_META_LEARNER and context_features is not None and not tune_hyperparameters:
+            print("Training with StackingMetaLearner (advanced stacking with context)...")
+
+            task_type = 'classification' if self.use_classifier else 'regression'
+
+            self.stacking_ensemble = StackingMetaLearner(
+                base_models=self.base_models,
+                meta_learner_type='xgboost',
+                cv_folds=cv_folds,
+                time_series_split=use_time_series_cv,
+                random_state=42,
+                task_type=task_type
+            )
+
+            self.stacking_ensemble.fit(
+                X_train_scaled,
+                y_train,
+                context_features=context_train,
+                sample_weights=weights_train
+            )
+            self.is_fitted = True
+
+            # Predictions
+            y_pred_raw = self.stacking_ensemble.predict(X_test_scaled, context_features=context_test)
+
+            # For classification, convert probabilities to binary predictions
+            if self.use_classifier:
+                y_pred = (y_pred_raw > 0.5).astype(int)
+            else:
+                y_pred = y_pred_raw
+
+        elif tune_hyperparameters:
+            # Hyperparameter tuning
             param_grid = {
                 "n_estimators": [50, 100, 200],
                 "max_depth": [5, 10, 15, None],
@@ -2725,17 +2895,22 @@ class PlayerPropModel(BaseModelTrainer):
             grid_search.fit(X_train_scaled, y_train)
             self.model = grid_search.best_estimator_
             print(f"Best parameters: {grid_search.best_params_}")
+            self.is_fitted = True
+            y_pred = self.model.predict(X_test_scaled)
         else:
             # Cross-validation
             cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=cv_folds)
 
             # Train
-            self.model.fit(X_train_scaled, y_train)
+            if weights_train is not None:
+                self.model.fit(X_train_scaled, y_train, sample_weight=weights_train)
+            else:
+                self.model.fit(X_train_scaled, y_train)
 
-        self.is_fitted = True
+            self.is_fitted = True
 
-        # Predictions
-        y_pred = self.model.predict(X_test_scaled)
+            # Predictions
+            y_pred = self.model.predict(X_test_scaled)
 
         # Calculate metrics
         if self.use_classifier:
@@ -2744,39 +2919,46 @@ class PlayerPropModel(BaseModelTrainer):
                 "precision": precision_score(y_test, y_pred, zero_division=0),
                 "recall": recall_score(y_test, y_pred, zero_division=0),
                 "f1": f1_score(y_test, y_pred, zero_division=0),
-                "cv_mean": cv_scores.mean() if not tune_hyperparameters else 0,
-                "cv_std": cv_scores.std() if not tune_hyperparameters else 0,
+                "cv_mean": cv_scores.mean() if not tune_hyperparameters and not self.stacking_ensemble else 0,
+                "cv_std": cv_scores.std() if not tune_hyperparameters and not self.stacking_ensemble else 0,
                 "train_size": len(X_train),
                 "test_size": len(X_test),
+                "using_stacking_meta_learner": self.stacking_ensemble is not None,
             }
             print(f"\n{self.prop_type.title()} Prop Classifier Training Results:")
             print(f"  Accuracy: {self.training_metrics['accuracy']:.4f}")
             print(f"  F1 Score: {self.training_metrics['f1']:.4f}")
+            if self.stacking_ensemble is not None:
+                print(f"  Using StackingMetaLearner: Yes")
         else:
             self.training_metrics = {
                 "mse": mean_squared_error(y_test, y_pred),
                 "rmse": np.sqrt(mean_squared_error(y_test, y_pred)),
                 "mae": mean_absolute_error(y_test, y_pred),
                 "r2": r2_score(y_test, y_pred),
-                "cv_mean": cv_scores.mean() if not tune_hyperparameters else 0,
-                "cv_std": cv_scores.std() if not tune_hyperparameters else 0,
+                "cv_mean": cv_scores.mean() if not tune_hyperparameters and not self.stacking_ensemble else 0,
+                "cv_std": cv_scores.std() if not tune_hyperparameters and not self.stacking_ensemble else 0,
                 "train_size": len(X_train),
                 "test_size": len(X_test),
+                "using_stacking_meta_learner": self.stacking_ensemble is not None,
             }
             print(f"\n{self.prop_type.title()} Prop Regressor Training Results:")
             print(f"  RMSE: {self.training_metrics['rmse']:.2f}")
             print(f"  MAE: {self.training_metrics['mae']:.2f}")
             print(f"  R2: {self.training_metrics['r2']:.4f}")
+            if self.stacking_ensemble is not None:
+                print(f"  Using StackingMetaLearner: Yes")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, prop_line: Optional[float] = None) -> Dict[str, Any]:
+    def predict(self, features: Dict, prop_line: Optional[float] = None, context_features: Optional[np.ndarray] = None) -> Dict[str, Any]:
         """
         Predict player prop outcome.
 
         Args:
             features: Player prop features dictionary
             prop_line: The betting line to evaluate
+            context_features: Additional context features (12 features)
 
         Returns:
             Dictionary with predictions
@@ -2799,7 +2981,14 @@ class PlayerPropModel(BaseModelTrainer):
         X_scaled = self.preprocess_features(X, fit=False)
 
         if self.use_classifier:
-            prob = self.model.predict_proba(X_scaled)[0]
+            # Use stacking ensemble if available
+            if self.stacking_ensemble is not None:
+                # For classification, stacking returns probability of class 1 (over)
+                over_prob = self.stacking_ensemble.predict(X_scaled, context_features=context_features)[0]
+                prob = [1 - over_prob, over_prob]
+            else:
+                prob = self.model.predict_proba(X_scaled)[0]
+
             return {
                 "over_probability": prob[1],
                 "under_probability": prob[0],
@@ -2808,7 +2997,12 @@ class PlayerPropModel(BaseModelTrainer):
                 "prop_type": self.prop_type,
             }
         else:
-            predicted_value = self.model.predict(X_scaled)[0]
+            # Use stacking ensemble if available
+            if self.stacking_ensemble is not None:
+                predicted_value = self.stacking_ensemble.predict(X_scaled, context_features=context_features)[0]
+            else:
+                predicted_value = self.model.predict(X_scaled)[0]
+
             result = {
                 "predicted_value": predicted_value,
                 "prop_type": self.prop_type,
@@ -2986,11 +3180,28 @@ class LightGBMSpreadModel(BaseModelTrainer):
     Requires: pip install lightgbm
     """
 
-    def __init__(self):
+    def __init__(self, use_stacking: bool = True):
         super().__init__("spread_lightgbm")
         if not HAS_LIGHTGBM:
             raise ImportError("LightGBM not installed. Run: pip install lightgbm")
 
+        self.use_stacking = use_stacking
+        self.stacking_ensemble = None
+
+        # Base models for ensemble
+        self.base_models = [
+            lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1,
+                            subsample=0.8, colsample_bytree=0.8, random_state=42, verbose=-1),
+            RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42),
+            GradientBoostingRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42),
+        ]
+
+        if HAS_XGBOOST:
+            self.base_models.append(xgb.XGBRegressor(
+                n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42, verbosity=0
+            ))
+
+        # Keep single model for backward compatibility
         self.model = lgb.LGBMRegressor(
             n_estimators=100,
             max_depth=6,
@@ -3038,43 +3249,118 @@ class LightGBMSpreadModel(BaseModelTrainer):
         y: np.ndarray,
         test_size: float = 0.2,
         cv_folds: int = 5,
+        use_time_series_cv: bool = True,
+        context_features: Optional[np.ndarray] = None,
+        sample_weights: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
-        """Train the LightGBM spread model."""
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42
-        )
+        """Train the LightGBM spread model.
+
+        Parameters:
+        -----------
+        X : pd.DataFrame
+            Feature matrix
+        y : np.ndarray
+            Target values (point differential)
+        test_size : float
+            Proportion of data for testing
+        cv_folds : int
+            Number of cross-validation folds
+        use_time_series_cv : bool
+            Whether to use time-series validation
+        context_features : Optional[np.ndarray]
+            Context features for meta-learner (N × 12 array)
+        sample_weights : Optional[np.ndarray]
+            Sample weights for training
+        """
+        if use_time_series_cv:
+            # TIME-SERIES WALK-FORWARD VALIDATION
+            n_samples = len(X)
+            test_samples = int(n_samples * test_size)
+            X_train = X.iloc[:-test_samples]
+            X_test = X.iloc[-test_samples:]
+            y_train = y[:-test_samples]
+            y_test = y[-test_samples:]
+
+            # Split context features and sample weights
+            if context_features is not None:
+                context_train = context_features[:-test_samples]
+                context_test = context_features[-test_samples:]
+            else:
+                context_train = context_test = None
+
+            if sample_weights is not None:
+                weights_train = sample_weights[:-test_samples]
+            else:
+                weights_train = None
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=42
+            )
+            context_train = context_test = None
+            weights_train = None
 
         X_train_scaled = self.preprocess_features(X_train, fit=True)
         X_test_scaled = self.preprocess_features(X_test, fit=False)
 
-        cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=cv_folds,
-                                     scoring='neg_mean_squared_error')
+        # Use StackingMetaLearner if enabled and available
+        if self.use_stacking and HAS_STACKING_META_LEARNER and context_features is not None:
+            print("Training with StackingMetaLearner (advanced stacking with context)...")
 
-        self.model.fit(X_train_scaled, y_train)
-        self.is_fitted = True
+            # Initialize StackingMetaLearner with base models
+            self.stacking_ensemble = StackingMetaLearner(
+                base_models=self.base_models,
+                meta_learner_type='xgboost',
+                cv_folds=cv_folds,
+                time_series_split=use_time_series_cv,
+                random_state=42,
+                task_type='regression'  # Regression for spread
+            )
 
-        y_pred = self.model.predict(X_test_scaled)
+            # Train with context features and sample weights
+            self.stacking_ensemble.fit(
+                X_train_scaled,
+                y_train,
+                context_features=context_train,
+                sample_weights=weights_train
+            )
+            self.is_fitted = True
+
+            # Predict using stacking ensemble
+            y_pred = self.stacking_ensemble.predict(X_test_scaled, context_features=context_test)
+
+        else:
+            # Use single LightGBM model
+            cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=cv_folds,
+                                         scoring='neg_mean_squared_error')
+
+            if weights_train is not None:
+                self.model.fit(X_train_scaled, y_train, sample_weight=weights_train)
+            else:
+                self.model.fit(X_train_scaled, y_train)
+            self.is_fitted = True
+
+            y_pred = self.model.predict(X_test_scaled)
 
         self.training_metrics = {
             "mse": mean_squared_error(y_test, y_pred),
             "rmse": np.sqrt(mean_squared_error(y_test, y_pred)),
             "mae": mean_absolute_error(y_test, y_pred),
             "r2": r2_score(y_test, y_pred),
-            "cv_mean_rmse": np.sqrt(-cv_scores.mean()),
-            "cv_std_rmse": np.sqrt(cv_scores.std()),
             "train_size": len(X_train),
             "test_size": len(X_test),
+            "using_stacking_meta_learner": self.stacking_ensemble is not None,
         }
 
         print(f"\nLightGBM Spread Model Training Results:")
         print(f"  RMSE: {self.training_metrics['rmse']:.2f} points")
         print(f"  MAE: {self.training_metrics['mae']:.2f} points")
         print(f"  R2: {self.training_metrics['r2']:.4f}")
-        print(f"  CV RMSE: {self.training_metrics['cv_mean_rmse']:.2f}")
+        if self.stacking_ensemble is not None:
+            print(f"  Using StackingMetaLearner: Yes")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, spread_line: Optional[float] = None) -> Dict[str, Any]:
+    def predict(self, features: Dict, spread_line: Optional[float] = None, context_features: Optional[np.ndarray] = None) -> Dict[str, Any]:
         """Predict spread outcome."""
         if not self.is_fitted:
             raise ValueError("Model not fitted. Train or load a model first.")
@@ -3091,7 +3377,12 @@ class LightGBMSpreadModel(BaseModelTrainer):
         X = X[self.feature_names]
 
         X_scaled = self.preprocess_features(X, fit=False)
-        predicted_diff = self.model.predict(X_scaled)[0]
+
+        # Use stacking ensemble if available
+        if self.stacking_ensemble is not None:
+            predicted_diff = self.stacking_ensemble.predict(X_scaled, context_features=context_features)[0]
+        else:
+            predicted_diff = self.model.predict(X_scaled)[0]
 
         # Clip to realistic NBA range
         predicted_diff = float(np.clip(predicted_diff, -30.0, 30.0))
@@ -3448,15 +3739,12 @@ class EnsembleMoneylineModel(BaseModelTrainer):
 
         # Use stacking ensemble with uncertainty if available
         if self.stacking_ensemble is not None:
-            predictions_dict, uncertainty = self.stacking_ensemble.predict_with_uncertainty(
+            predictions, confidence_scores = self.stacking_ensemble.predict_with_uncertainty(
                 X_scaled, context_features=context_features
             )
-            home_prob = float(np.clip(predictions_dict['predictions'][0], 0.0, 1.0))
+            home_prob = float(np.clip(predictions[0], 0.0, 1.0))
             away_prob = 1.0 - home_prob
-            std_dev = uncertainty['std_dev'][0]
-
-            # Confidence = 100 × (1 - min(std_dev / mean, 1.0))
-            confidence_score = 100.0 * (1.0 - min(std_dev / max(home_prob, 0.1), 1.0))
+            confidence_score = float(confidence_scores[0])
 
         else:
             # For standard ensemble, calculate confidence from base model predictions
