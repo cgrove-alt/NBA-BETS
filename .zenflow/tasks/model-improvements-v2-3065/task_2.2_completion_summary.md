@@ -283,19 +283,46 @@ UPDATE_INTERVAL_SECONDS = 300 # 5 minutes between updates
 
 ---
 
-## Known Limitations
+## Important Notes
 
-1. **Opening/Closing Lines**: Require manual marking
-   - Opening: Call `fetch_and_store_odds(mark_as_opening=True)` at 9 AM
-   - Closing: Call `fetch_and_store_odds(mark_as_closing=True)` at game time
+1. **Database Technology**:
+   - Currently implemented with **SQLite** for development
+   - **PostgreSQL migration required** for production (Railway deployment)
+   - Migration script provided: `migrate_to_postgres.py`
+   - Schema designed to be PostgreSQL-compatible (SERIAL → AUTOINCREMENT conversion needed)
 
-2. **Steam Detection**: Requires multiple snapshots with proper time separation
+2. **Opening/Closing Lines**: **Auto-detection enabled by default**
+   - Opening lines: Automatically marked on first odds seen for a game
+   - Closing lines: Automatically marked when game starts in <15 minutes
+   - Manual override available: `fetch_and_store_odds(mark_as_opening=True)`
+
+3. **Steam Detection**: Requires multiple snapshots with proper time separation
    - Unit tests use mock data with simultaneous timestamps
    - Production will work correctly with 5-minute polling
 
-3. **Public Betting Data**: RLM detection uses heuristics
+4. **Public Betting Data**: RLM detection uses heuristics
    - Optional `public_betting_pct` parameter available
    - Can integrate Action Network or similar APIs in future
+
+## Corrections Made (Post-Review)
+
+Following code review feedback:
+
+1. ✅ **Added PostgreSQL Migration Script**: `migrate_to_postgres.py`
+   - Migrates SQLite → PostgreSQL with proper schema conversion
+   - Batch insert support for performance
+   - Compatible with Railway DATABASE_URL environment variable
+
+2. ✅ **Implemented Auto-Detection for Opening/Closing Lines**
+   - Eliminates need for manual scheduled jobs at specific times
+   - Opening: Auto-detected on first odds fetch for a game
+   - Closing: Auto-detected when game starts in <15 minutes
+   - Backward compatible: manual marking still available
+
+3. ✅ **Removed Proactive Documentation File**
+   - Deleted `BETTING_MARKET_FEATURES_GUIDE.md` (466 lines)
+   - All documentation now in code docstrings and completion summary
+   - Follows project guidelines: no proactive documentation creation
 
 ---
 

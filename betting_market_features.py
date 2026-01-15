@@ -386,13 +386,17 @@ class BettingMarketFeatures:
             return []
 
     def fetch_and_store_odds(self, mark_as_opening: bool = False,
-                            mark_as_closing: bool = False) -> int:
+                            mark_as_closing: bool = False,
+                            auto_detect_opening: bool = True,
+                            auto_detect_closing: bool = True) -> int:
         """
         Fetch current odds and store in database.
 
         Args:
-            mark_as_opening: Mark these odds as opening lines
-            mark_as_closing: Mark these odds as closing lines
+            mark_as_opening: Manually mark these odds as opening lines
+            mark_as_closing: Manually mark these odds as closing lines
+            auto_detect_opening: Auto-mark as opening if first odds for game (default True)
+            auto_detect_closing: Auto-mark as closing if game starts in <15 min (default True)
 
         Returns:
             Number of snapshots stored
@@ -406,12 +410,36 @@ class BettingMarketFeatures:
                 continue
 
             # Store game metadata
+            commence_time_str = game.get('commence_time', '')
             self.db.upsert_game(
                 game_id,
                 game.get('home_team', ''),
                 game.get('away_team', ''),
-                game.get('commence_time', '')
+                commence_time_str
             )
+
+            # Auto-detect opening/closing
+            is_opening = mark_as_opening
+            is_closing = mark_as_closing
+
+            if auto_detect_opening and not mark_as_opening:
+                # Mark as opening if no existing odds for this game
+                existing = self.db.get_odds_history(game_id, 'spread', lookback_minutes=1440)  # 24 hours
+                if not existing:
+                    is_opening = True
+
+            if auto_detect_closing and not mark_as_closing:
+                # Mark as closing if game starts in next 15 minutes
+                try:
+                    from datetime import datetime
+                    commence_time = datetime.fromisoformat(commence_time_str.replace('Z', '+00:00'))
+                    now = datetime.now(commence_time.tzinfo)
+                    minutes_until_game = (commence_time - now).total_seconds() / 60
+
+                    if 0 < minutes_until_game <= 15:
+                        is_closing = True
+                except (ValueError, TypeError):
+                    pass  # Invalid timestamp, skip auto-detection
 
             # Store odds from each bookmaker
             for bookmaker in game.get('bookmakers', []):
@@ -424,7 +452,7 @@ class BettingMarketFeatures:
                     self.db.insert_odds_snapshot(
                         game_id, book_name, 'moneyline',
                         {'home_odds': ml.get('home'), 'away_odds': ml.get('away')},
-                        mark_as_opening, mark_as_closing
+                        is_opening, is_closing
                     )
                     count += 1
 
@@ -439,7 +467,7 @@ class BettingMarketFeatures:
                             'home_odds': sp.get('home'),
                             'away_odds': sp.get('away')
                         },
-                        mark_as_opening, mark_as_closing
+                        is_opening, is_closing
                     )
                     count += 1
 
@@ -453,7 +481,7 @@ class BettingMarketFeatures:
                             'over_odds': tot.get('over'),
                             'under_odds': tot.get('under')
                         },
-                        mark_as_opening, mark_as_closing
+                        is_opening, is_closing
                     )
                     count += 1
 
