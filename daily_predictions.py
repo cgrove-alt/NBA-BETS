@@ -580,8 +580,10 @@ def load_models() -> Dict:
     """Load all prediction models."""
     models = {}
 
-    # Moneyline - try stacking model first, then fall back to ensemble
-    ml_path = MODEL_DIR / "moneyline_stacking.pkl"
+    # Moneyline - try meta-learner first, then stacking, then fall back to ensemble
+    ml_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
+    if not ml_path.exists():
+        ml_path = MODEL_DIR / "moneyline_stacking.pkl"
     if not ml_path.exists():
         ml_path = MODEL_DIR / "moneyline_ensemble.pkl"  # Fallback
     if ml_path.exists():
@@ -593,8 +595,10 @@ def load_models() -> Dict:
         except Exception as e:
             print(f"    Warning: Could not load moneyline model: {e}")
 
-    # Spread - try stacking model first, then fall back to ensemble
-    spread_path = MODEL_DIR / "spread_stacking.pkl"
+    # Spread - try meta-learner first, then stacking, then fall back to ensemble
+    spread_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
+    if not spread_path.exists():
+        spread_path = MODEL_DIR / "spread_stacking.pkl"
     if not spread_path.exists():
         spread_path = MODEL_DIR / "spread_ensemble.pkl"  # Fallback
     if spread_path.exists():
