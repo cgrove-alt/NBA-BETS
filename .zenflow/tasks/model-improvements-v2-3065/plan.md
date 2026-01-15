@@ -548,14 +548,17 @@ Save to `{@artifacts_path}/plan.md`.
    - `DATA_INCOMPLETE` if ≥3 features are missing
 
 **Verification Steps**:
-- Test: Generate predictions, verify confidence column exists
-- Test: High-agreement predictions (low variance) → confidence > 80%
-- Backtest: Filter to Elite+Strong tiers, verify ROI increases
-- **Success Metric**: Filtered backtest shows 70% higher ROI
+- ✅ Test: Generate predictions, verify confidence column exists
+- ✅ Test: High-agreement predictions (low variance) → confidence > 80%
+- ⏳ Backtest: Filter to Elite+Strong tiers, verify ROI increases (**DEFERRED to Task 2.6**)
+- ⏳ **Success Metric**: Filtered backtest shows 70% higher ROI (**VALIDATION PENDING in Task 2.6**)
+
+**Note**: The 70% higher ROI success metric requires comprehensive backtesting with real predictions, which will be validated in Task 2.6 (Phase 2 Backtest with Confidence Filtering). The implementation is complete and ready for validation.
 
 **Files to Create/Modify**:
-- MODIFY: `model_trainer.py` (enhance predict_with_confidence() ~20 lines)
-- MODIFY/VERIFY: `edge_quality.py` (may already exist, enhance if needed ~50 lines)
+- ✅ MODIFY: `model_trainer.py` (added predict_with_confidence() to PlayerPropModel + SpreadModel, ~220 lines)
+- ✅ MODIFY: `edge_quality.py` (updated tier thresholds and Kelly multipliers, 3 locations)
+- ✅ CREATE: `tests/test_confidence_scoring.py` (28 comprehensive tests, all passing)
 
 ---
 

@@ -1614,6 +1614,98 @@ class SpreadModel(BaseModelTrainer):
 
             return result
 
+    def predict_with_confidence(self, features: Dict, spread_line: Optional[float] = None) -> Tuple[Dict[str, Any], float]:
+        """
+        Predict spread outcome with confidence score.
+
+        Args:
+            features: Spread features dictionary
+            spread_line: The betting line to evaluate
+
+        Returns:
+            Tuple[Dict[str, Any], float]
+                (predictions, confidence_score)
+                confidence_score ranges from 0-100, based on model certainty
+        """
+        if not self.is_fitted:
+            raise ValueError("Model not fitted. Train or load a model first.")
+
+        numeric_features = {
+            k: v for k, v in features.items()
+            if isinstance(v, (int, float)) and k not in [
+                "home_team_id", "away_team_id", "injury_details"
+            ]
+        }
+
+        X = pd.DataFrame([numeric_features])
+
+        for col in self.feature_names:
+            if col not in X.columns:
+                X[col] = 0
+        X = X[self.feature_names]
+
+        X_scaled = self.preprocess_features(X, fit=False)
+
+        if self.use_classifier:
+            # For classification, confidence based on probability strength
+            prob = self.model.predict_proba(X_scaled)[0]
+            cover_prob = float(np.clip(prob[1], 0.0, 1.0))
+            no_cover_prob = float(np.clip(prob[0], 0.0, 1.0))
+
+            # Confidence is distance from 50% (coin flip)
+            # Strong conviction (close to 0% or 100%) = high confidence
+            # Weak conviction (close to 50%) = low confidence
+            max_prob = max(cover_prob, no_cover_prob)
+            distance_from_even = abs(max_prob - 0.5)
+            confidence_score = 100.0 * (distance_from_even / 0.5)  # Scale to 0-100
+
+            result = {
+                "cover_probability": cover_prob,
+                "no_cover_probability": no_cover_prob,
+                "prediction": "cover" if cover_prob > 0.5 else "no_cover",
+                "confidence": max_prob,
+            }
+        else:
+            # For regression, confidence based on prediction strength
+            predicted_diff = self.model.predict(X_scaled)[0]
+
+            # Clip to realistic NBA range
+            predicted_diff = float(np.clip(predicted_diff, -30.0, 30.0))
+
+            # For SVR, we don't have ensemble variance, so use prediction magnitude
+            # Strong prediction (large point diff) = higher confidence
+            # Weak prediction (close game) = lower confidence
+            # Confidence formula: Higher margin of victory = higher confidence
+            # Confidence range: 40-90 (we reserve 90-100 for ensemble agreement)
+            margin = abs(predicted_diff)
+            if margin >= 15.0:
+                # Blowout prediction = high confidence (80-90)
+                confidence_score = min(90.0, 80.0 + (margin - 15.0) / 3.0)
+            elif margin >= 7.0:
+                # Comfortable win = good confidence (65-79)
+                confidence_score = 65.0 + (margin - 7.0) * 1.75
+            elif margin >= 3.0:
+                # Close game = moderate confidence (50-64)
+                confidence_score = 50.0 + (margin - 3.0) * 3.75
+            else:
+                # Very close game = low confidence (40-49)
+                # Games decided by < 3 points are essentially coin flips
+                confidence_score = 40.0 + margin * 3.33
+
+            result = {
+                "predicted_spread": predicted_diff,
+                "predicted_winner": "home" if predicted_diff > 0 else "away",
+                "predicted_margin": abs(predicted_diff),
+            }
+
+            if spread_line is not None:
+                result["covers_spread"] = predicted_diff > spread_line
+                result["spread_line"] = spread_line
+                result["edge"] = float(np.clip(predicted_diff - spread_line, -20.0, 20.0))
+
+        confidence_score = float(np.clip(confidence_score, 0.0, 100.0))
+        return result, confidence_score
+
 
 class SpreadCoverClassifier(BaseModelTrainer):
     """
@@ -3184,7 +3276,11 @@ class PlayerPropModel(BaseModelTrainer):
                     mean_pred = float(np.mean(base_predictions))
                     confidence_score = 100.0 * (1.0 - min(std_dev / max(abs(mean_pred), 1.0), 1.0))
                 else:
-                    # Default confidence based on model type
+                    # Default confidence: 70.0 (MODERATE tier baseline)
+                    # Rationale: Without ensemble variance, we default to moderate confidence
+                    # This places predictions in the MODERATE tier (60-74), suggesting 0.25× Kelly bet sizing
+                    # Not too high (avoids overconfidence) nor too low (still actionable)
+                    # Aligns with "reasonably confident but no ensemble agreement data" scenario
                     confidence_score = 70.0
 
                 result = {

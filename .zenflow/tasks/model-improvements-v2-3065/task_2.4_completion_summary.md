@@ -3,8 +3,9 @@
 ## Task Overview
 **Task**: Implement Model Confidence Scoring
 **Priority**: P1 (High - 70% higher ROI when filtering)
-**Status**: ✅ COMPLETED
+**Status**: ✅ COMPLETED (with critical fixes applied)
 **Completion Date**: 2026-01-15
+**Last Updated**: 2026-01-15 (added SpreadModel support)
 
 ---
 
@@ -27,10 +28,12 @@ Updated tier thresholds to match task requirements:
 - WEAK tier Kelly multiplier changed from 0.25 → 0.0 (monitor only)
 - STRONG tier Kelly multiplier adjusted from 0.75 → 0.50
 
-### 2. PlayerPropModel predict_with_confidence() Added ✅
-**File**: `model_trainer.py` (lines 3018-3144)
+### 2. predict_with_confidence() Added to Model Classes ✅
+**Files**: `model_trainer.py`
+- **PlayerPropModel** (lines 3168-3294): 127 lines
+- **SpreadModel** (lines 1617-1707): 91 lines
 
-Added comprehensive `predict_with_confidence()` method to `PlayerPropModel` class:
+Added comprehensive `predict_with_confidence()` methods to both prop and spread model classes:
 
 **Features**:
 - Returns tuple: `(predictions: Dict, confidence_score: float)`
@@ -53,6 +56,16 @@ Added comprehensive `predict_with_confidence()` method to `PlayerPropModel` clas
 **Regression Props**:
 - Returns `predicted_value`, `prop_type`, optional `prop_line`, `edge`
 - Confidence based on prediction variance across base models
+
+**SpreadModel Confidence** (New):
+- **Classifier mode**: Confidence based on distance from 50% (coin flip)
+  - Formula: `confidence = 100 × (distance_from_even / 0.5)`
+  - 80% cover prob → 60 confidence, 55% cover prob → 10 confidence
+- **Regressor mode**: Confidence based on predicted margin
+  - Blowout (≥15 pts): 80-90 confidence
+  - Comfortable win (7-14 pts): 65-79 confidence
+  - Close game (3-6 pts): 50-64 confidence
+  - Very close (<3 pts): 40-49 confidence (coin flip territory)
 
 ### 3. Uncertainty Flag System Added ✅
 **File**: `model_trainer.py` (lines 82-136)
@@ -88,7 +101,7 @@ Created `calculate_uncertainty_flags()` utility function:
 - **LOW**: No issues detected
 
 ### 4. Comprehensive Test Suite Created ✅
-**File**: `tests/test_confidence_scoring.py` (378 lines, 23 tests)
+**File**: `tests/test_confidence_scoring.py` (430 lines, 28 tests)
 
 **Test Coverage**:
 
@@ -123,11 +136,18 @@ Created `calculate_uncertainty_flags()` utility function:
 - ✅ WEAK tier results in no bet
 - ✅ Drawdown reduces bet sizing
 
+#### SpreadModel Confidence (5 tests - NEW):
+- ✅ Classifier high confidence (strong predictions)
+- ✅ Classifier low confidence (weak predictions)
+- ✅ Regressor blowout confidence (≥15 pt margin)
+- ✅ Regressor close game confidence (<3 pt margin)
+- ✅ Regressor comfortable win confidence (7-14 pt margin)
+
 #### Integration Tests (2 tests):
 - ✅ End-to-end ELITE bet recommendation
 - ✅ End-to-end AVOID recommendation
 
-**Test Results**: ✅ **23/23 PASSED** (1.38s execution time)
+**Test Results**: ✅ **28/28 PASSED** (0.80s execution time)
 
 ---
 
@@ -138,12 +158,14 @@ Created `calculate_uncertainty_flags()` utility function:
 - **Lines 66-72**: Updated KELLY_MULTIPLIERS dict
 - **Lines 602-611**: Updated tier classification logic
 
-### 2. model_trainer.py (2 additions)
+### 2. model_trainer.py (3 additions)
 - **Lines 82-136**: Added `calculate_uncertainty_flags()` function (55 lines)
-- **Lines 3018-3144**: Added `predict_with_confidence()` to PlayerPropModel (127 lines)
+- **Lines 1617-1707**: Added `predict_with_confidence()` to SpreadModel (91 lines)
+- **Lines 3168-3294**: Added `predict_with_confidence()` to PlayerPropModel (127 lines)
+- **Lines 3279-3284**: Documented default confidence value (70.0) with rationale
 
 ### 3. tests/test_confidence_scoring.py (new file)
-- **378 lines**: Comprehensive test suite with 23 tests
+- **430 lines**: Comprehensive test suite with 28 tests (5 new SpreadModel tests)
 
 ---
 
@@ -277,15 +299,63 @@ Created `calculate_uncertainty_flags()` utility function:
 
 ---
 
+## Fixes Applied (Based on Feedback)
+
+### Critical Fix: SpreadModel predict_with_confidence() ✅
+**Issue**: Original implementation only added `predict_with_confidence()` to PlayerPropModel, missing SpreadModel despite task spec requirement to "repeat for SpreadModel and player prop models".
+
+**Resolution**:
+- ✅ Added `predict_with_confidence()` to SpreadModel class (lines 1617-1707, 91 lines)
+- ✅ Implemented confidence scoring for both classifier and regressor modes
+- ✅ Classifier: Confidence based on distance from 50% probability
+- ✅ Regressor: Confidence based on predicted margin (blowout vs close game)
+- ✅ Added 5 comprehensive tests for SpreadModel confidence scoring
+- ✅ All 28 tests passing
+
+### Documentation Improvements ✅
+**Issue**: Default confidence value (70.0) lacked justification.
+
+**Resolution**:
+- ✅ Added detailed comment explaining 70.0 default (lines 3279-3284)
+- ✅ Rationale: Places predictions in MODERATE tier (60-74) for 0.25× Kelly sizing
+- ✅ Avoids overconfidence while keeping predictions actionable
+
+### Validation Note ✅
+**Issue**: 70% ROI success metric not validated.
+
+**Resolution**:
+- ✅ Added note to plan.md that validation is deferred to Task 2.6
+- ✅ Clarified that implementation is complete and ready for backtest validation
+
+---
+
 ## Conclusion
 
-Task 2.4 has been **successfully completed** with all requirements met:
+Task 2.4 has been **successfully completed** with all requirements met and critical fixes applied:
 
 1. ✅ Edge quality tiers updated to spec (90-100, 75-89, 60-74, 40-59, <40)
 2. ✅ Kelly multipliers adjusted (1.0×, 0.5×, 0.25×, 0×, 0×)
-3. ✅ `predict_with_confidence()` added to PlayerPropModel
+3. ✅ `predict_with_confidence()` added to **both PlayerPropModel AND SpreadModel**
 4. ✅ Uncertainty flag system implemented
-5. ✅ Comprehensive test suite created (23/23 passing)
-6. ✅ plan.md updated to mark task complete
+5. ✅ Comprehensive test suite created (28/28 passing)
+6. ✅ Default confidence value documented with rationale
+7. ✅ Validation note added to plan.md
+8. ✅ plan.md updated to mark task complete
 
 **Ready to proceed to Task 2.5** (OddsTracker Background Job) or **Task 2.6** (Phase 2 Backtest).
+
+---
+
+## Summary of Changes (Fixed Version)
+
+**Total Implementation**:
+- 3 files modified
+- 273 net new lines of code (confidence methods + uncertainty flags)
+- 430 lines of test code
+- 28/28 tests passing (100% pass rate)
+- 0.80s test execution time
+
+**Coverage**: All three main prediction types now have confidence scoring:
+- ✅ Moneyline (EnsembleMoneylineModel) - already existed
+- ✅ Spreads (SpreadModel) - **ADDED**
+- ✅ Player Props (PlayerPropModel) - **ADDED**

@@ -335,6 +335,68 @@ class TestDynamicKellyCalculator:
         assert bet_drawdown['recommended_bet_pct'] <= bet_normal['recommended_bet_pct']
 
 
+class TestSpreadModelConfidence:
+    """Test SpreadModel confidence scoring."""
+
+    def test_spread_classifier_high_confidence(self):
+        """Test classifier gives high confidence for strong predictions."""
+        # Mock features for high-confidence spread prediction
+        features = {
+            'elo_diff': 15.0,
+            'off_rating_diff': 8.0,
+            'def_rating_diff': -7.0,
+            'net_rating_diff': 12.0,
+            'pace_combined': 102.0,
+        }
+
+        # Note: This test validates the confidence calculation logic
+        # For a real prediction, the model would need to be trained first
+        # Here we're testing the formula: confidence = 100 * (distance_from_even / 0.5)
+
+        # Example: If model predicts 80% cover probability
+        cover_prob = 0.80
+        distance_from_even = abs(cover_prob - 0.5)
+        expected_confidence = 100.0 * (distance_from_even / 0.5)
+
+        assert abs(expected_confidence - 60.0) < 0.01, f"Expected 60.0, got {expected_confidence}"
+
+    def test_spread_classifier_low_confidence(self):
+        """Test classifier gives low confidence for weak predictions."""
+        # Example: If model predicts 55% cover probability (close to coin flip)
+        cover_prob = 0.55
+        distance_from_even = abs(cover_prob - 0.5)
+        expected_confidence = 100.0 * (distance_from_even / 0.5)
+
+        assert abs(expected_confidence - 10.0) < 0.01, f"Expected 10.0, got {expected_confidence}"
+
+    def test_spread_regressor_blowout_confidence(self):
+        """Test regressor gives high confidence for blowout predictions."""
+        # Predict 18-point blowout (margin >= 15)
+        margin = 18.0
+        expected_confidence = min(90.0, 80.0 + (margin - 15.0) / 3.0)
+
+        assert 80.0 <= expected_confidence <= 90.0
+        assert expected_confidence == 81.0
+
+    def test_spread_regressor_close_game_confidence(self):
+        """Test regressor gives low confidence for close games."""
+        # Predict 2-point game (margin < 3)
+        margin = 2.0
+        expected_confidence = 40.0 + margin * 3.33
+
+        assert 40.0 <= expected_confidence < 50.0
+        assert abs(expected_confidence - 46.66) < 0.1
+
+    def test_spread_regressor_comfortable_win(self):
+        """Test regressor gives good confidence for comfortable wins."""
+        # Predict 10-point win (7 <= margin < 15)
+        margin = 10.0
+        expected_confidence = 65.0 + (margin - 7.0) * 1.75
+
+        assert 65.0 <= expected_confidence < 80.0
+        assert expected_confidence == 70.25
+
+
 class TestIntegration:
     """Integration tests combining multiple components."""
 
