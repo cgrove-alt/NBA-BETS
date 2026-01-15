@@ -362,6 +362,225 @@ class TestOddsTracker(unittest.TestCase):
         self.assertTrue(self.tracker.should_update())
 
 
+class TestAutoDetection(unittest.TestCase):
+    """Test automatic opening/closing line detection."""
+
+    def setUp(self):
+        """Create temporary database for testing."""
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.temp_db.close()
+        self.features = BettingMarketFeatures(db_path=self.temp_db.name)
+
+    def tearDown(self):
+        """Clean up temporary database."""
+        if os.path.exists(self.temp_db.name):
+            os.unlink(self.temp_db.name)
+
+    def test_auto_detect_opening_first_odds(self):
+        """Test that first odds for a game are auto-marked as opening."""
+        # Mock odds data
+        game_id = 'test_game_auto_open'
+        mock_odds = [{
+            'game_id': game_id,
+            'home_team': 'Lakers',
+            'away_team': 'Celtics',
+            'commence_time': '2025-01-20T19:00:00Z',
+            'bookmakers': [{
+                'key': 'draftkings',
+                'markets': {
+                    'spread': {
+                        'home_line': -5.5,
+                        'away_line': 5.5,
+                        'home': -110,
+                        'away': -110
+                    }
+                }
+            }]
+        }]
+
+        # Mock fetch_current_odds method
+        original_fetch = self.features.fetch_current_odds
+        self.features.fetch_current_odds = lambda force_refresh=False: mock_odds
+
+        try:
+            # Store odds with auto-detection enabled (default)
+            self.features.fetch_and_store_odds()
+
+            # Verify opening line was auto-detected
+            opening = self.features.db.get_opening_line(game_id, 'spread')
+            self.assertIsNotNone(opening, "Opening line should be auto-detected")
+            self.assertEqual(opening['home_line'], -5.5)
+            self.assertTrue(opening['is_opening'])
+        finally:
+            # Restore original method
+            self.features.fetch_current_odds = original_fetch
+
+    def test_auto_detect_closing_game_soon(self):
+        """Test that odds are auto-marked as closing when game starts in <15 min."""
+        from datetime import timedelta
+        import datetime as dt
+
+        game_id = 'test_game_auto_close'
+
+        # Game starts in 10 minutes (use ISO format with UTC)
+        commence_time = dt.datetime.now(dt.timezone.utc) + timedelta(minutes=10)
+        commence_time_str = commence_time.isoformat().replace('+00:00', 'Z')
+
+        mock_odds = [{
+            'game_id': game_id,
+            'home_team': 'Lakers',
+            'away_team': 'Celtics',
+            'commence_time': commence_time_str,
+            'bookmakers': [{
+                'key': 'fanduel',
+                'markets': {
+                    'spread': {
+                        'home_line': -6.0,
+                        'away_line': 6.0,
+                        'home': -112,
+                        'away': -108
+                    }
+                }
+            }]
+        }]
+
+        # Mock fetch_current_odds method
+        original_fetch = self.features.fetch_current_odds
+        self.features.fetch_current_odds = lambda force_refresh=False: mock_odds
+
+        try:
+            # Store odds with auto-detection
+            self.features.fetch_and_store_odds()
+
+            # Verify closing line was auto-detected
+            closing = self.features.db.get_closing_line(game_id, 'spread')
+            self.assertIsNotNone(closing, "Closing line should be auto-detected")
+            self.assertEqual(closing['home_line'], -6.0)
+            self.assertTrue(closing['is_closing'])
+        finally:
+            self.features.fetch_current_odds = original_fetch
+
+    def test_manual_override_auto_detect(self):
+        """Test that manual marking overrides auto-detection."""
+        game_id = 'test_game_manual'
+
+        # Add some existing odds first
+        self.features.db.upsert_game(game_id, 'Lakers', 'Celtics', '2025-01-20T19:00:00Z')
+        self.features.db.insert_odds_snapshot(
+            game_id, 'draftkings', 'spread',
+            {'home_line': -5.0, 'away_line': 5.0},
+            is_opening=False, is_closing=False
+        )
+
+        # Now fetch new odds with manual opening mark
+        mock_odds = [{
+            'game_id': game_id,
+            'home_team': 'Lakers',
+            'away_team': 'Celtics',
+            'commence_time': '2025-01-20T19:00:00Z',
+            'bookmakers': [{
+                'key': 'fanduel',
+                'markets': {
+                    'spread': {
+                        'home_line': -5.5,
+                        'away_line': 5.5,
+                        'home': -110,
+                        'away': -110
+                    }
+                }
+            }]
+        }]
+
+        # Mock fetch_current_odds method
+        original_fetch = self.features.fetch_current_odds
+        self.features.fetch_current_odds = lambda force_refresh=False: mock_odds
+
+        try:
+            # Manual mark should override auto-detection (which would skip because odds exist)
+            self.features.fetch_and_store_odds(mark_as_opening=True, auto_detect_opening=True)
+
+            # Verify manual marking worked
+            opening = self.features.db.get_opening_line(game_id, 'spread')
+            self.assertIsNotNone(opening)
+            self.assertTrue(opening['is_opening'])
+        finally:
+            self.features.fetch_current_odds = original_fetch
+
+    def test_auto_detect_disabled(self):
+        """Test that auto-detection can be disabled."""
+        game_id = 'test_game_no_auto'
+
+        mock_odds = [{
+            'game_id': game_id,
+            'home_team': 'Lakers',
+            'away_team': 'Celtics',
+            'commence_time': '2025-01-20T19:00:00Z',
+            'bookmakers': [{
+                'key': 'draftkings',
+                'markets': {
+                    'spread': {
+                        'home_line': -5.5,
+                        'away_line': 5.5,
+                        'home': -110,
+                        'away': -110
+                    }
+                }
+            }]
+        }]
+
+        # Mock fetch_current_odds method
+        original_fetch = self.features.fetch_current_odds
+        self.features.fetch_current_odds = lambda force_refresh=False: mock_odds
+
+        try:
+            # Disable auto-detection
+            self.features.fetch_and_store_odds(auto_detect_opening=False, auto_detect_closing=False)
+
+            # Verify no opening line was marked
+            opening = self.features.db.get_opening_line(game_id, 'spread')
+            self.assertIsNone(opening, "Should not auto-detect when disabled")
+        finally:
+            self.features.fetch_current_odds = original_fetch
+
+    def test_auto_detect_invalid_timestamp(self):
+        """Test that auto-detection handles invalid timestamps gracefully."""
+        game_id = 'test_game_bad_time'
+
+        # Invalid timestamp format
+        mock_odds = [{
+            'game_id': game_id,
+            'home_team': 'Lakers',
+            'away_team': 'Celtics',
+            'commence_time': 'INVALID_TIMESTAMP',
+            'bookmakers': [{
+                'key': 'draftkings',
+                'markets': {
+                    'spread': {
+                        'home_line': -5.5,
+                        'away_line': 5.5,
+                        'home': -110,
+                        'away': -110
+                    }
+                }
+            }]
+        }]
+
+        # Mock fetch_current_odds method
+        original_fetch = self.features.fetch_current_odds
+        self.features.fetch_current_odds = lambda force_refresh=False: mock_odds
+
+        try:
+            # Should not crash, just skip closing detection
+            count = self.features.fetch_and_store_odds()
+
+            self.assertGreater(count, 0, "Should still store odds")
+            # Opening should still be detected (doesn't depend on timestamp parsing)
+            opening = self.features.db.get_opening_line(game_id, 'spread')
+            self.assertIsNotNone(opening)
+        finally:
+            self.features.fetch_current_odds = original_fetch
+
+
 class TestEdgeCases(unittest.TestCase):
     """Test edge cases and error handling."""
 
@@ -429,6 +648,7 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestOddsHistoryDB))
     suite.addTests(loader.loadTestsFromTestCase(TestBettingMarketFeatures))
     suite.addTests(loader.loadTestsFromTestCase(TestOddsTracker))
+    suite.addTests(loader.loadTestsFromTestCase(TestAutoDetection))
     suite.addTests(loader.loadTestsFromTestCase(TestEdgeCases))
 
     runner = unittest.TextTestRunner(verbosity=2)

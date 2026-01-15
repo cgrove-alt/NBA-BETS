@@ -431,7 +431,6 @@ class BettingMarketFeatures:
             if auto_detect_closing and not mark_as_closing:
                 # Mark as closing if game starts in next 15 minutes
                 try:
-                    from datetime import datetime
                     commence_time = datetime.fromisoformat(commence_time_str.replace('Z', '+00:00'))
                     now = datetime.now(commence_time.tzinfo)
                     minutes_until_game = (commence_time - now).total_seconds() / 60
