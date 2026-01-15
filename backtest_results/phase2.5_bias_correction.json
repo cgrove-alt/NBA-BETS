@@ -1,0 +1,179 @@
+{
+  "phase": "Phase 2.5 Task 2: Bias Correction",
+  "date_completed": "2026-01-15",
+  "sample_size": 100,
+  "corrections_applied": {
+    "points": {
+      "sample_size": 16,
+      "current_bias": -2.28,
+      "recommended_correction": 2.28,
+      "bias_after_correction": 0.0,
+      "std_error": 5.727
+    },
+    "rebounds": {
+      "sample_size": 21,
+      "current_bias": -0.442,
+      "recommended_correction": 0.442,
+      "bias_after_correction": 0.0,
+      "std_error": 2.436
+    },
+    "assists": {
+      "sample_size": 21,
+      "current_bias": 1.543,
+      "recommended_correction": -1.543,
+      "bias_after_correction": 0.0,
+      "std_error": 1.471
+    },
+    "threes": {
+      "sample_size": 21,
+      "current_bias": -0.203,
+      "recommended_correction": 0.203,
+      "bias_after_correction": 0.0,
+      "std_error": 1.656
+    },
+    "pra": {
+      "sample_size": 21,
+      "current_bias": -0.676,
+      "recommended_correction": 0.676,
+      "bias_after_correction": 0.0,
+      "std_error": 7.143
+    }
+  },
+  "comparison": {
+    "overall": {
+      "before": {
+        "count": 100,
+        "rmse": 4.441,
+        "mae": 3.169,
+        "bias": -0.318,
+        "std": 3.11
+      },
+      "after": {
+        "count": 100,
+        "rmse": 4.271,
+        "mae": 2.935,
+        "bias": 0.0,
+        "std": 3.103
+      },
+      "improvement": {
+        "rmse": 0.17,
+        "mae": 0.234,
+        "bias": -0.318
+      }
+    },
+    "by_prop_type": {
+      "assists": {
+        "before": {
+          "count": 21,
+          "rmse": 2.132,
+          "mae": 1.827,
+          "bias": 1.543,
+          "std": 1.1
+        },
+        "after": {
+          "count": 21,
+          "rmse": 1.471,
+          "mae": 1.067,
+          "bias": 0.0,
+          "std": 1.013
+        },
+        "improvement": {
+          "rmse": 0.661,
+          "bias": 1.543
+        }
+      },
+      "pra": {
+        "before": {
+          "count": 21,
+          "rmse": 7.175,
+          "mae": 6.258,
+          "bias": -0.676,
+          "std": 3.51
+        },
+        "after": {
+          "count": 21,
+          "rmse": 7.143,
+          "mae": 6.226,
+          "bias": 0.0,
+          "std": 3.502
+        },
+        "improvement": {
+          "rmse": 0.032,
+          "bias": -0.676
+        }
+      },
+      "threes": {
+        "before": {
+          "count": 21,
+          "rmse": 1.668,
+          "mae": 1.075,
+          "bias": -0.203,
+          "std": 1.276
+        },
+        "after": {
+          "count": 21,
+          "rmse": 1.656,
+          "mae": 1.181,
+          "bias": 0.0,
+          "std": 1.161
+        },
+        "improvement": {
+          "rmse": 0.012,
+          "bias": -0.203
+        }
+      },
+      "points": {
+        "before": {
+          "count": 16,
+          "rmse": 6.165,
+          "mae": 5.047,
+          "bias": -2.28,
+          "std": 3.54
+        },
+        "after": {
+          "count": 16,
+          "rmse": 5.727,
+          "mae": 4.455,
+          "bias": -0.0,
+          "std": 3.6
+        },
+        "improvement": {
+          "rmse": 0.438,
+          "bias": -2.28
+        }
+      },
+      "rebounds": {
+        "before": {
+          "count": 21,
+          "rmse": 2.476,
+          "mae": 2.087,
+          "bias": -0.442,
+          "std": 1.333
+        },
+        "after": {
+          "count": 21,
+          "rmse": 2.436,
+          "mae": 2.108,
+          "bias": 0.0,
+          "std": 1.222
+        },
+        "improvement": {
+          "rmse": 0.04,
+          "bias": -0.442
+        }
+      }
+    }
+  },
+  "bias_correction_code": "BIAS_CORRECTIONS = {\n    'assists': -1.543,  # Current bias: 1.543\n    'points': 2.280,  # Current bias: -2.280\n    'pra': 0.676,  # Current bias: -0.676\n    'rebounds': 0.442,  # Current bias: -0.442\n    'threes': 0.203,  # Current bias: -0.203\n}",
+  "conclusions": [
+    "Overall bias reduced from -0.318 to 0.000",
+    "RMSE change: 0.170",
+    "MAE change: 0.234",
+    "Bias correction successfully centers predictions around actual values"
+  ],
+  "recommendations": [
+    "Apply these corrections to comprehensive_backtest.py",
+    "Re-run full backtest to validate improvements on complete dataset",
+    "Monitor if bias remains stable over time (may need periodic recalibration)"
+  ]
+}

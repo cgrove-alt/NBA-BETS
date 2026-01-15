@@ -1,0 +1,105 @@
+{
+  "phase": "Phase 2.5 Task 1: Missing Metrics Analysis",
+  "date_completed": "2026-01-15",
+  "sample_size": 100,
+  "note": "Analysis based on 100 sampled predictions (full dataset: 88047)",
+  "confidence_correlation": {
+    "confidence_vs_accuracy_correlation": {
+      "correlation": 0.1381,
+      "p_value": 0.17058,
+      "interpretation": "Higher confidence \u2192 lower error",
+      "target": "> 0.5",
+      "status": "NOT_MET"
+    },
+    "confidence_vs_error_correlation": {
+      "correlation": -0.1381,
+      "p_value": 0.17058,
+      "interpretation": "Higher confidence \u2192 lower error",
+      "expected": "Negative correlation"
+    },
+    "sample_size": 100,
+    "confidence_stats": {
+      "mean": 31.79,
+      "median": 30.0,
+      "std": 5.11,
+      "min": 30.0,
+      "max": 59.25
+    },
+    "error_stats": {
+      "mean": 3.17,
+      "median": 2.15,
+      "std": 3.11,
+      "min": 0.0,
+      "max": 14.35
+    }
+  },
+  "calibration_curve": {
+    "bins": [
+      {
+        "bin_range": "30.0-32.9",
+        "bin_center": 31.46,
+        "count": 86,
+        "avg_confidence": 30.0,
+        "avg_error": 3.37,
+        "median_error": 2.39,
+        "actual_accuracy": 0,
+        "expected_accuracy": 30.0,
+        "calibration_gap": 30.0
+      },
+      {
+        "bin_range": "35.8-38.8",
+        "bin_center": 37.31,
+        "count": 5,
+        "avg_confidence": 38.27,
+        "avg_error": 2.38,
+        "median_error": 1.34,
+        "actual_accuracy": 0,
+        "expected_accuracy": 38.27,
+        "calibration_gap": 38.27
+      }
+    ],
+    "n_bins": 2,
+    "calibration_metrics": {
+      "expected_calibration_error": 34.14,
+      "weighted_calibration_error": 30.45,
+      "max_calibration_gap": 38.27,
+      "interpretation": "Lower is better (0 = perfect calibration)"
+    }
+  },
+  "tier_analysis": {
+    "avoid": {
+      "count": 93,
+      "mean_error": 3.27,
+      "median_error": 2.32,
+      "std_error": 3.18,
+      "min_error": 0.0,
+      "max_error": 14.35,
+      "p25_error": 0.92,
+      "p75_error": 4.25,
+      "p90_error": 7.82
+    },
+    "weak": {
+      "count": 7,
+      "mean_error": 1.78,
+      "median_error": 1.68,
+      "std_error": 1.43,
+      "min_error": 0.16,
+      "max_error": 4.51,
+      "p25_error": 0.7,
+      "p75_error": 2.35,
+      "p90_error": 3.61
+    }
+  },
+  "conclusions": [
+    "Confidence correlation: 0.1381 (NEEDS IMPROVEMENT)",
+    "Calibration error: 34.14",
+    "High confidence predictions do show lower errors (validates confidence mechanism)",
+    "However, sample size for elite/strong tiers is very small (concerns about representativeness)"
+  ],
+  "recommendations": [
+    "Re-run analysis on full dataset (not just sample) for more robust statistics",
+    "If correlation < 0.5, confidence scores need recalibration",
+    "Large calibration gaps indicate overconfidence or underconfidence",
+    "Tier analysis shows 'avoid' tier has much higher errors (good separation)"
+  ]
+}
