@@ -57,7 +57,8 @@ class StackingMetaLearner:
         cv_folds: int = 5,
         time_series_split: bool = True,
         regularization_strength: float = 1.0,
-        random_state: int = 42
+        random_state: int = 42,
+        task_type: str = 'regression'
     ):
         """
         Initialize the Stacking Meta-Learner.
@@ -78,6 +79,8 @@ class StackingMetaLearner:
             L2 regularization strength (alpha for Ridge, lambda for XGBoost)
         random_state : int
             Random seed for reproducibility
+        task_type : str
+            'regression' or 'classification' - determines how to generate predictions
         """
         self.base_models = base_models
         self.meta_learner_type = meta_learner_type
@@ -85,6 +88,7 @@ class StackingMetaLearner:
         self.time_series_split = time_series_split
         self.regularization_strength = regularization_strength
         self.random_state = random_state
+        self.task_type = task_type
 
         # Initialize components
         self.meta_learner = None
@@ -99,7 +103,7 @@ class StackingMetaLearner:
         self.base_model_weights = None
 
         logger.info(f"Initialized StackingMetaLearner with {len(base_models)} base models")
-        logger.info(f"Meta-learner type: {meta_learner_type}, CV folds: {cv_folds}")
+        logger.info(f"Meta-learner type: {meta_learner_type}, CV folds: {cv_folds}, Task: {task_type}")
 
     def _initialize_meta_learner(self, n_features: int):
         """
@@ -112,6 +116,12 @@ class StackingMetaLearner:
         """
         if self.meta_learner_type == 'xgboost':
             # XGBoost with strong regularization to prevent overfitting
+            # For classification, use logistic objective to predict probabilities
+            if self.task_type == 'classification':
+                objective = 'reg:logistic'  # Predicts probabilities (0-1)
+            else:
+                objective = 'reg:squarederror'
+
             self.meta_learner = xgb.XGBRegressor(
                 n_estimators=100,
                 max_depth=3,  # Shallow trees prevent overfitting
@@ -121,10 +131,10 @@ class StackingMetaLearner:
                 reg_alpha=0.1,  # L1 regularization
                 reg_lambda=self.regularization_strength,  # L2 regularization
                 random_state=self.random_state,
-                objective='reg:squarederror',
+                objective=objective,
                 verbosity=0
             )
-            logger.info("Initialized XGBoost meta-learner with regularization")
+            logger.info(f"Initialized XGBoost meta-learner with regularization (task: {self.task_type})")
 
         elif self.meta_learner_type == 'neural_network':
             # Multi-layer perceptron with dropout for regularization
@@ -239,7 +249,12 @@ class StackingMetaLearner:
                         cloned_model.fit(X_train, y_train)
 
                     # Generate predictions on validation fold (model has NOT seen this data)
-                    val_predictions = cloned_model.predict(X_val)
+                    # For classification, use predict_proba to get probabilities
+                    if self.task_type == 'classification' and hasattr(cloned_model, 'predict_proba'):
+                        # Get probability of positive class (index 1)
+                        val_predictions = cloned_model.predict_proba(X_val)[:, 1]
+                    else:
+                        val_predictions = cloned_model.predict(X_val)
 
                     # Store OOF predictions
                     oof_predictions[val_idx, model_idx] = val_predictions
@@ -395,7 +410,11 @@ class StackingMetaLearner:
         # Step 1: Get base model predictions
         base_predictions = np.zeros((X.shape[0], len(self.base_models)))
         for idx, model in enumerate(self.base_models):
-            base_predictions[:, idx] = model.predict(X)
+            # For classification, use predict_proba to get probabilities
+            if self.task_type == 'classification' and hasattr(model, 'predict_proba'):
+                base_predictions[:, idx] = model.predict_proba(X)[:, 1]
+            else:
+                base_predictions[:, idx] = model.predict(X)
 
         # Step 2: Combine with context features if provided
         if context_features is not None:
