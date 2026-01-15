@@ -34,6 +34,7 @@ warnings.filterwarnings('ignore')
 sys.path.insert(0, str(Path(__file__).parent / "models"))
 
 from models.stacking_model import StackingClassifier, StackingRegressor, create_stacking_model
+from stacking_meta_learner import StackingMetaLearner
 
 # Try importing Optuna
 try:
@@ -48,6 +49,120 @@ except ImportError:
 # Directories
 MODEL_DIR = Path("models")
 CACHE_DIR = Path("data/balldontlie_cache")
+
+
+def build_base_models_for_regression():
+    """Build diverse base models for regression tasks (spread, props)."""
+    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+    from sklearn.linear_model import Ridge
+
+    base_models = []
+
+    # Try XGBoost
+    try:
+        from xgboost import XGBRegressor
+        base_models.append(XGBRegressor(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbosity=0
+        ))
+    except ImportError:
+        pass
+
+    # Try LightGBM
+    try:
+        from lightgbm import LGBMRegressor
+        base_models.append(LGBMRegressor(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbosity=-1
+        ))
+    except ImportError:
+        pass
+
+    # Gradient Boosting
+    base_models.append(GradientBoostingRegressor(
+        n_estimators=100,
+        max_depth=5,
+        learning_rate=0.1,
+        random_state=42
+    ))
+
+    # Random Forest
+    base_models.append(RandomForestRegressor(
+        n_estimators=100,
+        max_depth=10,
+        random_state=42,
+        n_jobs=-1
+    ))
+
+    # Ridge Regression
+    base_models.append(Ridge(alpha=1.0, random_state=42))
+
+    return base_models
+
+
+def build_base_models_for_classification():
+    """Build diverse base models for classification tasks (moneyline)."""
+    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    from sklearn.linear_model import LogisticRegression
+
+    base_models = []
+
+    # Try XGBoost
+    try:
+        from xgboost import XGBClassifier
+        base_models.append(XGBClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbosity=0
+        ))
+    except ImportError:
+        pass
+
+    # Try LightGBM
+    try:
+        from lightgbm import LGBMClassifier
+        base_models.append(LGBMClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42,
+            verbosity=-1
+        ))
+    except ImportError:
+        pass
+
+    # Gradient Boosting
+    base_models.append(GradientBoostingClassifier(
+        n_estimators=100,
+        max_depth=5,
+        learning_rate=0.1,
+        random_state=42
+    ))
+
+    # Random Forest
+    base_models.append(RandomForestClassifier(
+        n_estimators=100,
+        max_depth=10,
+        random_state=42,
+        n_jobs=-1
+    ))
+
+    # Logistic Regression
+    base_models.append(LogisticRegression(
+        C=1.0,
+        max_iter=1000,
+        random_state=42
+    ))
+
+    return base_models
 
 
 def calculate_time_decay_weights(dates: pd.Series, half_life_days: int = 180) -> np.ndarray:
@@ -496,24 +611,51 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
         context_train = None
         context_test = None
 
-    if tune and HAS_OPTUNA:
-        model = tune_classifier_optuna(X_train, y_train)
-    else:
-        model = StackingClassifier(verbose=True)
-        # Note: StackingClassifier doesn't support context features yet
-        # This will be enhanced in a future iteration
-        model.fit(X_train, y_train)
+    # Build base models for stacking
+    print(f"  Building base models for stacking...")
+    base_models = build_base_models_for_classification()
+    print(f"    Created {len(base_models)} base models")
+
+    # Initialize StackingMetaLearner with context feature support
+    print(f"  Initializing StackingMetaLearner with XGBoost meta-learner...")
+    model = StackingMetaLearner(
+        base_models=base_models,
+        meta_learner_type='xgboost',
+        cv_folds=5,
+        time_series_split=True,
+        task_type='classification'
+    )
+
+    # Train with context features and sample weights
+    print(f"  Training with context features and time-decay weights...")
+    print(f"    X_train shape: {X_train.shape}")
+    print(f"    Context features shape: {context_train.shape if context_train is not None else 'None'}")
+    print(f"    Sample weights shape: {weights_train.shape}")
+
+    model.fit(
+        X=X_train.values,
+        y=y_train,
+        context_features=context_train,
+        sample_weights=weights_train
+    )
 
     # Evaluate
-    y_pred = model.predict(X_test)
-    y_proba = model.predict_proba(X_test)[:, 1]
+    print(f"\n  Generating predictions on test set...")
+    y_pred_proba = model.predict(X_test.values, context_features=context_test)
+    y_pred = (y_pred_proba > 0.5).astype(int)
 
     acc = accuracy_score(y_test, y_pred)
-    ll = log_loss(y_test, y_proba)
+    ll = log_loss(y_test, y_pred_proba)
 
     print(f"\n  Test Set Metrics:")
     print(f"    Accuracy:  {acc:.4f}")
     print(f"    Log Loss:  {ll:.4f}")
+
+    # Log base model performance
+    if hasattr(model, 'oof_scores'):
+        print(f"\n  Base Model OOF Performance:")
+        for model_name, score in model.oof_scores.items():
+            print(f"    {model_name}: RMSE={score:.3f}")
 
     # A/B Test: Compare with baseline (if exists)
     baseline_path = MODEL_DIR / "moneyline_stacking_baseline.pkl"
@@ -522,10 +664,21 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
         try:
             with open(baseline_path, 'rb') as f:
                 baseline_model = pickle.load(f)
-            y_pred_baseline = baseline_model.predict(X_test)
-            y_proba_baseline = baseline_model.predict_proba(X_test)[:, 1]
+
+            # Check if baseline supports context features
+            try:
+                y_pred_proba_baseline = baseline_model.predict(X_test.values, context_features=context_test)
+                y_pred_baseline = (y_pred_proba_baseline > 0.5).astype(int)
+            except (TypeError, AttributeError):
+                # Old model without context support
+                if hasattr(baseline_model, 'predict'):
+                    y_pred_baseline = baseline_model.predict(X_test)
+                    y_pred_proba_baseline = baseline_model.predict_proba(X_test)[:, 1]
+                else:
+                    raise
+
             acc_baseline = accuracy_score(y_test, y_pred_baseline)
-            ll_baseline = log_loss(y_test, y_proba_baseline)
+            ll_baseline = log_loss(y_test, y_pred_proba_baseline)
             acc_improvement = (acc - acc_baseline) * 100
             ll_improvement = (ll_baseline - ll) / ll_baseline * 100
 
@@ -536,20 +689,29 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
 
             # Only save if improved
             if acc >= acc_baseline or ll <= ll_baseline:
-                output_path = MODEL_DIR / "moneyline_stacking.pkl"
-                model.save(str(output_path))
+                output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
+                with open(output_path, 'wb') as f:
+                    pickle.dump(model, f)
                 print(f"  ✓ Model improved! Saved to {output_path}")
             else:
                 print(f"  ✗ Model did not improve. Keeping baseline.")
                 return baseline_model
         except Exception as e:
             print(f"  Warning: Could not load baseline: {e}")
+            # Save anyway if baseline comparison failed
+            output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
+            with open(output_path, 'wb') as f:
+                pickle.dump(model, f)
+            print(f"  Saved to {output_path}")
     else:
-        output_path = MODEL_DIR / "moneyline_stacking.pkl"
-        model.save(str(output_path))
+        output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
+        with open(output_path, 'wb') as f:
+            pickle.dump(model, f)
         # Save as baseline for future comparisons
-        model.save(str(baseline_path))
+        with open(baseline_path, 'wb') as f:
+            pickle.dump(model, f)
         print(f"  Saved to {output_path}")
+        print(f"  Also saved as baseline for future comparisons")
 
     return model
 
@@ -588,22 +750,49 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
         context_train = None
         context_test = None
 
-    if tune and HAS_OPTUNA:
-        model = tune_regressor_optuna(X_train, y_train)
-    else:
-        model = StackingRegressor(verbose=True)
-        # Note: StackingRegressor doesn't support context features yet
-        # This will be enhanced in a future iteration
-        model.fit(X_train, y_train)
+    # Build base models for stacking
+    print(f"  Building base models for stacking...")
+    base_models = build_base_models_for_regression()
+    print(f"    Created {len(base_models)} base models")
+
+    # Initialize StackingMetaLearner with context feature support
+    print(f"  Initializing StackingMetaLearner with XGBoost meta-learner...")
+    model = StackingMetaLearner(
+        base_models=base_models,
+        meta_learner_type='xgboost',
+        cv_folds=5,
+        time_series_split=True,
+        task_type='regression'
+    )
+
+    # Train with context features and sample weights
+    print(f"  Training with context features and time-decay weights...")
+    print(f"    X_train shape: {X_train.shape}")
+    print(f"    Context features shape: {context_train.shape if context_train is not None else 'None'}")
+    print(f"    Sample weights shape: {weights_train.shape}")
+
+    model.fit(
+        X=X_train.values,
+        y=y_train,
+        context_features=context_train,
+        sample_weights=weights_train
+    )
 
     # Evaluate
-    y_pred = model.predict(X_test)
+    print(f"\n  Generating predictions on test set...")
+    y_pred = model.predict(X_test.values, context_features=context_test)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     r2 = r2_score(y_test, y_pred)
 
     print(f"\n  Test Set Metrics:")
     print(f"    RMSE: {rmse:.3f}")
     print(f"    R²:   {r2:.3f}")
+
+    # Log base model performance
+    if hasattr(model, 'oof_scores'):
+        print(f"\n  Base Model OOF Performance:")
+        for model_name, score in model.oof_scores.items():
+            print(f"    {model_name}: RMSE={score:.3f}")
 
     # A/B Test: Compare with baseline (if exists)
     baseline_path = MODEL_DIR / "spread_stacking_baseline.pkl"
@@ -612,7 +801,17 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
         try:
             with open(baseline_path, 'rb') as f:
                 baseline_model = pickle.load(f)
-            y_pred_baseline = baseline_model.predict(X_test)
+
+            # Check if baseline supports context features
+            try:
+                y_pred_baseline = baseline_model.predict(X_test.values, context_features=context_test)
+            except (TypeError, AttributeError):
+                # Old model without context support
+                if hasattr(baseline_model, 'predict'):
+                    y_pred_baseline = baseline_model.predict(X_test)
+                else:
+                    raise
+
             rmse_baseline = np.sqrt(mean_squared_error(y_test, y_pred_baseline))
             improvement = (rmse_baseline - rmse) / rmse_baseline * 100
             print(f"    Baseline RMSE: {rmse_baseline:.3f}")
@@ -621,20 +820,29 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
 
             # Only save if improved
             if improvement >= 0:
-                output_path = MODEL_DIR / "spread_stacking.pkl"
-                model.save(str(output_path))
+                output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
+                with open(output_path, 'wb') as f:
+                    pickle.dump(model, f)
                 print(f"  ✓ Model improved! Saved to {output_path}")
             else:
                 print(f"  ✗ Model did not improve. Keeping baseline.")
                 return baseline_model
         except Exception as e:
             print(f"  Warning: Could not load baseline: {e}")
+            # Save anyway if baseline comparison failed
+            output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
+            with open(output_path, 'wb') as f:
+                pickle.dump(model, f)
+            print(f"  Saved to {output_path}")
     else:
-        output_path = MODEL_DIR / "spread_stacking.pkl"
-        model.save(str(output_path))
+        output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
+        with open(output_path, 'wb') as f:
+            pickle.dump(model, f)
         # Save as baseline for future comparisons
-        model.save(str(baseline_path))
+        with open(baseline_path, 'wb') as f:
+            pickle.dump(model, f)
         print(f"  Saved to {output_path}")
+        print(f"  Also saved as baseline for future comparisons")
 
     return model
 
