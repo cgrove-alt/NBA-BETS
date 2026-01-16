@@ -1,0 +1,17 @@
+======================================================================
+FEATURE ABLATION STUDY - Quick Test
+======================================================================
+
+Prop type: points
+Total features: 150
+Phase 2 features in model: 1 / 14
+  Found: ['is_back_to_back']...
+
+Baseline CV: 0.9764
+Elite+Strong: 0.0%
+
+======================================================================
+CONCLUSION
+======================================================================
+
+Phase 2 features exist. Full ablation study needed.
