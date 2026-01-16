@@ -1,6 +1,6 @@
 {
   "phase": "Phase 2: Enhancement (Weeks 3-4)",
-  "date_completed": "2026-01-15",
+  "date_completed": "2026-01-16",
   "backtest_period": "2025-10-21 to 2026-01-13",
   "games_analyzed": 596,
   "total_predictions": 88047,
@@ -13,64 +13,78 @@
       "bias": -0.02
     },
     "elite_strong_performance": {
-      "count": 172,
-      "rmse": 2.046,
-      "mae": 1.482,
-      "r2": 0.477,
-      "bias": -0.027
+      "count": 8747,
+      "rmse": 2.73,
+      "mae": 1.636,
+      "r2": 0.851,
+      "bias": 0.142
     },
-    "elite_strong_percentage": 0.2464592774313719,
+    "elite_strong_percentage": 18.784285665610412,
     "by_tier": {
       "elite": {
-        "count": 39,
-        "rmse": 2.665,
-        "mae": 1.735,
-        "r2": 0.397,
-        "bias": -0.913
+        "count": 3853,
+        "rmse": 1.858,
+        "mae": 1.398,
+        "r2": 0.461,
+        "bias": -0.004
       },
       "strong": {
-        "count": 133,
-        "rmse": 1.825,
-        "mae": 1.407,
-        "r2": 0.488,
-        "bias": 0.232
+        "count": 4894,
+        "rmse": 3.257,
+        "mae": 1.823,
+        "r2": 0.872,
+        "bias": 0.258
       },
       "moderate": {
-        "count": 1488,
-        "rmse": 1.89,
-        "mae": 1.446,
-        "r2": 0.448,
-        "bias": -0.166
+        "count": 10527,
+        "rmse": 7.233,
+        "mae": 5.134,
+        "r2": 0.683,
+        "bias": 1.094
       },
       "weak": {
-        "count": 3034,
-        "rmse": 1.87,
-        "mae": 1.384,
-        "r2": 0.454,
-        "bias": 0.124
+        "count": 21800,
+        "rmse": 5.583,
+        "mae": 3.959,
+        "r2": 0.381,
+        "bias": -0.259
       },
       "avoid": {
-        "count": 44011,
-        "rmse": 5.525,
-        "mae": 3.659,
-        "r2": 0.684,
-        "bias": -0.025
+        "count": 7631,
+        "rmse": 2.91,
+        "mae": 1.702,
+        "r2": 0.051,
+        "bias": -1.06
       }
     },
     "by_prop_type_filtered": {
+      "points": {
+        "count": 198,
+        "rmse": 9.391,
+        "mae": 7.294,
+        "r2": -0.149,
+        "bias": 1.95
+      },
       "assists": {
-        "count": 27,
-        "rmse": 3.584,
-        "mae": 2.796,
-        "r2": -0.23,
-        "bias": -1.746
+        "count": 2260,
+        "rmse": 2.784,
+        "mae": 2.205,
+        "r2": 0.145,
+        "bias": 0.327
       },
       "threes": {
-        "count": 145,
-        "rmse": 1.605,
-        "mae": 1.237,
+        "count": 6133,
+        "rmse": 1.399,
+        "mae": 1.076,
+        "r2": 0.013,
+        "bias": 0.005
+      },
+      "pra": {
+        "count": 156,
+        "rmse": 10.809,
+        "mae": 8.25,
         "r2": -0.012,
-        "bias": 0.293
+        "bias": 0.575
       }
     }
   },
@@ -80,8 +94,8 @@
       "prop_type": "points",
       "predicted": 14.395628288269043,
       "actual": 16,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 60.84326968177486,
+      "tier": "moderate",
       "error": -1.6043717117309573,
       "game_date": "2025-10-24"
     },
@@ -90,8 +104,8 @@
       "prop_type": "rebounds",
       "predicted": 5.033992727279664,
       "actual": 8,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 58.119877636902245,
+      "tier": "weak",
       "error": -2.9660072727203364,
       "game_date": "2025-10-24"
     },
@@ -100,8 +114,8 @@
       "prop_type": "assists",
       "predicted": 4.852910438537598,
       "actual": 3,
-      "confidence": 35.68410413958334,
-      "tier": "avoid",
+      "confidence": 85.34205206979166,
+      "tier": "strong",
       "error": 1.8529104385375978,
       "game_date": "2025-10-24"
     },
@@ -110,8 +124,8 @@
       "prop_type": "threes",
       "predicted": 2.319726215362549,
       "actual": 1,
-      "confidence": 47.58450935095622,
-      "tier": "weak",
+      "confidence": 90.57376107591227,
+      "tier": "elite",
       "error": 1.3197262153625489,
       "game_date": "2025-10-24"
     },
@@ -120,8 +134,8 @@
       "prop_type": "pra",
       "predicted": 27.165646240234373,
       "actual": 27,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 66.87909821816464,
+      "tier": "moderate",
       "error": 0.16564624023437347,
       "game_date": "2025-10-24"
     },
@@ -130,8 +144,8 @@
       "prop_type": "points",
       "predicted": 11.824078872680664,
       "actual": 2,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 55.394910899532896,
+      "tier": "weak",
       "error": 9.824078872680664,
       "game_date": "2025-10-24"
     },
@@ -140,8 +154,8 @@
       "prop_type": "rebounds",
       "predicted": 3.682692726135254,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 42.184174078120336,
+      "tier": "weak",
       "error": 3.682692726135254,
       "game_date": "2025-10-24"
     },
@@ -150,7 +164,7 @@
       "prop_type": "assists",
       "predicted": 0.38030616378784177,
       "actual": 3,
-      "confidence": 30,
+      "confidence": 19.889943320784813,
       "tier": "avoid",
       "error": -2.619693836212158,
       "game_date": "2025-10-24"
@@ -160,8 +174,8 @@
       "prop_type": "threes",
       "predicted": 2.837316499710083,
       "actual": 0,
-      "confidence": 51.694321784165616,
-      "tier": "weak",
+      "confidence": 91.48613943608477,
+      "tier": "elite",
       "error": 2.837316499710083,
       "game_date": "2025-10-24"
     },
@@ -170,8 +184,8 @@
       "prop_type": "pra",
       "predicted": 15.1413265914917,
       "actual": 5,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 55.08474739453538,
+      "tier": "weak",
       "error": 10.1413265914917,
       "game_date": "2025-10-24"
     },
@@ -180,8 +194,8 @@
       "prop_type": "points",
       "predicted": 6.605810478210449,
       "actual": 6,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 42.32924223380052,
+      "tier": "weak",
       "error": 0.605810478210449,
       "game_date": "2025-10-24"
     },
@@ -190,8 +204,8 @@
       "prop_type": "rebounds",
       "predicted": 2.280380268573761,
       "actual": 4,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 40.83870456936285,
+      "tier": "weak",
       "error": -1.719619731426239,
       "game_date": "2025-10-24"
     },
@@ -200,7 +214,7 @@
       "prop_type": "assists",
       "predicted": 0.9896885547637939,
       "actual": 1,
-      "confidence": 30,
+      "confidence": 20.065143494724392,
       "tier": "avoid",
       "error": -0.010311445236206085,
       "game_date": "2025-10-24"
@@ -210,8 +224,8 @@
       "prop_type": "threes",
       "predicted": 1.0779212952256203,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 74.43120568568489,
+      "tier": "moderate",
       "error": 1.0779212952256203,
       "game_date": "2025-10-24"
     },
@@ -220,8 +234,8 @@
       "prop_type": "pra",
       "predicted": 6.8899652214050295,
       "actual": 11,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 45.02701872850956,
+      "tier": "weak",
       "error": -4.1100347785949705,
       "game_date": "2025-10-24"
     },
@@ -230,7 +244,7 @@
       "prop_type": "points",
       "predicted": 4.481934383392334,
       "actual": 7,
-      "confidence": 30,
+      "confidence": 39.84834559548153,
       "tier": "avoid",
       "error": -2.5180656166076663,
       "game_date": "2025-10-24"
@@ -240,7 +254,7 @@
       "prop_type": "rebounds",
       "predicted": 2.06890629696846,
       "actual": 2,
-      "confidence": 30,
+      "confidence": 38.91570756313968,
       "tier": "avoid",
       "error": 0.06890629696846018,
       "game_date": "2025-10-24"
@@ -250,7 +264,7 @@
       "prop_type": "assists",
       "predicted": 1.2623948249816894,
       "actual": 0,
-      "confidence": 30,
+      "confidence": 4.983476962011743,
       "tier": "avoid",
       "error": 1.2623948249816894,
       "game_date": "2025-10-24"
@@ -260,8 +274,8 @@
       "prop_type": "threes",
       "predicted": 2.5002425775527954,
       "actual": 1,
-      "confidence": 38.07759478596299,
-      "tier": "avoid",
+      "confidence": 86.5387973929815,
+      "tier": "strong",
       "error": 1.5002425775527954,
       "game_date": "2025-10-24"
     },
@@ -270,8 +284,8 @@
       "prop_type": "pra",
       "predicted": 6.394621297836304,
       "actual": 9,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 44.20003265571172,
+      "tier": "weak",
       "error": -2.605378702163696,
       "game_date": "2025-10-24"
     },
@@ -280,8 +294,8 @@
       "prop_type": "rebounds",
       "predicted": 3.483359058380127,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 47.28932523562171,
+      "tier": "weak",
       "error": 2.483359058380127,
       "game_date": "2025-10-24"
     },
@@ -290,7 +304,7 @@
       "prop_type": "assists",
       "predicted": 2.389984527587891,
       "actual": 0,
-      "confidence": 30,
+      "confidence": 27.694005319534206,
       "tier": "avoid",
       "error": 2.389984527587891,
       "game_date": "2025-10-24"
@@ -300,8 +314,8 @@
       "prop_type": "threes",
       "predicted": 1.3063366875648499,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 72.99105536507085,
+      "tier": "moderate",
       "error": 1.3063366875648499,
       "game_date": "2025-10-24"
     },
@@ -310,8 +324,8 @@
       "prop_type": "pra",
       "predicted": 11.677344009399414,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 50.98900498118125,
+      "tier": "weak",
       "error": 10.677344009399414,
       "game_date": "2025-10-24"
     },
@@ -320,8 +334,8 @@
       "prop_type": "points",
       "predicted": 7.408726051330566,
       "actual": 8,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 47.89014666844216,
+      "tier": "weak",
       "error": -0.5912739486694338,
       "game_date": "2025-10-24"
     },
@@ -330,8 +344,8 @@
       "prop_type": "rebounds",
       "predicted": 6.712519367218018,
       "actual": 5,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 53.646877367398716,
+      "tier": "weak",
       "error": 1.7125193672180181,
       "game_date": "2025-10-24"
     },
@@ -340,7 +354,7 @@
       "prop_type": "assists",
       "predicted": 0.9896885547637939,
       "actual": 0,
-      "confidence": 30,
+      "confidence": 0.8353446561075799,
       "tier": "avoid",
       "error": 0.9896885547637939,
       "game_date": "2025-10-24"
@@ -350,8 +364,8 @@
       "prop_type": "threes",
       "predicted": 2.420501576423645,
       "actual": 1,
-      "confidence": 46.66851883185258,
-      "tier": "weak",
+      "confidence": 90.37041118067127,
+      "tier": "elite",
       "error": 1.420501576423645,
       "game_date": "2025-10-24"
     },
@@ -360,8 +374,8 @@
       "prop_type": "pra",
       "predicted": 15.432715103149414,
       "actual": 13,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 56.540350778898215,
+      "tier": "weak",
       "error": 2.4327151031494143,
       "game_date": "2025-10-24"
     },
@@ -370,7 +384,7 @@
       "prop_type": "points",
       "predicted": 3.1755082159042356,
       "actual": 7,
-      "confidence": 30,
+      "confidence": 39.15119168811548,
       "tier": "avoid",
       "error": -3.8244917840957644,
       "game_date": "2025-10-24"
@@ -380,7 +394,7 @@
       "prop_type": "rebounds",
       "predicted": 2.401448507785797,
       "actual": 2,
-      "confidence": 30,
+      "confidence": 39.89741658961099,
       "tier": "avoid",
       "error": 0.4014485077857972,
       "game_date": "2025-10-24"
@@ -390,7 +404,7 @@
       "prop_type": "assists",
       "predicted": 0.5789779815673828,
       "actual": 2,
-      "confidence": 30,
+      "confidence": 28.68860203562405,
       "tier": "avoid",
       "error": -1.4210220184326172,
       "game_date": "2025-10-24"
@@ -400,8 +414,8 @@
       "prop_type": "threes",
       "predicted": 2.156113730430603,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 77.61806009695555,
+      "tier": "strong",
       "error": 1.156113730430603,
       "game_date": "2025-10-24"
     },
@@ -410,8 +424,8 @@
       "prop_type": "pra",
       "predicted": 6.8899652214050295,
       "actual": 11,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 45.121350331282336,
+      "tier": "weak",
       "error": -4.1100347785949705,
       "game_date": "2025-10-24"
     },
@@ -420,8 +434,8 @@
       "prop_type": "points",
       "predicted": 4.639287784576416,
       "actual": 3,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 41.30294929224546,
+      "tier": "weak",
       "error": 1.6392877845764158,
       "game_date": "2025-10-24"
     },
@@ -430,7 +444,7 @@
       "prop_type": "rebounds",
       "predicted": 2.06890629696846,
       "actual": 1,
-      "confidence": 30,
+      "confidence": 38.64545611865762,
       "tier": "avoid",
       "error": 1.0689062969684602,
       "game_date": "2025-10-24"
@@ -440,7 +454,7 @@
       "prop_type": "assists",
       "predicted": 0.6319877300262451,
       "actual": 1,
-      "confidence": 30,
+      "confidence": 0,
       "tier": "avoid",
       "error": -0.3680122699737549,
       "game_date": "2025-10-24"
@@ -450,8 +464,8 @@
       "prop_type": "threes",
       "predicted": 1.1152487636208535,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 73.688524569849,
+      "tier": "moderate",
       "error": 0.11524876362085346,
       "game_date": "2025-10-24"
     },
@@ -460,8 +474,8 @@
       "prop_type": "pra",
       "predicted": 6.195264265060425,
       "actual": 5,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 43.376299971076705,
+      "tier": "weak",
       "error": 1.195264265060425,
       "game_date": "2025-10-24"
     },
@@ -470,7 +484,7 @@
       "prop_type": "points",
       "predicted": 4.481934383392334,
       "actual": 4,
-      "confidence": 30,
+      "confidence": 39.84834559548153,
       "tier": "avoid",
       "error": 0.48193438339233374,
       "game_date": "2025-10-24"
@@ -480,7 +494,7 @@
       "prop_type": "rebounds",
       "predicted": 2.06890629696846,
       "actual": 2,
-      "confidence": 30,
+      "confidence": 38.91570756313968,
       "tier": "avoid",
       "error": 0.06890629696846018,
       "game_date": "2025-10-24"
@@ -490,7 +504,7 @@
       "prop_type": "assists",
       "predicted": 1.2623948249816894,
       "actual": 1,
-      "confidence": 30,
+      "confidence": 4.983476962011743,
       "tier": "avoid",
       "error": 0.2623948249816894,
       "game_date": "2025-10-24"
@@ -500,8 +514,8 @@
       "prop_type": "threes",
       "predicted": 2.5002425775527954,
       "actual": 0,
-      "confidence": 38.07759478596299,
-      "tier": "avoid",
+      "confidence": 86.5387973929815,
+      "tier": "strong",
       "error": 2.5002425775527954,
       "game_date": "2025-10-24"
     },
@@ -510,8 +524,8 @@
       "prop_type": "pra",
       "predicted": 6.394621297836304,
       "actual": 7,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 44.20003265571172,
+      "tier": "weak",
       "error": -0.605378702163696,
       "game_date": "2025-10-24"
     },
@@ -520,8 +534,8 @@
       "prop_type": "rebounds",
       "predicted": 3.10017689037323,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 45.52213028501225,
+      "tier": "weak",
       "error": 3.10017689037323,
       "game_date": "2025-10-24"
     },
@@ -530,7 +544,7 @@
       "prop_type": "assists",
       "predicted": 1.2924214992523193,
       "actual": 0,
-      "confidence": 30,
+      "confidence": 37.86877108438426,
       "tier": "avoid",
       "error": 1.2924214992523193,
       "game_date": "2025-10-24"
@@ -540,8 +554,8 @@
       "prop_type": "threes",
       "predicted": 1.4032419339418412,
       "actual": 0,
-      "confidence": 34.211368314006094,
-      "tier": "avoid",
+      "confidence": 84.60568415700304,
+      "tier": "strong",
       "error": 1.4032419339418412,
       "game_date": "2025-10-24"
     },
@@ -550,8 +564,8 @@
       "prop_type": "pra",
       "predicted": 10.235217735290528,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 51.91772849996726,
+      "tier": "weak",
       "error": 10.235217735290528,
       "game_date": "2025-10-24"
     },
@@ -560,7 +574,7 @@
       "prop_type": "rebounds",
       "predicted": 2.06890629696846,
       "actual": 0,
-      "confidence": 30,
+      "confidence": 38.91570756313968,
       "tier": "avoid",
       "error": 2.06890629696846,
       "game_date": "2025-10-24"
@@ -570,7 +584,7 @@
       "prop_type": "assists",
       "predicted": 1.2623948249816894,
       "actual": 0,
-      "confidence": 30,
+      "confidence": 4.983476962011743,
       "tier": "avoid",
       "error": 1.2623948249816894,
       "game_date": "2025-10-24"
@@ -580,8 +594,8 @@
       "prop_type": "threes",
       "predicted": 2.5002425775527954,
       "actual": 0,
-      "confidence": 38.07759478596299,
-      "tier": "avoid",
+      "confidence": 86.5387973929815,
+      "tier": "strong",
       "error": 2.5002425775527954,
       "game_date": "2025-10-24"
     },
@@ -590,8 +604,8 @@
       "prop_type": "pra",
       "predicted": 6.394621297836304,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 44.20003265571172,
+      "tier": "weak",
       "error": 6.394621297836304,
       "game_date": "2025-10-24"
     },
@@ -600,8 +614,8 @@
       "prop_type": "rebounds",
       "predicted": 2.280380268573761,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 40.83870456936285,
+      "tier": "weak",
       "error": 2.280380268573761,
       "game_date": "2025-10-24"
     },
@@ -610,7 +624,7 @@
       "prop_type": "assists",
       "predicted": 0.9896885547637939,
       "actual": 0,
-      "confidence": 30,
+      "confidence": 20.065143494724392,
       "tier": "avoid",
       "error": 0.9896885547637939,
       "game_date": "2025-10-24"
@@ -620,8 +634,8 @@
       "prop_type": "threes",
       "predicted": 1.0779212952256203,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 74.43120568568489,
+      "tier": "moderate",
       "error": 1.0779212952256203,
       "game_date": "2025-10-24"
     },
@@ -630,8 +644,8 @@
       "prop_type": "pra",
       "predicted": 6.8899652214050295,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 45.02701872850956,
+      "tier": "weak",
       "error": 6.8899652214050295,
       "game_date": "2025-10-24"
     },
@@ -640,8 +654,8 @@
       "prop_type": "rebounds",
       "predicted": 2.280380268573761,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 40.83870456936285,
+      "tier": "weak",
       "error": 2.280380268573761,
       "game_date": "2025-10-24"
     },
@@ -650,7 +664,7 @@
       "prop_type": "assists",
       "predicted": 0.9896885547637939,
       "actual": 0,
-      "confidence": 30,
+      "confidence": 20.065143494724392,
       "tier": "avoid",
       "error": 0.9896885547637939,
       "game_date": "2025-10-24"
@@ -660,8 +674,8 @@
       "prop_type": "threes",
       "predicted": 1.0779212952256203,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 74.43120568568489,
+      "tier": "moderate",
       "error": 1.0779212952256203,
       "game_date": "2025-10-24"
     },
@@ -670,8 +684,8 @@
       "prop_type": "pra",
       "predicted": 6.8899652214050295,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 45.02701872850956,
+      "tier": "weak",
       "error": 6.8899652214050295,
       "game_date": "2025-10-24"
     },
@@ -680,8 +694,8 @@
       "prop_type": "points",
       "predicted": 9.911076858520508,
       "actual": 12,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 54.99879959055671,
+      "tier": "weak",
       "error": -2.0889231414794924,
       "game_date": "2025-10-24"
     },
@@ -690,8 +704,8 @@
       "prop_type": "rebounds",
       "predicted": 7.417806346893311,
       "actual": 3,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 59.55264048072027,
+      "tier": "weak",
       "error": 4.417806346893311,
       "game_date": "2025-10-24"
     },
@@ -700,8 +714,8 @@
       "prop_type": "assists",
       "predicted": 7.472444931030274,
       "actual": 5,
-      "confidence": 59.249626851489275,
-      "tier": "weak",
+      "confidence": 93.16341716103062,
+      "tier": "elite",
       "error": 2.4724449310302736,
       "game_date": "2025-10-24"
     },
@@ -710,8 +724,8 @@
       "prop_type": "threes",
       "predicted": 1.2913582042455674,
       "actual": 3,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 79.08506440887585,
+      "tier": "strong",
       "error": -1.7086417957544326,
       "game_date": "2025-10-24"
     },
@@ -720,8 +734,8 @@
       "prop_type": "pra",
       "predicted": 23.80059306335449,
       "actual": 20,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 60.99077700359282,
+      "tier": "moderate",
       "error": 3.8005930633544907,
       "game_date": "2025-10-24"
     },
@@ -730,7 +744,7 @@
       "prop_type": "points",
       "predicted": 2.010650828361511,
       "actual": 5,
-      "confidence": 30,
+      "confidence": 39.27900235002336,
       "tier": "avoid",
       "error": -2.989349171638489,
       "game_date": "2025-10-24"
@@ -740,7 +754,7 @@
       "prop_type": "rebounds",
       "predicted": 1.4212103234529496,
       "actual": 4,
-      "confidence": 30,
+      "confidence": 38.69716034272439,
       "tier": "avoid",
       "error": -2.5787896765470504,
       "game_date": "2025-10-24"
@@ -750,7 +764,7 @@
       "prop_type": "assists",
       "predicted": 0.4734716806411743,
       "actual": 1,
-      "confidence": 30,
+      "confidence": 0,
       "tier": "avoid",
       "error": -0.5265283193588257,
       "game_date": "2025-10-24"
@@ -760,8 +774,8 @@
       "prop_type": "threes",
       "predicted": 1.2455463573932648,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 76.28798757861172,
+      "tier": "strong",
       "error": 0.2455463573932648,
       "game_date": "2025-10-24"
     },
@@ -770,8 +784,8 @@
       "prop_type": "pra",
       "predicted": 6.195264265060425,
       "actual": 10,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 42.63980482201348,
+      "tier": "weak",
       "error": -3.804735734939575,
       "game_date": "2025-10-24"
     },
@@ -780,8 +794,8 @@
       "prop_type": "points",
       "predicted": 23.565635040283205,
       "actual": 14,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 70.93927296076436,
+      "tier": "moderate",
       "error": 9.565635040283205,
       "game_date": "2025-10-24"
     },
@@ -790,8 +804,8 @@
       "prop_type": "rebounds",
       "predicted": 6.712519367218018,
       "actual": 3,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 53.24174344155602,
+      "tier": "weak",
       "error": 3.712519367218018,
       "game_date": "2025-10-24"
     },
@@ -800,8 +814,8 @@
       "prop_type": "assists",
       "predicted": 6.951781192779541,
       "actual": 4,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 82.31204676181349,
+      "tier": "strong",
       "error": 2.951781192779541,
       "game_date": "2025-10-24"
     },
@@ -810,8 +824,8 @@
       "prop_type": "threes",
       "predicted": 2.8547646865844727,
       "actual": 0,
-      "confidence": 47.51762378312557,
-      "tier": "weak",
+      "confidence": 90.55891247985387,
+      "tier": "elite",
       "error": 2.8547646865844727,
       "game_date": "2025-10-24"
     },
@@ -820,8 +834,8 @@
       "prop_type": "pra",
       "predicted": 39.0014921875,
       "actual": 21,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 72.97256569689877,
+      "tier": "moderate",
       "error": 18.0014921875,
       "game_date": "2025-10-24"
     },
@@ -830,8 +844,8 @@
       "prop_type": "points",
       "predicted": 24.18524678039551,
       "actual": 35,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 71.92097079790953,
+      "tier": "moderate",
       "error": -10.81475321960449,
       "game_date": "2025-10-24"
     },
@@ -840,8 +854,8 @@
       "prop_type": "rebounds",
       "predicted": 5.033992727279664,
       "actual": 6,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 48.91941195356909,
+      "tier": "weak",
       "error": -0.9660072727203364,
       "game_date": "2025-10-24"
     },
@@ -850,8 +864,8 @@
       "prop_type": "assists",
       "predicted": 7.241449275970459,
       "actual": 3,
-      "confidence": 38.71207957604149,
-      "tier": "avoid",
+      "confidence": 86.85603978802075,
+      "tier": "strong",
       "error": 4.241449275970459,
       "game_date": "2025-10-24"
     },
@@ -860,8 +874,8 @@
       "prop_type": "threes",
       "predicted": 3.6499822006225586,
       "actual": 7,
-      "confidence": 42.918591613425384,
-      "tier": "weak",
+      "confidence": 88.95929580671269,
+      "tier": "strong",
       "error": -3.3500177993774414,
       "game_date": "2025-10-24"
     },
@@ -870,8 +884,8 @@
       "prop_type": "pra",
       "predicted": 36.826576873779295,
       "actual": 44,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 72.54610792022461,
+      "tier": "moderate",
       "error": -7.173423126220705,
       "game_date": "2025-10-24"
     },
@@ -880,8 +894,8 @@
       "prop_type": "points",
       "predicted": 9.728932693481445,
       "actual": 5,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 49.13550286919915,
+      "tier": "weak",
       "error": 4.728932693481445,
       "game_date": "2025-10-25"
     },
@@ -890,8 +904,8 @@
       "prop_type": "rebounds",
       "predicted": 7.417806346893311,
       "actual": 2,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 55.2038395511143,
+      "tier": "weak",
       "error": 5.417806346893311,
       "game_date": "2025-10-25"
     },
@@ -900,8 +914,8 @@
       "prop_type": "assists",
       "predicted": 3.009851137161255,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 73.29977730462608,
+      "tier": "moderate",
       "error": 2.009851137161255,
       "game_date": "2025-10-25"
     },
@@ -910,8 +924,8 @@
       "prop_type": "threes",
       "predicted": 3.0780918464660645,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 81.40593977464518,
+      "tier": "strong",
       "error": 2.0780918464660645,
       "game_date": "2025-10-25"
     },
@@ -920,8 +934,8 @@
       "prop_type": "pra",
       "predicted": 20.019039794921873,
       "actual": 8,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 56.94770402451786,
+      "tier": "weak",
       "error": 12.019039794921873,
       "game_date": "2025-10-25"
     },
@@ -930,8 +944,8 @@
       "prop_type": "points",
       "predicted": 21.06763203430176,
       "actual": 31,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 67.97124516048235,
+      "tier": "moderate",
       "error": -9.93236796569824,
       "game_date": "2025-10-25"
     },
@@ -940,8 +954,8 @@
       "prop_type": "rebounds",
       "predicted": 8.181638916015626,
       "actual": 11,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 63.68380187000672,
+      "tier": "moderate",
       "error": -2.8183610839843745,
       "game_date": "2025-10-25"
     },
@@ -950,8 +964,8 @@
       "prop_type": "assists",
       "predicted": 2.372174421310425,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 60.197125109279824,
+      "tier": "moderate",
       "error": 1.372174421310425,
       "game_date": "2025-10-25"
     },
@@ -960,8 +974,8 @@
       "prop_type": "threes",
       "predicted": 3.044329153060913,
       "actual": 6,
-      "confidence": 38.40817222145027,
-      "tier": "avoid",
+      "confidence": 86.70408611072514,
+      "tier": "strong",
       "error": -2.955670846939087,
       "game_date": "2025-10-25"
     },
@@ -970,8 +984,8 @@
       "prop_type": "pra",
       "predicted": 34.81845538330078,
       "actual": 43,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 69.71516669521856,
+      "tier": "moderate",
       "error": -8.18154461669922,
       "game_date": "2025-10-25"
     },
@@ -980,8 +994,8 @@
       "prop_type": "points",
       "predicted": 7.757196739196777,
       "actual": 14,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 46.75781441667992,
+      "tier": "weak",
       "error": -6.242803260803223,
       "game_date": "2025-10-25"
     },
@@ -990,8 +1004,8 @@
       "prop_type": "rebounds",
       "predicted": 8.784422119140626,
       "actual": 10,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 64.01785313768112,
+      "tier": "moderate",
       "error": -1.2155778808593745,
       "game_date": "2025-10-25"
     },
@@ -1000,8 +1014,8 @@
       "prop_type": "assists",
       "predicted": 3.2002698574066164,
       "actual": 2,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 72.3690182376288,
+      "tier": "moderate",
       "error": 1.2002698574066164,
       "game_date": "2025-10-25"
     },
@@ -1010,8 +1024,8 @@
       "prop_type": "threes",
       "predicted": 1.4235920474529267,
       "actual": 0,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 65.08895551981941,
+      "tier": "moderate",
       "error": 1.4235920474529267,
       "game_date": "2025-10-25"
     },
@@ -1020,8 +1034,8 @@
       "prop_type": "pra",
       "predicted": 20.107851669311522,
       "actual": 26,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 59.6670685532439,
+      "tier": "weak",
       "error": -5.892148330688478,
       "game_date": "2025-10-25"
     },
@@ -1030,8 +1044,8 @@
       "prop_type": "points",
       "predicted": 7.927840545654297,
       "actual": 3,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 48.65302995200794,
+      "tier": "weak",
       "error": 4.927840545654297,
       "game_date": "2025-10-25"
     },
@@ -1040,8 +1054,8 @@
       "prop_type": "rebounds",
       "predicted": 6.804144580841065,
       "actual": 3,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 52.590410914961,
+      "tier": "weak",
       "error": 3.804144580841065,
       "game_date": "2025-10-25"
     },
@@ -1050,8 +1064,8 @@
       "prop_type": "assists",
       "predicted": 3.6044963989257814,
       "actual": 3,
-      "confidence": 42.41148234970771,
-      "tier": "weak",
+      "confidence": 88.70574117485386,
+      "tier": "strong",
       "error": 0.6044963989257814,
       "game_date": "2025-10-25"
     },
@@ -1060,8 +1074,8 @@
       "prop_type": "threes",
       "predicted": 2.949375973701477,
       "actual": 1,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 78.12620607414321,
+      "tier": "strong",
       "error": 1.949375973701477,
       "game_date": "2025-10-25"
     },
@@ -1070,8 +1084,8 @@
       "prop_type": "pra",
       "predicted": 19.032389328002928,
       "actual": 9,
-      "confidence": 30,
-      "tier": "avoid",
+      "confidence": 55.33845760958639,
+      "tier": "weak",
       "error": 10.032389328002928,
       "game_date": "2025-10-25"
     }
@@ -1087,7 +1101,7 @@
     "target_1_overall_rmse": {
       "target": "< 5.0 (from Phase 1: 5.435)",
       "current_all": 5.284,
-      "current_filtered": 2.046,
+      "current_filtered": 2.73,
       "status_all": "NOT_MET",
       "status_filtered": "MET"
     },
@@ -1109,9 +1123,9 @@
   },
   "conclusions": [
     "Phase 2 backtest completed with 88047 predictions",
-    "Elite + Strong tier represents 0.2% of predictions",
+    "Elite + Strong tier represents 18.8% of predictions",
     "Overall RMSE: 5.284",
-    "Elite + Strong RMSE: 2.046",
+    "Elite + Strong RMSE: 2.730",
     "Confidence filtering shows measurable improvement in prediction accuracy",
     "CLV and ROI validation pending odds data integration"
   ]

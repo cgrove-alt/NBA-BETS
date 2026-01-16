@@ -167,18 +167,24 @@ class Phase2Backtester(SeasonBacktester):
         cv = std_dev / max(abs(mean_pred), 0.01)
 
         # Convert to confidence score (0-100)
-        # CV < 0.05 = excellent (90-100)
-        # CV 0.05-0.10 = good (75-89)
-        # CV 0.10-0.20 = moderate (60-74)
-        # CV > 0.20 = weak (<60)
-        if cv < 0.05:
-            confidence = 95 + (0.05 - cv) * 100
-        elif cv < 0.10:
-            confidence = 75 + (0.10 - cv) * 400
-        elif cv < 0.20:
-            confidence = 60 + (0.20 - cv) * 150
+        # RECALIBRATED thresholds based on actual CV analysis (Phase 2.5)
+        # Actual CV ranges: 0.3-1.4 (was expecting 0.05-0.20)
+        # New thresholds adjusted 6x more lenient to match reality
+        # CV < 0.30 = excellent (90-100)
+        # CV 0.30-0.50 = good (75-89)
+        # CV 0.50-0.80 = moderate (60-74)
+        # CV 0.80-1.20 = weak (40-59)
+        # CV > 1.20 = avoid (<40)
+        if cv < 0.30:
+            confidence = 90 + (0.30 - cv) * 33.3  # Maps 0-0.30 to 90-100
+        elif cv < 0.50:
+            confidence = 75 + (0.50 - cv) * 75    # Maps 0.30-0.50 to 75-90
+        elif cv < 0.80:
+            confidence = 60 + (0.80 - cv) * 50    # Maps 0.50-0.80 to 60-75
+        elif cv < 1.20:
+            confidence = 40 + (1.20 - cv) * 50    # Maps 0.80-1.20 to 40-60
         else:
-            confidence = max(30, 60 - (cv - 0.20) * 150)
+            confidence = max(0, 40 - (cv - 1.20) * 33.3)  # Maps 1.20+ to 0-40
 
         confidence = min(100, max(0, confidence))
 

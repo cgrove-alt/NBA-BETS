@@ -1,0 +1,11 @@
+{
+  "timestamp": "1768570724.5062046",
+  "targets": {
+    "rmse": null,
+    "bias": null,
+    "elite_strong": null,
+    "confidence_correlation": null
+  },
+  "targets_met": 0,
+  "total_targets": 4
+}
