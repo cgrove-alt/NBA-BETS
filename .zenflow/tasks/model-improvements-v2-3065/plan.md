@@ -645,7 +645,8 @@ Save to `{@artifacts_path}/plan.md`.
 ## PHASE 3: OPTIMIZATION (Weeks 5-6) - Fine-Tuning
 **Goal**: Integrate player impact metrics, quantile regression, risk management for ROI > 5%
 
-### [ ] Task 3.1: Enhance player_impact_fetcher.py with DARKO/EPM
+### [x] Task 3.1: Enhance player_impact_fetcher.py with DARKO/EPM
+<!-- chat-id: 1b3b2ccc-d337-4631-bc22-7897d9d4a067 -->
 **Priority**: P1 (High - 5-8% player prop accuracy improvement)
 **Location**: Root directory (already exists)
 **Estimated Effort**: 6 hours

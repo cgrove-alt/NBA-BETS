@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-01-16T16:49:51.431030",
+  "players": {
+    "Nikola Jokic": {
+      "source": "raptor",
+      "raw_raptor": 8.2,
+      "impact_metric": 10,
+      "team": "DEN",
+      "season": "2024"
+    },
+    "Luka Doncic": {
+      "source": "raptor",
+      "raw_raptor": 7.5,
+      "impact_metric": 9.375,
+      "team": "DAL",
+      "season": "2024"
+    }
+  }
+}

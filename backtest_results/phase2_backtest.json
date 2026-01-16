@@ -7,79 +7,84 @@
   "summary": {
     "overall_performance": {
       "count": 48705,
-      "rmse": 5.608,
-      "mae": 3.823,
-      "r2": 0.656,
-      "bias": 1.575
+      "rmse": 5.285,
+      "mae": 3.442,
+      "r2": 0.694,
+      "bias": -0.021
     },
     "elite_strong_performance": {
-      "count": 48691,
-      "rmse": 5.609,
-      "mae": 3.824,
-      "r2": 0.656,
-      "bias": 1.576
+      "count": 8747,
+      "rmse": 2.731,
+      "mae": 1.636,
+      "r2": 0.851,
+      "bias": 0.142
     },
-    "elite_strong_percentage": 99.63655774756664,
+    "elite_strong_percentage": 18.784285665610412,
     "by_tier": {
       "elite": {
-        "count": 48170,
-        "rmse": 5.638,
-        "mae": 3.857,
-        "r2": 0.654,
-        "bias": 1.589
+        "count": 3853,
+        "rmse": 1.858,
+        "mae": 1.398,
+        "r2": 0.461,
+        "bias": -0.005
       },
       "strong": {
-        "count": 521,
-        "rmse": 0.991,
-        "mae": 0.8,
-        "r2": -0.102,
-        "bias": 0.326
+        "count": 4894,
+        "rmse": 3.257,
+        "mae": 1.823,
+        "r2": 0.872,
+        "bias": 0.257
       },
       "moderate": {
-        "count": 14,
-        "rmse": 0.686,
-        "mae": 0.636,
-        "r2": -1.792,
-        "bias": 0.49
+        "count": 10527,
+        "rmse": 7.233,
+        "mae": 5.133,
+        "r2": 0.683,
+        "bias": 1.094
       },
-      "weak": {},
-      "avoid": {}
+      "weak": {
+        "count": 21800,
+        "rmse": 5.583,
+        "mae": 3.96,
+        "r2": 0.38,
+        "bias": -0.261
+      },
+      "avoid": {
+        "count": 7631,
+        "rmse": 2.91,
+        "mae": 1.702,
+        "r2": 0.051,
+        "bias": -1.061
+      }
     },
     "by_prop_type_filtered": {
       "points": {
-        "count": 10627,
-        "rmse": 6.195,
-        "mae": 4.877,
-        "r2": 0.467,
-        "bias": 1.15
-      },
-      "rebounds": {
-        "count": 10665,
-        "rmse": 2.901,
-        "mae": 2.375,
-        "r2": 0.173,
-        "bias": 1.391
+        "count": 198,
+        "rmse": 9.391,
+        "mae": 7.294,
+        "r2": -0.149,
+        "bias": 1.95
       },
       "assists": {
-        "count": 9044,
-        "rmse": 2.065,
-        "mae": 1.49,
-        "r2": 0.318,
-        "bias": -0.669
+        "count": 2260,
+        "rmse": 2.785,
+        "mae": 2.205,
+        "r2": 0.144,
+        "bias": 0.326
       },
       "threes": {
-        "count": 6823,
-        "rmse": 1.39,
-        "mae": 1.114,
-        "r2": -0.015,
-        "bias": 0.394
+        "count": 6133,
+        "rmse": 1.399,
+        "mae": 1.075,
+        "r2": 0.013,
+        "bias": 0.004
       },
       "pra": {
-        "count": 11532,
-        "rmse": 9.229,
-        "mae": 7.629,
-        "r2": 0.408,
-        "bias": 4.599
+        "count": 156,
+        "rmse": 10.809,
+        "mae": 8.25,
+        "r2": -0.012,
+        "bias": 0.575
       }
     }
   },
@@ -87,1001 +92,1001 @@
     {
       "player_name": "Jonathan Kuminga",
       "prop_type": "points",
-      "predicted": 15.01847966003418,
+      "predicted": 14.395628288269043,
       "actual": 16,
-      "confidence": 96.34822297465584,
-      "tier": "elite",
-      "error": -0.9815203399658206,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jonathan Kuminga",
-      "prop_type": "rebounds",
-      "predicted": 9.888455589294434,
-      "actual": 8,
-      "confidence": 99.19791298165828,
-      "tier": "elite",
-      "error": 1.8884555892944341,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jonathan Kuminga",
-      "prop_type": "assists",
-      "predicted": 4.381515899658203,
-      "actual": 3,
-      "confidence": 99.02202456299122,
-      "tier": "elite",
-      "error": 1.3815158996582033,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jonathan Kuminga",
-      "prop_type": "threes",
-      "predicted": 2.5222767457962036,
-      "actual": 1,
-      "confidence": 96.29982639403153,
-      "tier": "elite",
-      "error": 1.5222767457962036,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jonathan Kuminga",
-      "prop_type": "pra",
-      "predicted": 29.829962417602538,
-      "actual": 27,
-      "confidence": 98.16475919152008,
-      "tier": "elite",
-      "error": 2.8299624176025375,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Buddy Hield",
-      "prop_type": "points",
-      "predicted": 16.682113960266115,
-      "actual": 2,
-      "confidence": 98.56666218322778,
-      "tier": "elite",
-      "error": 14.682113960266115,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Buddy Hield",
-      "prop_type": "rebounds",
-      "predicted": 4.070472200393677,
-      "actual": 0,
-      "confidence": 96.81845780302993,
-      "tier": "elite",
-      "error": 4.070472200393677,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Buddy Hield",
-      "prop_type": "assists",
-      "predicted": 2.4772590789794924,
-      "actual": 3,
-      "confidence": 90.97108412579655,
-      "tier": "elite",
-      "error": -0.5227409210205076,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Buddy Hield",
-      "prop_type": "threes",
-      "predicted": 4.307659612655639,
-      "actual": 0,
-      "confidence": 97.05009862316736,
-      "tier": "elite",
-      "error": 4.307659612655639,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Buddy Hield",
-      "prop_type": "pra",
-      "predicted": 22.27705447387695,
-      "actual": 5,
-      "confidence": 98.13057828384535,
-      "tier": "elite",
-      "error": 17.27705447387695,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Trayce Jackson-Davis",
-      "prop_type": "points",
-      "predicted": 7.824034049987793,
-      "actual": 6,
-      "confidence": 97.29892529181012,
-      "tier": "elite",
-      "error": 1.8240340499877927,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Trayce Jackson-Davis",
-      "prop_type": "rebounds",
-      "predicted": 3.4713472919464112,
-      "actual": 4,
-      "confidence": 93.67695212038964,
-      "tier": "elite",
-      "error": -0.5286527080535888,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Trayce Jackson-Davis",
-      "prop_type": "assists",
-      "predicted": 1.0646108779907226,
-      "actual": 1,
-      "confidence": 92.80663507843451,
-      "tier": "elite",
-      "error": 0.06461087799072263,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Trayce Jackson-Davis",
-      "prop_type": "threes",
-      "predicted": 1.7975593671798706,
-      "actual": 0,
-      "confidence": 89.04492069666537,
-      "tier": "strong",
-      "error": 1.7975593671798706,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Trayce Jackson-Davis",
-      "prop_type": "pra",
-      "predicted": 11.664663955688477,
-      "actual": 11,
-      "confidence": 97.36219871152802,
-      "tier": "elite",
-      "error": 0.6646639556884768,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Moses Moody",
-      "prop_type": "points",
-      "predicted": 9.914500549316406,
-      "actual": 7,
-      "confidence": 94.20416463344075,
-      "tier": "elite",
-      "error": 2.914500549316406,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Moses Moody",
-      "prop_type": "rebounds",
-      "predicted": 3.9244124488830567,
-      "actual": 2,
-      "confidence": 96.75529766407621,
-      "tier": "elite",
-      "error": 1.9244124488830567,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Moses Moody",
-      "prop_type": "assists",
-      "predicted": 1.721671739578247,
-      "actual": 0,
-      "confidence": 92.13866720910964,
-      "tier": "elite",
-      "error": 1.721671739578247,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Moses Moody",
-      "prop_type": "threes",
-      "predicted": 2.354057894706726,
-      "actual": 1,
-      "confidence": 86.66589458348233,
-      "tier": "strong",
-      "error": 1.354057894706726,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Moses Moody",
-      "prop_type": "pra",
-      "predicted": 12.574000045776367,
-      "actual": 9,
-      "confidence": 98.01815174369621,
-      "tier": "elite",
-      "error": 3.5740000457763674,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gary Payton II",
-      "prop_type": "rebounds",
-      "predicted": 4.888569314956666,
-      "actual": 1,
-      "confidence": 97.86163363024089,
-      "tier": "elite",
-      "error": 3.8885693149566656,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gary Payton II",
-      "prop_type": "assists",
-      "predicted": 0.6223806533813476,
-      "actual": 0,
-      "confidence": 95.0813982551872,
-      "tier": "elite",
-      "error": 0.6223806533813476,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gary Payton II",
-      "prop_type": "threes",
-      "predicted": 1.4395822451114655,
-      "actual": 0,
-      "confidence": 75.60468231888242,
-      "tier": "strong",
-      "error": 1.4395822451114655,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gary Payton II",
-      "prop_type": "pra",
-      "predicted": 16.430314704895018,
-      "actual": 1,
-      "confidence": 97.92904683955386,
-      "tier": "elite",
-      "error": 15.430314704895018,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Brandin Podziemski",
-      "prop_type": "points",
-      "predicted": 9.549035861968994,
-      "actual": 8,
-      "confidence": 96.23289276838844,
-      "tier": "elite",
-      "error": 1.549035861968994,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Brandin Podziemski",
-      "prop_type": "rebounds",
-      "predicted": 6.7007405357360845,
-      "actual": 5,
-      "confidence": 99.21068157522667,
-      "tier": "elite",
-      "error": 1.7007405357360845,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Brandin Podziemski",
-      "prop_type": "assists",
-      "predicted": 2.138313451766968,
-      "actual": 0,
-      "confidence": 94.73184094310892,
-      "tier": "elite",
-      "error": 2.138313451766968,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Brandin Podziemski",
-      "prop_type": "threes",
-      "predicted": 2.0206256971359253,
-      "actual": 1,
-      "confidence": 95.36272375581068,
-      "tier": "elite",
-      "error": 1.0206256971359253,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Brandin Podziemski",
-      "prop_type": "pra",
-      "predicted": 25.701470062255858,
-      "actual": 13,
-      "confidence": 96.21089836679916,
-      "tier": "elite",
-      "error": 12.701470062255858,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Will Richard",
-      "prop_type": "points",
-      "predicted": 8.531380966186523,
-      "actual": 7,
-      "confidence": 97.14100944129022,
-      "tier": "elite",
-      "error": 1.5313809661865232,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Will Richard",
-      "prop_type": "rebounds",
-      "predicted": 3.454800446510315,
-      "actual": 2,
-      "confidence": 94.48690811345247,
-      "tier": "elite",
-      "error": 1.454800446510315,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Will Richard",
-      "prop_type": "assists",
-      "predicted": 2.4772590789794924,
-      "actual": 2,
-      "confidence": 93.9002699510948,
-      "tier": "elite",
-      "error": 0.4772590789794924,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Will Richard",
-      "prop_type": "threes",
-      "predicted": 1.914049373626709,
-      "actual": 1,
-      "confidence": 93.27316549297237,
-      "tier": "elite",
-      "error": 0.914049373626709,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Will Richard",
-      "prop_type": "pra",
-      "predicted": 13.724129364013672,
-      "actual": 11,
-      "confidence": 97.38148224965099,
-      "tier": "elite",
-      "error": 2.724129364013672,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gui Santos",
-      "prop_type": "points",
-      "predicted": 7.462825611114502,
-      "actual": 3,
-      "confidence": 96.87961678732688,
-      "tier": "elite",
-      "error": 4.462825611114502,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gui Santos",
-      "prop_type": "rebounds",
-      "predicted": 3.454800446510315,
-      "actual": 1,
-      "confidence": 93.3313155782148,
-      "tier": "elite",
-      "error": 2.454800446510315,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gui Santos",
-      "prop_type": "assists",
-      "predicted": 0.5013494882583618,
-      "actual": 1,
-      "confidence": 91.31513299843013,
-      "tier": "elite",
-      "error": -0.4986505117416382,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gui Santos",
-      "prop_type": "threes",
-      "predicted": 1.7975593671798706,
-      "actual": 1,
-      "confidence": 76.2037578497556,
-      "tier": "strong",
-      "error": 0.7975593671798706,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Gui Santos",
-      "prop_type": "pra",
-      "predicted": 12.314707443237305,
-      "actual": 5,
-      "confidence": 98.25064216328062,
-      "tier": "elite",
-      "error": 7.314707443237305,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Pat Spencer",
-      "prop_type": "points",
-      "predicted": 9.914500549316406,
-      "actual": 4,
-      "confidence": 94.20416463344075,
-      "tier": "elite",
-      "error": 5.914500549316406,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Pat Spencer",
-      "prop_type": "rebounds",
-      "predicted": 3.9244124488830567,
-      "actual": 2,
-      "confidence": 96.75529766407621,
-      "tier": "elite",
-      "error": 1.9244124488830567,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Pat Spencer",
-      "prop_type": "assists",
-      "predicted": 1.721671739578247,
-      "actual": 1,
-      "confidence": 92.13866720910964,
-      "tier": "elite",
-      "error": 0.721671739578247,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Pat Spencer",
-      "prop_type": "threes",
-      "predicted": 2.354057894706726,
-      "actual": 0,
-      "confidence": 86.66589458348233,
-      "tier": "strong",
-      "error": 2.354057894706726,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Pat Spencer",
-      "prop_type": "pra",
-      "predicted": 12.574000045776367,
-      "actual": 7,
-      "confidence": 98.01815174369621,
-      "tier": "elite",
-      "error": 5.574000045776367,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Al Horford",
-      "prop_type": "rebounds",
-      "predicted": 6.571388919830323,
-      "actual": 0,
-      "confidence": 98.96140311479711,
-      "tier": "elite",
-      "error": 6.571388919830323,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Al Horford",
-      "prop_type": "assists",
-      "predicted": 1.3100828323364258,
-      "actual": 0,
-      "confidence": 92.19551705695244,
-      "tier": "elite",
-      "error": 1.3100828323364258,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Al Horford",
-      "prop_type": "threes",
-      "predicted": 1.934941159248352,
-      "actual": 0,
-      "confidence": 96.37038213476531,
-      "tier": "elite",
-      "error": 1.934941159248352,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Al Horford",
-      "prop_type": "pra",
-      "predicted": 17.433147117614745,
-      "actual": 0,
-      "confidence": 97.88551478641266,
-      "tier": "elite",
-      "error": 17.433147117614745,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "De'Anthony Melton",
-      "prop_type": "rebounds",
-      "predicted": 3.9244124488830567,
-      "actual": 0,
-      "confidence": 96.75529766407621,
-      "tier": "elite",
-      "error": 3.9244124488830567,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "De'Anthony Melton",
-      "prop_type": "assists",
-      "predicted": 1.721671739578247,
-      "actual": 0,
-      "confidence": 92.13866720910964,
-      "tier": "elite",
-      "error": 1.721671739578247,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "De'Anthony Melton",
-      "prop_type": "threes",
-      "predicted": 2.354057894706726,
-      "actual": 0,
-      "confidence": 86.66589458348233,
-      "tier": "strong",
-      "error": 2.354057894706726,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "De'Anthony Melton",
-      "prop_type": "pra",
-      "predicted": 12.574000045776367,
-      "actual": 0,
-      "confidence": 98.01815174369621,
-      "tier": "elite",
-      "error": 12.574000045776367,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jackson Rowe",
-      "prop_type": "rebounds",
-      "predicted": 3.4713472919464112,
-      "actual": 0,
-      "confidence": 93.67695212038964,
-      "tier": "elite",
-      "error": 3.4713472919464112,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jackson Rowe",
-      "prop_type": "assists",
-      "predicted": 1.0646108779907226,
-      "actual": 0,
-      "confidence": 92.80663507843451,
-      "tier": "elite",
-      "error": 1.0646108779907226,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jackson Rowe",
-      "prop_type": "threes",
-      "predicted": 1.7975593671798706,
-      "actual": 0,
-      "confidence": 89.04492069666537,
-      "tier": "strong",
-      "error": 1.7975593671798706,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jackson Rowe",
-      "prop_type": "pra",
-      "predicted": 11.664663955688477,
-      "actual": 0,
-      "confidence": 97.36219871152802,
-      "tier": "elite",
-      "error": 11.664663955688477,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Alex Toohey",
-      "prop_type": "rebounds",
-      "predicted": 3.4713472919464112,
-      "actual": 0,
-      "confidence": 93.67695212038964,
-      "tier": "elite",
-      "error": 3.4713472919464112,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Alex Toohey",
-      "prop_type": "assists",
-      "predicted": 1.0646108779907226,
-      "actual": 0,
-      "confidence": 92.80663507843451,
-      "tier": "elite",
-      "error": 1.0646108779907226,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Alex Toohey",
-      "prop_type": "threes",
-      "predicted": 1.7975593671798706,
-      "actual": 0,
-      "confidence": 89.04492069666537,
-      "tier": "strong",
-      "error": 1.7975593671798706,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Alex Toohey",
-      "prop_type": "pra",
-      "predicted": 11.664663955688477,
-      "actual": 0,
-      "confidence": 97.36219871152802,
-      "tier": "elite",
-      "error": 11.664663955688477,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Draymond Green",
-      "prop_type": "points",
-      "predicted": 11.626614883422851,
-      "actual": 12,
-      "confidence": 97.30270496852535,
-      "tier": "elite",
-      "error": -0.3733851165771487,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Draymond Green",
-      "prop_type": "rebounds",
-      "predicted": 9.302014549255372,
-      "actual": 3,
-      "confidence": 98.73255092003313,
-      "tier": "elite",
-      "error": 6.302014549255372,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Draymond Green",
-      "prop_type": "assists",
-      "predicted": 7.857452789306641,
-      "actual": 5,
-      "confidence": 97.26294212856756,
-      "tier": "elite",
-      "error": 2.857452789306641,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Draymond Green",
-      "prop_type": "threes",
-      "predicted": 2.1131753191947937,
-      "actual": 3,
-      "confidence": 96.63614770073974,
-      "tier": "elite",
-      "error": -0.8868246808052063,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Draymond Green",
-      "prop_type": "pra",
-      "predicted": 25.568501159667967,
-      "actual": 20,
-      "confidence": 98.06662932819496,
-      "tier": "elite",
-      "error": 5.568501159667967,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Quinten Post",
-      "prop_type": "points",
-      "predicted": 6.377838924407959,
-      "actual": 5,
-      "confidence": 96.11088780944803,
-      "tier": "elite",
-      "error": 1.3778389244079587,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Quinten Post",
-      "prop_type": "rebounds",
-      "predicted": 3.5234865741729737,
-      "actual": 4,
-      "confidence": 95.20835003586721,
-      "tier": "elite",
-      "error": -0.47651342582702627,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Quinten Post",
-      "prop_type": "assists",
-      "predicted": 0.5013494882583618,
-      "actual": 1,
-      "confidence": 91.92009450935201,
-      "tier": "elite",
-      "error": -0.4986505117416382,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Quinten Post",
-      "prop_type": "threes",
-      "predicted": 1.5710528657436371,
-      "actual": 1,
-      "confidence": 73.8107622006455,
+      "confidence": 60.84326968177486,
       "tier": "moderate",
-      "error": 0.5710528657436371,
+      "error": -1.6043717117309573,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jonathan Kuminga",
+      "prop_type": "rebounds",
+      "predicted": 5.033992727279664,
+      "actual": 8,
+      "confidence": 58.119877636902245,
+      "tier": "weak",
+      "error": -2.9660072727203364,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jonathan Kuminga",
+      "prop_type": "assists",
+      "predicted": 4.852910438537598,
+      "actual": 3,
+      "confidence": 85.34205206979166,
+      "tier": "strong",
+      "error": 1.8529104385375978,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jonathan Kuminga",
+      "prop_type": "threes",
+      "predicted": 2.319726215362549,
+      "actual": 1,
+      "confidence": 90.57376107591227,
+      "tier": "elite",
+      "error": 1.3197262153625489,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jonathan Kuminga",
+      "prop_type": "pra",
+      "predicted": 27.165646240234373,
+      "actual": 27,
+      "confidence": 66.87909821816464,
+      "tier": "moderate",
+      "error": 0.16564624023437347,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Buddy Hield",
+      "prop_type": "points",
+      "predicted": 11.824078872680664,
+      "actual": 2,
+      "confidence": 55.394910899532896,
+      "tier": "weak",
+      "error": 9.824078872680664,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Buddy Hield",
+      "prop_type": "rebounds",
+      "predicted": 3.682692726135254,
+      "actual": 0,
+      "confidence": 42.184174078120336,
+      "tier": "weak",
+      "error": 3.682692726135254,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Buddy Hield",
+      "prop_type": "assists",
+      "predicted": 0.38030616378784177,
+      "actual": 3,
+      "confidence": 19.889943320784813,
+      "tier": "avoid",
+      "error": -2.619693836212158,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Buddy Hield",
+      "prop_type": "threes",
+      "predicted": 2.837316499710083,
+      "actual": 0,
+      "confidence": 91.48613943608477,
+      "tier": "elite",
+      "error": 2.837316499710083,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Buddy Hield",
+      "prop_type": "pra",
+      "predicted": 15.1413265914917,
+      "actual": 5,
+      "confidence": 55.08474739453538,
+      "tier": "weak",
+      "error": 10.1413265914917,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Trayce Jackson-Davis",
+      "prop_type": "points",
+      "predicted": 6.605810478210449,
+      "actual": 6,
+      "confidence": 42.32924223380052,
+      "tier": "weak",
+      "error": 0.605810478210449,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Trayce Jackson-Davis",
+      "prop_type": "rebounds",
+      "predicted": 2.280380268573761,
+      "actual": 4,
+      "confidence": 40.83870456936285,
+      "tier": "weak",
+      "error": -1.719619731426239,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Trayce Jackson-Davis",
+      "prop_type": "assists",
+      "predicted": 0.9896885547637939,
+      "actual": 1,
+      "confidence": 20.065143494724392,
+      "tier": "avoid",
+      "error": -0.010311445236206085,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Trayce Jackson-Davis",
+      "prop_type": "threes",
+      "predicted": 1.0779212952256203,
+      "actual": 0,
+      "confidence": 74.43120568568489,
+      "tier": "moderate",
+      "error": 1.0779212952256203,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Trayce Jackson-Davis",
+      "prop_type": "pra",
+      "predicted": 6.8899652214050295,
+      "actual": 11,
+      "confidence": 45.02701872850956,
+      "tier": "weak",
+      "error": -4.1100347785949705,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Moses Moody",
+      "prop_type": "points",
+      "predicted": 4.481934383392334,
+      "actual": 7,
+      "confidence": 39.84834559548153,
+      "tier": "avoid",
+      "error": -2.5180656166076663,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Moses Moody",
+      "prop_type": "rebounds",
+      "predicted": 2.06890629696846,
+      "actual": 2,
+      "confidence": 38.91570756313968,
+      "tier": "avoid",
+      "error": 0.06890629696846018,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Moses Moody",
+      "prop_type": "assists",
+      "predicted": 1.2623948249816894,
+      "actual": 0,
+      "confidence": 4.983476962011743,
+      "tier": "avoid",
+      "error": 1.2623948249816894,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Moses Moody",
+      "prop_type": "threes",
+      "predicted": 2.5002425775527954,
+      "actual": 1,
+      "confidence": 86.5387973929815,
+      "tier": "strong",
+      "error": 1.5002425775527954,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Moses Moody",
+      "prop_type": "pra",
+      "predicted": 6.394621297836304,
+      "actual": 9,
+      "confidence": 44.20003265571172,
+      "tier": "weak",
+      "error": -2.605378702163696,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gary Payton II",
+      "prop_type": "rebounds",
+      "predicted": 3.483359058380127,
+      "actual": 1,
+      "confidence": 47.28932523562171,
+      "tier": "weak",
+      "error": 2.483359058380127,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gary Payton II",
+      "prop_type": "assists",
+      "predicted": 2.389984527587891,
+      "actual": 0,
+      "confidence": 27.694005319534206,
+      "tier": "avoid",
+      "error": 2.389984527587891,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gary Payton II",
+      "prop_type": "threes",
+      "predicted": 1.3063366875648499,
+      "actual": 0,
+      "confidence": 72.99105536507085,
+      "tier": "moderate",
+      "error": 1.3063366875648499,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gary Payton II",
+      "prop_type": "pra",
+      "predicted": 11.677344009399414,
+      "actual": 1,
+      "confidence": 50.98900498118125,
+      "tier": "weak",
+      "error": 10.677344009399414,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Brandin Podziemski",
+      "prop_type": "points",
+      "predicted": 7.408726051330566,
+      "actual": 8,
+      "confidence": 47.89014666844216,
+      "tier": "weak",
+      "error": -0.5912739486694338,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Brandin Podziemski",
+      "prop_type": "rebounds",
+      "predicted": 6.712519367218018,
+      "actual": 5,
+      "confidence": 53.646877367398716,
+      "tier": "weak",
+      "error": 1.7125193672180181,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Brandin Podziemski",
+      "prop_type": "assists",
+      "predicted": 0.9896885547637939,
+      "actual": 0,
+      "confidence": 0.8353446561075799,
+      "tier": "avoid",
+      "error": 0.9896885547637939,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Brandin Podziemski",
+      "prop_type": "threes",
+      "predicted": 2.420501576423645,
+      "actual": 1,
+      "confidence": 90.37041118067127,
+      "tier": "elite",
+      "error": 1.420501576423645,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Brandin Podziemski",
+      "prop_type": "pra",
+      "predicted": 15.432715103149414,
+      "actual": 13,
+      "confidence": 56.540350778898215,
+      "tier": "weak",
+      "error": 2.4327151031494143,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Will Richard",
+      "prop_type": "points",
+      "predicted": 3.1755082159042356,
+      "actual": 7,
+      "confidence": 39.15119168811548,
+      "tier": "avoid",
+      "error": -3.8244917840957644,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Will Richard",
+      "prop_type": "rebounds",
+      "predicted": 2.401448507785797,
+      "actual": 2,
+      "confidence": 39.89741658961099,
+      "tier": "avoid",
+      "error": 0.4014485077857972,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Will Richard",
+      "prop_type": "assists",
+      "predicted": 0.5789779815673828,
+      "actual": 2,
+      "confidence": 28.68860203562405,
+      "tier": "avoid",
+      "error": -1.4210220184326172,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Will Richard",
+      "prop_type": "threes",
+      "predicted": 2.156113730430603,
+      "actual": 1,
+      "confidence": 77.61806009695555,
+      "tier": "strong",
+      "error": 1.156113730430603,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Will Richard",
+      "prop_type": "pra",
+      "predicted": 6.8899652214050295,
+      "actual": 11,
+      "confidence": 45.121350331282336,
+      "tier": "weak",
+      "error": -4.1100347785949705,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gui Santos",
+      "prop_type": "points",
+      "predicted": 4.639287784576416,
+      "actual": 3,
+      "confidence": 41.30294929224546,
+      "tier": "weak",
+      "error": 1.6392877845764158,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gui Santos",
+      "prop_type": "rebounds",
+      "predicted": 2.06890629696846,
+      "actual": 1,
+      "confidence": 38.64545611865762,
+      "tier": "avoid",
+      "error": 1.0689062969684602,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gui Santos",
+      "prop_type": "assists",
+      "predicted": 0.6319877300262451,
+      "actual": 1,
+      "confidence": 0,
+      "tier": "avoid",
+      "error": -0.3680122699737549,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gui Santos",
+      "prop_type": "threes",
+      "predicted": 1.1152487636208535,
+      "actual": 1,
+      "confidence": 73.688524569849,
+      "tier": "moderate",
+      "error": 0.11524876362085346,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Gui Santos",
+      "prop_type": "pra",
+      "predicted": 6.195264265060425,
+      "actual": 5,
+      "confidence": 43.376299971076705,
+      "tier": "weak",
+      "error": 1.195264265060425,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Pat Spencer",
+      "prop_type": "points",
+      "predicted": 4.481934383392334,
+      "actual": 4,
+      "confidence": 39.84834559548153,
+      "tier": "avoid",
+      "error": 0.48193438339233374,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Pat Spencer",
+      "prop_type": "rebounds",
+      "predicted": 2.06890629696846,
+      "actual": 2,
+      "confidence": 38.91570756313968,
+      "tier": "avoid",
+      "error": 0.06890629696846018,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Pat Spencer",
+      "prop_type": "assists",
+      "predicted": 1.2623948249816894,
+      "actual": 1,
+      "confidence": 4.983476962011743,
+      "tier": "avoid",
+      "error": 0.2623948249816894,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Pat Spencer",
+      "prop_type": "threes",
+      "predicted": 2.5002425775527954,
+      "actual": 0,
+      "confidence": 86.5387973929815,
+      "tier": "strong",
+      "error": 2.5002425775527954,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Pat Spencer",
+      "prop_type": "pra",
+      "predicted": 6.394621297836304,
+      "actual": 7,
+      "confidence": 44.20003265571172,
+      "tier": "weak",
+      "error": -0.605378702163696,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Al Horford",
+      "prop_type": "rebounds",
+      "predicted": 3.10017689037323,
+      "actual": 0,
+      "confidence": 45.52213028501225,
+      "tier": "weak",
+      "error": 3.10017689037323,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Al Horford",
+      "prop_type": "assists",
+      "predicted": 1.2924214992523193,
+      "actual": 0,
+      "confidence": 37.86877108438426,
+      "tier": "avoid",
+      "error": 1.2924214992523193,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Al Horford",
+      "prop_type": "threes",
+      "predicted": 1.4032419339418412,
+      "actual": 0,
+      "confidence": 84.60568415700304,
+      "tier": "strong",
+      "error": 1.4032419339418412,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Al Horford",
+      "prop_type": "pra",
+      "predicted": 10.235217735290528,
+      "actual": 0,
+      "confidence": 51.91772849996726,
+      "tier": "weak",
+      "error": 10.235217735290528,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "De'Anthony Melton",
+      "prop_type": "rebounds",
+      "predicted": 2.06890629696846,
+      "actual": 0,
+      "confidence": 38.91570756313968,
+      "tier": "avoid",
+      "error": 2.06890629696846,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "De'Anthony Melton",
+      "prop_type": "assists",
+      "predicted": 1.2623948249816894,
+      "actual": 0,
+      "confidence": 4.983476962011743,
+      "tier": "avoid",
+      "error": 1.2623948249816894,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "De'Anthony Melton",
+      "prop_type": "threes",
+      "predicted": 2.5002425775527954,
+      "actual": 0,
+      "confidence": 86.5387973929815,
+      "tier": "strong",
+      "error": 2.5002425775527954,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "De'Anthony Melton",
+      "prop_type": "pra",
+      "predicted": 6.394621297836304,
+      "actual": 0,
+      "confidence": 44.20003265571172,
+      "tier": "weak",
+      "error": 6.394621297836304,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jackson Rowe",
+      "prop_type": "rebounds",
+      "predicted": 2.280380268573761,
+      "actual": 0,
+      "confidence": 40.83870456936285,
+      "tier": "weak",
+      "error": 2.280380268573761,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jackson Rowe",
+      "prop_type": "assists",
+      "predicted": 0.9896885547637939,
+      "actual": 0,
+      "confidence": 20.065143494724392,
+      "tier": "avoid",
+      "error": 0.9896885547637939,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jackson Rowe",
+      "prop_type": "threes",
+      "predicted": 1.0779212952256203,
+      "actual": 0,
+      "confidence": 74.43120568568489,
+      "tier": "moderate",
+      "error": 1.0779212952256203,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jackson Rowe",
+      "prop_type": "pra",
+      "predicted": 6.8899652214050295,
+      "actual": 0,
+      "confidence": 45.02701872850956,
+      "tier": "weak",
+      "error": 6.8899652214050295,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Alex Toohey",
+      "prop_type": "rebounds",
+      "predicted": 2.280380268573761,
+      "actual": 0,
+      "confidence": 40.83870456936285,
+      "tier": "weak",
+      "error": 2.280380268573761,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Alex Toohey",
+      "prop_type": "assists",
+      "predicted": 0.9896885547637939,
+      "actual": 0,
+      "confidence": 20.065143494724392,
+      "tier": "avoid",
+      "error": 0.9896885547637939,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Alex Toohey",
+      "prop_type": "threes",
+      "predicted": 1.0779212952256203,
+      "actual": 0,
+      "confidence": 74.43120568568489,
+      "tier": "moderate",
+      "error": 1.0779212952256203,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Alex Toohey",
+      "prop_type": "pra",
+      "predicted": 6.8899652214050295,
+      "actual": 0,
+      "confidence": 45.02701872850956,
+      "tier": "weak",
+      "error": 6.8899652214050295,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Draymond Green",
+      "prop_type": "points",
+      "predicted": 9.911076858520508,
+      "actual": 12,
+      "confidence": 54.99879959055671,
+      "tier": "weak",
+      "error": -2.0889231414794924,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Draymond Green",
+      "prop_type": "rebounds",
+      "predicted": 7.417806346893311,
+      "actual": 3,
+      "confidence": 59.55264048072027,
+      "tier": "weak",
+      "error": 4.417806346893311,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Draymond Green",
+      "prop_type": "assists",
+      "predicted": 7.472444931030274,
+      "actual": 5,
+      "confidence": 93.16341716103062,
+      "tier": "elite",
+      "error": 2.4724449310302736,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Draymond Green",
+      "prop_type": "threes",
+      "predicted": 1.2913582042455674,
+      "actual": 3,
+      "confidence": 79.08506440887585,
+      "tier": "strong",
+      "error": -1.7086417957544326,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Draymond Green",
+      "prop_type": "pra",
+      "predicted": 23.80059306335449,
+      "actual": 20,
+      "confidence": 60.99077700359282,
+      "tier": "moderate",
+      "error": 3.8005930633544907,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Quinten Post",
+      "prop_type": "points",
+      "predicted": 2.010650828361511,
+      "actual": 5,
+      "confidence": 39.27900235002336,
+      "tier": "avoid",
+      "error": -2.989349171638489,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Quinten Post",
+      "prop_type": "rebounds",
+      "predicted": 1.4212103234529496,
+      "actual": 4,
+      "confidence": 38.69716034272439,
+      "tier": "avoid",
+      "error": -2.5787896765470504,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Quinten Post",
+      "prop_type": "assists",
+      "predicted": 0.4734716806411743,
+      "actual": 1,
+      "confidence": 0,
+      "tier": "avoid",
+      "error": -0.5265283193588257,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Quinten Post",
+      "prop_type": "threes",
+      "predicted": 1.2455463573932648,
+      "actual": 1,
+      "confidence": 76.28798757861172,
+      "tier": "strong",
+      "error": 0.2455463573932648,
       "game_date": "2025-10-24"
     },
     {
       "player_name": "Quinten Post",
       "prop_type": "pra",
-      "predicted": 11.664663955688477,
+      "predicted": 6.195264265060425,
       "actual": 10,
-      "confidence": 96.97476611289191,
-      "tier": "elite",
-      "error": 1.6646639556884768,
+      "confidence": 42.63980482201347,
+      "tier": "weak",
+      "error": -3.804735734939575,
       "game_date": "2025-10-24"
     },
     {
       "player_name": "Jimmy Butler",
       "prop_type": "points",
-      "predicted": 27.364081695556642,
+      "predicted": 23.565635040283205,
       "actual": 14,
-      "confidence": 99.54462545205209,
-      "tier": "elite",
-      "error": 13.364081695556642,
+      "confidence": 70.93927296076436,
+      "tier": "moderate",
+      "error": 9.565635040283205,
       "game_date": "2025-10-24"
     },
     {
       "player_name": "Jimmy Butler",
       "prop_type": "rebounds",
-      "predicted": 6.111612518310547,
+      "predicted": 6.712519367218018,
       "actual": 3,
-      "confidence": 98.25231379467192,
-      "tier": "elite",
-      "error": 3.1116125183105474,
+      "confidence": 53.24174344155602,
+      "tier": "weak",
+      "error": 3.712519367218018,
       "game_date": "2025-10-24"
     },
     {
       "player_name": "Jimmy Butler",
       "prop_type": "assists",
-      "predicted": 6.016024032592774,
+      "predicted": 6.951781192779541,
       "actual": 4,
-      "confidence": 96.84907332340947,
-      "tier": "elite",
-      "error": 2.0160240325927736,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jimmy Butler",
-      "prop_type": "threes",
-      "predicted": 2.533360348701477,
-      "actual": 0,
-      "confidence": 97.27709029973677,
-      "tier": "elite",
-      "error": 2.533360348701477,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Jimmy Butler",
-      "prop_type": "pra",
-      "predicted": 41.25548617553711,
-      "actual": 21,
-      "confidence": 98.70127656965,
-      "tier": "elite",
-      "error": 20.255486175537108,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Stephen Curry",
-      "prop_type": "points",
-      "predicted": 30.979209259033205,
-      "actual": 35,
-      "confidence": 99.30095687014239,
-      "tier": "elite",
-      "error": -4.020790740966795,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Stephen Curry",
-      "prop_type": "rebounds",
-      "predicted": 4.810619552612305,
-      "actual": 6,
-      "confidence": 98.03589906128208,
-      "tier": "elite",
-      "error": -1.1893804473876948,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Stephen Curry",
-      "prop_type": "assists",
-      "predicted": 7.403895298004151,
-      "actual": 3,
-      "confidence": 97.07757882513758,
-      "tier": "elite",
-      "error": 4.403895298004151,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Stephen Curry",
-      "prop_type": "threes",
-      "predicted": 4.601127849578857,
-      "actual": 7,
-      "confidence": 97.3055887712183,
-      "tier": "elite",
-      "error": -2.398872150421143,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Stephen Curry",
-      "prop_type": "pra",
-      "predicted": 35.44636408996582,
-      "actual": 44,
-      "confidence": 98.99037775665855,
-      "tier": "elite",
-      "error": -8.553635910034181,
-      "game_date": "2025-10-24"
-    },
-    {
-      "player_name": "Luguentz Dort",
-      "prop_type": "points",
-      "predicted": 14.492333724975586,
-      "actual": 5,
-      "confidence": 95.08357320760507,
-      "tier": "elite",
-      "error": 9.492333724975586,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Luguentz Dort",
-      "prop_type": "rebounds",
-      "predicted": 8.888194759368897,
-      "actual": 2,
-      "confidence": 98.2716724397334,
-      "tier": "elite",
-      "error": 6.888194759368897,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Luguentz Dort",
-      "prop_type": "assists",
-      "predicted": 3.371350685119629,
-      "actual": 1,
-      "confidence": 97.39187448476707,
-      "tier": "elite",
-      "error": 2.371350685119629,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Luguentz Dort",
-      "prop_type": "threes",
-      "predicted": 2.754652606010437,
-      "actual": 1,
-      "confidence": 90.82750775414506,
-      "tier": "elite",
-      "error": 1.754652606010437,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Luguentz Dort",
-      "prop_type": "pra",
-      "predicted": 29.980385467529295,
-      "actual": 8,
-      "confidence": 95.43450673466856,
-      "tier": "elite",
-      "error": 21.980385467529295,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Chet Holmgren",
-      "prop_type": "points",
-      "predicted": 22.33846600341797,
-      "actual": 31,
-      "confidence": 99.43679192585536,
-      "tier": "elite",
-      "error": -8.66153399658203,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Chet Holmgren",
-      "prop_type": "rebounds",
-      "predicted": 9.93459912109375,
-      "actual": 11,
-      "confidence": 99.10826040959823,
-      "tier": "elite",
-      "error": -1.0654008789062495,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Chet Holmgren",
-      "prop_type": "assists",
-      "predicted": 2.8504447135925295,
-      "actual": 1,
-      "confidence": 93.26262344346773,
-      "tier": "elite",
-      "error": 1.8504447135925295,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Chet Holmgren",
-      "prop_type": "threes",
-      "predicted": 3.061239944458008,
-      "actual": 6,
-      "confidence": 96.85737521134838,
-      "tier": "elite",
-      "error": -2.938760055541992,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Chet Holmgren",
-      "prop_type": "pra",
-      "predicted": 40.21646563720703,
-      "actual": 43,
-      "confidence": 98.63719391554852,
-      "tier": "elite",
-      "error": -2.7835343627929703,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Isaiah Hartenstein",
-      "prop_type": "points",
-      "predicted": 10.576945617675781,
-      "actual": 14,
-      "confidence": 97.26087950569931,
-      "tier": "elite",
-      "error": -3.423054382324219,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Isaiah Hartenstein",
-      "prop_type": "rebounds",
-      "predicted": 12.355176170349122,
-      "actual": 10,
-      "confidence": 98.19363566758443,
-      "tier": "elite",
-      "error": 2.3551761703491216,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Isaiah Hartenstein",
-      "prop_type": "assists",
-      "predicted": 3.8031491432189943,
-      "actual": 2,
-      "confidence": 98.290958540088,
-      "tier": "elite",
-      "error": 1.8031491432189943,
-      "game_date": "2025-10-25"
-    },
-    {
-      "player_name": "Isaiah Hartenstein",
-      "prop_type": "threes",
-      "predicted": 1.4084301308393479,
-      "actual": 0,
-      "confidence": 76.22344670327108,
+      "confidence": 82.31204676181349,
       "tier": "strong",
-      "error": 1.4084301308393479,
+      "error": 2.951781192779541,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jimmy Butler",
+      "prop_type": "threes",
+      "predicted": 2.8547646865844727,
+      "actual": 0,
+      "confidence": 90.55891247985387,
+      "tier": "elite",
+      "error": 2.8547646865844727,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Jimmy Butler",
+      "prop_type": "pra",
+      "predicted": 39.0014921875,
+      "actual": 21,
+      "confidence": 72.97256569689877,
+      "tier": "moderate",
+      "error": 18.0014921875,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Stephen Curry",
+      "prop_type": "points",
+      "predicted": 24.18524678039551,
+      "actual": 35,
+      "confidence": 71.92097079790953,
+      "tier": "moderate",
+      "error": -10.81475321960449,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Stephen Curry",
+      "prop_type": "rebounds",
+      "predicted": 5.033992727279664,
+      "actual": 6,
+      "confidence": 48.91941195356909,
+      "tier": "weak",
+      "error": -0.9660072727203364,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Stephen Curry",
+      "prop_type": "assists",
+      "predicted": 7.241449275970459,
+      "actual": 3,
+      "confidence": 86.85603978802075,
+      "tier": "strong",
+      "error": 4.241449275970459,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Stephen Curry",
+      "prop_type": "threes",
+      "predicted": 3.6499822006225586,
+      "actual": 7,
+      "confidence": 88.95929580671269,
+      "tier": "strong",
+      "error": -3.3500177993774414,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Stephen Curry",
+      "prop_type": "pra",
+      "predicted": 36.826576873779295,
+      "actual": 44,
+      "confidence": 72.54610792022461,
+      "tier": "moderate",
+      "error": -7.173423126220705,
+      "game_date": "2025-10-24"
+    },
+    {
+      "player_name": "Luguentz Dort",
+      "prop_type": "points",
+      "predicted": 9.728932693481445,
+      "actual": 5,
+      "confidence": 49.13550286919915,
+      "tier": "weak",
+      "error": 4.728932693481445,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Luguentz Dort",
+      "prop_type": "rebounds",
+      "predicted": 7.417806346893311,
+      "actual": 2,
+      "confidence": 55.2038395511143,
+      "tier": "weak",
+      "error": 5.417806346893311,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Luguentz Dort",
+      "prop_type": "assists",
+      "predicted": 3.009851137161255,
+      "actual": 1,
+      "confidence": 73.29977730462608,
+      "tier": "moderate",
+      "error": 2.009851137161255,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Luguentz Dort",
+      "prop_type": "threes",
+      "predicted": 3.0780918464660645,
+      "actual": 1,
+      "confidence": 81.40593977464518,
+      "tier": "strong",
+      "error": 2.0780918464660645,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Luguentz Dort",
+      "prop_type": "pra",
+      "predicted": 20.019039794921873,
+      "actual": 8,
+      "confidence": 56.94770402451786,
+      "tier": "weak",
+      "error": 12.019039794921873,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Chet Holmgren",
+      "prop_type": "points",
+      "predicted": 21.06763203430176,
+      "actual": 31,
+      "confidence": 67.97124516048235,
+      "tier": "moderate",
+      "error": -9.93236796569824,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Chet Holmgren",
+      "prop_type": "rebounds",
+      "predicted": 8.181638916015626,
+      "actual": 11,
+      "confidence": 63.68380187000672,
+      "tier": "moderate",
+      "error": -2.8183610839843745,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Chet Holmgren",
+      "prop_type": "assists",
+      "predicted": 2.372174421310425,
+      "actual": 1,
+      "confidence": 60.197125109279824,
+      "tier": "moderate",
+      "error": 1.372174421310425,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Chet Holmgren",
+      "prop_type": "threes",
+      "predicted": 3.044329153060913,
+      "actual": 6,
+      "confidence": 86.70408611072514,
+      "tier": "strong",
+      "error": -2.955670846939087,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Chet Holmgren",
+      "prop_type": "pra",
+      "predicted": 34.81845538330078,
+      "actual": 43,
+      "confidence": 69.71516669521856,
+      "tier": "moderate",
+      "error": -8.18154461669922,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Isaiah Hartenstein",
+      "prop_type": "points",
+      "predicted": 7.757196739196777,
+      "actual": 14,
+      "confidence": 46.75781441667992,
+      "tier": "weak",
+      "error": -6.242803260803223,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Isaiah Hartenstein",
+      "prop_type": "rebounds",
+      "predicted": 8.784422119140626,
+      "actual": 10,
+      "confidence": 64.01785313768112,
+      "tier": "moderate",
+      "error": -1.2155778808593745,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Isaiah Hartenstein",
+      "prop_type": "assists",
+      "predicted": 3.2002698574066164,
+      "actual": 2,
+      "confidence": 72.3690182376288,
+      "tier": "moderate",
+      "error": 1.2002698574066164,
+      "game_date": "2025-10-25"
+    },
+    {
+      "player_name": "Isaiah Hartenstein",
+      "prop_type": "threes",
+      "predicted": 1.4235920474529267,
+      "actual": 0,
+      "confidence": 65.08895551981941,
+      "tier": "moderate",
+      "error": 1.4235920474529267,
       "game_date": "2025-10-25"
     },
     {
       "player_name": "Isaiah Hartenstein",
       "prop_type": "pra",
-      "predicted": 27.512707397460936,
+      "predicted": 20.107851669311522,
       "actual": 26,
-      "confidence": 97.51973940789128,
-      "tier": "elite",
-      "error": 1.512707397460936,
+      "confidence": 59.6670685532439,
+      "tier": "weak",
+      "error": -5.892148330688478,
       "game_date": "2025-10-25"
     },
     {
       "player_name": "Cason Wallace",
       "prop_type": "points",
-      "predicted": 11.403359725952148,
+      "predicted": 7.927840545654297,
       "actual": 3,
-      "confidence": 98.66209081765479,
-      "tier": "elite",
-      "error": 8.403359725952148,
+      "confidence": 48.65302995200794,
+      "tier": "weak",
+      "error": 4.927840545654297,
       "game_date": "2025-10-25"
     },
     {
       "player_name": "Cason Wallace",
       "prop_type": "rebounds",
-      "predicted": 7.44520350265503,
+      "predicted": 6.804144580841065,
       "actual": 3,
-      "confidence": 98.96956823794645,
-      "tier": "elite",
-      "error": 4.44520350265503,
+      "confidence": 52.590410914961,
+      "tier": "weak",
+      "error": 3.804144580841065,
       "game_date": "2025-10-25"
     },
     {
       "player_name": "Cason Wallace",
       "prop_type": "assists",
-      "predicted": 4.029490390777588,
+      "predicted": 3.6044963989257814,
       "actual": 3,
-      "confidence": 96.21499622893799,
-      "tier": "elite",
-      "error": 1.029490390777588,
+      "confidence": 88.70574117485386,
+      "tier": "strong",
+      "error": 0.6044963989257814,
       "game_date": "2025-10-25"
     },
     {
       "player_name": "Cason Wallace",
       "prop_type": "threes",
-      "predicted": 2.728131042480469,
+      "predicted": 2.949375973701477,
       "actual": 1,
-      "confidence": 98.56447153977855,
-      "tier": "elite",
-      "error": 1.7281310424804688,
+      "confidence": 78.12620607414321,
+      "tier": "strong",
+      "error": 1.949375973701477,
       "game_date": "2025-10-25"
     },
     {
       "player_name": "Cason Wallace",
       "prop_type": "pra",
-      "predicted": 30.06853739929199,
+      "predicted": 19.032389328002928,
       "actual": 9,
-      "confidence": 96.99893852657947,
-      "tier": "elite",
-      "error": 21.06853739929199,
+      "confidence": 55.33845760958639,
+      "tier": "weak",
+      "error": 10.032389328002928,
       "game_date": "2025-10-25"
     }
   ],
@@ -1095,10 +1100,10 @@
   "phase2_targets_analysis": {
     "target_1_overall_rmse": {
       "target": "< 5.0 (from Phase 1: 5.435)",
-      "current_all": 5.608,
-      "current_filtered": 5.609,
+      "current_all": 5.285,
+      "current_filtered": 2.731,
       "status_all": "NOT_MET",
-      "status_filtered": "NOT_MET"
+      "status_filtered": "MET"
     },
     "target_2_roi_elite": {
       "target": "> 5%",
@@ -1118,9 +1123,9 @@
   },
   "conclusions": [
     "Phase 2 backtest completed with 88047 predictions",
-    "Elite + Strong tier represents 99.6% of predictions",
-    "Overall RMSE: 5.608",
-    "Elite + Strong RMSE: 5.609",
+    "Elite + Strong tier represents 18.8% of predictions",
+    "Overall RMSE: 5.285",
+    "Elite + Strong RMSE: 2.731",
     "Confidence filtering shows measurable improvement in prediction accuracy",
     "CLV and ROI validation pending odds data integration"
   ]

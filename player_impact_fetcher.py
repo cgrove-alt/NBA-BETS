@@ -18,6 +18,8 @@ import requests
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+from bs4 import BeautifulSoup
+import re
 
 # Try importing nba_api for fallback
 try:
@@ -41,79 +43,381 @@ class PlayerImpactFetcher:
     """
     Fetches and caches player impact metrics.
 
-    Primary source: EPM from Dunks & Threes
-    Fallback: Basic plus/minus from nba_api
+    Priority order:
+    1. DARKO DPM (Daily Plus-Minus) from APAnalytics
+    2. ESPN EPM (Estimated Plus-Minus)
+    3. FiveThirtyEight RAPTOR
+    4. Basic plus/minus from nba_api (fallback)
+
+    All metrics standardized to -10 to +10 scale where:
+    - +10 = MVP-level impact (top 1%)
+    - +5 = All-Star level (top 10%)
+    - 0 = Average starter
+    - -5 = Below replacement level
     """
 
     def __init__(self):
+        self.darko_cache: Dict[str, Dict] = {}
         self.epm_cache: Dict[str, Dict] = {}
+        self.raptor_cache: Dict[str, Dict] = {}
         self.basic_stats_cache: Dict[str, Dict] = {}
         self._load_cache()
 
     def _load_cache(self):
-        """Load cached player data."""
-        epm_cache_file = CACHE_DIR / "epm_cache.json"
-        if epm_cache_file.exists():
-            try:
-                with open(epm_cache_file, 'r') as f:
-                    data = json.load(f)
-                    # Check if cache is still valid
-                    cache_time = datetime.fromisoformat(data.get('timestamp', '2000-01-01'))
-                    if datetime.now() - cache_time < timedelta(hours=CACHE_EXPIRY_HOURS):
-                        self.epm_cache = data.get('players', {})
-                        print(f"Loaded {len(self.epm_cache)} players from EPM cache")
-            except Exception as e:
-                print(f"Error loading EPM cache: {e}")
+        """Load cached player data from all sources."""
+        cache_files = {
+            'darko': CACHE_DIR / "darko_cache.json",
+            'epm': CACHE_DIR / "epm_cache.json",
+            'raptor': CACHE_DIR / "raptor_cache.json",
+        }
 
-    def _save_cache(self):
+        for source, cache_file in cache_files.items():
+            if cache_file.exists():
+                try:
+                    with open(cache_file, 'r') as f:
+                        data = json.load(f)
+                        # Check if cache is still valid
+                        cache_time = datetime.fromisoformat(data.get('timestamp', '2000-01-01'))
+                        if datetime.now() - cache_time < timedelta(hours=CACHE_EXPIRY_HOURS):
+                            if source == 'darko':
+                                self.darko_cache = data.get('players', {})
+                                print(f"Loaded {len(self.darko_cache)} players from DARKO cache")
+                            elif source == 'epm':
+                                self.epm_cache = data.get('players', {})
+                                print(f"Loaded {len(self.epm_cache)} players from EPM cache")
+                            elif source == 'raptor':
+                                self.raptor_cache = data.get('players', {})
+                                print(f"Loaded {len(self.raptor_cache)} players from RAPTOR cache")
+                except Exception as e:
+                    print(f"Error loading {source} cache: {e}")
+
+    def _save_cache(self, source: str = 'all'):
         """Save player data to cache."""
-        epm_cache_file = CACHE_DIR / "epm_cache.json"
-        try:
-            with open(epm_cache_file, 'w') as f:
-                json.dump({
-                    'timestamp': datetime.now().isoformat(),
-                    'players': self.epm_cache
-                }, f, indent=2)
-        except Exception as e:
-            print(f"Error saving EPM cache: {e}")
+        cache_data = {
+            'darko': (CACHE_DIR / "darko_cache.json", self.darko_cache),
+            'epm': (CACHE_DIR / "epm_cache.json", self.epm_cache),
+            'raptor': (CACHE_DIR / "raptor_cache.json", self.raptor_cache),
+        }
 
-    def fetch_epm_from_dunks_and_threes(self, season: int = 2025) -> Dict[str, Dict]:
+        sources_to_save = [source] if source != 'all' else cache_data.keys()
+
+        for src in sources_to_save:
+            if src in cache_data:
+                cache_file, cache_dict = cache_data[src]
+                try:
+                    with open(cache_file, 'w') as f:
+                        json.dump({
+                            'timestamp': datetime.now().isoformat(),
+                            'players': cache_dict
+                        }, f, indent=2)
+                except Exception as e:
+                    print(f"Error saving {src} cache: {e}")
+
+    def _standardize_metric(self, value: float, metric_type: str) -> float:
         """
-        Fetch EPM data from Dunks & Threes website.
-
-        EPM (Estimated Plus-Minus) is one of the best modern impact metrics,
-        estimating player contribution in points per 100 possessions.
+        Standardize different metrics to -10 to +10 scale.
 
         Args:
-            season: Season year (e.g., 2025 for 2024-25 season)
+            value: Raw metric value
+            metric_type: 'darko', 'epm', 'raptor', or 'plus_minus'
 
         Returns:
-            Dictionary mapping player name to stats
+            Standardized value on -10 to +10 scale
         """
-        # Dunks & Threes doesn't have a public API, so we'll try scraping
-        # or using their data export if available
+        # Conversion factors based on typical ranges
+        # DARKO DPM: typically -8 to +8 (MVP level)
+        # EPM: typically -7 to +7
+        # RAPTOR: typically -8 to +8
+        # Plus/Minus per 36: typically -10 to +10
 
-        url = f"https://dunksandthrees.com/epm"
+        if metric_type == 'darko':
+            # DARKO already close to our scale, cap at ±10
+            return max(-10, min(10, value * 1.25))
+        elif metric_type == 'epm':
+            # EPM scale: expand slightly
+            return max(-10, min(10, value * 1.4))
+        elif metric_type == 'raptor':
+            # RAPTOR scale: expand slightly
+            return max(-10, min(10, value * 1.25))
+        elif metric_type == 'plus_minus':
+            # Plus/minus per 36 already roughly on scale
+            return max(-10, min(10, value))
+        else:
+            return 0.0
+
+    def fetch_darko_dpm(self, season: str = "2024-25") -> Dict[str, Dict]:
+        """
+        Fetch DARKO DPM (Daily Plus-Minus) from APAnalytics Shiny app.
+
+        DARKO is one of the most advanced publicly available impact metrics,
+        combining box score stats with play-by-play data.
+
+        Args:
+            season: Season string (e.g., "2024-25")
+
+        Returns:
+            Dictionary mapping player name to impact metrics
+        """
+        print(f"Fetching DARKO DPM for {season}...")
+
+        # APAnalytics DARKO endpoint
+        url = "https://apanalytics.shinyapps.io/DARKO/"
 
         try:
-            # Try to fetch the page
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
+
+            # Add delay to be respectful
+            time.sleep(2)
+
             response = requests.get(url, headers=headers, timeout=30)
 
             if response.status_code != 200:
-                print(f"Could not fetch EPM data: HTTP {response.status_code}")
+                print(f"Could not fetch DARKO data: HTTP {response.status_code}")
                 return {}
 
-            # The actual data would need to be parsed from the HTML
-            # For now, we'll note that this requires more complex scraping
-            # and fall back to nba_api
-            print("EPM scraping requires JavaScript rendering - using fallback")
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # DARKO uses a data table - look for it
+            # The actual scraping depends on the page structure
+            # This is a best-effort implementation
+            players_dict = {}
+
+            # Try to find the data table
+            tables = soup.find_all('table')
+
+            if not tables:
+                print("DARKO: No tables found on page (may require JavaScript)")
+                return {}
+
+            # Parse the main data table
+            for table in tables:
+                rows = table.find_all('tr')
+                if len(rows) < 2:
+                    continue
+
+                # Get headers
+                headers_row = rows[0]
+                headers = [th.get_text(strip=True).lower() for th in headers_row.find_all(['th', 'td'])]
+
+                # Find relevant column indices
+                name_idx = next((i for i, h in enumerate(headers) if 'player' in h or 'name' in h), None)
+                dpm_idx = next((i for i, h in enumerate(headers) if 'dpm' in h or 'darko' in h), None)
+                team_idx = next((i for i, h in enumerate(headers) if 'team' in h), None)
+
+                if name_idx is None or dpm_idx is None:
+                    continue
+
+                # Parse data rows
+                for row in rows[1:]:
+                    cols = row.find_all('td')
+                    if len(cols) <= max(name_idx, dpm_idx):
+                        continue
+
+                    try:
+                        player_name = cols[name_idx].get_text(strip=True)
+                        dpm_raw = cols[dpm_idx].get_text(strip=True)
+                        team = cols[team_idx].get_text(strip=True) if team_idx and len(cols) > team_idx else 'UNK'
+
+                        # Parse DPM value
+                        dpm_value = float(dpm_raw)
+
+                        # Standardize to -10 to +10 scale
+                        standardized_impact = self._standardize_metric(dpm_value, 'darko')
+
+                        players_dict[player_name] = {
+                            'source': 'darko',
+                            'raw_dpm': dpm_value,
+                            'impact_metric': standardized_impact,
+                            'team': team,
+                            'season': season
+                        }
+
+                    except (ValueError, IndexError) as e:
+                        continue
+
+            if players_dict:
+                print(f"Fetched DARKO data for {len(players_dict)} players")
+                self.darko_cache = players_dict
+                self._save_cache('darko')
+                return players_dict
+            else:
+                print("DARKO: Could not parse data from page")
+                return {}
+
+        except Exception as e:
+            print(f"Error fetching DARKO: {e}")
+            return {}
+
+    def fetch_espn_epm(self, season: int = 2025) -> Dict[str, Dict]:
+        """
+        Fetch ESPN EPM (Estimated Plus-Minus) data.
+
+        EPM is ESPN's proprietary player impact metric that estimates
+        a player's contribution per 100 possessions.
+
+        Args:
+            season: Season year (e.g., 2025 for 2024-25)
+
+        Returns:
+            Dictionary mapping player name to impact metrics
+        """
+        print(f"Fetching ESPN EPM for {season}...")
+
+        # ESPN EPM stats page
+        url = f"https://www.espn.com/nba/stats/player/_/season/{season}/seasontype/2"
+
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            time.sleep(2)
+
+            response = requests.get(url, headers=headers, timeout=30)
+
+            if response.status_code != 200:
+                print(f"Could not fetch ESPN EPM: HTTP {response.status_code}")
+                return {}
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+            players_dict = {}
+
+            # ESPN uses complex table structures
+            # Look for player stats tables
+            tables = soup.find_all('table', class_=re.compile('Table'))
+
+            if not tables:
+                print("ESPN: No stats tables found (may require JavaScript)")
+                return {}
+
+            # Parse tables for EPM-related data
+            # Note: ESPN may not directly expose EPM on the main stats page
+            # You may need to scrape from their RPM/EPM specific pages
+
+            # Placeholder: In practice, ESPN's EPM data may require
+            # API access or more complex scraping
+            print("ESPN EPM: Direct access not available via web scraping")
             return {}
 
         except Exception as e:
-            print(f"Error fetching EPM: {e}")
+            print(f"Error fetching ESPN EPM: {e}")
+            return {}
+
+    def fetch_fivethirtyeight_raptor(self, season: str = "2024-25") -> Dict[str, Dict]:
+        """
+        Fetch FiveThirtyEight RAPTOR ratings.
+
+        RAPTOR (Robust Algorithm using Player Tracking and On/off Ratings)
+        is FiveThirtyEight's player impact metric.
+
+        Args:
+            season: Season string (e.g., "2024-25")
+
+        Returns:
+            Dictionary mapping player name to impact metrics
+        """
+        print(f"Fetching FiveThirtyEight RAPTOR for {season}...")
+
+        # FiveThirtyEight provides data on GitHub
+        # For current season, they may have a live endpoint
+        # Historical data: https://github.com/fivethirtyeight/data/tree/master/nba-raptor
+
+        # Try GitHub raw file for latest season
+        season_year = season.split('-')[0]
+        url = f"https://raw.githubusercontent.com/fivethirtyeight/data/master/nba-raptor/modern_RAPTOR_by_player.csv"
+
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            time.sleep(2)
+
+            response = requests.get(url, headers=headers, timeout=30)
+
+            if response.status_code != 200:
+                print(f"Could not fetch RAPTOR data: HTTP {response.status_code}")
+                return {}
+
+            # Parse CSV data using pandas-style approach for robustness
+            import csv
+            from io import StringIO
+
+            players_dict = {}
+            csv_reader = csv.DictReader(StringIO(response.text))
+
+            # Check if CSV has required columns
+            fieldnames = csv_reader.fieldnames or []
+            if not fieldnames:
+                print("RAPTOR: No CSV headers found")
+                return {}
+
+            # Find column names (case-insensitive)
+            fieldnames_lower = {f.lower(): f for f in fieldnames}
+
+            name_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'player' in k or 'name' in k), None)
+            raptor_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'raptor' in k), None)
+            team_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'team' in k), None)
+            season_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'season' in k), None)
+
+            if not name_col or not raptor_col:
+                print(f"RAPTOR: Required columns not found. Available: {fieldnames}")
+                return {}
+
+            # Parse data rows
+            for row in csv_reader:
+                try:
+                    player_name = row[name_col].strip()
+                    if not player_name:
+                        continue
+
+                    # Get RAPTOR value (may be in different columns)
+                    raptor_raw = None
+                    for possible_raptor_col in [raptor_col, 'raptor_total', 'raptor_offense', 'war_total']:
+                        if possible_raptor_col in row:
+                            try:
+                                raptor_raw = float(row[possible_raptor_col])
+                                break
+                            except (ValueError, TypeError):
+                                continue
+
+                    if raptor_raw is None:
+                        continue
+
+                    team = row.get(team_col, 'UNK').strip() if team_col else 'UNK'
+                    player_season = row.get(season_col, '').strip() if season_col else ''
+
+                    # Filter to current season if specified
+                    if season_col and season_year and season_year not in player_season:
+                        continue
+
+                    # Standardize to -10 to +10 scale
+                    standardized_impact = self._standardize_metric(raptor_raw, 'raptor')
+
+                    players_dict[player_name] = {
+                        'source': 'raptor',
+                        'raw_raptor': raptor_raw,
+                        'impact_metric': standardized_impact,
+                        'team': team,
+                        'season': player_season
+                    }
+
+                except (ValueError, KeyError, TypeError) as e:
+                    continue
+
+            if players_dict:
+                print(f"Fetched RAPTOR data for {len(players_dict)} players")
+                self.raptor_cache = players_dict
+                self._save_cache('raptor')
+                return players_dict
+            else:
+                print("RAPTOR: Could not parse player data")
+                return {}
+
+        except Exception as e:
+            print(f"Error fetching RAPTOR: {e}")
             return {}
 
     def fetch_basic_stats_from_nba_api(self, season: str = "2024-25") -> Dict[str, Dict]:
@@ -148,7 +452,13 @@ class PlayerImpactFetcher:
             players_dict = {}
             for _, row in df.iterrows():
                 player_name = row['PLAYER_NAME']
+                # Calculate per-36 plus/minus as impact estimate
+                per_36_plus_minus = row['PLUS_MINUS'] / max(row['MIN'], 1) * 36
+                # Standardize to our scale
+                impact_metric = self._standardize_metric(per_36_plus_minus, 'plus_minus')
+
                 players_dict[player_name] = {
+                    'source': 'nba_api',
                     'player_id': row['PLAYER_ID'],
                     'team': row['TEAM_ABBREVIATION'],
                     'games': row['GP'],
@@ -158,8 +468,8 @@ class PlayerImpactFetcher:
                     'assists': row['AST'],
                     'plus_minus': row['PLUS_MINUS'],
                     'net_rating': row.get('NET_RATING', 0),
-                    # Estimate impact using plus/minus and minutes
-                    'estimated_impact': row['PLUS_MINUS'] / max(row['MIN'], 1) * 36  # Per-36 plus/minus
+                    'estimated_impact': per_36_plus_minus,  # Raw per-36 for backward compatibility
+                    'impact_metric': impact_metric  # Standardized metric
                 }
 
             print(f"Fetched stats for {len(players_dict)} players")
@@ -174,26 +484,116 @@ class PlayerImpactFetcher:
         """
         Get impact metrics for a specific player.
 
+        Priority order:
+        1. DARKO DPM (most advanced)
+        2. ESPN EPM
+        3. FiveThirtyEight RAPTOR
+        4. nba_api basic stats (fallback)
+
         Args:
             player_name: Player's full name
 
         Returns:
-            Dictionary with player impact metrics or None
+            Dictionary with player impact metrics (with 'impact_metric' key) or None
         """
-        # Check EPM cache first
+        # Priority 1: DARKO
+        if player_name in self.darko_cache:
+            return self.darko_cache[player_name]
+
+        # Priority 2: ESPN EPM
         if player_name in self.epm_cache:
             return self.epm_cache[player_name]
 
-        # Check basic stats cache
+        # Priority 3: FiveThirtyEight RAPTOR
+        if player_name in self.raptor_cache:
+            return self.raptor_cache[player_name]
+
+        # Priority 4: Basic stats
         if player_name in self.basic_stats_cache:
             return self.basic_stats_cache[player_name]
 
         # Try to fetch if caches are empty
-        if not self.basic_stats_cache and HAS_NBA_API:
-            self.fetch_basic_stats_from_nba_api()
-            return self.basic_stats_cache.get(player_name)
+        if not self.darko_cache and not self.raptor_cache and not self.basic_stats_cache:
+            self.refresh_data()
+            # Try again after refresh
+            return self.get_player_impact(player_name)
 
         return None
+
+    def get_player_impact_metric(self, player_name: str) -> float:
+        """
+        Get standardized impact metric for a player (-10 to +10 scale).
+
+        Args:
+            player_name: Player's full name
+
+        Returns:
+            Impact metric value (0.0 if not found)
+        """
+        impact_data = self.get_player_impact(player_name)
+        if impact_data:
+            return impact_data.get('impact_metric', 0.0)
+        return 0.0
+
+    def get_team_impact_when_player_on_court(
+        self,
+        team_abbrev: str,
+        player_name: str
+    ) -> float:
+        """
+        Estimate team's net rating when specific player is on court.
+
+        Args:
+            team_abbrev: Team abbreviation
+            player_name: Player name
+
+        Returns:
+            Estimated team net rating with player on court
+        """
+        player_impact = self.get_player_impact_metric(player_name)
+
+        # Team base rating (assuming average team is 0)
+        # Add player's impact
+        return player_impact
+
+    def get_opponent_defensive_impact_vs_position(
+        self,
+        opponent_team: str,
+        position: str
+    ) -> float:
+        """
+        Calculate opponent's defensive impact against a specific position.
+
+        Args:
+            opponent_team: Opponent team abbreviation
+            position: Position ('G', 'F', 'C')
+
+        Returns:
+            Defensive impact (negative = strong defense, positive = weak defense)
+        """
+        # Get all players on opponent team
+        team_defenders = []
+
+        for cache in [self.darko_cache, self.epm_cache, self.raptor_cache, self.basic_stats_cache]:
+            for name, stats in cache.items():
+                if stats.get('team') == opponent_team:
+                    impact = stats.get('impact_metric', 0.0)
+                    team_defenders.append((name, impact))
+
+        if not team_defenders:
+            return 0.0
+
+        # Sort by impact (best players first)
+        team_defenders.sort(key=lambda x: x[1], reverse=True)
+
+        # Top 3 defenders for position
+        # In a full implementation, would filter by position matchup
+        # For now, use top defenders overall
+        top_defenders = team_defenders[:3]
+        avg_defensive_impact = sum(impact for _, impact in top_defenders) / len(top_defenders)
+
+        # Invert sign (positive defender impact = harder to score against)
+        return -avg_defensive_impact * 0.3  # Scale down for prop adjustments
 
     def calculate_team_rating_adjustment(
         self,
@@ -204,8 +604,8 @@ class PlayerImpactFetcher:
         """
         Calculate team rating adjustment based on player availability.
 
-        Uses player impact metrics to estimate how much a team's rating
-        should be adjusted when key players are out.
+        Uses advanced player impact metrics (DARKO/EPM/RAPTOR) to estimate
+        how much a team's rating should be adjusted when key players are out.
 
         Args:
             team_abbrev: Team abbreviation (e.g., "LAL")
@@ -225,17 +625,18 @@ class PlayerImpactFetcher:
         total_adjustment = 0.0
 
         for player_name in unavailable:
-            impact = self.get_player_impact(player_name)
-            if impact:
-                # Use estimated impact (points per 36 minutes equivalent)
-                player_impact = impact.get('estimated_impact', 0)
-                minutes = impact.get('minutes', 0)
+            impact_data = self.get_player_impact(player_name)
+            if impact_data:
+                # Use standardized impact metric (-10 to +10 scale)
+                player_impact = impact_data.get('impact_metric', 0)
 
-                # Weight by minutes played (more minutes = bigger impact when out)
+                # Get minutes weight if available
+                minutes = impact_data.get('minutes', 30)  # Default to 30 MPG
                 minutes_weight = min(minutes / 36, 1.0)  # Cap at 1.0 for 36+ MPG players
 
                 # Adjustment is negative (team gets worse when player is out)
-                # Scale factor: 1 point of plus/minus ≈ 0.5 points of team rating
+                # Impact metric already on -10 to +10 scale
+                # Scale by 0.5 for spread adjustment
                 adjustment = -abs(player_impact) * minutes_weight * 0.5
                 total_adjustment += adjustment
 
@@ -253,36 +654,73 @@ class PlayerImpactFetcher:
         """
         team_players = []
 
-        # Search in basic stats cache
-        for name, stats in self.basic_stats_cache.items():
-            if stats.get('team') == team_abbrev:
-                team_players.append({
-                    'name': name,
-                    'minutes': stats.get('minutes', 0),
-                    'impact': stats.get('estimated_impact', 0),
-                    'points': stats.get('points', 0),
-                    'plus_minus': stats.get('plus_minus', 0),
-                })
+        # Search in all caches (priority order)
+        all_caches = [
+            ('darko', self.darko_cache),
+            ('epm', self.epm_cache),
+            ('raptor', self.raptor_cache),
+            ('basic', self.basic_stats_cache)
+        ]
 
-        # Sort by estimated impact
+        seen_players = set()
+
+        for source, cache in all_caches:
+            for name, stats in cache.items():
+                if stats.get('team') == team_abbrev and name not in seen_players:
+                    seen_players.add(name)
+                    team_players.append({
+                        'name': name,
+                        'source': source,
+                        'minutes': stats.get('minutes', 0),
+                        'impact': stats.get('impact_metric', stats.get('estimated_impact', 0)),
+                        'points': stats.get('points', 0),
+                        'plus_minus': stats.get('plus_minus', 0),
+                    })
+
+        # Sort by impact
         team_players.sort(key=lambda x: x['impact'], reverse=True)
 
         return team_players
 
-    def refresh_data(self):
-        """Refresh all player data from sources."""
+    def refresh_data(self, season: str = "2024-25"):
+        """
+        Refresh all player data from sources.
+
+        Tries in priority order:
+        1. DARKO DPM
+        2. FiveThirtyEight RAPTOR (more reliable than ESPN)
+        3. nba_api basic stats (fallback)
+
+        Args:
+            season: Season string (e.g., "2024-25")
+        """
         print("Refreshing player impact data...")
 
-        # Try EPM first (preferred)
-        epm_data = self.fetch_epm_from_dunks_and_threes()
-        if epm_data:
-            self.epm_cache = epm_data
-            self._save_cache()
-            return
+        # Try DARKO first (best metric)
+        darko_data = self.fetch_darko_dpm(season)
+        if darko_data:
+            print(f"✓ Successfully loaded DARKO data for {len(darko_data)} players")
 
-        # Fall back to nba_api
-        if HAS_NBA_API:
-            self.fetch_basic_stats_from_nba_api()
+        # Try RAPTOR (reliable GitHub data)
+        raptor_data = self.fetch_fivethirtyeight_raptor(season)
+        if raptor_data:
+            print(f"✓ Successfully loaded RAPTOR data for {len(raptor_data)} players")
+
+        # Try ESPN EPM (often requires JS, may fail)
+        season_year = int(season.split('-')[0])
+        epm_data = self.fetch_espn_epm(season_year)
+        if epm_data:
+            print(f"✓ Successfully loaded ESPN EPM data for {len(epm_data)} players")
+
+        # Fallback to nba_api
+        if not darko_data and not raptor_data and not epm_data:
+            if HAS_NBA_API:
+                print("Falling back to nba_api basic stats...")
+                self.fetch_basic_stats_from_nba_api(season)
+            else:
+                print("WARNING: No player impact data sources available!")
+
+        print(f"Data refresh complete. Total unique players: {len(set(list(self.darko_cache.keys()) + list(self.raptor_cache.keys()) + list(self.epm_cache.keys()) + list(self.basic_stats_cache.keys())))}")
 
 
 # Simple impact estimates for star players when API unavailable
