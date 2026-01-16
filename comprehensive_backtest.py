@@ -1150,11 +1150,11 @@ class SeasonBacktester:
     # Bias corrections - set to 0 now that feature mismatch is fixed
     # These will be recalibrated after a clean backtest run
     BIAS_CORRECTIONS = {
-        'points': -0.986,  # FIX #2: Fix bias of +0.986
-        'rebounds': 0.904,  # FIX #2: Fix bias of -0.904
-        'assists': 0.558,  # FIX #2: Fix bias of -0.558
-        'threes': 0.246,  # FIX #2: Fix bias of -0.246
-        'pra': 2.678,  # FIX #2: Fix bias of -2.678
+        'points': 1.728,  # FIX #2: Fix bias of -2.714
+        'rebounds': 1.608,  # FIX #2: Fix bias of -0.704
+        'assists': -0.534,  # FIX #2: Fix bias of +1.092
+        'threes': 1.161,  # FIX #2: Fix bias of -0.915
+        'pra': 3.647,  # FIX #2: Fix bias of -0.969
     }
 
     def predict_minutes(self, features: Dict) -> Optional[float]:

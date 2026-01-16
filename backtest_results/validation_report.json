@@ -66,11 +66,11 @@
     },
     "status": "FAIL",
     "sample_dnp_errors": [
-      "Buddy Hield rebounds: pred=2.5 actual=0",
-      "Branden Carlson rebounds: pred=0.3 actual=0",
-      "Pat Connaughton rebounds: pred=0.9 actual=0",
-      "Sion James rebounds: pred=1.4 actual=0",
-      "Matisse Thybulle rebounds: pred=1.6 actual=0"
+      "Buddy Hield rebounds: pred=3.0 actual=0",
+      "Branden Carlson rebounds: pred=0.8 actual=0",
+      "Pat Connaughton rebounds: pred=1.4 actual=0",
+      "Sion James rebounds: pred=1.8 actual=0",
+      "Matisse Thybulle rebounds: pred=2.1 actual=0"
     ]
   }
 }
