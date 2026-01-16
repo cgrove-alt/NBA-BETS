@@ -47,6 +47,31 @@ except ImportError:
     def calculate_prop_injury_boost(*args, **kwargs):
         return {'boost_factor': 1.0, 'reasons': []}
 
+# Import Kelly bet sizing from risk_management (Task 3.4)
+try:
+    from risk_management import calculate_kelly_bet_size, get_kelly_multiplier_for_tier
+    HAS_KELLY_SIZING = True
+except ImportError:
+    HAS_KELLY_SIZING = False
+    def calculate_kelly_bet_size(*args, **kwargs):
+        return 0.0
+    def get_kelly_multiplier_for_tier(*args, **kwargs):
+        return 0.0
+
+# Helper function to map confidence score to edge quality tier
+def get_tier_from_confidence(confidence_score: float) -> str:
+    """Map confidence score (0-100) to edge quality tier."""
+    if confidence_score >= 90:
+        return 'elite'
+    elif confidence_score >= 75:
+        return 'strong'
+    elif confidence_score >= 60:
+        return 'moderate'
+    elif confidence_score >= 40:
+        return 'weak'
+    else:
+        return 'avoid'
+
 # Import training feature generator for accurate prop predictions
 try:
     from train_complete_balldontlie import (
@@ -620,8 +645,18 @@ def load_models() -> Dict:
             MODEL_DIR / f"player_{prop_type}_line_classifier.pkl",
             MODEL_DIR / f"player_{prop_type}_position_aware.pkl",
             MODEL_DIR / f"player_{prop_type}.pkl",  # Simple regressor (old, 27 features)
-            MODEL_DIR / f"player_{prop_type}_quantile.pkl",
         ]
+
+        # Load quantile model separately for prediction bands (Task 3.4)
+        quantile_path = MODEL_DIR / f"player_{prop_type}_quantile.pkl"
+        if quantile_path.exists():
+            try:
+                with open(quantile_path, 'rb') as f:
+                    quantile_data = pickle.load(f)
+                models[f'prop_{prop_type}_quantile'] = quantile_data
+                print(f"    Loaded quantile model for {prop_type}")
+            except Exception as e:
+                print(f"    Warning: Could not load quantile model for {prop_type}: {e}")
 
         for path in model_paths:
             if path.exists():
@@ -1166,13 +1201,28 @@ def print_game_analysis(analysis: Dict):
             edge = prop.get('edge', 0)
             predicted = prop.get('predicted_value')
 
+            # Task 3.4: Display prediction bands and bet sizing
+            pred_low = prop.get('pred_low')
+            pred_median = prop.get('pred_median')
+            pred_high = prop.get('pred_high')
+            confidence = prop.get('confidence_score', 50)
+            tier = prop.get('edge_quality_tier', 'moderate')
+            bet_size = prop.get('suggested_bet_size', 0)
+            recommendation = prop.get('bet_recommendation', 'MONITOR')
+
             direction = "Over" if over_prob > 0.5 else "Under"
             prob = over_prob if over_prob > 0.5 else (1 - over_prob)
 
             marker = "**" if abs(edge) > 5 else ("*" if abs(edge) > 3 else "")
 
-            if predicted is not None:
+            # Build display with prediction bands if available
+            if pred_low is not None and pred_median is not None and pred_high is not None:
+                pred_str = f"[{pred_low:.1f} | {pred_median:.1f} | {pred_high:.1f}]"
+                print(f"    {player} {stat} {line}: {direction} {prob:.0%} ({edge:+.1f}%) {marker}")
+                print(f"      Pred: {pred_str} | Conf: {confidence:.0f} ({tier.upper()}) | ${bet_size:.0f} ({recommendation})")
+            elif predicted is not None:
                 print(f"    {player} {stat} {line} (pred: {predicted:.1f}): {direction} {prob:.0%} ({edge:+.1f}%) {marker}")
+                print(f"      Conf: {confidence:.0f} ({tier.upper()}) | ${bet_size:.0f} ({recommendation})")
             else:
                 print(f"    {player} {stat} {line}: {direction} {prob:.0%} ({edge:+.1f}%) {marker}")
 
@@ -1433,6 +1483,117 @@ def predict_player_prop(
         except Exception:
             pass  # Continue without injury adjustment if it fails
 
+    # Task 3.4: Add prediction bands using quantile models
+    pred_low = None
+    pred_median = None
+    pred_high = None
+    confidence_score = 50.0  # Default moderate confidence
+    edge_quality_tier = 'moderate'
+    suggested_bet_size = 0.0
+    bet_recommendation = 'MONITOR'
+
+    # Try to get quantile predictions for better risk assessment
+    quantile_model_data = models.get(f'prop_{prop_type}_quantile')
+    if quantile_model_data and features and use_api_features:
+        try:
+            import pandas as pd
+
+            # Check if it's a QuantilePropModel object with predict method
+            if hasattr(quantile_model_data, 'predict'):
+                quantile_result = quantile_model_data.predict(features, prop_line=line)
+                pred_low = quantile_result.get('pred_low')
+                pred_median = quantile_result.get('pred_median')
+                pred_high = quantile_result.get('pred_high')
+            # Or if it's a dict with quantile models
+            elif isinstance(quantile_model_data, dict) and 'quantile_models' in quantile_model_data:
+                quantile_models = quantile_model_data['quantile_models']
+                scaler = quantile_model_data.get('scaler')
+                feature_names = quantile_model_data.get('feature_names', [])
+
+                # Build feature array
+                X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
+                X = X[feature_names].fillna(0)
+
+                # Scale if scaler available
+                if scaler is not None:
+                    X_scaled = scaler.transform(X)
+                else:
+                    X_scaled = X.values
+
+                # Get predictions from all quantile models
+                pred_low = float(quantile_models[0.10].predict(X_scaled)[0])
+                pred_median = float(quantile_models[0.50].predict(X_scaled)[0])
+                pred_high = float(quantile_models[0.90].predict(X_scaled)[0])
+
+                # Use median as the primary prediction if we don't have one yet
+                if predicted_value is None:
+                    predicted_value = pred_median
+        except Exception as e:
+            # Fall back to defaults
+            pass
+
+    # Calculate confidence score based on prediction band width (Task 2.4)
+    if pred_low is not None and pred_high is not None and pred_median is not None:
+        band_width = pred_high - pred_low
+        # Narrow bands (< 3 pts) = high confidence, wide bands (> 8 pts) = low confidence
+        if band_width < 3:
+            confidence_score = 85.0  # High confidence
+        elif band_width < 5:
+            confidence_score = 70.0  # Good confidence
+        elif band_width < 8:
+            confidence_score = 55.0  # Moderate confidence
+        else:
+            confidence_score = 40.0  # Low confidence (wide prediction range)
+    elif predicted_value is not None:
+        # Fallback: use prediction variance as confidence proxy
+        # If edge is strong and prediction far from line, higher confidence
+        if abs(predicted_value - line) > line * 0.15:  # Prediction differs by 15%+
+            confidence_score = 70.0
+        else:
+            confidence_score = 55.0
+
+    # Calculate edge quality tier based on confidence score (Task 2.4)
+    edge_quality_tier = get_tier_from_confidence(confidence_score)
+
+    # Calculate Kelly bet size (Task 3.4)
+    if HAS_KELLY_SIZING and abs(edge) > 2.0:  # Only bet if edge > 2%
+        try:
+            # Convert edge to probability advantage
+            # over_prob already accounts for our edge
+            win_prob = over_prob if over_prob > 0.5 else (1 - over_prob)
+
+            # Assume -110 odds (decimal 1.909)
+            decimal_odds = 1.909
+
+            # Use a default $1000 bankroll for bet sizing (user can scale)
+            default_bankroll = 1000.0
+
+            suggested_bet_size = calculate_kelly_bet_size(
+                win_prob=win_prob,
+                decimal_odds=decimal_odds,
+                bankroll=default_bankroll,
+                fractional=0.25,  # Quarter Kelly for safety
+                edge_tier=edge_quality_tier,
+                current_drawdown=0.0,  # Assume no drawdown for daily predictions
+                num_same_day_bets=1,   # Conservative default
+                max_bet_pct=0.05       # Cap at 5% of bankroll
+            )
+
+            # Calculate bet size as percentage of bankroll for display
+            bet_size_pct = (suggested_bet_size / default_bankroll) * 100
+
+            # Determine recommendation based on edge and confidence
+            if edge_quality_tier in ['elite', 'strong'] and abs(edge) > 5:
+                bet_recommendation = 'BET'
+            elif edge_quality_tier == 'moderate' and abs(edge) > 3:
+                bet_recommendation = 'CONSIDER'
+            else:
+                bet_recommendation = 'MONITOR'
+
+        except Exception as e:
+            # Fall back to defaults
+            pass
+
     # Without full feature generation, just show the prop lines
     # Edge calculation would need player stats
     return {
@@ -1443,6 +1604,13 @@ def predict_player_prop(
         'over_prob': over_prob,
         'edge': edge,
         'predicted_value': predicted_value,
+        'pred_low': pred_low,
+        'pred_median': pred_median,
+        'pred_high': pred_high,
+        'confidence_score': confidence_score,
+        'edge_quality_tier': edge_quality_tier,
+        'suggested_bet_size': suggested_bet_size,
+        'bet_recommendation': bet_recommendation,
         'injury_boost': injury_boost_info.get('boost_factor', 1.0),
         'injury_reasons': injury_boost_info.get('reasons', []),
     }
@@ -1835,6 +2003,48 @@ def main():
             print(f"  {i}. {rec['game']}: {rec['bet']} ({rec['prob']:.0%}, edge: {rec['edge']:+.1f}%)")
     else:
         print("\n  No strong edges found today.")
+
+    # Task 3.4: Export predictions to CSV with enhanced columns
+    if all_player_props:
+        try:
+            import pandas as pd
+            csv_filename = f"predictions_{target_date}.csv"
+
+            # Build DataFrame with all enhanced columns
+            csv_data = []
+            for prop in all_player_props:
+                row = {
+                    'date': target_date,
+                    'game': prop.get('game', ''),
+                    'player_name': prop.get('player', ''),
+                    'prop_type': prop.get('stat', ''),
+                    'line': prop.get('line', 0),
+                    'prediction': prop.get('predicted_value', ''),
+                    'pred_low': prop.get('pred_low', ''),
+                    'pred_median': prop.get('pred_median', ''),
+                    'pred_high': prop.get('pred_high', ''),
+                    'over_prob': prop.get('over_prob', 0.5),
+                    'edge': prop.get('edge', 0),
+                    'confidence_score': prop.get('confidence_score', 50),
+                    'edge_quality_tier': prop.get('edge_quality_tier', 'moderate'),
+                    'suggested_bet_size': prop.get('suggested_bet_size', 0),
+                    'bet_recommendation': prop.get('bet_recommendation', 'MONITOR'),
+                    'uncertainty_flag': prop.get('uncertainty_flag', ''),
+                    'injury_boost': prop.get('injury_boost', 1.0),
+                }
+                csv_data.append(row)
+
+            df = pd.DataFrame(csv_data)
+            df.to_csv(csv_filename, index=False)
+            print(f"\n  Predictions saved to: {csv_filename}")
+            print(f"  Total props: {len(all_player_props)}")
+
+            # Show summary by recommendation
+            if 'bet_recommendation' in df.columns:
+                rec_counts = df['bet_recommendation'].value_counts()
+                print(f"  Recommendations: {rec_counts.to_dict()}")
+        except Exception as e:
+            print(f"\n  Warning: Could not save CSV: {e}")
 
     print("\n" + "=" * 65)
     print("  Note: Always verify with actual sportsbook odds before betting.")
