@@ -1444,26 +1444,11 @@ class SeasonBacktester:
                 if not features:
                     continue
 
-                # FIX #1: Check if player is available (injury/DNP detection)
-                # Parse game_date string to datetime if needed
-                game_datetime = datetime.strptime(game_date, '%Y-%m-%d') if isinstance(game_date, str) else game_date
+                # FIX #1: DNP detection via minutes played
+                # Note: Injury API disabled for backtesting (causes crashes with 596 games)
+                # Minutes-played check is sufficient and reliable for historical DNP detection
 
-                # Try to check injury status (may not have historical data)
-                try:
-                    is_available, injury_status = is_player_available(player_id, game_datetime)
-
-                    # Skip predictions for OUT/DOUBTFUL players
-                    if not is_available:
-                        if self.verbose:
-                            print(f"  ⚠️  Skipping {player_name} - Injury status: {injury_status.value if injury_status else 'OUT'}")
-                        continue
-                except Exception as e:
-                    # Historical injury data may not be available - rely on minutes played check below
-                    if self.verbose and "historical" not in str(e).lower():
-                        print(f"  ⚠️  Could not check injury status for {player_name}: {e}")
-                    pass
-
-                # Also check if player actually played (DNP detection from box score)
+                # Check if player actually played (DNP detection from box score)
                 minutes_played_str = actual_stats.get('min', '0')
                 minutes_played = 0
                 try:
