@@ -3933,8 +3933,7 @@ class PropEnsembleModel:
             'min_samples_leaf': 5, 'max_features': 'sqrt', 'random_state': 42,
             'n_jobs': -1,
         }
-        # PHASE 2.5: Ridge model removed (linear regression incompatible with tree-based models)
-        # ridge_defaults = {'alpha': 1.0, 'random_state': 42}
+        ridge_defaults = {'alpha': 1.0, 'random_state': 42}
         gb_defaults = {
             'n_estimators': 200, 'max_depth': 5, 'learning_rate': 0.05,
             'subsample': 0.8, 'random_state': 42,
@@ -3951,15 +3950,12 @@ class PropEnsembleModel:
             xgb_params = {**xgb_defaults, **optimized_params.get('xgboost', {})}
             lgb_params = {**lgb_defaults, **optimized_params.get('lightgbm', {})}
             rf_params = {**rf_defaults, **optimized_params.get('random_forest', {})}
-            # PHASE 2.5: Ridge params removed
-            # ridge_params = {**ridge_defaults, **optimized_params.get('ridge', {})}
+            ridge_params = {**ridge_defaults, **optimized_params.get('ridge', {})}
             gb_params = {**gb_defaults, **optimized_params.get('gradient_boosting', {})}
             catboost_params = {**catboost_defaults, **optimized_params.get('catboost', {})}
         else:
             xgb_params, lgb_params, rf_params = xgb_defaults, lgb_defaults, rf_defaults
-            # PHASE 2.5: Ridge params removed
-            # ridge_params, gb_params = ridge_defaults, gb_defaults
-            gb_params = gb_defaults
+            ridge_params, gb_params = ridge_defaults, gb_defaults
             catboost_params = catboost_defaults
 
         # XGBoost (primary)
@@ -3978,9 +3974,8 @@ class PropEnsembleModel:
         # Random Forest (diverse)
         self.models['random_forest'] = RandomForestRegressor(**rf_params)
 
-        # PHASE 2.5: Ridge Regression removed (linear baseline incompatible with tree-based models)
-        # Causes extreme CV disagreement (0.3-1.4 vs expected <0.05)
-        # self.models['ridge'] = Ridge(**ridge_params)
+        # Ridge Regression (linear baseline)
+        self.models['ridge'] = Ridge(**ridge_params)
 
         # Gradient Boosting (fallback if XGBoost unavailable, also provides diversity)
         if not HAS_XGBOOST:
