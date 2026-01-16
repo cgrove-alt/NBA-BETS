@@ -1,0 +1,11 @@
+{
+  "summary": {
+    "avg_rmse_improvement": 0,
+    "avg_mae_improvement": 0,
+    "rmse_improvements": [],
+    "mae_improvements": [],
+    "success_criteria_met": false,
+    "target_met": false,
+    "num_prop_types": 0
+  }
+}

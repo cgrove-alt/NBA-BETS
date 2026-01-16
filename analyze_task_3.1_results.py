@@ -220,24 +220,19 @@ def generate_markdown_report(analysis_results: Dict[str, Any], summary: Dict[str
 
 def main():
     """Main analysis routine."""
-    # Find most recent backtest results
-    backtest_dir = Path('backtest_results')
+    # Baseline from Phase 2
+    baseline_file = Path('backtest_results/phase2_backtest.json')
 
-    if not backtest_dir.exists():
-        print("Error: backtest_results/ directory not found")
+    # New results from Task 3.1 backtest (in current directory)
+    new_file = Path('backtest_results_2025.json')
+
+    if not baseline_file.exists():
+        print(f"Error: Baseline file not found: {baseline_file}")
         return
 
-    # Look for baseline (phase2) and new results
-    baseline_file = backtest_dir / 'phase2_backtest.json'
-
-    # Find most recent backtest file
-    json_files = sorted(backtest_dir.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
-
-    if not json_files:
-        print("Error: No backtest results found in backtest_results/")
+    if not new_file.exists():
+        print(f"Error: New results file not found: {new_file}")
         return
-
-    new_file = json_files[0]
 
     print(f"Analyzing backtest results:")
     print(f"  Baseline: {baseline_file}")
