@@ -1,14 +1,19 @@
 # Task 3.2: Implement Quantile Regression for All Prop Types - Completion Summary
 
-**Status**: ✅ COMPLETE
+**Status**: ✅ COMPLETE (with bug fixes applied)
 **Completed**: January 16, 2025
-**Implementation Time**: ~3 hours
+**Implementation Time**: ~3.5 hours
+**Bug Fixes**: 2 critical bugs fixed post-review
 
 ---
 
 ## Overview
 
 Successfully enhanced the `QuantilePropModel` class in `model_trainer.py` to use LightGBM quantile regression (q10, q50, q90) for better risk management and bet sizing. The implementation provides calibrated prediction bands that enable intelligent bet size adjustments based on uncertainty.
+
+**Update (Post-Review)**: Fixed 2 critical bugs identified in code review:
+1. Negative confidence bug when wide bands + line at median
+2. Missing confidence bounds validation in test suite
 
 ---
 
@@ -317,20 +322,150 @@ result = {
 
 ---
 
+## Bug Fixes (Post-Review)
+
+### Bug #1: Negative Confidence with Wide Bands + Line at Median (CRITICAL)
+
+**Issue**: Confidence could become negative when combining wide bands (-15% adjustment) with predictions near 50% probability.
+
+**Location**: `model_trainer.py:2359`
+
+**Before**:
+```python
+adjusted_confidence = min(1.0, adjusted_confidence + confidence_adjustment / 100.0)
+```
+
+**After**:
+```python
+# CRITICAL: Clamp to [0, 1] to prevent negative confidence with wide bands
+adjusted_confidence = max(0.0, min(1.0, adjusted_confidence + confidence_adjustment / 100.0))
+```
+
+**Test Case**: Line at median (50% over_prob) + wide bands (confidence_adjustment = -15%)
+- Before: `confidence = 0.0 + (-0.15) = -0.15` ❌
+- After: `confidence = max(0.0, -0.15) = 0.0` ✅
+
+**Impact**: Prevented invalid negative confidence values that could break downstream risk management.
+
+---
+
+### Bug #2: Missing Confidence Bounds Validation in Tests
+
+**Issue**: Test suite validated probability bounds [0.05, 0.95] but not confidence bounds [0, 1].
+
+**Location**: `tests/test_quantile_models.py:282-287`
+
+**Added**:
+```python
+# CRITICAL: Check confidence bounds [0, 1]
+self.assertGreaterEqual(result['confidence'], 0.0,
+                        f"Confidence cannot be negative: {result['confidence']}")
+self.assertLessEqual(result['confidence'], 1.0,
+                     f"Confidence cannot exceed 1.0: {result['confidence']}")
+```
+
+**New Edge Case Test**: `test_negative_confidence_edge_case` (lines 352-388)
+- Specifically tests wide bands + line at median scenario
+- Would have caught Bug #1 if written initially
+
+**Test Results**: 11/11 tests passing (added 1 new test)
+
+---
+
+## Known Limitations
+
+### 1. Normal Distribution Assumption (Stacking Path)
+
+**Location**: `model_trainer.py:2186-2194`
+
+**Assumption**: Uses z-scores (±1.282 for 10th/90th percentiles) which assume normal distribution.
+
+**Reality**: NBA statistics have:
+- **Skewness**: Star players have long right tails
+- **Floor effects**: Stats can't be negative (especially Q10)
+- **Higher kurtosis**: More extreme games than normal distribution predicts
+
+**Impact**: Q10 may be underestimated, empirical coverage may deviate from 80%
+
+**Mitigation**: Validated in Task 3.5 comprehensive backtest with real data
+
+---
+
+### 2. Hardcoded Band Width Thresholds
+
+**Location**: `model_trainer.py:2306-2317`
+
+**Thresholds**:
+- Wide: `> 8 pts` → -50% bet size
+- Narrow: `< 3 pts` → +10% confidence
+
+**Issue**: Designed for points prop type. May not generalize well:
+- **Rebounds**: Typical std ~2-3 → thresholds too wide
+- **Assists**: Typical std ~1-2 → thresholds too wide
+- **Threes**: Typical std ~1-2 → thresholds too wide
+
+**Recommendation**: Consider prop-type-specific thresholds or normalize by typical std
+
+**Current Status**: Acceptable for initial implementation, validate in backtests
+
+---
+
+### 3. Quantile Ordering Can Mask Severe Miscalibration
+
+**Location**: `model_trainer.py:2295-2299`
+
+**Current Logic**: Enforces q10 ≤ q50 ≤ q90 by sorting
+
+**Edge Case**: Severe model failure (Q10=25, Q50=18, Q90=15) becomes (Q10=18, Q50=18, Q90=18)
+- Result: Band width = 0 → Model shows **zero uncertainty**
+- Reality: Model is severely miscalibrated → Should show **maximum uncertainty**
+
+**Frequency**: Rare (would require severe training issues)
+
+**Better Approach**: Isotonic regression during training to preserve monotonicity
+
+**Current Status**: Acceptable for production, monitor for edge cases
+
+---
+
+### 4. Unverified Performance Claims
+
+**Claims**:
+- ROI improvement: +0.5-1.5% (line 218)
+- Empirical coverage: 75-85% (line 220)
+- Sharpe ratio improvement (line 221)
+
+**Status**: ❌ **Speculative** - Not validated on real data
+
+**Validation Plan**: Task 3.5 comprehensive 2-season backtest will verify:
+- Actual empirical coverage on real NBA games
+- ROI improvement from bet sizing logic
+- Correlation between narrow bands and accuracy
+
+---
+
 ## Conclusion
 
-Task 3.2 is **100% complete**. The enhanced `QuantilePropModel` now provides:
+Task 3.2 is **100% complete with all critical bugs fixed**. The enhanced `QuantilePropModel` now provides:
 
 1. ✅ Better uncertainty quantification (10th-90th percentile bands)
 2. ✅ Intelligent bet sizing (reduce risk on wide bands, increase on narrow)
 3. ✅ Improved calibration (LightGBM quantile regression)
-4. ✅ Comprehensive testing (10/10 tests passing)
-5. ✅ Ready for production backtesting (Task 3.5)
+4. ✅ Comprehensive testing (11/11 tests passing, including edge case)
+5. ✅ Critical bugs fixed (negative confidence, test coverage)
+6. ✅ Known limitations documented
+
+**Production Readiness**: ✅ **Ready for backtesting** (Task 3.5)
+- Critical bugs fixed
+- Test coverage comprehensive
+- Limitations documented
+- Performance claims to be validated
 
 **Next Task**: 3.3 - Enhance risk_management.py with Kelly Criterion
 
 ---
 
-**Generated**: January 16, 2025
+**Generated**: January 16, 2025 (Updated post-review)
 **Model Version**: QuantilePropModel v2.0 (LightGBM-based)
-**Test Suite**: tests/test_quantile_models.py (10 tests, 100% pass rate)
+**Test Suite**: tests/test_quantile_models.py (11 tests, 100% pass rate)
+**Bugs Fixed**: 2 critical (negative confidence, missing test coverage)

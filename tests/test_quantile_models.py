@@ -279,6 +279,13 @@ class TestQuantilePropModel(unittest.TestCase):
             places=5
         )
 
+        # CRITICAL: Check confidence bounds [0, 1]
+        # This catches negative confidence bug (e.g., wide bands + line at median)
+        self.assertGreaterEqual(result['confidence'], 0.0,
+                                f"Confidence cannot be negative: {result['confidence']}")
+        self.assertLessEqual(result['confidence'], 1.0,
+                             f"Confidence cannot exceed 1.0: {result['confidence']}")
+
     def test_model_save_load(self):
         """Test that model can be saved and loaded"""
         model = QuantilePropModel(prop_type="points", use_stacking=False)
@@ -341,6 +348,44 @@ class TestQuantilePropModel(unittest.TestCase):
             features = self.X_test.iloc[0].to_dict()
             result = model.predict(features)
             self.assertEqual(result['prop_type'], prop_type)
+
+    def test_negative_confidence_edge_case(self):
+        """
+        Test that confidence stays non-negative in edge case:
+        Wide bands (>8 pts) + line at median → confidence_adjustment = -15%
+        If base confidence near 0%, could go negative without clamping
+        """
+        model = QuantilePropModel(prop_type="points", use_stacking=False)
+        model.train(self.X_train, self.y_train, test_size=0.2, use_time_series_cv=False)
+
+        # Create scenario with wide bands
+        features = {
+            'season_pts_avg': 20.0,
+            'recent_pts_avg': 15.0,  # Inconsistent
+            'usage_rate': 25.0,
+            'true_shooting': 0.50,
+            'pace': 100.0,
+            'def_rating_opp': 110.0,
+            'is_home': 0,
+            'days_rest': 0,  # Back-to-back
+        }
+
+        # First get median prediction
+        initial_result = model.predict(features)
+        pred_median = initial_result['pred_median']
+
+        # Now test with line at median (should have ~50% over_prob, low base confidence)
+        # With wide bands (-15% adjustment), this could go negative without clamping
+        result = model.predict(features, prop_line=pred_median)
+
+        # CRITICAL: Confidence must be non-negative even with wide bands
+        self.assertGreaterEqual(result['confidence'], 0.0,
+                                f"Confidence went negative with wide bands + line at median: {result['confidence']}")
+        self.assertLessEqual(result['confidence'], 1.0,
+                             f"Confidence exceeded 1.0: {result['confidence']}")
+
+        print(f"  Edge case test: band_width={result['prediction_spread']:.1f}, "
+              f"confidence={result['confidence']:.2f} (non-negative ✓)")
 
 
 if __name__ == '__main__':

@@ -2355,7 +2355,8 @@ class QuantilePropModel(BaseModelTrainer):
 
             # Apply confidence adjustment from bet sizing logic
             adjusted_confidence = abs(over_prob - 0.5) * 2  # 0 to 1 scale
-            adjusted_confidence = min(1.0, adjusted_confidence + confidence_adjustment / 100.0)
+            # CRITICAL: Clamp to [0, 1] to prevent negative confidence with wide bands
+            adjusted_confidence = max(0.0, min(1.0, adjusted_confidence + confidence_adjustment / 100.0))
 
             result["over_probability"] = over_prob
             result["under_probability"] = 1.0 - over_prob
