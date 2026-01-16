@@ -2000,27 +2000,51 @@ class QuantilePropModel(BaseModelTrainer):
         model_name = f"player_{prop_type}_quantile"
         super().__init__(model_name)
 
-        # Three quantile models for implied probability calculation
-        self.quantile_models = {
-            0.45: GradientBoostingRegressor(
-                loss='quantile', alpha=0.45,
-                n_estimators=100, max_depth=5,
-                learning_rate=0.1, min_samples_split=10,
-                random_state=42
-            ),
-            0.50: GradientBoostingRegressor(
-                loss='quantile', alpha=0.50,
-                n_estimators=100, max_depth=5,
-                learning_rate=0.1, min_samples_split=10,
-                random_state=42
-            ),
-            0.55: GradientBoostingRegressor(
-                loss='quantile', alpha=0.55,
-                n_estimators=100, max_depth=5,
-                learning_rate=0.1, min_samples_split=10,
-                random_state=42
-            ),
-        }
+        # Three quantile models for prediction bands (q10, q50, q90)
+        # Using LightGBM for better performance if available, else GradientBoosting
+        if HAS_LIGHTGBM:
+            self.quantile_models = {
+                0.10: lgb.LGBMRegressor(
+                    objective='quantile', alpha=0.10,
+                    n_estimators=100, max_depth=5,
+                    learning_rate=0.1, min_child_samples=10,
+                    random_state=42, verbose=-1
+                ),
+                0.50: lgb.LGBMRegressor(
+                    objective='quantile', alpha=0.50,
+                    n_estimators=100, max_depth=5,
+                    learning_rate=0.1, min_child_samples=10,
+                    random_state=42, verbose=-1
+                ),
+                0.90: lgb.LGBMRegressor(
+                    objective='quantile', alpha=0.90,
+                    n_estimators=100, max_depth=5,
+                    learning_rate=0.1, min_child_samples=10,
+                    random_state=42, verbose=-1
+                ),
+            }
+        else:
+            # Fallback to GradientBoostingRegressor
+            self.quantile_models = {
+                0.10: GradientBoostingRegressor(
+                    loss='quantile', alpha=0.10,
+                    n_estimators=100, max_depth=5,
+                    learning_rate=0.1, min_samples_split=10,
+                    random_state=42
+                ),
+                0.50: GradientBoostingRegressor(
+                    loss='quantile', alpha=0.50,
+                    n_estimators=100, max_depth=5,
+                    learning_rate=0.1, min_samples_split=10,
+                    random_state=42
+                ),
+                0.90: GradientBoostingRegressor(
+                    loss='quantile', alpha=0.90,
+                    n_estimators=100, max_depth=5,
+                    learning_rate=0.1, min_samples_split=10,
+                    random_state=42
+                ),
+            }
         self.model = self.quantile_models[0.50]  # Default median model for compatibility
 
         # Base models for regression stacking (used for all quantiles)
@@ -2031,7 +2055,7 @@ class QuantilePropModel(BaseModelTrainer):
         if HAS_XGBOOST:
             self.base_models.append(xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42))
         if HAS_LIGHTGBM:
-            self.base_models.append(lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42))
+            self.base_models.append(lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42, verbose=-1))
 
     def prepare_training_data(
         self,
@@ -2161,12 +2185,12 @@ class QuantilePropModel(BaseModelTrainer):
             std_dev = np.abs(y_pred_median_arr) * (1.0 - confidence_scores / 100.0)
 
             # Estimate quantiles from median + std_dev
-            # q45 ≈ median - 0.126 * std_dev (10th percentile offset)
-            # q55 ≈ median + 0.126 * std_dev (90th percentile offset)
+            # q10 ≈ median - 1.282 * std_dev (10th percentile offset using z-score)
+            # q90 ≈ median + 1.282 * std_dev (90th percentile offset using z-score)
             predictions = {
-                0.45: y_pred_median_arr - 0.126 * std_dev,
+                0.10: y_pred_median_arr - 1.282 * std_dev,
                 0.50: y_pred_median_arr,
-                0.55: y_pred_median_arr + 0.126 * std_dev,
+                0.90: y_pred_median_arr + 1.282 * std_dev,
             }
             y_pred_median = predictions[0.50]
 
@@ -2189,7 +2213,17 @@ class QuantilePropModel(BaseModelTrainer):
         y_pred_median = predictions[0.50]
 
         # Check quantile crossing (lower should be <= median <= upper)
-        crossings = np.sum(predictions[0.45] > predictions[0.55])
+        crossings = np.sum(predictions[0.10] > predictions[0.90])
+
+        # Calculate prediction band width for bet sizing logic
+        pred_low = predictions[0.10]
+        pred_high = predictions[0.90]
+        band_widths = pred_high - pred_low
+        avg_band_width = np.mean(band_widths)
+
+        # Calculate empirical coverage (% of actual values within prediction bands)
+        within_bands = np.sum((y_test >= pred_low) & (y_test <= pred_high))
+        empirical_coverage = within_bands / len(y_test) if len(y_test) > 0 else 0.0
 
         self.training_metrics = {
             "mse": mean_squared_error(y_test, y_pred_median),
@@ -2201,6 +2235,9 @@ class QuantilePropModel(BaseModelTrainer):
             "quantile_crossings": int(crossings),
             "quantiles_trained": list(self.quantile_models.keys()),
             "using_stacking_meta_learner": len(self.stacking_ensembles) > 0,
+            "avg_band_width": float(avg_band_width),
+            "empirical_coverage": float(empirical_coverage),
+            "theoretical_coverage": 0.80,  # 80% of data should fall within 10th-90th percentile
         }
 
         print(f"  Quantile {self.prop_type.title()} Model Results:")
@@ -2208,6 +2245,8 @@ class QuantilePropModel(BaseModelTrainer):
         print(f"    MAE: {self.training_metrics['mae']:.2f}")
         print(f"    R²: {self.training_metrics['r2']:.4f}")
         print(f"    Quantile crossings: {crossings} (should be 0)")
+        print(f"    Avg band width (Q90-Q10): {avg_band_width:.2f}")
+        print(f"    Empirical coverage: {empirical_coverage:.1%} (target: 80%)")
         if len(self.stacking_ensembles) > 0:
             print(f"    Using StackingMetaLearner: Yes")
 
@@ -2244,52 +2283,85 @@ class QuantilePropModel(BaseModelTrainer):
             # Calculate std_dev from confidence score
             std_dev = abs(q50) * (1.0 - confidence_scores[0] / 100.0)
 
-            # Estimate quantiles from median + std_dev
-            q45 = q50 - 0.126 * std_dev
-            q55 = q50 + 0.126 * std_dev
+            # Estimate quantiles from median + std_dev (using z-scores)
+            q10 = q50 - 1.282 * std_dev  # 10th percentile
+            q90 = q50 + 1.282 * std_dev  # 90th percentile
         else:
             # Get predictions from all quantile models
-            q45 = self.quantile_models[0.45].predict(X_scaled)[0]
-            q50 = self.quantile_models[0.50].predict(X_scaled)[0]  # Median
-            q55 = self.quantile_models[0.55].predict(X_scaled)[0]
+            q10_raw = self.quantile_models[0.10].predict(X_scaled)[0]
+            q50_raw = self.quantile_models[0.50].predict(X_scaled)[0]  # Median
+            q90_raw = self.quantile_models[0.90].predict(X_scaled)[0]
+
+            # Enforce quantile ordering (q10 <= q50 <= q90)
+            # This can happen with independent models
+            q10 = min(q10_raw, q50_raw)
+            q50 = max(min(q50_raw, q90_raw), q10)
+            q90 = max(q90_raw, q50)
+
+        # Calculate prediction band width
+        band_width = q90 - q10
+
+        # Bet sizing logic based on prediction bands
+        base_confidence = 75.0  # Default confidence
+        if band_width > 8.0:
+            # Wide bands (high uncertainty) → Reduce bet size by 50%
+            bet_size_multiplier = 0.5
+            confidence_adjustment = -15.0
+        elif band_width < 3.0:
+            # Narrow bands (low uncertainty) → Increase confidence by 10%
+            bet_size_multiplier = 1.0
+            confidence_adjustment = 10.0
+        else:
+            # Normal bands
+            bet_size_multiplier = 1.0
+            confidence_adjustment = 0.0
 
         result = {
             "predicted_value": float(q50),  # Use median as main prediction
-            "q45": float(q45),
-            "q50": float(q50),
-            "q55": float(q55),
-            "prediction_spread": float(q55 - q45),  # Uncertainty width
+            "pred_low": float(q10),
+            "pred_median": float(q50),
+            "pred_high": float(q90),
+            "prediction_spread": float(band_width),  # Uncertainty width
             "prop_type": self.prop_type,
+            "bet_size_multiplier": bet_size_multiplier,
+            "confidence_adjustment": confidence_adjustment,
         }
 
         if prop_line is not None:
             result["prop_line"] = prop_line
 
             # Calculate implied probability using quantile positions
-            # If line is below q45, strong over
-            # If line is above q55, strong under
-            # If line is between q45-q55, interpolate
-            if prop_line <= q45:
-                over_prob = 0.55 + 0.35 * (q45 - prop_line) / max(q50 - q45 + 1, 1)
-            elif prop_line >= q55:
-                over_prob = 0.45 - 0.35 * (prop_line - q55) / max(q55 - q50 + 1, 1)
+            # If line is below q10, strong over (>90% chance)
+            # If line is above q90, strong under (<10% chance)
+            # If line is between q10-q90, interpolate
+            if prop_line <= q10:
+                # Line is below 10th percentile → >90% over
+                over_prob = 0.90 + 0.05 * (q10 - prop_line) / max(q50 - q10 + 1, 1)
+            elif prop_line >= q90:
+                # Line is above 90th percentile → <10% over
+                over_prob = 0.10 - 0.05 * (prop_line - q90) / max(q90 - q50 + 1, 1)
             else:
-                # Linear interpolation between q45 and q55
-                range_width = q55 - q45
+                # Linear interpolation between q10 and q90
+                range_width = q90 - q10
                 if range_width > 0:
-                    position = (prop_line - q45) / range_width
-                    over_prob = 0.55 - 0.10 * position  # 0.55 at q45, 0.45 at q55
+                    position = (prop_line - q10) / range_width
+                    # At q10: 90% over, at q50: 50% over, at q90: 10% over
+                    over_prob = 0.90 - 0.80 * position
                 else:
                     over_prob = 0.50
 
             # Clip to valid probability range
             over_prob = float(np.clip(over_prob, 0.05, 0.95))
 
+            # Apply confidence adjustment from bet sizing logic
+            adjusted_confidence = abs(over_prob - 0.5) * 2  # 0 to 1 scale
+            adjusted_confidence = min(1.0, adjusted_confidence + confidence_adjustment / 100.0)
+
             result["over_probability"] = over_prob
             result["under_probability"] = 1.0 - over_prob
             result["prediction"] = "over" if over_prob > 0.5 else "under"
             result["edge"] = q50 - prop_line
-            result["confidence"] = abs(over_prob - 0.5) * 2  # 0 to 1 scale
+            result["confidence"] = adjusted_confidence
 
         return result
 

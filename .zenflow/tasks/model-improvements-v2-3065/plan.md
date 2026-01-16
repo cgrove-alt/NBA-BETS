@@ -680,6 +680,7 @@ Save to `{@artifacts_path}/plan.md`.
 ---
 
 ### [ ] Task 3.2: Implement Quantile Regression for All Prop Types
+<!-- chat-id: fd9f2bc6-f063-42ee-81b3-46237e722a1a -->
 **Priority**: P2 (Medium - better risk management)
 **Location**: `model_trainer.py`
 **Estimated Effort**: 6 hours
