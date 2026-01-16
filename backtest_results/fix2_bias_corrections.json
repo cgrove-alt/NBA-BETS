@@ -1,0 +1,43 @@
+{
+  "assists": {
+    "count": 11975,
+    "current_bias": -0.558,
+    "mae": 1.42,
+    "rmse": 2.012,
+    "recommended_correction": 0.558
+  },
+  "points": {
+    "count": 11975,
+    "current_bias": 0.986,
+    "mae": 5.004,
+    "rmse": 6.509,
+    "recommended_correction": -0.986
+  },
+  "pra": {
+    "count": 11975,
+    "current_bias": -2.678,
+    "mae": 6.552,
+    "rmse": 8.637,
+    "recommended_correction": 2.678
+  },
+  "rebounds": {
+    "count": 11975,
+    "current_bias": -0.904,
+    "mae": 2.088,
+    "rmse": 2.813,
+    "recommended_correction": 0.904
+  },
+  "threes": {
+    "count": 11975,
+    "current_bias": -0.246,
+    "mae": 0.975,
+    "rmse": 1.376,
+    "recommended_correction": 0.246
+  },
+  "overall": {
+    "count": 59875,
+    "current_bias": -0.68,
+    "mae": 3.208,
+    "rmse": 5.115
+  }
+}

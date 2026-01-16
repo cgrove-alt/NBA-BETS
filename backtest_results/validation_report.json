@@ -1,0 +1,76 @@
+{
+  "overall_rmse": {
+    "value": Infinity,
+    "target": "< 5.0",
+    "status": "FAIL",
+    "delta_from_phase1": Infinity
+  },
+  "overall_bias": {
+    "value": Infinity,
+    "target": "< |0.5|",
+    "status": "FAIL"
+  },
+  "per_prop_bias": {
+    "target": "< |0.5|",
+    "status": "FAIL",
+    "by_prop": {
+      "points": {
+        "value": Infinity,
+        "status": "FAIL"
+      },
+      "rebounds": {
+        "value": Infinity,
+        "status": "FAIL"
+      },
+      "assists": {
+        "value": Infinity,
+        "status": "FAIL"
+      },
+      "threes": {
+        "value": Infinity,
+        "status": "FAIL"
+      },
+      "pra": {
+        "value": Infinity,
+        "status": "FAIL"
+      }
+    }
+  },
+  "elite_strong_confidence": {
+    "status": "SKIP",
+    "reason": "Confidence data not in standard backtest results"
+  },
+  "confidence_correlation": {
+    "status": "SKIP",
+    "reason": "Confidence data not in standard backtest results"
+  },
+  "phase2_vs_phase1": {
+    "phase1_rmse": 5.435,
+    "phase2_rmse": Infinity,
+    "improvement": -Infinity,
+    "status": "FAIL"
+  },
+  "threes_r2": {
+    "value": -Infinity,
+    "target": "> 0.0",
+    "status": "FAIL"
+  },
+  "dnp_errors": {
+    "total_dnp_predictions": 11172,
+    "by_prop_type": {
+      "rebounds": 1311,
+      "threes": 5138,
+      "assists": 2931,
+      "points": 1348,
+      "pra": 444
+    },
+    "status": "FAIL",
+    "sample_dnp_errors": [
+      "Buddy Hield rebounds: pred=2.5 actual=0",
+      "Branden Carlson rebounds: pred=0.3 actual=0",
+      "Pat Connaughton rebounds: pred=0.9 actual=0",
+      "Sion James rebounds: pred=1.4 actual=0",
+      "Matisse Thybulle rebounds: pred=1.6 actual=0"
+    ]
+  }
+}
