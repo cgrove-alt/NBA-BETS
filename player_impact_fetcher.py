@@ -137,8 +137,10 @@ class PlayerImpactFetcher:
             # EPM scale: expand slightly
             return max(-10, min(10, value * 1.4))
         elif metric_type == 'raptor':
-            # RAPTOR scale: expand slightly
-            return max(-10, min(10, value * 1.25))
+            # RAPTOR scale: Real values range from ~-8 to +15
+            # Scale down to fit -10 to +10 range
+            # Elite player (RAPTOR=15) → 10, Average (RAPTOR=0) → 0
+            return max(-10, min(10, value * 0.67))
         elif metric_type == 'plus_minus':
             # Plus/minus per 36 already roughly on scale
             return max(-10, min(10, value))
@@ -305,15 +307,19 @@ class PlayerImpactFetcher:
             print(f"Error fetching ESPN EPM: {e}")
             return {}
 
-    def fetch_fivethirtyeight_raptor(self, season: str = "2024-25") -> Dict[str, Dict]:
+    def fetch_fivethirtyeight_raptor(self, season: str = "2024-25", use_latest_available: bool = True) -> Dict[str, Dict]:
         """
         Fetch FiveThirtyEight RAPTOR ratings.
 
         RAPTOR (Robust Algorithm using Player Tracking and On/off Ratings)
         is FiveThirtyEight's player impact metric.
 
+        NOTE: FiveThirtyEight RAPTOR data typically lags by 1-2 years. If the requested
+        season is not available, this will use the most recent season's data.
+
         Args:
             season: Season string (e.g., "2024-25")
+            use_latest_available: If True, use latest season when requested season unavailable
 
         Returns:
             Dictionary mapping player name to impact metrics
@@ -321,12 +327,8 @@ class PlayerImpactFetcher:
         print(f"Fetching FiveThirtyEight RAPTOR for {season}...")
 
         # FiveThirtyEight provides data on GitHub
-        # For current season, they may have a live endpoint
         # Historical data: https://github.com/fivethirtyeight/data/tree/master/nba-raptor
-
-        # Try GitHub raw file for latest season
-        season_year = season.split('-')[0]
-        url = f"https://raw.githubusercontent.com/fivethirtyeight/data/master/nba-raptor/modern_RAPTOR_by_player.csv"
+        url = "https://raw.githubusercontent.com/fivethirtyeight/data/master/nba-raptor/modern_RAPTOR_by_player.csv"
 
         try:
             headers = {
@@ -341,11 +343,10 @@ class PlayerImpactFetcher:
                 print(f"Could not fetch RAPTOR data: HTTP {response.status_code}")
                 return {}
 
-            # Parse CSV data using pandas-style approach for robustness
+            # Parse CSV data
             import csv
             from io import StringIO
 
-            players_dict = {}
             csv_reader = csv.DictReader(StringIO(response.text))
 
             # Check if CSV has required columns
@@ -357,58 +358,74 @@ class PlayerImpactFetcher:
             # Find column names (case-insensitive)
             fieldnames_lower = {f.lower(): f for f in fieldnames}
 
-            name_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'player' in k or 'name' in k), None)
-            raptor_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'raptor' in k), None)
-            team_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'team' in k), None)
+            # Find correct columns
+            name_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'player' in k and 'name' in k), None)
+            player_id_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'player' in k and 'id' in k), None)
             season_col = next((fieldnames_lower[k] for k in fieldnames_lower if 'season' in k), None)
+
+            # FIX: Specifically select raptor_box_total (overall box score impact)
+            raptor_col = fieldnames_lower.get('raptor_box_total') or \
+                         fieldnames_lower.get('raptor_onoff_total') or \
+                         next((fieldnames_lower[k] for k in fieldnames_lower if 'raptor' in k and 'total' in k), None)
 
             if not name_col or not raptor_col:
                 print(f"RAPTOR: Required columns not found. Available: {fieldnames}")
                 return {}
 
-            # Parse data rows
+            # Parse data rows and find latest season
+            players_dict = {}
+            seasons_found = set()
+
             for row in csv_reader:
                 try:
                     player_name = row[name_col].strip()
                     if not player_name:
                         continue
 
-                    # Get RAPTOR value (may be in different columns)
+                    player_season = row.get(season_col, '').strip() if season_col else ''
+                    seasons_found.add(player_season)
+
+                    # Get RAPTOR value
                     raptor_raw = None
-                    for possible_raptor_col in [raptor_col, 'raptor_total', 'raptor_offense', 'war_total']:
-                        if possible_raptor_col in row:
-                            try:
-                                raptor_raw = float(row[possible_raptor_col])
-                                break
-                            except (ValueError, TypeError):
-                                continue
+                    if raptor_col in row:
+                        try:
+                            raptor_raw = float(row[raptor_col])
+                        except (ValueError, TypeError):
+                            continue
 
                     if raptor_raw is None:
                         continue
 
-                    team = row.get(team_col, 'UNK').strip() if team_col else 'UNK'
-                    player_season = row.get(season_col, '').strip() if season_col else ''
+                    # Get player_id for team lookup
+                    player_id = row.get(player_id_col, '').strip() if player_id_col else ''
 
-                    # Filter to current season if specified
-                    if season_col and season_year and season_year not in player_season:
-                        continue
+                    # FIX: Lookup current team via player_id using nba_api
+                    team = self._lookup_team_for_player(player_name, player_id)
 
                     # Standardize to -10 to +10 scale
                     standardized_impact = self._standardize_metric(raptor_raw, 'raptor')
 
-                    players_dict[player_name] = {
-                        'source': 'raptor',
-                        'raw_raptor': raptor_raw,
-                        'impact_metric': standardized_impact,
-                        'team': team,
-                        'season': player_season
-                    }
+                    # Use latest data for each player (CSV may have multiple seasons)
+                    if player_name not in players_dict or player_season > players_dict[player_name].get('season', ''):
+                        players_dict[player_name] = {
+                            'source': 'raptor',
+                            'raw_raptor': raptor_raw,
+                            'impact_metric': standardized_impact,
+                            'team': team,
+                            'season': player_season,
+                            'player_id': player_id
+                        }
 
                 except (ValueError, KeyError, TypeError) as e:
                     continue
 
             if players_dict:
-                print(f"Fetched RAPTOR data for {len(players_dict)} players")
+                latest_season = max(seasons_found) if seasons_found else "unknown"
+                print(f"Fetched RAPTOR data for {len(players_dict)} players (latest season: {latest_season})")
+
+                if use_latest_available and latest_season != season:
+                    print(f"⚠ Note: RAPTOR data for {season} not available. Using {latest_season} data.")
+
                 self.raptor_cache = players_dict
                 self._save_cache('raptor')
                 return players_dict
@@ -419,6 +436,28 @@ class PlayerImpactFetcher:
         except Exception as e:
             print(f"Error fetching RAPTOR: {e}")
             return {}
+
+    def _lookup_team_for_player(self, player_name: str, player_id: str = None) -> str:
+        """
+        Lookup current team for a player.
+
+        OPTIMIZED: Returns 'UNK' to avoid expensive nba_api calls during RAPTOR fetching.
+        Teams will be resolved later when fetching from nba_api basic stats.
+
+        Args:
+            player_name: Player's full name
+            player_id: FiveThirtyEight player ID (optional)
+
+        Returns:
+            Team abbreviation or 'UNK' if not found
+        """
+        # Check if already in basic_stats_cache
+        if player_name in self.basic_stats_cache:
+            return self.basic_stats_cache[player_name].get('team', 'UNK')
+
+        # Return UNK - teams will be resolved when nba_api is called
+        # This avoids expensive API calls (4685 players × 0.6s = 47 minutes!)
+        return 'UNK'
 
     def fetch_basic_stats_from_nba_api(self, season: str = "2024-25") -> Dict[str, Dict]:
         """
@@ -682,26 +721,44 @@ class PlayerImpactFetcher:
 
         return team_players
 
+    def _enrich_raptor_with_teams(self):
+        """
+        Enrich RAPTOR data with current team information from nba_api basic stats.
+
+        This resolves 'UNK' teams in RAPTOR cache by matching player names.
+        """
+        if not self.raptor_cache or not self.basic_stats_cache:
+            return
+
+        enriched_count = 0
+        for player_name, raptor_data in self.raptor_cache.items():
+            if raptor_data.get('team') == 'UNK' and player_name in self.basic_stats_cache:
+                raptor_data['team'] = self.basic_stats_cache[player_name].get('team', 'UNK')
+                enriched_count += 1
+
+        if enriched_count > 0:
+            print(f"  ✓ Enriched {enriched_count} RAPTOR players with team data from nba_api")
+
     def refresh_data(self, season: str = "2024-25"):
         """
         Refresh all player data from sources.
 
         Tries in priority order:
-        1. DARKO DPM
-        2. FiveThirtyEight RAPTOR (more reliable than ESPN)
-        3. nba_api basic stats (fallback)
+        1. DARKO DPM (best, but requires JavaScript)
+        2. FiveThirtyEight RAPTOR (reliable GitHub CSV)
+        3. nba_api basic stats (always fetched for team enrichment)
 
         Args:
             season: Season string (e.g., "2024-25")
         """
         print("Refreshing player impact data...")
 
-        # Try DARKO first (best metric)
+        # Try DARKO first (best metric, but likely to fail)
         darko_data = self.fetch_darko_dpm(season)
         if darko_data:
             print(f"✓ Successfully loaded DARKO data for {len(darko_data)} players")
 
-        # Try RAPTOR (reliable GitHub data)
+        # Try RAPTOR (reliable GitHub data - will have UNK teams)
         raptor_data = self.fetch_fivethirtyeight_raptor(season)
         if raptor_data:
             print(f"✓ Successfully loaded RAPTOR data for {len(raptor_data)} players")
@@ -712,13 +769,17 @@ class PlayerImpactFetcher:
         if epm_data:
             print(f"✓ Successfully loaded ESPN EPM data for {len(epm_data)} players")
 
-        # Fallback to nba_api
-        if not darko_data and not raptor_data and not epm_data:
-            if HAS_NBA_API:
-                print("Falling back to nba_api basic stats...")
-                self.fetch_basic_stats_from_nba_api(season)
-            else:
-                print("WARNING: No player impact data sources available!")
+        # ALWAYS fetch nba_api for current season team data
+        # This enriches RAPTOR cache with correct teams
+        if HAS_NBA_API:
+            print("Fetching nba_api basic stats (for team enrichment)...")
+            self.fetch_basic_stats_from_nba_api(season)
+
+            # Enrich RAPTOR data with teams
+            if self.raptor_cache:
+                self._enrich_raptor_with_teams()
+        else:
+            print("WARNING: nba_api not available - cannot enrich team data")
 
         print(f"Data refresh complete. Total unique players: {len(set(list(self.darko_cache.keys()) + list(self.raptor_cache.keys()) + list(self.epm_cache.keys()) + list(self.basic_stats_cache.keys())))}")
 
