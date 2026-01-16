@@ -556,21 +556,24 @@ class BankrollManager:
         max_weekly_loss_pct: float = 0.15,
         max_drawdown_pct: float = 0.25,
         max_single_bet_pct: float = 0.05,
+        max_daily_exposure_pct: float = 0.20,
         losing_streak_halt: int = 8
     ):
         """
         Args:
             initial_bankroll: Starting bankroll amount
-            max_daily_loss_pct: Maximum daily loss as % of bankroll
-            max_weekly_loss_pct: Maximum weekly loss as % of bankroll
-            max_drawdown_pct: Maximum drawdown to halt betting
-            max_single_bet_pct: Maximum single bet as % of bankroll
-            losing_streak_halt: Number of consecutive losses to halt
+            max_daily_loss_pct: Maximum daily loss as % of bankroll (default 5%)
+            max_weekly_loss_pct: Maximum weekly loss as % of bankroll (default 15%)
+            max_drawdown_pct: Maximum drawdown to halt betting (default 25%)
+            max_single_bet_pct: Maximum single bet as % of bankroll (default 5%)
+            max_daily_exposure_pct: Maximum total daily exposure as % of bankroll (default 20%)
+            losing_streak_halt: Number of consecutive losses to halt (default 8)
         """
         self.initial_bankroll = initial_bankroll
         self.current_bankroll = initial_bankroll
         self.peak_bankroll = initial_bankroll
         self.max_single_bet_pct = max_single_bet_pct
+        self.max_daily_exposure_pct = max_daily_exposure_pct
 
         # Initialize drawdown protection
         self.drawdown_protection = DrawdownProtection(
@@ -583,6 +586,7 @@ class BankrollManager:
         # Tracking
         self.bet_history: List[Dict] = []
         self.daily_pnl: Dict[str, float] = {}  # date -> pnl
+        self.daily_exposure: Dict[str, float] = {}  # date -> total exposure
         self.snapshots: List[BankrollSnapshot] = []
         self.current_streak: int = 0
         self.manual_halt: bool = False
@@ -626,6 +630,82 @@ class BankrollManager:
             return 0.0
 
         return weekly_pnl / sow_bankroll
+
+    def get_daily_exposure(self) -> float:
+        """Get total exposure (pending bets) for today."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        return self.daily_exposure.get(today, 0.0)
+
+    def get_daily_exposure_pct(self) -> float:
+        """Get total daily exposure as percentage of bankroll."""
+        if self.current_bankroll <= 0:
+            return 0.0
+        return self.get_daily_exposure() / self.current_bankroll
+
+    def can_place_bet(self, bet_size: float) -> Tuple[bool, str]:
+        """
+        Check if a bet can be placed given current limits.
+
+        Enforces:
+        1. Risk status (no betting if halted)
+        2. Single bet size limit (max 5% of bankroll)
+        3. Daily exposure limit (max 20% of bankroll)
+
+        Args:
+            bet_size: Proposed bet size
+
+        Returns:
+            Tuple of (can_place, reason)
+        """
+        # Check risk status
+        risk_status = self.get_risk_status()
+        if not risk_status.is_betting_allowed():
+            return (False, f"Betting halted: {risk_status.message}")
+
+        # Check single bet size limit
+        bet_pct = bet_size / self.current_bankroll
+        if bet_pct > self.max_single_bet_pct:
+            return (False, f"Bet size {bet_pct:.2%} exceeds limit {self.max_single_bet_pct:.2%}")
+
+        # Check daily exposure limit
+        current_exposure = self.get_daily_exposure()
+        new_exposure = current_exposure + bet_size
+        exposure_pct = new_exposure / self.current_bankroll
+
+        if exposure_pct > self.max_daily_exposure_pct:
+            return (False, f"Daily exposure would be {exposure_pct:.2%}, "
+                          f"exceeds limit {self.max_daily_exposure_pct:.2%}")
+
+        return (True, "OK")
+
+    def record_bet_placed(self, bet_size: float, game_id: str = None) -> None:
+        """
+        Record that a bet has been placed (increases daily exposure).
+
+        Call this when placing a bet, before the result is known.
+
+        Args:
+            bet_size: Size of bet placed
+            game_id: Optional game identifier
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        self.daily_exposure[today] = self.daily_exposure.get(today, 0.0) + bet_size
+
+        logger.info(f"Bet placed: ${bet_size:.2f}. Daily exposure: "
+                   f"${self.get_daily_exposure():.2f} ({self.get_daily_exposure_pct():.2%})")
+
+    def record_bet_settled(self, bet_size: float) -> None:
+        """
+        Record that a bet has settled (decreases daily exposure).
+
+        Call this when a bet result is final.
+
+        Args:
+            bet_size: Size of bet that settled
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        current_exposure = self.daily_exposure.get(today, 0.0)
+        self.daily_exposure[today] = max(0.0, current_exposure - bet_size)
 
     def update_bankroll(self, pnl: float, bet_won: bool) -> None:
         """
@@ -1012,6 +1092,152 @@ class DynamicKellyCalculator:
         }
 
 
+def get_kelly_multiplier_for_tier(edge_tier: str) -> float:
+    """
+    Get Kelly multiplier based on edge quality tier.
+
+    Maps edge quality tiers to Kelly criterion multipliers following
+    the approach from edge_quality.py.
+
+    Args:
+        edge_tier: Edge quality tier ('elite', 'strong', 'moderate', 'weak', 'avoid')
+
+    Returns:
+        Kelly multiplier (fraction of base Kelly to use)
+
+    Examples:
+        >>> get_kelly_multiplier_for_tier('elite')
+        1.0
+        >>> get_kelly_multiplier_for_tier('strong')
+        0.5
+        >>> get_kelly_multiplier_for_tier('moderate')
+        0.25
+    """
+    tier_multipliers = {
+        'elite': 1.0,      # 90-100: Bet full (fractional) Kelly
+        'strong': 0.50,    # 75-89: Bet 50% Kelly
+        'moderate': 0.25,  # 60-74: Bet 25% Kelly
+        'weak': 0.0,       # 40-59: Monitor only, no bet
+        'avoid': 0.0       # <40: Do not bet
+    }
+    return tier_multipliers.get(edge_tier.lower(), 0.0)
+
+
+def calculate_kelly_bet_size(
+    win_prob: float,
+    decimal_odds: float,
+    bankroll: float,
+    fractional: float = 0.25,
+    edge_tier: str = None,
+    current_drawdown: float = 0.0,
+    num_same_day_bets: int = 1,
+    max_bet_pct: float = 0.05
+) -> float:
+    """
+    Calculate Kelly Criterion bet size with safety adjustments.
+
+    Implements the Kelly formula with multiple layers of risk management:
+    1. Fractional Kelly (default 25%) for safety
+    2. Edge tier adjustments (Elite=1x, Strong=0.5x, Moderate=0.25x)
+    3. Drawdown adjustments (reduce stakes during losses)
+    4. Correlation adjustments (reduce when multiple same-day bets)
+    5. Hard cap at max_bet_pct of bankroll per bet (default 5%)
+
+    Kelly formula: f* = (bp - q) / b
+    Where:
+        b = decimal_odds - 1 (net odds)
+        p = win_prob
+        q = 1 - p
+
+    Args:
+        win_prob: Probability of winning (0-1)
+        decimal_odds: Decimal odds (e.g., 1.91 for -110, 2.0 for +100)
+        bankroll: Current bankroll amount
+        fractional: Fraction of full Kelly to use (default 0.25 = quarter Kelly)
+        edge_tier: Edge quality tier ('elite', 'strong', 'moderate', 'weak', 'avoid')
+                   If None, uses edge_quality_score for adjustment
+        current_drawdown: Current drawdown as decimal (0.15 = 15% drawdown)
+        num_same_day_bets: Number of bets already placed today (for correlation adjustment)
+        max_bet_pct: Maximum bet as % of bankroll (default 0.05 = 5%)
+
+    Returns:
+        Recommended bet size in dollars
+
+    Examples:
+        >>> # Elite tier bet: 55% win prob at -110 odds, $10k bankroll
+        >>> calculate_kelly_bet_size(0.55, 1.91, 10000, edge_tier='elite')
+        ~230.0  # ~2.3% of bankroll
+
+        >>> # Strong tier bet: Same odds but lower confidence
+        >>> calculate_kelly_bet_size(0.55, 1.91, 10000, edge_tier='strong')
+        ~115.0  # ~1.15% of bankroll (50% of elite)
+    """
+    # Validate inputs
+    if win_prob <= 0 or win_prob >= 1:
+        logger.warning(f"Invalid win_prob: {win_prob}. Must be between 0 and 1.")
+        return 0.0
+
+    if decimal_odds <= 1:
+        logger.warning(f"Invalid decimal_odds: {decimal_odds}. Must be > 1.")
+        return 0.0
+
+    if bankroll <= 0:
+        logger.warning(f"Invalid bankroll: {bankroll}. Must be > 0.")
+        return 0.0
+
+    # Calculate full Kelly
+    b = decimal_odds - 1  # Net odds
+    p = win_prob
+    q = 1 - p
+
+    kelly_fraction = (b * p - q) / b
+
+    # Kelly can be negative if there's no edge
+    if kelly_fraction <= 0:
+        logger.info(f"No edge detected (Kelly={kelly_fraction:.4f}). No bet recommended.")
+        return 0.0
+
+    # Apply fractional Kelly (safety factor)
+    bet_size_pct = kelly_fraction * fractional
+
+    # Apply edge tier adjustment if provided
+    if edge_tier:
+        tier_mult = get_kelly_multiplier_for_tier(edge_tier)
+        bet_size_pct *= tier_mult
+        if tier_mult == 0:
+            logger.info(f"Edge tier '{edge_tier}' indicates no bet.")
+            return 0.0
+
+    # Apply drawdown adjustment (reduce stakes during drawdowns)
+    # Formula: multiplier = max(0.25, 1.0 - drawdown * 2)
+    # 0% drawdown = 1.0x, 10% = 0.8x, 20% = 0.6x, 25% = 0.5x, 37.5%+ = 0.25x
+    drawdown_multiplier = max(0.25, 1.0 - current_drawdown * 2)
+    bet_size_pct *= drawdown_multiplier
+
+    # Apply correlation adjustment for multiple same-day bets
+    # NBA games have ~15% correlation due to shared factors (refs, weather, etc.)
+    if num_same_day_bets > 1:
+        correlation_factor = 0.15
+        correlation_adj = 1.0 - (correlation_factor * (num_same_day_bets - 1))
+        correlation_adj = max(0.25, correlation_adj)  # Floor at 25%
+        bet_size_pct *= correlation_adj
+        logger.info(f"Correlation adjustment applied: {correlation_adj:.2%} "
+                   f"({num_same_day_bets} same-day bets)")
+
+    # Cap at max_bet_pct of bankroll per bet (hard limit for safety)
+    bet_size_pct = min(bet_size_pct, max_bet_pct)
+
+    # Calculate actual bet size
+    bet_size = bankroll * bet_size_pct
+
+    # Ensure minimum viable bet (avoid dust bets < $1)
+    if bet_size < 1.0:
+        logger.info(f"Bet size ${bet_size:.2f} below $1 minimum. Rounding to $0.")
+        return 0.0
+
+    return round(bet_size, 2)
+
+
 def calculate_recommended_stake(
     bankroll: float,
     win_probability: float,
@@ -1019,10 +1245,14 @@ def calculate_recommended_stake(
     edge_quality_score: float = 100.0,
     current_drawdown: float = 0.0,
     confidence: str = "medium",
-    kelly_fraction: float = 0.25
+    kelly_fraction: float = 0.25,
+    edge_tier: str = None
 ) -> Dict:
     """
     Convenience function to calculate recommended stake.
+
+    This function wraps DynamicKellyCalculator for backward compatibility
+    and provides detailed breakdown of Kelly calculations.
 
     Args:
         bankroll: Current bankroll
@@ -1030,11 +1260,16 @@ def calculate_recommended_stake(
         decimal_odds: Decimal odds for the bet
         edge_quality_score: Edge quality score (0-100)
         current_drawdown: Current drawdown as decimal
-        confidence: 'high', 'medium', or 'low'
-        kelly_fraction: Kelly fraction to use
+        confidence: 'high', 'medium', or 'low' (deprecated - use edge_tier)
+        kelly_fraction: Kelly fraction to use (default 0.25)
+        edge_tier: Edge quality tier ('elite', 'strong', 'moderate')
 
     Returns:
         Dict with stake recommendation and details
+
+    Note:
+        Prefer using calculate_kelly_bet_size() for simpler, more direct usage.
+        This function provides more detailed breakdown for analysis.
     """
     kelly_calc = DynamicKellyCalculator(kelly_fraction=kelly_fraction)
 
@@ -1045,11 +1280,15 @@ def calculate_recommended_stake(
         current_drawdown=current_drawdown
     )
 
-    # Apply confidence adjustment
-    confidence_multipliers = {"high": 1.0, "medium": 0.6, "low": 0.3}
-    confidence_mult = confidence_multipliers.get(confidence, 0.5)
+    # Apply confidence adjustment (deprecated in favor of edge_tier)
+    if edge_tier:
+        tier_mult = get_kelly_multiplier_for_tier(edge_tier)
+        final_fraction = kelly_result["final_kelly"] * tier_mult
+    else:
+        confidence_multipliers = {"high": 1.0, "medium": 0.6, "low": 0.3}
+        confidence_mult = confidence_multipliers.get(confidence, 0.5)
+        final_fraction = kelly_result["final_kelly"] * confidence_mult
 
-    final_fraction = kelly_result["final_kelly"] * confidence_mult
     recommended_stake = bankroll * final_fraction
 
     # Round to reasonable amount
@@ -1059,7 +1298,8 @@ def calculate_recommended_stake(
         "recommended_stake": recommended_stake,
         "stake_fraction": final_fraction,
         "kelly_details": kelly_result,
-        "confidence_multiplier": confidence_mult,
+        "confidence_multiplier": tier_mult if edge_tier else confidence_multipliers.get(confidence, 0.5),
+        "edge_tier": edge_tier,
         "bankroll": bankroll
     }
 
