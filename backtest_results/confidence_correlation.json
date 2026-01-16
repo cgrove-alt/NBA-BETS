@@ -1,0 +1,11 @@
+{
+  "confidence_correlation": {
+    "value": 0.1019,
+    "p_value": 0.313016,
+    "n": 100,
+    "target": 0.5,
+    "status": "NOT_MET"
+  },
+  "mean_confidence": 31.79,
+  "mean_error": 3.235
+}

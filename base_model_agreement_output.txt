@@ -1,0 +1,69 @@
+======================================================================
+ANALYZING BASE MODEL AGREEMENT (Why Confidence is Broken)
+======================================================================
+
+POINTS:
+  Base models: 5
+  Mean CV: 1.0091
+  Median CV: 0.9987
+  Elite (<0.05): 0%
+  Strong (0.05-0.10): 0%
+  Elite+Strong: 0.0% (target: >=10%)
+  Avoid (>=0.30): 100%
+  Status: NOT MET
+
+REBOUNDS:
+  Base models: 5
+  Mean CV: 1.4054
+  Median CV: 1.4006
+  Elite (<0.05): 0%
+  Strong (0.05-0.10): 0%
+  Elite+Strong: 0.0% (target: >=10%)
+  Avoid (>=0.30): 100%
+  Status: NOT MET
+
+ASSISTS:
+  Base models: 5
+  Mean CV: 0.8824
+  Median CV: 0.8101
+  Elite (<0.05): 0%
+  Strong (0.05-0.10): 0%
+  Elite+Strong: 0.0% (target: >=10%)
+  Avoid (>=0.30): 100%
+  Status: NOT MET
+
+THREES:
+  Base models: 5
+  Mean CV: 0.3369
+  Median CV: 0.3277
+  Elite (<0.05): 0%
+  Strong (0.05-0.10): 0%
+  Elite+Strong: 0.0% (target: >=10%)
+  Avoid (>=0.30): 61%
+  Status: NOT MET
+
+PRA:
+  Base models: 5
+  Mean CV: 1.2477
+  Median CV: 1.2431
+  Elite (<0.05): 0%
+  Strong (0.05-0.10): 0%
+  Elite+Strong: 0.0% (target: >=10%)
+  Avoid (>=0.30): 100%
+  Status: NOT MET
+
+======================================================================
+SUMMARY
+======================================================================
+points  : CV=1.0091  E+S=  0.0%  NOT MET
+rebounds: CV=1.4054  E+S=  0.0%  NOT MET
+assists : CV=0.8824  E+S=  0.0%  NOT MET
+threes  : CV=0.3369  E+S=  0.0%  NOT MET
+pra     : CV=1.2477  E+S=  0.0%  NOT MET
+
+Overall Elite+Strong: 0.0% (target: >=10%)
+
+❌ CRITICAL: Base models have EXTREME disagreement
+Root cause: CV thresholds too strict OR models poorly calibrated
+
+Saved to: backtest_results/base_model_agreement.json

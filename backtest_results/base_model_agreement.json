@@ -1,0 +1,32 @@
+{
+  "points": {
+    "mean_cv": 1.009055788102183,
+    "median_cv": 0.9987079219652839,
+    "elite_strong_pct": 0.0,
+    "status": "NOT MET"
+  },
+  "rebounds": {
+    "mean_cv": 1.4054077330825447,
+    "median_cv": 1.4005971345220862,
+    "elite_strong_pct": 0.0,
+    "status": "NOT MET"
+  },
+  "assists": {
+    "mean_cv": 0.8823501870124045,
+    "median_cv": 0.8101105120779556,
+    "elite_strong_pct": 0.0,
+    "status": "NOT MET"
+  },
+  "threes": {
+    "mean_cv": 0.3369154420321084,
+    "median_cv": 0.3277236896117395,
+    "elite_strong_pct": 0.0,
+    "status": "NOT MET"
+  },
+  "pra": {
+    "mean_cv": 1.2476535910877267,
+    "median_cv": 1.2431465010504752,
+    "elite_strong_pct": 0.0,
+    "status": "NOT MET"
+  }
+}
