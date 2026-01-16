@@ -91,6 +91,17 @@ except ImportError:
     HAS_INJURY_TRACKER_V3 = False
     print("Warning: injury_tracker_v3.py not found. Using existing injury system.")
 
+# Phase 3 enhancement: Player Impact Metrics (DARKO/EPM/RAPTOR)
+try:
+    from player_impact_fetcher import PlayerImpactFetcher
+    _PLAYER_IMPACT_FETCHER = PlayerImpactFetcher()
+    HAS_PLAYER_IMPACT = True
+    print("✓ Player Impact Fetcher loaded successfully")
+except ImportError:
+    _PLAYER_IMPACT_FETCHER = None
+    HAS_PLAYER_IMPACT = False
+    print("Warning: player_impact_fetcher.py not found. Impact metrics will default to 0.")
+
 
 # Position mapping for analysis
 POSITION_GROUPS = {
@@ -2477,6 +2488,50 @@ class PlayerPropFeatureGenerator:
         else:
             features["minutes_std"] = 5
             features["minutes_cv"] = 0.2
+
+        # =========================================================
+        # PHASE 3 NEW FEATURES: Player Impact Metrics (DARKO/EPM/RAPTOR)
+        # These advanced metrics capture player's true value
+        # =========================================================
+        if HAS_PLAYER_IMPACT and _PLAYER_IMPACT_FETCHER:
+            try:
+                # Get player name from stats (both season_avg and game_log may have it)
+                player_name = None
+                if game_log and len(game_log) > 0:
+                    player_name = game_log[0].get("player_name")
+                if not player_name and season_avg:
+                    player_name = season_avg.get("player_name")
+
+                if player_name:
+                    # Get player's impact metric (-10 to +10 scale)
+                    features["player_impact_metric"] = _PLAYER_IMPACT_FETCHER.get_player_impact_metric(player_name)
+
+                    # Get opponent defensive impact if available
+                    if opponent_team_id and player_position:
+                        # Convert team_id to team abbreviation
+                        from data_fetcher import get_team_abbreviation
+                        try:
+                            opp_abbrev = get_team_abbreviation(opponent_team_id)
+                            if opp_abbrev:
+                                features["opponent_def_impact"] = _PLAYER_IMPACT_FETCHER.get_opponent_defensive_impact_vs_position(
+                                    opp_abbrev, player_position
+                                )
+                        except:
+                            features["opponent_def_impact"] = 0.0
+                    else:
+                        features["opponent_def_impact"] = 0.0
+                else:
+                    # Player name not found - default to 0
+                    features["player_impact_metric"] = 0.0
+                    features["opponent_def_impact"] = 0.0
+            except Exception as e:
+                # Silently handle any errors - don't break feature generation
+                features["player_impact_metric"] = 0.0
+                features["opponent_def_impact"] = 0.0
+        else:
+            # Impact fetcher not available - use defaults
+            features["player_impact_metric"] = 0.0
+            features["opponent_def_impact"] = 0.0
 
         return features
 
