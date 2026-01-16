@@ -31,6 +31,9 @@ from train_complete_balldontlie import (
     calculate_regression_adjustment_features
 )
 
+# Import injury tracking for DNP detection
+from injury_tracker_v3 import is_player_available, InjuryStatus
+
 warnings.filterwarnings('ignore')
 
 # Directories
@@ -429,11 +432,12 @@ class SeasonBacktester:
         'pra': 'pra',  # Computed: pts + reb + ast
     }
 
-    def __init__(self, season: int = 2025):
+    def __init__(self, season: int = 2025, verbose: bool = False):
         self.season = season
         self.models = {}
         self.player_calc = None
         self.team_calc = None
+        self.verbose = verbose
 
         # TIER 2.3: Minutes prediction model
         self.minutes_model = None
@@ -1440,6 +1444,47 @@ class SeasonBacktester:
                 if not features:
                     continue
 
+                # FIX #1: Check if player is available (injury/DNP detection)
+                # Parse game_date string to datetime if needed
+                game_datetime = datetime.strptime(game_date, '%Y-%m-%d') if isinstance(game_date, str) else game_date
+
+                # Try to check injury status (may not have historical data)
+                try:
+                    is_available, injury_status = is_player_available(player_id, game_datetime)
+
+                    # Skip predictions for OUT/DOUBTFUL players
+                    if not is_available:
+                        if self.verbose:
+                            print(f"  ⚠️  Skipping {player_name} - Injury status: {injury_status.value if injury_status else 'OUT'}")
+                        continue
+                except Exception as e:
+                    # Historical injury data may not be available - rely on minutes played check below
+                    if self.verbose and "historical" not in str(e).lower():
+                        print(f"  ⚠️  Could not check injury status for {player_name}: {e}")
+                    pass
+
+                # Also check if player actually played (DNP detection from box score)
+                minutes_played_str = actual_stats.get('min', '0')
+                minutes_played = 0
+                try:
+                    if isinstance(minutes_played_str, str):
+                        # Parse "MM:SS" format or plain minutes
+                        if ':' in minutes_played_str:
+                            mins, secs = minutes_played_str.split(':')
+                            minutes_played = int(mins) + int(secs) / 60
+                        else:
+                            minutes_played = float(minutes_played_str)
+                    else:
+                        minutes_played = float(minutes_played_str)
+                except (ValueError, AttributeError):
+                    minutes_played = 0
+
+                # Skip if player didn't play (DNP)
+                if minutes_played < 0.1:  # Less than ~6 seconds = DNP
+                    if self.verbose:
+                        print(f"  ⚠️  Skipping {player_name} - DNP (0 minutes played)")
+                    continue
+
                 # TIER 2.3: Predict expected minutes for this player
                 predicted_minutes = self.predict_minutes(features)
 
@@ -1457,10 +1502,6 @@ class SeasonBacktester:
                                       (actual_stats.get('ast', 0) or 0)
                     else:
                         actual_value = actual_stats.get(stat_key, 0) or 0
-
-                    # Skip if player didn't play
-                    if actual_value == 0 and prop_type == 'points':
-                        continue
 
                     # Record prediction
                     pred = PropPrediction(
@@ -1634,6 +1675,21 @@ def main():
             for prop_type in backtester.PROP_TYPES
         },
         'overall': results.calculate_metrics(),
+        # Export raw predictions for bias correction analysis (FIX #2)
+        'raw_predictions': [
+            {
+                'player_id': p.player_id,
+                'player_name': p.player_name,
+                'team': p.team,
+                'prop_type': p.prop_type,
+                'predicted': p.predicted,
+                'actual': p.actual,
+                'error': p.error,
+                'game_date': p.game_date,
+                'is_home': p.is_home,
+            }
+            for p in results.predictions
+        ]
     }
 
     with open(output_file, 'w') as f:
