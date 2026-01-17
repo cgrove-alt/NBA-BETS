@@ -451,13 +451,14 @@ class Phase3Backtester(SeasonBacktester):
         else:
             return 'MONITOR'
 
-    def run_comprehensive_backtest(self, start_date: str, end_date: str) -> Dict[str, Any]:
+    def run_comprehensive_backtest(self, start_date: str, end_date: str, enable_stop_loss: bool = True) -> Dict[str, Any]:
         """
         Run comprehensive backtest with quantile predictions and Kelly sizing.
 
         Args:
             start_date: "YYYY-MM-DD"
             end_date: "YYYY-MM-DD"
+            enable_stop_loss: If False, run full backtest ignoring stop-loss (for validation)
 
         Returns:
             Dict with comprehensive metrics
@@ -509,8 +510,8 @@ class Phase3Backtester(SeasonBacktester):
                     if datetime.strptime(game_date, "%Y-%m-%d").weekday() == 0:
                         self.portfolio.reset_weekly()
 
-                # Check stop-loss
-                if self.portfolio.check_stop_loss(game_date):
+                # Check stop-loss (only if enabled)
+                if enable_stop_loss and self.portfolio.check_stop_loss(game_date):
                     print(f"\n  ⚠️  STOP-LOSS TRIGGERED: {self.portfolio.stop_reason}")
                     break
 
@@ -561,9 +562,20 @@ class Phase3Backtester(SeasonBacktester):
 
                     # Make predictions for each prop type
                     for prop_type in ['points', 'rebounds', 'assists', 'threes', 'pra']:
-                        # Make prediction with quantiles
-                        # Use actual value as "line" for simulation purposes
-                        line = actuals[prop_type]
+                        # Estimate betting line from player's season average (reasonable proxy)
+                        # Books typically set lines near season average ± recent form
+                        line_map = {
+                            'points': features.get('season_pts_avg', actuals['points']),
+                            'rebounds': features.get('season_reb_avg', actuals['rebounds']),
+                            'assists': features.get('season_ast_avg', actuals['assists']),
+                            'threes': features.get('season_fg3m_avg', actuals['threes']),
+                            'pra': features.get('season_pts_avg', 0) + features.get('season_reb_avg', 0) + features.get('season_ast_avg', 0)
+                        }
+                        line = line_map.get(prop_type, actuals[prop_type])
+
+                        # Fallback if no historical data available (rookie, early season)
+                        if line is None or line == 0:
+                            line = actuals[prop_type]  # Use actual as last resort
 
                         # Try quantile prediction first, fall back to regular prediction
                         prediction = self.predict_with_quantiles(
@@ -889,7 +901,8 @@ def main():
     backtester_2324 = Phase3Backtester(season=2024)
     results_2324 = backtester_2324.run_comprehensive_backtest(
         start_date="2024-10-22",
-        end_date="2025-01-13"  # Use actual data range we have
+        end_date="2025-01-13",  # Use actual data range we have
+        enable_stop_loss=False  # Disable for validation - want to see full performance
     )
 
     # Save results
@@ -906,7 +919,8 @@ def main():
     backtester_2425 = Phase3Backtester(season=2025)
     results_2425 = backtester_2425.run_comprehensive_backtest(
         start_date="2025-10-21",
-        end_date="2026-01-13"  # Use actual data range we have
+        end_date="2026-01-13",  # Use actual data range we have
+        enable_stop_loss=False  # Disable for validation - want to see full performance
     )
 
     # Save results

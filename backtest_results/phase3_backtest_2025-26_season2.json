@@ -74,18 +74,18 @@
     "percentage": 79.4890510948905
   },
   "betting_performance": {
-    "total_bets": 258,
-    "wins": 0,
-    "losses": 0,
-    "pushes": 258,
-    "win_rate": 0.0,
-    "roi": 0.0,
-    "total_wagered": 12399.959999999997,
-    "total_profit": 0.0,
-    "final_bankroll": 1000.0,
-    "peak_bankroll": 1000.0,
+    "total_bets": 299,
+    "wins": 133,
+    "losses": 98,
+    "pushes": 68,
+    "win_rate": 57.57575757575758,
+    "roi": 4.768148017345895,
+    "total_wagered": 14723.949999999988,
+    "total_profit": 702.0597300000004,
+    "final_bankroll": 1702.059729999999,
+    "peak_bankroll": 1702.059729999999,
     "max_drawdown": 0.0,
-    "sharpe_ratio": 0.0,
+    "sharpe_ratio": 1.6611306888369128,
     "stopped": false,
     "stop_reason": null
   },
@@ -137,7 +137,7 @@
       "tier": "strong",
       "error": 6.24,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 52.27,
       "game_date": "2025-10-28"
     },
     {
@@ -152,7 +152,7 @@
       "tier": "strong",
       "error": 1.55,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 49.66,
       "game_date": "2025-10-28"
     },
     {
@@ -182,7 +182,7 @@
       "tier": "moderate",
       "error": 3.54,
       "bet_rec": "CONSIDER",
-      "bet_size": 50.0,
+      "bet_size": 42.01,
       "game_date": "2025-10-28"
     },
     {
@@ -197,7 +197,7 @@
       "tier": "strong",
       "error": -2.76,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.18,
       "game_date": "2025-10-28"
     },
     {
@@ -212,7 +212,7 @@
       "tier": "strong",
       "error": 3.82,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 15.35,
       "game_date": "2025-10-28"
     },
     {
@@ -227,7 +227,7 @@
       "tier": "strong",
       "error": 0.43,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -257,7 +257,7 @@
       "tier": "strong",
       "error": -4.51,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -272,7 +272,7 @@
       "tier": "strong",
       "error": -4.97,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -287,7 +287,7 @@
       "tier": "strong",
       "error": 2.46,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -302,7 +302,7 @@
       "tier": "strong",
       "error": -2.92,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -317,7 +317,7 @@
       "tier": "strong",
       "error": -11.57,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -347,7 +347,7 @@
       "tier": "strong",
       "error": 0.78,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -362,7 +362,7 @@
       "tier": "strong",
       "error": 2.16,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -377,7 +377,7 @@
       "tier": "strong",
       "error": -0.63,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -422,7 +422,7 @@
       "tier": "strong",
       "error": 0.97,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -437,7 +437,7 @@
       "tier": "strong",
       "error": -2.65,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -452,7 +452,7 @@
       "tier": "strong",
       "error": 2.86,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 30.42,
       "game_date": "2025-10-28"
     },
     {
@@ -482,7 +482,7 @@
       "tier": "moderate",
       "error": 13.58,
       "bet_rec": "CONSIDER",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -497,7 +497,7 @@
       "tier": "strong",
       "error": -1.7,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -512,7 +512,7 @@
       "tier": "strong",
       "error": 3.78,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -527,7 +527,7 @@
       "tier": "strong",
       "error": 3.8,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -542,7 +542,7 @@
       "tier": "strong",
       "error": 3.11,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -572,7 +572,7 @@
       "tier": "strong",
       "error": -1.22,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -617,7 +617,7 @@
       "tier": "moderate",
       "error": 4.44,
       "bet_rec": "CONSIDER",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -632,7 +632,7 @@
       "tier": "strong",
       "error": 7.06,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -647,7 +647,7 @@
       "tier": "strong",
       "error": 3.08,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -692,7 +692,7 @@
       "tier": "strong",
       "error": 9.44,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -722,7 +722,7 @@
       "tier": "strong",
       "error": -0.6,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -737,7 +737,7 @@
       "tier": "strong",
       "error": 1.64,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 0.0,
       "game_date": "2025-10-28"
     },
     {
@@ -752,7 +752,7 @@
       "tier": "strong",
       "error": 0.59,
       "bet_rec": "BET",
-      "bet_size": 50.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -767,7 +767,7 @@
       "tier": "moderate",
       "error": 0.81,
       "bet_rec": "CONSIDER",
-      "bet_size": 26.4,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -782,7 +782,7 @@
       "tier": "strong",
       "error": 7.49,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -797,7 +797,7 @@
       "tier": "strong",
       "error": 2.07,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     },
     {
@@ -842,7 +842,7 @@
       "tier": "strong",
       "error": 7.77,
       "bet_rec": "BET",
-      "bet_size": 0.0,
+      "bet_size": 47.87,
       "game_date": "2025-10-28"
     }
   ],
@@ -850,4 +850,42 @@
     "overall_rmse": {
       "target": "< 4.8",
       "actual": 7.927,
-      "met": 
+      "met": false
+    },
+    "points_rmse": {
+      "target": "< 5.5",
+      "actual": 10.123,
+      "met": false
+    },
+    "threes_r2": {
+      "target": "> 0.10",
+      "actual": -0.651,
+      "met": false
+    },
+    "roi_all": {
+      "target": "> 3%",
+      "actual": 4.77,
+      "met": true
+    },
+    "roi_elite": {
+      "target": "> 7%",
+      "actual": "N/A (need tier-specific betting)",
+      "met": false
+    },
+    "sharpe_ratio": {
+      "target": "> 1.5",
+      "actual": 1.66,
+      "met": true
+    },
+    "max_drawdown": {
+      "target": "< 15%",
+      "actual": 0.0,
+      "met": true
+    },
+    "confidence_correlation": {
+      "target": "> 0.5",
+      "actual": 0.568,
+      "met": true
+    }
+  }
+}
