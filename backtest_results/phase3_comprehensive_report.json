@@ -1,0 +1,170 @@
+{
+  "report_type": "Phase 3 Comprehensive Analysis",
+  "generated_at": "2026-01-17T10:55:08.653805",
+  "phase": "Phase 3: Optimization (Weeks 5-6)",
+  "phase2_summary": {
+    "games_analyzed": 596,
+    "total_predictions": 88047,
+    "overall_rmse": 5.285,
+    "elite_strong_rmse": 2.731,
+    "elite_strong_percentage": 18.784285665610412
+  },
+  "phase3_enhancements": {
+    "quantile_regression": {
+      "total_quantile_models": 6,
+      "prop_types_with_quantiles": [
+        "pra",
+        "threes",
+        "assists",
+        "spread",
+        "rebounds",
+        "points"
+      ],
+      "quantile_model_files": [
+        "models/player_pra_quantile.pkl",
+        "models/player_threes_quantile.pkl",
+        "models/player_assists_quantile.pkl",
+        "models/spread_quantile.pkl",
+        "models/player_rebounds_quantile.pkl",
+        "models/player_points_quantile.pkl"
+      ]
+    },
+    "kelly_bet_sizing": {
+      "kelly_available": true,
+      "test_cases": [
+        {
+          "tier": "elite",
+          "win_prob": 0.55,
+          "bet_size": 13.74
+        },
+        {
+          "tier": "strong",
+          "win_prob": 0.6,
+          "bet_size": 19.99
+        },
+        {
+          "tier": "moderate",
+          "win_prob": 0.52,
+          "bet_size": 0.0
+        }
+      ],
+      "validation": "PASSED"
+    },
+    "prediction_bands": "Implemented (pred_low, pred_median, pred_high)",
+    "confidence_scoring": "Implemented (band-width based)",
+    "portfolio_management": "Implemented (stop-loss, exposure limits)",
+    "risk_management": "Enhanced with Kelly multipliers per tier"
+  },
+  "phase3_targets": {
+    "targets": {
+      "target_1_overall_rmse": {
+        "target": "< 4.8",
+        "phase2_actual": 5.285,
+        "phase2_met": false,
+        "notes": "Phase 2 achieved 5.285, still above target. Phase 3 quantile regression should improve."
+      },
+      "target_2_points_rmse": {
+        "target": "< 5.5",
+        "phase2_actual": 9.391,
+        "phase2_met": false,
+        "notes": "Phase 2 Points RMSE was 9.391 (elite/strong only). Needs improvement."
+      },
+      "target_3_threes_r2": {
+        "target": "> 0.10",
+        "phase2_actual": 0.013,
+        "phase2_met": false,
+        "notes": "Phase 2 achieved R\u00b2=0.013 (elite/strong). Still challenging to predict 3PT makes."
+      },
+      "target_4_roi_all": {
+        "target": "> 3%",
+        "phase2_actual": "N/A (requires odds data)",
+        "phase2_met": false,
+        "notes": "Phase 2 did not integrate betting odds. Phase 3 adds this capability."
+      },
+      "target_5_roi_elite": {
+        "target": "> 7%",
+        "phase2_actual": "N/A (requires odds data)",
+        "phase2_met": false,
+        "notes": "Elite tier predictions (18.8% of total) have RMSE 1.858. Should achieve high ROI with odds."
+      },
+      "target_6_sharpe_ratio": {
+        "target": "> 1.5",
+        "phase2_actual": "N/A (requires betting simulation)",
+        "phase2_met": false,
+        "notes": "Phase 3 adds portfolio simulation with Sharpe ratio calculation."
+      },
+      "target_7_max_drawdown": {
+        "target": "< 15%",
+        "phase2_actual": "N/A (requires betting simulation)",
+        "phase2_met": false,
+        "notes": "Phase 3 implements stop-loss rules to limit drawdown."
+      },
+      "target_8_confidence_correlation": {
+        "target": "Pearson r > 0.5",
+        "phase2_actual": "Not measured",
+        "phase2_met": false,
+        "notes": "Phase 3 adds calibration analysis to validate confidence scores."
+      }
+    },
+    "targets_met": 0,
+    "total_targets": 8,
+    "completion_pct": 0.0
+  },
+  "recommendations": {
+    "overall_readiness": "CONDITIONAL_GO",
+    "strengths": [
+      "Elite+Strong tier achieves excellent RMSE of 2.731",
+      "Elite+Strong tier represents 18.8% of predictions (good balance)",
+      "Quantile models implemented for prediction bands",
+      "Kelly bet sizing implemented with tier adjustments",
+      "Stop-loss and portfolio management implemented"
+    ],
+    "concerns": [
+      "Overall RMSE (5.285) still above Phase 3 target (4.8)",
+      "Points predictions in elite/strong tier need improvement (RMSE 9.4)",
+      "3-point predictions remain challenging (R\u00b2 = 0.013)",
+      "Betting performance (ROI, Sharpe) not yet validated on real odds"
+    ],
+    "recommendations": [
+      "\u2713 GO-LIVE for paper trading with Elite+Strong tier only",
+      "\u2713 Start with conservative bankroll (10% of intended)",
+      "\u2713 Focus on Assists, Rebounds, PRA props (better R\u00b2)",
+      "\u26a0 Monitor Points predictions closely (higher errors)",
+      "\u26a0 Avoid 3PT props until model improves (R\u00b2 < 0.10)",
+      "\u26a0 Implement strict stop-loss: 3% daily, 8% weekly",
+      "\u2713 Run 7-day paper trading before live betting"
+    ],
+    "next_steps": [
+      "1. Integrate The Odds API for real-time lines",
+      "2. Run 7-day paper trading on Elite+Strong tier",
+      "3. Validate CLV > 0 (beating closing lines)",
+      "4. Measure actual ROI and Sharpe ratio",
+      "5. If ROI > 3% and Sharpe > 1.0 after 30 bets \u2192 scale to 25% bankroll"
+    ]
+  },
+  "technical_details": {
+    "quantile_models_available": 6,
+    "prop_types": [
+      "pra",
+      "threes",
+      "assists",
+      "spread",
+      "rebounds",
+      "points"
+    ],
+    "kelly_validation_status": "PASSED",
+    "stop_loss_rules": {
+      "daily_limit": "3% of bankroll",
+      "weekly_limit": "8% of bankroll",
+      "max_drawdown": "15% from peak",
+      "daily_exposure": "20% of bankroll"
+    },
+    "confidence_tiers": {
+      "elite": "90-100 (Kelly 1.0x)",
+      "strong": "75-89 (Kelly 0.5x)",
+      "moderate": "60-74 (Kelly 0.25x)",
+      "weak": "40-59 (monitor only)",
+      "avoid": "< 40 (do not bet)"
+    }
+  }
+}
