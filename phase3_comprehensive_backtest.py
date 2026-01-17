@@ -117,7 +117,14 @@ class QuantilePrediction:
     hit_under: Optional[bool] = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        result = asdict(self)
+        # Convert None and bool values to JSON-serializable types
+        for key, value in result.items():
+            if value is None:
+                result[key] = None  # None is JSON-serializable
+            elif isinstance(value, (bool, np.bool_)):
+                result[key] = bool(value)  # Ensure it's Python bool
+        return result
 
 
 @dataclass
@@ -554,14 +561,11 @@ class Phase3Backtester(SeasonBacktester):
 
                     # Make predictions for each prop type
                     for prop_type in ['points', 'rebounds', 'assists', 'threes', 'pra']:
-                        # Skip if no quantile model
-                        if prop_type not in self.quantile_models:
-                            continue
-
                         # Make prediction with quantiles
                         # Use actual value as "line" for simulation purposes
                         line = actuals[prop_type]
 
+                        # Try quantile prediction first, fall back to regular prediction
                         prediction = self.predict_with_quantiles(
                             prop_type, features, line=line
                         )
@@ -802,22 +806,22 @@ class Phase3Backtester(SeasonBacktester):
             'overall_rmse': {
                 'target': '< 4.8',
                 'actual': round(overall_metrics['rmse'], 3),
-                'met': overall_metrics['rmse'] < 4.8
+                'met': bool(overall_metrics['rmse'] < 4.8)
             },
             'points_rmse': {
                 'target': '< 5.5',
                 'actual': round(prop_metrics.get('points', {}).get('rmse', 999), 3),
-                'met': prop_metrics.get('points', {}).get('rmse', 999) < 5.5
+                'met': bool(prop_metrics.get('points', {}).get('rmse', 999) < 5.5)
             },
             'threes_r2': {
                 'target': '> 0.10',
                 'actual': round(prop_metrics.get('threes', {}).get('r2', -1), 3),
-                'met': prop_metrics.get('threes', {}).get('r2', -1) > 0.10
+                'met': bool(prop_metrics.get('threes', {}).get('r2', -1) > 0.10)
             },
             'roi_all': {
                 'target': '> 3%',
                 'actual': round(betting_metrics['roi'], 2),
-                'met': betting_metrics['roi'] > 3.0
+                'met': bool(betting_metrics['roi'] > 3.0)
             },
             'roi_elite': {
                 'target': '> 7%',
@@ -827,17 +831,17 @@ class Phase3Backtester(SeasonBacktester):
             'sharpe_ratio': {
                 'target': '> 1.5',
                 'actual': round(betting_metrics['sharpe_ratio'], 2),
-                'met': betting_metrics['sharpe_ratio'] > 1.5
+                'met': bool(betting_metrics['sharpe_ratio'] > 1.5)
             },
             'max_drawdown': {
                 'target': '< 15%',
                 'actual': round(betting_metrics['max_drawdown'], 2),
-                'met': betting_metrics['max_drawdown'] < 15.0
+                'met': bool(betting_metrics['max_drawdown'] < 15.0)
             },
             'confidence_correlation': {
                 'target': '> 0.5',
                 'actual': round(confidence_correlation, 3),
-                'met': confidence_correlation > 0.5
+                'met': bool(confidence_correlation > 0.5)
             }
         }
 
