@@ -463,15 +463,24 @@ class Phase3Backtester(SeasonBacktester):
         self.load_models()
         self.load_quantile_models()
 
+        # Load all games and historical stats FIRST
+        print("\nLoading games and historical player statistics...")
+        self.load_games()
+        self.load_historical_player_stats()
+
+        # Filter games to date range
+        print(f"\nFiltering games to date range: {start_date} to {end_date}...")
+        all_games = [g for g in self.games if start_date <= g['date'] <= end_date]
+        print(f"Found {len(all_games)} games in date range")
+
+        if not all_games:
+            print("ERROR: No games found in date range")
+            return {"error": "No games found in date range"}
+
         # Reset portfolio
         self.portfolio = BettingPortfolio()
         self.predictions = []
         self.bet_returns = []
-
-        # Get all games in date range
-        print(f"\nFetching games from {start_date} to {end_date}...")
-        all_games = self.fetch_games_in_range(start_date, end_date)
-        print(f"Found {len(all_games)} games")
 
         # Process each game
         total_predictions = 0
@@ -498,25 +507,24 @@ class Phase3Backtester(SeasonBacktester):
                     print(f"\n  ⚠️  STOP-LOSS TRIGGERED: {self.portfolio.stop_reason}")
                     break
 
-                # Get player stats for this game
-                player_stats = self.fetch_game_player_stats(game_id, game_date)
-                if not player_stats:
+                # Get player stats for this game from cache
+                box_scores = self.fetch_box_scores_for_game(game)
+                if not box_scores:
                     continue
 
                 # Make predictions for each player
-                for player_stat in player_stats:
-                    player = player_stat.get('player', {})
-                    player_id = player.get('id')
+                for player_id, box_score in box_scores.items():
+                    player = box_score.get('player', {})
                     player_name = f"{player.get('first_name', '')} {player.get('last_name', '')}".strip()
 
                     if not player_id or not player_name:
                         continue
 
                     # Get actual values
-                    actual_pts = player_stat.get('pts', 0) or 0
-                    actual_reb = player_stat.get('reb', 0) or 0
-                    actual_ast = player_stat.get('ast', 0) or 0
-                    actual_fg3m = player_stat.get('fg3m', 0) or 0
+                    actual_pts = box_score.get('pts', 0) or 0
+                    actual_reb = box_score.get('reb', 0) or 0
+                    actual_ast = box_score.get('ast', 0) or 0
+                    actual_fg3m = box_score.get('fg3m', 0) or 0
                     actual_pra = actual_pts + actual_reb + actual_ast
 
                     actuals = {
@@ -527,8 +535,20 @@ class Phase3Backtester(SeasonBacktester):
                         'pra': actual_pra
                     }
 
-                    # Generate features (simplified - in production would use full feature engineering)
-                    features = self.generate_player_features(player_id, game_date, game)
+                    # Generate features using parent class method (point-in-time)
+                    # Determine home/away and opponent
+                    is_home = box_score.get('team_id') == game.get('home_team_id')
+                    opponent_id = game.get('away_team_id') if is_home else game.get('home_team_id')
+                    player_position = player.get('position', 'F')
+
+                    features = self.get_player_features_before_date(
+                        player_id=player_id,
+                        game_date=game_date,
+                        opponent_id=opponent_id,
+                        is_home=is_home,
+                        player_position=player_position
+                    )
+
                     if not features:
                         continue
 
@@ -852,74 +872,74 @@ class Phase3Backtester(SeasonBacktester):
 
         return results
 
-    def generate_player_features(self, player_id: int, game_date: str, game: Dict) -> Optional[Dict]:
-        """Generate features for a player (simplified version)."""
-        # This is a simplified version - in production would use full feature_engineering.py
-        # For now, return mock features based on existing patterns
-        return {
-            'season_pts_avg': 15.0,
-            'recent_pts_avg': 15.0,
-            'season_min_avg': 28.0,
-            'recent_min_avg': 28.0,
-            'usage_rate': 22.0,
-            'pace': 100.0,
-            'is_home': 1 if game.get('home_team_id') == player_id else 0,
-            # Add more features as needed
-        }
 
 
 def main():
     """Run 2-season comprehensive backtest."""
 
-    # Season 1: 2023-24
+    # Season 1: 2024-25 (actual dates in data: Oct 22, 2024 - June 22, 2025)
     print("\n" + "="*80)
-    print("SEASON 1: 2023-24")
+    print("SEASON 1: 2024-25")
     print("="*80)
 
-    backtester_2324 = Phase3Backtester(season=2024)  # 2023-24 season
+    backtester_2324 = Phase3Backtester(season=2024)
     results_2324 = backtester_2324.run_comprehensive_backtest(
-        start_date="2023-10-24",
-        end_date="2024-04-14"
+        start_date="2024-10-22",
+        end_date="2025-01-13"  # Use actual data range we have
     )
 
     # Save results
-    output_file_2324 = RESULTS_DIR / "phase3_backtest_2023-24.json"
+    output_file_2324 = RESULTS_DIR / "phase3_backtest_2024-25_season1.json"
     with open(output_file_2324, 'w') as f:
         json.dump(results_2324, f, indent=2)
-    print(f"\n✓ Saved 2023-24 results to: {output_file_2324}")
+    print(f"\n✓ Saved Season 1 results to: {output_file_2324}")
 
-    # Season 2: 2024-25
+    # Season 2: 2025-26 (actual dates in data: Oct 21, 2025 - Jan 13, 2026)
     print("\n" + "="*80)
-    print("SEASON 2: 2024-25")
+    print("SEASON 2: 2025-26")
     print("="*80)
 
-    backtester_2425 = Phase3Backtester(season=2025)  # 2024-25 season
+    backtester_2425 = Phase3Backtester(season=2025)
     results_2425 = backtester_2425.run_comprehensive_backtest(
-        start_date="2024-10-22",
-        end_date="2025-04-13"
+        start_date="2025-10-21",
+        end_date="2026-01-13"  # Use actual data range we have
     )
 
     # Save results
-    output_file_2425 = RESULTS_DIR / "phase3_backtest_2024-25.json"
+    output_file_2425 = RESULTS_DIR / "phase3_backtest_2025-26_season2.json"
     with open(output_file_2425, 'w') as f:
         json.dump(results_2425, f, indent=2)
-    print(f"\n✓ Saved 2024-25 results to: {output_file_2425}")
+    print(f"\n✓ Saved Season 2 results to: {output_file_2425}")
 
     # Combined analysis
     print("\n" + "="*80)
     print("COMBINED 2-SEASON ANALYSIS")
     print("="*80)
 
+    # Handle case where no predictions were made
+    total_preds_1 = results_2324.get('total_predictions', 0) if isinstance(results_2324, dict) else 0
+    total_preds_2 = results_2425.get('total_predictions', 0) if isinstance(results_2425, dict) else 0
+
     combined_results = {
-        'season_2023_24': results_2324,
-        'season_2024_25': results_2425,
+        'season_2024_25': results_2324,
+        'season_2025_26': results_2425,
         'combined_summary': {
-            'total_predictions': results_2324['total_predictions'] + results_2425['total_predictions'],
-            'avg_rmse': (results_2324['overall_performance']['rmse'] + results_2425['overall_performance']['rmse']) / 2,
-            'avg_roi': (results_2324['betting_performance']['roi'] + results_2425['betting_performance']['roi']) / 2,
-            'avg_sharpe': (results_2324['betting_performance']['sharpe_ratio'] + results_2425['betting_performance']['sharpe_ratio']) / 2,
+            'total_predictions': total_preds_1 + total_preds_2,
+            'seasons_analyzed': 2,
+            'date_range': '2024-10-22 to 2026-01-13',
         }
     }
+
+    # Add combined metrics if both seasons have results
+    if total_preds_1 > 0 and total_preds_2 > 0:
+        try:
+            combined_results['combined_summary'].update({
+                'avg_rmse': (results_2324['overall_performance']['rmse'] + results_2425['overall_performance']['rmse']) / 2,
+                'avg_roi': (results_2324['betting_performance']['roi'] + results_2425['betting_performance']['roi']) / 2,
+                'avg_sharpe': (results_2324['betting_performance']['sharpe_ratio'] + results_2425['betting_performance']['sharpe_ratio']) / 2,
+            })
+        except KeyError as e:
+            print(f"Warning: Could not calculate combined metrics: {e}")
 
     output_file_combined = RESULTS_DIR / "phase3_backtest_2seasons.json"
     with open(output_file_combined, 'w') as f:
