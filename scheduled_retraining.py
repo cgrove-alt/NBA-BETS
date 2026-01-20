@@ -375,6 +375,22 @@ def full_retrain() -> bool:
 
         new_metrics = get_latest_backtest_metrics()
 
+        # Generate HTML report from backtest results
+        try:
+            logger.info("Generating HTML backtest report...")
+            from report_generator import generate_html_report
+
+            # Find most recent backtest JSON
+            backtest_files = sorted(BACKTEST_RESULTS.glob("*.json"),
+                                  key=lambda p: p.stat().st_mtime, reverse=True)
+            if backtest_files:
+                report_path = generate_html_report(str(backtest_files[0]))
+                logger.info(f"Report generated: {report_path}")
+            else:
+                logger.warning("No backtest results found to generate report")
+        except Exception as e:
+            logger.warning(f"Failed to generate HTML report (non-critical): {e}")
+
         # Step 5: Validate performance
         if old_metrics and new_metrics:
             old_rmse = old_metrics.get('overall_rmse', 10)
@@ -497,6 +513,22 @@ def incremental_update() -> bool:
         )
 
         new_metrics = get_latest_backtest_metrics()
+
+        # Generate HTML report from backtest results
+        try:
+            logger.info("Generating HTML backtest report...")
+            from report_generator import generate_html_report
+
+            # Find most recent backtest JSON
+            backtest_files = sorted(BACKTEST_RESULTS.glob("*.json"),
+                                  key=lambda p: p.stat().st_mtime, reverse=True)
+            if backtest_files:
+                report_path = generate_html_report(str(backtest_files[0]))
+                logger.info(f"Report generated: {report_path}")
+            else:
+                logger.warning("No backtest results found to generate report")
+        except Exception as e:
+            logger.warning(f"Failed to generate HTML report (non-critical): {e}")
 
         # Step 5: Save record
         duration = (datetime.now() - start_time).total_seconds()

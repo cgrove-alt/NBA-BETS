@@ -222,3 +222,126 @@ class HealthResponse(BaseModel):
     service: str
     timestamp: str
     models_loaded: bool = False
+
+
+# ============== DAILY PREDICTIONS SCHEMAS ==============
+
+class DailyPrediction(BaseModel):
+    player_name: str
+    team: str
+    prop_type: str
+    prediction: float
+    pred_low: Optional[float] = None
+    pred_median: Optional[float] = None
+    pred_high: Optional[float] = None
+    line: Optional[float] = None
+    confidence_score: Optional[float] = None
+    edge_quality_tier: Optional[str] = None
+    suggested_bet_size: Optional[float] = None
+    bet_recommendation: Optional[str] = None
+    uncertainty_flag: Optional[str] = None
+    pick: Optional[str] = None
+    edge: Optional[float] = None
+
+
+class DailyPredictionsResponse(BaseModel):
+    date: str
+    predictions: List[DailyPrediction]
+    count: int
+    metadata: Optional[Dict[str, Any]] = None
+
+
+# ============== INJURY REPORT SCHEMAS ==============
+
+class InjuryReport(BaseModel):
+    player_id: int
+    player_name: str
+    team_id: int
+    team_abbrev: str
+    status: str  # OUT, DOUBTFUL, QUESTIONABLE, GTD
+    injury_type: Optional[str] = None
+    detected_at: str
+
+
+class InjuryReportResponse(BaseModel):
+    date: str
+    injuries: List[InjuryReport]
+    count: int
+    last_updated: str
+
+
+# ============== LINE MOVEMENT SCHEMAS ==============
+
+class OddsSnapshot(BaseModel):
+    timestamp: str
+    book_name: str
+    market: str  # moneyline, spread, total, props
+    home_odds: Optional[int] = None
+    away_odds: Optional[int] = None
+    home_line: Optional[float] = None
+    away_line: Optional[float] = None
+    total: Optional[float] = None
+
+
+class LineMovement(BaseModel):
+    opening_line: Optional[float] = None
+    closing_line: Optional[float] = None
+    movement: Optional[float] = None  # closing - opening
+    rlm_detected: bool = False
+    steam_move_detected: bool = False
+
+
+class LineMovementResponse(BaseModel):
+    game_id: str
+    market: str
+    odds_history: List[OddsSnapshot]
+    movement_analysis: Optional[LineMovement] = None
+    count: int
+
+
+# ============== BACKTEST RESULTS SCHEMAS ==============
+
+class BacktestMetrics(BaseModel):
+    rmse: Optional[float] = None
+    mae: Optional[float] = None
+    r2: Optional[float] = None
+    bias: Optional[float] = None
+
+
+class BacktestBettingMetrics(BaseModel):
+    total_bets: int
+    wins: int
+    losses: int
+    pushes: int
+    win_rate: float
+    roi: float
+    total_wagered: float
+    total_profit: float
+    sharpe_ratio: Optional[float] = None
+    max_drawdown: Optional[float] = None
+
+
+class BacktestByProp(BaseModel):
+    prop_type: str
+    metrics: BacktestMetrics
+    count: int
+
+
+class BacktestResults(BaseModel):
+    backtest_id: str
+    date_range: str
+    games_analyzed: int
+    total_predictions: int
+    overall_metrics: BacktestMetrics
+    betting_metrics: Optional[BacktestBettingMetrics] = None
+    by_prop_type: Optional[List[BacktestByProp]] = None
+    elite_strong_metrics: Optional[BacktestMetrics] = None
+    confidence_correlation: Optional[float] = None
+    phase: Optional[str] = None
+    timestamp: str
+
+
+class LatestBacktestResponse(BaseModel):
+    latest_backtest: Optional[BacktestResults] = None
+    available_backtests: List[str]
+    count: int

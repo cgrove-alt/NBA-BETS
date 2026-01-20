@@ -6,6 +6,26 @@ DO NOT modify the underlying data_service.py - this is a read-only wrapper.
 
 Usage:
     uvicorn backend.api:app --reload --port 8000
+
+Authentication (Optional):
+    Set AUTH_ENABLED=true to enable JWT authentication
+    Set JWT_SECRET_KEY for production security
+    Set API_KEY for simple API key authentication
+
+    Protected endpoints support:
+        - Bearer token in Authorization header
+        - X-API-Key header for API key auth
+
+    Generate token: POST /api/auth/token
+    Verify token: GET /api/auth/verify
+
+New Endpoints (Task 4.4):
+    - GET /api/predictions/{date} - Daily predictions with confidence & bet sizing
+    - GET /api/injuries/{date} - Injury report for specific date
+    - GET /api/line-movement/{game_id} - Odds history and movement analysis
+    - GET /api/backtest/latest - Latest backtest results
+    - POST /api/auth/token - Generate JWT token (if AUTH_ENABLED)
+    - GET /api/auth/verify - Verify JWT token (if AUTH_ENABLED)
 """
 
 import sys
@@ -45,6 +65,18 @@ from backend.schemas import (
     FinalScore,
     MoneylineResult,
     ResultsSummary,
+    DailyPredictionsResponse,
+    DailyPrediction,
+    InjuryReportResponse,
+    InjuryReport,
+    LineMovementResponse,
+    OddsSnapshot,
+    LineMovement,
+    LatestBacktestResponse,
+    BacktestResults,
+    BacktestMetrics,
+    BacktestBettingMetrics,
+    BacktestByProp,
 )
 
 # Singleton data service instance
@@ -76,9 +108,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="NBA Props API",
     description="REST API for NBA player prop predictions",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
+
+# Initialize authentication endpoints (optional - controlled by AUTH_ENABLED env var)
+try:
+    from backend.auth import add_auth_endpoints
+    add_auth_endpoints(app)
+except ImportError:
+    pass  # Auth module optional
 
 # Configure CORS for React frontend
 # Add your production Vercel URL here after deployment
@@ -907,6 +946,364 @@ def get_retrain_status():
         "models": model_files,
         "timestamp": datetime.now().isoformat(),
     }
+
+
+# ============== DAILY PREDICTIONS ENDPOINT ==============
+
+@app.get("/api/predictions/{date}", response_model=DailyPredictionsResponse)
+def get_daily_predictions(date: str):
+    """Get daily predictions for a specific date.
+
+    Args:
+        date: Date string in YYYY-MM-DD format
+
+    Returns:
+        Daily predictions with confidence, bet sizing, and recommendations
+    """
+    import pandas as pd
+    from pathlib import Path
+
+    # Validate date format
+    try:
+        from datetime import datetime
+        datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid date format. Use YYYY-MM-DD"
+        )
+
+    # Check for predictions file
+    csv_path = Path(f"predictions_{date}.csv")
+
+    if not csv_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No predictions found for {date}. Generate predictions first."
+        )
+
+    # Load predictions CSV
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error reading predictions file: {str(e)}"
+        )
+
+    # Convert to prediction objects
+    predictions = []
+    for _, row in df.iterrows():
+        predictions.append(DailyPrediction(
+            player_name=row.get('player_name', 'Unknown'),
+            team=row.get('team', ''),
+            prop_type=row.get('prop_type', ''),
+            prediction=float(row.get('prediction', 0)),
+            pred_low=float(row['pred_low']) if pd.notna(row.get('pred_low')) else None,
+            pred_median=float(row['pred_median']) if pd.notna(row.get('pred_median')) else None,
+            pred_high=float(row['pred_high']) if pd.notna(row.get('pred_high')) else None,
+            line=float(row['line']) if pd.notna(row.get('line')) else None,
+            confidence_score=float(row['confidence_score']) if pd.notna(row.get('confidence_score')) else None,
+            edge_quality_tier=row.get('edge_quality_tier'),
+            suggested_bet_size=float(row['suggested_bet_size']) if pd.notna(row.get('suggested_bet_size')) else None,
+            bet_recommendation=row.get('bet_recommendation'),
+            uncertainty_flag=row.get('uncertainty_flag'),
+            pick=row.get('pick'),
+            edge=float(row['edge']) if pd.notna(row.get('edge')) else None,
+        ))
+
+    return DailyPredictionsResponse(
+        date=date,
+        predictions=predictions,
+        count=len(predictions),
+        metadata={
+            "file_path": str(csv_path),
+            "total_elite_bets": len([p for p in predictions if p.edge_quality_tier == "elite"]),
+            "total_strong_bets": len([p for p in predictions if p.edge_quality_tier == "strong"]),
+        }
+    )
+
+
+# ============== INJURY REPORT ENDPOINT ==============
+
+@app.get("/api/injuries/{date}", response_model=InjuryReportResponse)
+def get_injury_report(date: str):
+    """Get injury report for a specific date.
+
+    Args:
+        date: Date string in YYYY-MM-DD format
+
+    Returns:
+        List of injured players with status and team info
+    """
+    from datetime import datetime
+
+    # Validate date format
+    try:
+        target_date = datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid date format. Use YYYY-MM-DD"
+        )
+
+    # Import injury tracker
+    try:
+        from injury_tracker_v3 import fetch_current_injuries
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Injury tracker module not available"
+        )
+
+    # Fetch injuries for the date
+    try:
+        injuries_data = fetch_current_injuries(target_date)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching injuries: {str(e)}"
+        )
+
+    # Convert to injury report objects
+    # fetch_current_injuries returns InjuryReport dataclass objects, not dicts
+    injuries = []
+    for injury_obj in injuries_data:
+        injuries.append(InjuryReport(
+            player_id=injury_obj.player_id or 0,
+            player_name=injury_obj.player_name or 'Unknown',
+            team_id=injury_obj.team_id or 0,
+            team_abbrev=injury_obj.team_abbrev or '',
+            status=str(injury_obj.status.value) if injury_obj.status else 'UNKNOWN',
+            injury_type=injury_obj.injury_type or None,
+            detected_at=injury_obj.last_updated.isoformat() if injury_obj.last_updated else datetime.now().isoformat(),
+        ))
+
+    return InjuryReportResponse(
+        date=date,
+        injuries=injuries,
+        count=len(injuries),
+        last_updated=datetime.now().isoformat(),
+    )
+
+
+# ============== LINE MOVEMENT ENDPOINT ==============
+
+@app.get("/api/line-movement/{game_id}", response_model=LineMovementResponse)
+def get_line_movement(
+    game_id: str,
+    market: str = Query("spread", description="Market type: moneyline, spread, total")
+):
+    """Get line movement history for a specific game.
+
+    Args:
+        game_id: Game ID
+        market: Market type (moneyline, spread, total)
+
+    Returns:
+        Historical odds snapshots and movement analysis
+    """
+    # Import betting market features
+    try:
+        from betting_market_features import BettingMarketFeatures
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Betting market features module not available"
+        )
+
+    # Initialize features module
+    try:
+        bmf = BettingMarketFeatures()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error initializing betting features: {str(e)}"
+        )
+
+    # Get odds history
+    try:
+        odds_history = bmf.db.get_odds_history(game_id, market, lookback_minutes=1440)  # 24 hours
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching odds history: {str(e)}"
+        )
+
+    # Convert to snapshots
+    snapshots = []
+    for odds in odds_history:
+        snapshots.append(OddsSnapshot(
+            timestamp=odds.get('timestamp', ''),
+            book_name=odds.get('book_name', ''),
+            market=odds.get('market', ''),
+            home_odds=odds.get('home_odds'),
+            away_odds=odds.get('away_odds'),
+            home_line=odds.get('home_line'),
+            away_line=odds.get('away_line'),
+            total=odds.get('total'),
+        ))
+
+    # Calculate movement analysis
+    movement = None
+    if len(snapshots) >= 2:
+        opening = snapshots[0]
+        closing = snapshots[-1]
+
+        opening_line = opening.home_line or 0
+        closing_line = closing.home_line or 0
+        line_move = closing_line - opening_line
+
+        # Detect RLM and steam moves
+        try:
+            rlm_detected = bmf.detect_reverse_line_movement(game_id, market)
+            steam_detected = bmf.detect_steam_move(game_id, market, lookback_minutes=15)
+        except:
+            rlm_detected = False
+            steam_detected = False
+
+        movement = LineMovement(
+            opening_line=opening_line,
+            closing_line=closing_line,
+            movement=line_move,
+            rlm_detected=rlm_detected,
+            steam_move_detected=steam_detected,
+        )
+
+    return LineMovementResponse(
+        game_id=game_id,
+        market=market,
+        odds_history=snapshots,
+        movement_analysis=movement,
+        count=len(snapshots),
+    )
+
+
+# ============== BACKTEST RESULTS ENDPOINT ==============
+
+@app.get("/api/backtest/latest", response_model=LatestBacktestResponse)
+def get_latest_backtest():
+    """Get the latest backtest results.
+
+    Returns:
+        Most recent backtest results with performance metrics
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime
+
+    # Find all backtest JSON files
+    backtest_dir = Path("backtest_results")
+
+    if not backtest_dir.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Backtest results directory not found"
+        )
+
+    # Get all JSON files
+    backtest_files = list(backtest_dir.glob("*.json"))
+
+    if not backtest_files:
+        raise HTTPException(
+            status_code=404,
+            detail="No backtest results found"
+        )
+
+    # Sort by modification time to get latest
+    backtest_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
+    # Load the latest backtest
+    latest_file = backtest_files[0]
+
+    try:
+        with open(latest_file, 'r') as f:
+            data = json.load(f)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error reading backtest file: {str(e)}"
+        )
+
+    # Parse backtest results
+    try:
+        # Extract overall metrics
+        overall = data.get('overall_performance', {})
+        overall_metrics = BacktestMetrics(
+            rmse=overall.get('rmse'),
+            mae=overall.get('mae'),
+            r2=overall.get('r2'),
+            bias=overall.get('bias'),
+        )
+
+        # Extract betting metrics
+        betting = data.get('betting_performance', {})
+        betting_metrics = None
+        if betting:
+            betting_metrics = BacktestBettingMetrics(
+                total_bets=betting.get('total_bets', 0),
+                wins=betting.get('wins', 0),
+                losses=betting.get('losses', 0),
+                pushes=betting.get('pushes', 0),
+                win_rate=betting.get('win_rate', 0.0),
+                roi=betting.get('roi', 0.0),
+                total_wagered=betting.get('total_wagered', 0.0),
+                total_profit=betting.get('total_profit', 0.0),
+                sharpe_ratio=betting.get('sharpe_ratio'),
+                max_drawdown=betting.get('max_drawdown'),
+            )
+
+        # Extract by prop type
+        by_prop = []
+        prop_metrics = data.get('by_prop_type', {})
+        for prop_type, metrics in prop_metrics.items():
+            by_prop.append(BacktestByProp(
+                prop_type=prop_type,
+                metrics=BacktestMetrics(
+                    rmse=metrics.get('rmse'),
+                    mae=metrics.get('mae'),
+                    r2=metrics.get('r2'),
+                    bias=metrics.get('bias'),
+                ),
+                count=metrics.get('count', 0),
+            ))
+
+        # Extract elite+strong metrics
+        elite_strong = data.get('elite_strong_tier', {})
+        elite_strong_metrics = None
+        if elite_strong:
+            elite_strong_metrics = BacktestMetrics(
+                rmse=elite_strong.get('rmse'),
+                mae=elite_strong.get('mae'),
+                r2=elite_strong.get('r2'),
+                bias=elite_strong.get('bias'),
+            )
+
+        backtest_result = BacktestResults(
+            backtest_id=latest_file.stem,
+            date_range=data.get('date_range', 'unknown'),
+            games_analyzed=data.get('games_analyzed', 0),
+            total_predictions=data.get('total_predictions', 0),
+            overall_metrics=overall_metrics,
+            betting_metrics=betting_metrics,
+            by_prop_type=by_prop if by_prop else None,
+            elite_strong_metrics=elite_strong_metrics,
+            confidence_correlation=data.get('confidence_correlation'),
+            phase=data.get('phase'),
+            timestamp=datetime.fromtimestamp(latest_file.stat().st_mtime).isoformat(),
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error parsing backtest data: {str(e)}"
+        )
+
+    return LatestBacktestResponse(
+        latest_backtest=backtest_result,
+        available_backtests=[f.stem for f in backtest_files],
+        count=len(backtest_files),
+    )
 
 
 # ============== RUN SERVER ==============
