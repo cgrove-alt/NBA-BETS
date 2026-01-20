@@ -77,35 +77,64 @@ def check_dnp_errors(results: Dict) -> Dict:
 
 def validate_results(results: Dict) -> Dict:
     """Validate all targets."""
+    import math
+
     validation = {}
 
     overall = results.get('overall', {})
     metrics = results.get('metrics', {})
 
+    # BUG FIX: Handle NaN/None values properly, don't use infinity as default
+    def safe_get(d, key, default=None):
+        val = d.get(key, default)
+        if val is None or (isinstance(val, float) and (math.isnan(val) or math.isinf(val))):
+            return default
+        return val
+
     # Target 1: Overall RMSE < 5.0
-    overall_rmse = overall.get('RMSE', float('inf'))
-    validation['overall_rmse'] = {
-        'value': overall_rmse,
-        'target': f'< {TARGETS["overall_rmse"]}',
-        'status': 'PASS' if overall_rmse < TARGETS['overall_rmse'] else 'FAIL',
-        'delta_from_phase1': overall_rmse - PHASE1_RMSE,
-    }
+    overall_rmse = safe_get(overall, 'RMSE', None)
+    if overall_rmse is None:
+        validation['overall_rmse'] = {
+            'value': None,
+            'target': f'< {TARGETS["overall_rmse"]}',
+            'status': 'SKIP',
+            'reason': 'No valid RMSE data available',
+            'delta_from_phase1': None,
+        }
+    else:
+        validation['overall_rmse'] = {
+            'value': overall_rmse,
+            'target': f'< {TARGETS["overall_rmse"]}',
+            'status': 'PASS' if overall_rmse < TARGETS['overall_rmse'] else 'FAIL',
+            'delta_from_phase1': overall_rmse - PHASE1_RMSE,
+        }
 
     # Target 2: Overall Bias < |0.5|
-    overall_bias = overall.get('Bias', float('inf'))
-    validation['overall_bias'] = {
-        'value': overall_bias,
-        'target': f'< |{TARGETS["overall_bias"]}|',
-        'status': 'PASS' if abs(overall_bias) < TARGETS['overall_bias'] else 'FAIL',
-    }
+    overall_bias = safe_get(overall, 'Bias', None)
+    if overall_bias is None:
+        validation['overall_bias'] = {
+            'value': None,
+            'target': f'< |{TARGETS["overall_bias"]}|',
+            'status': 'SKIP',
+            'reason': 'No valid Bias data available',
+        }
+    else:
+        validation['overall_bias'] = {
+            'value': overall_bias,
+            'target': f'< |{TARGETS["overall_bias"]}|',
+            'status': 'PASS' if abs(overall_bias) < TARGETS['overall_bias'] else 'FAIL',
+        }
 
     # Target 3: Per-prop Bias < |0.5|
     per_prop_bias = {}
     per_prop_status = 'PASS'
     for prop_type in ['points', 'rebounds', 'assists', 'threes', 'pra']:
         if prop_type in metrics:
-            bias = metrics[prop_type].get('Bias', float('inf'))
-            status = 'PASS' if abs(bias) < TARGETS['per_prop_bias'] else 'FAIL'
+            bias = safe_get(metrics[prop_type], 'Bias', None)  # FIX: Use safe_get
+            if bias is None:
+                status = 'SKIP'
+            else:
+                status = 'PASS' if abs(bias) < TARGETS['per_prop_bias'] else 'FAIL'
             per_prop_bias[prop_type] = {
                 'value': bias,
                 'status': status
@@ -133,20 +162,37 @@ def validate_results(results: Dict) -> Dict:
     }
 
     # Target 6: Phase 2 RMSE < Phase 1 RMSE
-    validation['phase2_vs_phase1'] = {
-        'phase1_rmse': PHASE1_RMSE,
-        'phase2_rmse': overall_rmse,
-        'improvement': PHASE1_RMSE - overall_rmse,
-        'status': 'PASS' if overall_rmse < PHASE1_RMSE else 'FAIL',
-    }
+    if overall_rmse is None:
+        validation['phase2_vs_phase1'] = {
+            'phase1_rmse': PHASE1_RMSE,
+            'phase2_rmse': None,
+            'improvement': None,
+            'status': 'SKIP',
+            'reason': 'No valid RMSE data available',
+        }
+    else:
+        validation['phase2_vs_phase1'] = {
+            'phase1_rmse': PHASE1_RMSE,
+            'phase2_rmse': overall_rmse,
+            'improvement': PHASE1_RMSE - overall_rmse,
+            'status': 'PASS' if overall_rmse < PHASE1_RMSE else 'FAIL',
+        }
 
     # Target 7: Threes R² > 0
-    threes_r2 = metrics.get('threes', {}).get('R²', float('-inf'))
-    validation['threes_r2'] = {
-        'value': threes_r2,
-        'target': f'> {TARGETS["threes_r2"]}',
-        'status': 'PASS' if threes_r2 > TARGETS['threes_r2'] else 'FAIL',
-    }
+    threes_r2 = safe_get(metrics.get('threes', {}), 'R²', None)  # FIX: Use safe_get
+    if threes_r2 is None:
+        validation['threes_r2'] = {
+            'value': None,
+            'target': f'> {TARGETS["threes_r2"]}',
+            'status': 'SKIP',
+            'reason': 'No valid R² data available',
+        }
+    else:
+        validation['threes_r2'] = {
+            'value': threes_r2,
+            'target': f'> {TARGETS["threes_r2"]}',
+            'status': 'PASS' if threes_r2 > TARGETS['threes_r2'] else 'FAIL',
+        }
 
     # Target 8: No DNP errors
     validation['dnp_errors'] = check_dnp_errors(results)

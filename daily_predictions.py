@@ -38,6 +38,7 @@ from feature_engineering import generate_game_features, PlayerPropFeatureGenerat
 from scipy.stats import norm
 from data_fetcher import fetch_player_stats_bdl
 from injury_tracker_v3 import fetch_current_injuries, is_player_available, InjuryStatus
+from model_classes import QuantilePropModel  # BUG FIX: Import for pickle deserialization
 
 # BUG FIX: Prop-specific standard deviations (not line-based)
 # Previous bug: std = line * 0.20 caused massive miscalibration
@@ -45,10 +46,10 @@ from injury_tracker_v3 import fetch_current_injuries, is_player_available, Injur
 # - Points (line ~25): std=5.0 → Z-scores reasonable → 56.4% avg over_prob
 # Fix: Use empirically-derived prop-specific constants from NBA historical data
 PROP_STD_DEVS = {
-    'points': 6.5,      # Historical std for NBA player points per game
-    'rebounds': 2.8,    # Historical std for NBA player rebounds per game
-    'assists': 2.3,     # Historical std for NBA player assists per game
-    'threes': 1.3,      # Historical std for NBA player 3PM per game
+    'points': 5.0,      # Calibrated from empirical data (was 6.5, reduced for better calibration)
+    'rebounds': 3.5,    # Calibrated from empirical data (was 2.8, increased for better calibration)
+    'assists': 3.0,     # Calibrated from empirical data (was 2.3, increased for better calibration)
+    'threes': 1.8,      # Calibrated from empirical data (was 1.3, increased for better calibration)
     'pra': 9.0,         # Points + Rebounds + Assists combined variance
 }
 
@@ -1577,12 +1578,20 @@ def predict_player_prop(
         else:
             confidence_score = 40.0  # Low confidence (wide prediction range)
     elif predicted_value is not None:
-        # Fallback: use prediction variance as confidence proxy
-        # If edge is strong and prediction far from line, higher confidence
-        if abs(predicted_value - line) > line * 0.15:  # Prediction differs by 15%+
-            confidence_score = 70.0
-        else:
-            confidence_score = 55.0
+        # BUG FIX: More granular confidence based on edge magnitude and prediction difference
+        # Higher edge and larger prediction difference = higher confidence
+        pred_diff_pct = abs(predicted_value - line) / max(line, 1.0) if line > 0 else 0
+        edge_magnitude = abs(edge)
+
+        # Combine edge and prediction difference for confidence score (0-100 scale)
+        # Strong edge (>20%) AND large diff (>20%) = high confidence (~80-90)
+        # Weak edge (<5%) OR small diff (<5%) = low confidence (~40-50)
+        confidence_from_edge = min(edge_magnitude * 2, 50.0)  # 0-50 from edge
+        confidence_from_diff = min(pred_diff_pct * 200, 50.0)  # 0-50 from diff
+        confidence_score = 50.0 + (confidence_from_edge + confidence_from_diff) / 2
+
+        # Clamp to reasonable range [40, 90]
+        confidence_score = max(40.0, min(90.0, confidence_score))
 
     # Calculate edge quality tier based on confidence score (Task 2.4)
     edge_quality_tier = get_tier_from_confidence(confidence_score)
