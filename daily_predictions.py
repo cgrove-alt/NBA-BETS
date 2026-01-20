@@ -47,7 +47,7 @@ from model_classes import QuantilePropModel  # BUG FIX: Import for pickle deseri
 # Fix: Use empirically-derived prop-specific constants from NBA historical data
 PROP_STD_DEVS = {
     'points': 5.5,      # Calibrated: 54.7% ✓ (target: 50±5%)
-    'rebounds': 6.5,    # Tuned: 6.0 → 6.5 (was 55.7%, target: 50±5%)
+    'rebounds': 7.0,    # Tuned: 6.5 → 7.0 (was 55.2%, target: 50-55%)
     'assists': 2.5,     # Calibrated: 48.7% ✓ (target: 50±5%)
     'threes': 1.8,      # Calibrated from empirical data
     'pra': 9.0,         # Points + Rebounds + Assists combined variance
