@@ -134,8 +134,8 @@ export function EnhancedFilterPanel({
     filters.maxEdge !== undefined ||
     filters.pickType !== null ||
     filters.propTypes.length < 5 ||
-    (filters.teams && filters.teams.length > 0) ||
-    (filters.positions && filters.positions.length > 0);
+    (filters.teams?.length ?? 0) > 0 ||
+    (filters.positions?.length ?? 0) > 0;
 
   return (
     <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
