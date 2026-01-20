@@ -1793,6 +1793,9 @@ def main():
         return
 
     # TASK 4.1: Cache warmup - pre-fetch all team/player data in parallel
+    # Also cache props data to avoid duplicate API calls
+    props_cache = {}  # Cache props data for reuse in main loop
+
     if not args.no_warmup and api:
         team_ids = []
         player_ids_to_warm = []
@@ -1809,6 +1812,7 @@ def main():
         team_ids = list(set(team_ids))  # Remove duplicates
 
         # Collect player IDs from all games (quickly)
+        # OPTIMIZATION: Cache props data here to avoid fetching twice
         print("\n  Collecting player IDs for cache warmup...", end='', flush=True)
         for game in games:
             game_id = game.get('id')
@@ -1816,6 +1820,9 @@ def main():
                 try:
                     props_data = get_player_props_for_game(api, game_id)
                     if props_data:
+                        # Cache props for later use in main loop
+                        props_cache[game_id] = props_data
+
                         # Get players with significant lines (likely to be analyzed)
                         for pid, props in props_data.items():
                             if props.get('points_line', 0) >= 15:
@@ -1856,7 +1863,12 @@ def main():
             home = analysis['home_team']
             away = analysis['away_team']
             print(f"\n  Analyzing {away}@{home} props...", end="", flush=True)
-            props_data = get_player_props_for_game(api, game_id)
+
+            # OPTIMIZATION: Use cached props if available (from warmup phase)
+            props_data = props_cache.get(game_id)
+            if not props_data:
+                # Fall back to API call if not in cache
+                props_data = get_player_props_for_game(api, game_id)
 
             if props_data:
                 # Get player names from API
