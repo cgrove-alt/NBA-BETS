@@ -1029,9 +1029,40 @@ def get_daily_predictions(date: str):
     # Convert to prediction objects
     predictions = []
     for _, row in df.iterrows():
+        # Handle NaN values for string fields - pandas reads empty cells as NaN
+        team = row.get('team', '')
+        if pd.notna(team) and team != '':
+            team = str(team)
+        else:
+            team = ''
+
+        uncertainty_flag = row.get('uncertainty_flag')
+        if pd.notna(uncertainty_flag) and uncertainty_flag != '':
+            uncertainty_flag = str(uncertainty_flag)
+        else:
+            uncertainty_flag = None
+
+        pick = row.get('pick')
+        if pd.notna(pick) and pick != '':
+            pick = str(pick)
+        else:
+            pick = None
+
+        edge_quality_tier = row.get('edge_quality_tier')
+        if pd.notna(edge_quality_tier):
+            edge_quality_tier = str(edge_quality_tier)
+        else:
+            edge_quality_tier = None
+
+        bet_recommendation = row.get('bet_recommendation')
+        if pd.notna(bet_recommendation):
+            bet_recommendation = str(bet_recommendation)
+        else:
+            bet_recommendation = None
+
         predictions.append(DailyPrediction(
             player_name=row.get('player_name', 'Unknown'),
-            team=row.get('team', ''),
+            team=team,
             prop_type=row.get('prop_type', ''),
             prediction=float(row.get('prediction', 0)),
             pred_low=float(row['pred_low']) if pd.notna(row.get('pred_low')) else None,
@@ -1039,11 +1070,11 @@ def get_daily_predictions(date: str):
             pred_high=float(row['pred_high']) if pd.notna(row.get('pred_high')) else None,
             line=float(row['line']) if pd.notna(row.get('line')) else None,
             confidence_score=float(row['confidence_score']) if pd.notna(row.get('confidence_score')) else None,
-            edge_quality_tier=row.get('edge_quality_tier'),
+            edge_quality_tier=edge_quality_tier,
             suggested_bet_size=float(row['suggested_bet_size']) if pd.notna(row.get('suggested_bet_size')) else None,
-            bet_recommendation=row.get('bet_recommendation'),
-            uncertainty_flag=row.get('uncertainty_flag'),
-            pick=row.get('pick'),
+            bet_recommendation=bet_recommendation,
+            uncertainty_flag=uncertainty_flag,
+            pick=pick,
             edge=float(row['edge']) if pd.notna(row.get('edge')) else None,
         ))
 

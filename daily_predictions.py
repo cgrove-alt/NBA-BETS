@@ -2151,28 +2151,49 @@ def main():
             # Build DataFrame with all enhanced columns
             csv_data = []
             for prop in all_player_props:
+                # Extract team from game string (format: "AWAY@HOME")
+                game_str = prop.get('game', '')
+                team = ''
+                if '@' in game_str:
+                    # We don't know which team this player is on from the prop alone
+                    # We'll need to extract it from context or leave empty
+                    # For now, leave empty - frontend doesn't strictly need it
+                    team = ''
+
+                # Generate pick from over_prob and bet_recommendation
+                over_prob = prop.get('over_prob', 0.5)
+                bet_rec = prop.get('bet_recommendation', 'MONITOR')
+                if bet_rec in ['BET', 'STRONG_BET']:
+                    pick = 'OVER' if over_prob > 0.5 else 'UNDER'
+                else:
+                    pick = '-'
+
                 row = {
                     'date': target_date,
-                    'game': prop.get('game', ''),
+                    'game': game_str,
                     'player_name': prop.get('player', ''),
+                    'team': team,  # Added for API compatibility
                     'prop_type': prop.get('stat', ''),
                     'line': prop.get('line', 0),
                     'prediction': prop.get('predicted_value', ''),
                     'pred_low': prop.get('pred_low', ''),
                     'pred_median': prop.get('pred_median', ''),
                     'pred_high': prop.get('pred_high', ''),
-                    'over_prob': prop.get('over_prob', 0.5),
+                    'over_prob': over_prob,
                     'edge': prop.get('edge', 0),
                     'confidence_score': prop.get('confidence_score', 50),
                     'edge_quality_tier': prop.get('edge_quality_tier', 'moderate'),
                     'suggested_bet_size': prop.get('suggested_bet_size', 0),
-                    'bet_recommendation': prop.get('bet_recommendation', 'MONITOR'),
+                    'bet_recommendation': bet_rec,
+                    'pick': pick,  # Added for API compatibility
                     'uncertainty_flag': prop.get('uncertainty_flag', ''),
                     'injury_boost': prop.get('injury_boost', 1.0),
                 }
                 csv_data.append(row)
 
             df = pd.DataFrame(csv_data)
+            # Fill NaN values with empty strings to prevent JSON serialization issues in API
+            df = df.fillna('')
             df.to_csv(csv_filename, index=False)
             print(f"\n  Predictions saved to: {csv_filename}")
             print(f"  Total props: {len(all_player_props)}")
