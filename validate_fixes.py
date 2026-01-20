@@ -86,7 +86,8 @@ def validate_results(results: Dict) -> Dict:
 
     # BUG FIX: Handle NaN/None values properly, don't use infinity as default
     def safe_get(d, key, default=None):
-        val = d.get(key, default)
+        # Try both lowercase and uppercase keys
+        val = d.get(key, d.get(key.lower(), d.get(key.upper(), default)))
         if val is None or (isinstance(val, float) and (math.isnan(val) or math.isinf(val))):
             return default
         return val
@@ -226,17 +227,24 @@ def print_validation_report(validation: Dict):
     print("\n📊 Target 1: Overall RMSE")
     print("-" * 70)
     rmse = validation['overall_rmse']
-    status_icon = "✅" if rmse['status'] == 'PASS' else "❌"
-    print(f"  {status_icon} RMSE: {rmse['value']:.3f} (target: {rmse['target']})")
-    delta_icon = "📉" if rmse['delta_from_phase1'] < 0 else "📈"
-    print(f"  {delta_icon} vs Phase 1: {rmse['delta_from_phase1']:+.3f}")
+    if rmse['status'] == 'SKIP':
+        print(f"  ⏩ SKIPPED: {rmse.get('reason', 'No data')}")
+    else:
+        status_icon = "✅" if rmse['status'] == 'PASS' else "❌"
+        print(f"  {status_icon} RMSE: {rmse['value']:.3f} (target: {rmse['target']})")
+        if rmse.get('delta_from_phase1') is not None:
+            delta_icon = "📉" if rmse['delta_from_phase1'] < 0 else "📈"
+            print(f"  {delta_icon} vs Phase 1: {rmse['delta_from_phase1']:+.3f}")
 
     # Overall Bias
     print("\n📊 Target 2: Overall Bias")
     print("-" * 70)
     bias = validation['overall_bias']
-    status_icon = "✅" if bias['status'] == 'PASS' else "❌"
-    print(f"  {status_icon} Bias: {bias['value']:+.3f} (target: {bias['target']})")
+    if bias['status'] == 'SKIP':
+        print(f"  ⏩ SKIPPED: {bias.get('reason', 'No data')}")
+    else:
+        status_icon = "✅" if bias['status'] == 'PASS' else "❌"
+        print(f"  {status_icon} Bias: {bias['value']:+.3f} (target: {bias['target']})")
 
     # Per-prop Bias
     print("\n📊 Target 3: Per-Prop Bias")
@@ -244,8 +252,11 @@ def print_validation_report(validation: Dict):
     per_prop = validation['per_prop_bias']
     print(f"  Overall Status: {'✅ PASS' if per_prop['status'] == 'PASS' else '❌ FAIL'}")
     for prop_type, data in per_prop['by_prop'].items():
-        status_icon = "✅" if data['status'] == 'PASS' else "❌"
-        print(f"  {status_icon} {prop_type:8s}: {data['value']:+.3f}")
+        if data['status'] == 'SKIP':
+            print(f"  ⏩ {prop_type:8s}: SKIPPED")
+        else:
+            status_icon = "✅" if data['status'] == 'PASS' else "❌"
+            print(f"  {status_icon} {prop_type:8s}: {data['value']:+.3f}")
 
     # Confidence
     print("\n📊 Target 4-5: Confidence Metrics")
@@ -257,17 +268,23 @@ def print_validation_report(validation: Dict):
     print("\n📊 Target 6: Phase 2 Improvement")
     print("-" * 70)
     comp = validation['phase2_vs_phase1']
-    status_icon = "✅" if comp['status'] == 'PASS' else "❌"
-    print(f"  {status_icon} Phase 1 RMSE: {comp['phase1_rmse']:.3f}")
-    print(f"     Phase 2 RMSE: {comp['phase2_rmse']:.3f}")
-    print(f"     Improvement:  {comp['improvement']:+.3f}")
+    if comp['status'] == 'SKIP':
+        print(f"  ⏩ SKIPPED: {comp.get('reason', 'No data')}")
+    else:
+        status_icon = "✅" if comp['status'] == 'PASS' else "❌"
+        print(f"  {status_icon} Phase 1 RMSE: {comp['phase1_rmse']:.3f}")
+        print(f"     Phase 2 RMSE: {comp['phase2_rmse']:.3f}")
+        print(f"     Improvement:  {comp['improvement']:+.3f}")
 
     # Threes R²
     print("\n📊 Target 7: Threes R²")
     print("-" * 70)
     threes = validation['threes_r2']
-    status_icon = "✅" if threes['status'] == 'PASS' else "❌"
-    print(f"  {status_icon} R²: {threes['value']:.3f} (target: {threes['target']})")
+    if threes['status'] == 'SKIP':
+        print(f"  ⏩ SKIPPED: {threes.get('reason', 'No data')}")
+    else:
+        status_icon = "✅" if threes['status'] == 'PASS' else "❌"
+        print(f"  {status_icon} R²: {threes['value']:.3f} (target: {threes['target']})")
 
     # Summary
     print("\n" + "="*70)

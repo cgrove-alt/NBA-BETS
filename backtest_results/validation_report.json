@@ -1,38 +1,38 @@
 {
   "overall_rmse": {
-    "value": Infinity,
+    "value": 5.285,
     "target": "< 5.0",
     "status": "FAIL",
-    "delta_from_phase1": Infinity
+    "delta_from_phase1": -0.14999999999999947
   },
   "overall_bias": {
-    "value": Infinity,
+    "value": -0.023,
     "target": "< |0.5|",
-    "status": "FAIL"
+    "status": "PASS"
   },
   "per_prop_bias": {
     "target": "< |0.5|",
-    "status": "FAIL",
+    "status": "PASS",
     "by_prop": {
       "points": {
-        "value": Infinity,
-        "status": "FAIL"
+        "value": -0.099,
+        "status": "PASS"
       },
       "rebounds": {
-        "value": Infinity,
-        "status": "FAIL"
+        "value": -0.002,
+        "status": "PASS"
       },
       "assists": {
-        "value": Infinity,
-        "status": "FAIL"
+        "value": -0.001,
+        "status": "PASS"
       },
       "threes": {
-        "value": Infinity,
-        "status": "FAIL"
+        "value": -0.001,
+        "status": "PASS"
       },
       "pra": {
-        "value": Infinity,
-        "status": "FAIL"
+        "value": -0.004,
+        "status": "PASS"
       }
     }
   },
@@ -46,14 +46,15 @@
   },
   "phase2_vs_phase1": {
     "phase1_rmse": 5.435,
-    "phase2_rmse": Infinity,
-    "improvement": -Infinity,
-    "status": "FAIL"
+    "phase2_rmse": 5.285,
+    "improvement": 0.14999999999999947,
+    "status": "PASS"
   },
   "threes_r2": {
-    "value": -Infinity,
+    "value": null,
     "target": "> 0.0",
-    "status": "FAIL"
+    "status": "SKIP",
+    "reason": "No valid R\u00b2 data available"
   },
   "dnp_errors": {
     "total_dnp_predictions": 11172,
@@ -66,11 +67,11 @@
     },
     "status": "FAIL",
     "sample_dnp_errors": [
-      "Buddy Hield rebounds: pred=3.0 actual=0",
-      "Branden Carlson rebounds: pred=0.8 actual=0",
-      "Pat Connaughton rebounds: pred=1.4 actual=0",
-      "Sion James rebounds: pred=1.8 actual=0",
-      "Matisse Thybulle rebounds: pred=2.1 actual=0"
+      "Buddy Hield rebounds: pred=3.7 actual=0",
+      "Branden Carlson rebounds: pred=1.5 actual=0",
+      "Pat Connaughton rebounds: pred=2.1 actual=0",
+      "Sion James rebounds: pred=2.6 actual=0",
+      "Matisse Thybulle rebounds: pred=2.8 actual=0"
     ]
   }
 }

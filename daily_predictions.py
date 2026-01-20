@@ -46,10 +46,10 @@ from model_classes import QuantilePropModel  # BUG FIX: Import for pickle deseri
 # - Points (line ~25): std=5.0 → Z-scores reasonable → 56.4% avg over_prob
 # Fix: Use empirically-derived prop-specific constants from NBA historical data
 PROP_STD_DEVS = {
-    'points': 5.0,      # Calibrated from empirical data (was 6.5, reduced for better calibration)
-    'rebounds': 3.5,    # Calibrated from empirical data (was 2.8, increased for better calibration)
-    'assists': 3.0,     # Calibrated from empirical data (was 2.3, increased for better calibration)
-    'threes': 1.8,      # Calibrated from empirical data (was 1.3, increased for better calibration)
+    'points': 5.0,      # Calibrated: 55.0% avg prob (target: 50±5%) ✓
+    'rebounds': 4.5,    # Fine-tuned: 4.0 → 4.5 (was 58.1%, target: 50±5%)
+    'assists': 2.5,     # Calibrated: 49.2% avg prob ✓ (target: 50±5%)
+    'threes': 1.8,      # Calibrated from empirical data
     'pra': 9.0,         # Points + Rebounds + Assists combined variance
 }
 
@@ -1350,6 +1350,7 @@ def predict_player_prop(
     over_prob = 0.5
     edge = 0.0
     predicted_value = None
+    features = None  # Initialize for quantile model usage later
 
     model_data = models.get(f'prop_{prop_type}')
 
@@ -1568,15 +1569,11 @@ def predict_player_prop(
     # Calculate confidence score based on prediction band width (Task 2.4)
     if pred_low is not None and pred_high is not None and pred_median is not None:
         band_width = pred_high - pred_low
-        # Narrow bands (< 3 pts) = high confidence, wide bands (> 8 pts) = low confidence
-        if band_width < 3:
-            confidence_score = 85.0  # High confidence
-        elif band_width < 5:
-            confidence_score = 70.0  # Good confidence
-        elif band_width < 8:
-            confidence_score = 55.0  # Moderate confidence
-        else:
-            confidence_score = 40.0  # Low confidence (wide prediction range)
+        # BUG FIX: Continuous confidence calculation, not binary thresholds
+        # Narrow bands = high confidence, wide bands = low confidence
+        # Map band_width to confidence: 0-3pts → 90, 3-5pts → 70, 5-8pts → 55, 8+pts → 40
+        # Use inverse relationship: confidence = 90 - (band_width * 6.25), clamped to [40, 90]
+        confidence_score = max(40.0, min(90.0, 90.0 - (band_width * 6.25)))
     elif predicted_value is not None:
         # BUG FIX: More granular confidence based on edge magnitude and prediction difference
         # Higher edge and larger prediction difference = higher confidence
