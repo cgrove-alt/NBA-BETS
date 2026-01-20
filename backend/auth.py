@@ -32,16 +32,23 @@ from passlib.context import CryptContext
 
 # ============== CONFIGURATION ==============
 
+# Enable/disable authentication
+AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "false").lower() == "true"
+
 # JWT Configuration
-JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
 JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
+# CRITICAL: JWT_SECRET_KEY must be set when authentication is enabled
+if AUTH_ENABLED and not JWT_SECRET_KEY:
+    raise ValueError(
+        "CRITICAL SECURITY ERROR: JWT_SECRET_KEY environment variable must be set when AUTH_ENABLED=true. "
+        "Generate a secure key with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+    )
+
 # Simple API Key (alternative to JWT)
 API_KEY = os.environ.get("API_KEY", None)
-
-# Enable/disable authentication
-AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "false").lower() == "true"
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -221,11 +228,28 @@ def add_auth_endpoints(app):
     async def login(request: TokenRequest):
         """Generate JWT access token.
 
-        For demo purposes, accepts any username/password.
-        In production, verify against a user database.
+        SECURITY WARNING: This is a stub implementation for development/testing only.
+
+        In production, you MUST implement proper user verification:
+        1. Check username/password against a database
+        2. Use password hashing (bcrypt, argon2)
+        3. Implement rate limiting on failed attempts
+        4. Add account lockout after N failed attempts
+
+        This endpoint is DISABLED when AUTH_ENABLED=true to prevent accidental deployment.
         """
-        # TODO: Replace with real user verification
-        # For now, accept any credentials for demo
+        # SECURITY: Prevent deployment with stub auth
+        if AUTH_ENABLED:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "Authentication endpoint not implemented. "
+                    "This is a stub for development only. "
+                    "Implement proper user verification before enabling AUTH_ENABLED=true in production."
+                )
+            )
+
+        # Development/testing only - returns token for any credentials
         user_data = {
             "sub": request.username,
             "username": request.username,
