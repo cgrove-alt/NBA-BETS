@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronUp, Percent } from 'lucide-react';
-import { PROP_TYPES } from '../../lib/types';
-import type { FilterState, PropType, FilterPreset, Game } from '../../lib/types';
+import { PROP_TYPES, POSITIONS } from '../../lib/types';
+import type { FilterState, PropType, FilterPreset, Game, Position, PlayerProp } from '../../lib/types';
 import { FilterPresets } from './FilterPresets';
 import { formatMatchup } from '../../lib/utils';
 
@@ -13,6 +13,8 @@ interface EnhancedFilterPanelProps {
   games: Game[];
   selectedGameId: string | null;
   onGameSelect: (gameId: string) => void;
+  // Player data (for extracting unique teams/positions)
+  players?: PlayerProp[];
   // Preset management
   presets: FilterPreset[];
   onSavePreset: (name: string, description?: string) => void;
@@ -27,6 +29,7 @@ export function EnhancedFilterPanel({
   games,
   selectedGameId,
   onGameSelect,
+  players = [],
   presets,
   onSavePreset,
   onLoadPreset,
@@ -34,6 +37,8 @@ export function EnhancedFilterPanel({
 }: EnhancedFilterPanelProps) {
   const [expandedSections, setExpandedSections] = useState({
     game: false,
+    team: false,
+    position: false,
     confidence: true,
     edge: true,
     propTypes: true,
@@ -41,6 +46,26 @@ export function EnhancedFilterPanel({
     sort: true,
     presets: false,
   });
+
+  // Extract unique teams from player data
+  const availableTeams = useMemo(() => {
+    const teams = new Set<string>();
+    players.forEach((p) => {
+      if (p.team) teams.add(p.team);
+    });
+    return Array.from(teams).sort();
+  }, [players]);
+
+  // Extract unique positions from player data
+  const availablePositions = useMemo(() => {
+    const positions = new Set<Position>();
+    players.forEach((p) => {
+      if (p.position && POSITIONS.includes(p.position as Position)) {
+        positions.add(p.position as Position);
+      }
+    });
+    return Array.from(positions).sort();
+  }, [players]);
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -84,13 +109,31 @@ export function EnhancedFilterPanel({
     onFilterChange({ sortBy });
   };
 
+  const handleTeamToggle = (team: string) => {
+    const current = filters.teams || [];
+    const updated = current.includes(team)
+      ? current.filter((t) => t !== team)
+      : [...current, team];
+    onFilterChange({ teams: updated.length > 0 ? updated : undefined });
+  };
+
+  const handlePositionToggle = (position: Position) => {
+    const current = filters.positions || [];
+    const updated = current.includes(position)
+      ? current.filter((p) => p !== position)
+      : [...current, position];
+    onFilterChange({ positions: updated.length > 0 ? updated : undefined });
+  };
+
   const currentFiltersActive =
     filters.minConfidence > 55 ||
     filters.maxConfidence !== undefined ||
     filters.minEdge > 4 ||
     filters.maxEdge !== undefined ||
     filters.pickType !== null ||
-    filters.propTypes.length < 5;
+    filters.propTypes.length < 5 ||
+    (filters.teams && filters.teams.length > 0) ||
+    (filters.positions && filters.positions.length > 0);
 
   return (
     <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
@@ -134,6 +177,87 @@ export function EnhancedFilterPanel({
                   );
                 })}
               </select>
+            )}
+          </div>
+        )}
+
+        {/* Team Filter */}
+        {availableTeams.length > 0 && (
+          <div>
+            <button
+              onClick={() => toggleSection('team')}
+              className="flex items-center justify-between w-full mb-2"
+            >
+              <label className="text-xs text-text-secondary font-medium">
+                Team {filters.teams && filters.teams.length > 0 && `(${filters.teams.length})`}
+              </label>
+              {expandedSections.team ? (
+                <ChevronUp size={14} className="text-text-muted" />
+              ) : (
+                <ChevronDown size={14} className="text-text-muted" />
+              )}
+            </button>
+            {expandedSections.team && (
+              <div className="flex flex-wrap gap-2">
+                {availableTeams.map((team) => (
+                  <button
+                    key={team}
+                    onClick={() => handleTeamToggle(team)}
+                    className={`
+                      px-3 py-1.5 text-xs font-medium rounded transition-colors
+                      ${
+                        filters.teams?.includes(team)
+                          ? 'bg-accent-primary text-white shadow-sm'
+                          : 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'
+                      }
+                    `}
+                  >
+                    {team}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Position Filter */}
+        {availablePositions.length > 0 && (
+          <div>
+            <button
+              onClick={() => toggleSection('position')}
+              className="flex items-center justify-between w-full mb-2"
+            >
+              <label className="text-xs text-text-secondary font-medium">
+                Position {filters.positions && filters.positions.length > 0 && `(${filters.positions.length})`}
+              </label>
+              {expandedSections.position ? (
+                <ChevronUp size={14} className="text-text-muted" />
+              ) : (
+                <ChevronDown size={14} className="text-text-muted" />
+              )}
+            </button>
+            {expandedSections.position && (
+              <div className="flex flex-wrap gap-2">
+                {POSITIONS.map((position) => (
+                  <button
+                    key={position}
+                    onClick={() => handlePositionToggle(position)}
+                    disabled={!availablePositions.includes(position)}
+                    className={`
+                      px-3 py-1.5 text-xs font-medium rounded transition-colors
+                      ${
+                        filters.positions?.includes(position)
+                          ? 'bg-accent-primary text-white shadow-sm'
+                          : availablePositions.includes(position)
+                          ? 'bg-bg-tertiary text-text-secondary hover:bg-bg-hover'
+                          : 'bg-bg-tertiary text-text-muted opacity-40 cursor-not-allowed'
+                      }
+                    `}
+                  >
+                    {position}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         )}

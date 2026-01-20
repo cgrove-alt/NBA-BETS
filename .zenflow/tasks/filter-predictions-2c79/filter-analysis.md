@@ -49,11 +49,11 @@ Filtered props displayed in PropTable
 
 ### 2. Confidence Level Data
 
-**Source:** `backend/data_service.py:_calculate_prop_confidence()` (lines 2826-2937)
+**Source:** `dashboard/data_service.py:_calculate_prop_confidence()` (lines 2826-2937)
 
 **Range:** 50-85% (calibrated, not arbitrary)
 
-**Calculation Method (8-factor formula):**
+**Calculation Method (9-factor formula):**
 1. **Sample Size Boost** - More games played = higher confidence
 2. **Form Stability** - Recent performance vs season average
 3. **Consistency Score** - Historical variance
@@ -61,7 +61,8 @@ Filtered props displayed in PropTable
 5. **Real Line Available** - Sportsbook line exists (+3%)
 6. **Whitelist Bonus** - 15 historically accurate players (+10%)
 7. **Minutes Stability** - Playing time variance
-8. **Matchup Quality** - Opponent defensive rating
+8. **Matchup Quality** - Easy matchup vs weak defense (+5%)
+9. **Hit Rate Boost** - Player beats the line consistently (last 10 games >60%: +5%)
 
 **Distribution (typical day):**
 - 50-55%: ~40% of predictions
@@ -416,7 +417,7 @@ Since confidence and game filters are **already fully implemented**, here are op
 - ✅ Game time/status
 
 ### Requires Backend Enhancement
-- ❌ Confidence component breakdown (8 factors)
+- ❌ Confidence component breakdown (9 factors)
 - ❌ Historical hit rates by prop type
 - ❌ Opponent defensive ratings (per prop)
 - ❌ Injury adjustment metadata (% impact)
@@ -485,7 +486,7 @@ Current: No validation
 **7. Confidence Explanation**
 Current: No explanation
 **Better:** Inline tooltip
-- Hover confidence slider: "50-85% range based on 8 factors"
+- Hover confidence slider: "50-85% range based on 9 factors"
 - Link to methodology page
 - Show which factors are boosting/lowering each prediction
 

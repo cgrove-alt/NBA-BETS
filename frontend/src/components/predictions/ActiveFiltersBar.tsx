@@ -58,6 +58,28 @@ export function ActiveFiltersBar({
     });
   }
 
+  // Team filter
+  if (filters.teams && filters.teams.length > 0) {
+    filters.teams.forEach((team) => {
+      activeFilters.push({
+        key: 'teams',
+        label: `Team: ${team}`,
+        value: team,
+      });
+    });
+  }
+
+  // Position filter
+  if (filters.positions && filters.positions.length > 0) {
+    filters.positions.forEach((position) => {
+      activeFilters.push({
+        key: 'positions',
+        label: `Pos: ${position}`,
+        value: position,
+      });
+    });
+  }
+
   // Don't render if no active filters
   if (activeFilters.length === 0) {
     return null;

@@ -202,7 +202,7 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
   const filteredPlayers = useMemo(() => {
     return players
       .map((player) => ({ player, prop: getProp(player) }))
-      .filter(({ prop }) => {
+      .filter(({ player, prop }) => {
         if (!prop || prop.pick === '-') return false;
 
         // Confidence filters
@@ -218,6 +218,16 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
 
         // Pick type filter
         if (filters.pickType && prop.pick !== filters.pickType) return false;
+
+        // Team filter
+        if (filters.teams && filters.teams.length > 0) {
+          if (!player.team || !filters.teams.includes(player.team)) return false;
+        }
+
+        // Position filter
+        if (filters.positions && filters.positions.length > 0) {
+          if (!player.position || !filters.positions.includes(player.position as never)) return false;
+        }
 
         return true;
       })

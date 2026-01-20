@@ -224,6 +224,10 @@ export interface LiveStatsResponse {
 export const PROP_TYPES = ['Points', 'Rebounds', 'Assists', '3PM', 'PRA'] as const;
 export type PropType = (typeof PROP_TYPES)[number];
 
+// Position constants
+export const POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'] as const;
+export type Position = (typeof POSITIONS)[number];
+
 // Filter state
 export interface FilterState {
   minConfidence: number;
@@ -235,6 +239,8 @@ export interface FilterState {
   sortBy: string;
   sortOrder: 'asc' | 'desc';
   edgeMode: 'points' | 'percentage';
+  teams?: string[];  // Filter by team abbreviations (e.g., ["NYK", "BOS"])
+  positions?: Position[];  // Filter by positions (e.g., ["PG", "C"])
 }
 
 // Filter preset for saving/loading

@@ -87,6 +87,16 @@ export function Predictions() {
     let filtered = 0;
 
     for (const player of allPlayers) {
+      // Apply team filter at player level
+      if (filters.teams && filters.teams.length > 0) {
+        if (!player.team || !filters.teams.includes(player.team)) continue;
+      }
+
+      // Apply position filter at player level
+      if (filters.positions && filters.positions.length > 0) {
+        if (!player.position || !filters.positions.includes(player.position as never)) continue;
+      }
+
       for (const propType of filters.propTypes) {
         const prop = propType === '3PM' ? player['3PM'] : player[propType as keyof typeof player];
         if (prop && typeof prop === 'object' && 'pick' in prop) {
@@ -131,6 +141,18 @@ export function Predictions() {
         if (value) {
           const updated = filters.propTypes.filter((p) => p !== value);
           updateFilters({ propTypes: updated.length > 0 ? updated : [...PROP_TYPES] });
+        }
+        break;
+      case 'teams':
+        if (value) {
+          const updated = (filters.teams || []).filter((t) => t !== value);
+          updateFilters({ teams: updated.length > 0 ? updated : undefined });
+        }
+        break;
+      case 'positions':
+        if (value) {
+          const updated = (filters.positions || []).filter((p) => p !== value);
+          updateFilters({ positions: updated.length > 0 ? updated : undefined });
         }
         break;
     }
@@ -251,6 +273,7 @@ export function Predictions() {
               games={games}
               selectedGameId={selectedGameId}
               onGameSelect={handleGameSelect}
+              players={allPlayers}
               presets={presets}
               onSavePreset={savePreset}
               onLoadPreset={loadPreset}
