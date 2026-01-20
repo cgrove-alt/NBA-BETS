@@ -19,7 +19,7 @@ Successfully restored complete 2025 season dataset and re-ran comprehensive back
 **Comparison to Baseline (ea2901bb)**:
 - Games: Same (596)
 - Predictions: +1,445 (+2.4%)
-- RMSE: -0.039 (0.7% better) ✅
+- RMSE: +0.135 (2.6% worse) - trade-off for calibration improvements
 
 ---
 
