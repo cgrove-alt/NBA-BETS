@@ -60,21 +60,6 @@ export function ActiveFiltersBar({
     });
   }
 
-  // Game filter (if specific games selected)
-  if (filters.gameIds.length > 0 && filters.gameIds.length < games.length) {
-    filters.gameIds.forEach((gameId) => {
-      const game = games.find((g) => g.game_id === gameId);
-      if (game) {
-        const matchup = `${game.visitor_team.abbreviation} @ ${game.home_team.abbreviation}`;
-        activeFilters.push({
-          key: 'gameIds',
-          label: matchup,
-          value: gameId,
-        });
-      }
-    });
-  }
-
   // Don't render if no active filters
   if (activeFilters.length === 0) {
     return null;

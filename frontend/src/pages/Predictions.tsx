@@ -13,6 +13,7 @@ import { usePredictions } from '../hooks/usePredictions';
 import { useFilters } from '../hooks/useFilters';
 import { useLiveStats } from '../hooks/useLiveStats';
 import { PROP_TYPES } from '../lib/types';
+import type { PropPrediction } from '../lib/types';
 
 export function Predictions() {
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDate());
@@ -98,9 +99,10 @@ export function Predictions() {
           if (p.confidence < filters.minConfidence) continue;
           if (filters.maxConfidence && p.confidence > filters.maxConfidence) continue;
 
+          const propPred = p as PropPrediction;
           const edgeValue = filters.edgeMode === 'percentage'
-            ? (p as any).edge_pct || Math.abs(p.edge)
-            : Math.abs(p.edge);
+            ? propPred.edge_pct || Math.abs(propPred.edge)
+            : Math.abs(propPred.edge);
           if (edgeValue < filters.minEdge) continue;
           if (filters.maxEdge && edgeValue > filters.maxEdge) continue;
 
@@ -129,12 +131,6 @@ export function Predictions() {
         if (value) {
           const updated = filters.propTypes.filter((p) => p !== value);
           updateFilters({ propTypes: updated.length > 0 ? updated : [...PROP_TYPES] });
-        }
-        break;
-      case 'gameIds':
-        if (value) {
-          const updated = filters.gameIds.filter((id) => id !== value);
-          updateFilters({ gameIds: updated });
         }
         break;
     }
@@ -251,7 +247,6 @@ export function Predictions() {
           <div className="lg:col-span-1 space-y-4">
             <EnhancedFilterPanel
               filters={filters}
-              games={games}
               onFilterChange={updateFilters}
               resultCount={filteredCount}
               presets={presets}

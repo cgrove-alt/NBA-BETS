@@ -1,17 +1,15 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronUp, Percent } from 'lucide-react';
 import { PROP_TYPES } from '../../lib/types';
-import type { FilterState, PropType, Game } from '../../lib/types';
+import type { FilterState, PropType, FilterPreset } from '../../lib/types';
 import { FilterPresets } from './FilterPresets';
-import { formatMatchup } from '../../lib/utils';
 
 interface EnhancedFilterPanelProps {
   filters: FilterState;
-  games: Game[];
   onFilterChange: (filters: Partial<FilterState>) => void;
   resultCount: number;
   // Preset management
-  presets: any[];
+  presets: FilterPreset[];
   onSavePreset: (name: string, description?: string) => void;
   onLoadPreset: (presetId: string) => void;
   onDeletePreset: (presetId: string) => void;
@@ -19,7 +17,6 @@ interface EnhancedFilterPanelProps {
 
 export function EnhancedFilterPanel({
   filters,
-  games,
   onFilterChange,
   resultCount,
   presets,
@@ -28,7 +25,6 @@ export function EnhancedFilterPanel({
   onDeletePreset,
 }: EnhancedFilterPanelProps) {
   const [expandedSections, setExpandedSections] = useState({
-    games: true,
     confidence: true,
     edge: true,
     propTypes: true,
@@ -69,22 +65,6 @@ export function EnhancedFilterPanel({
     onFilterChange({ pickType: filters.pickType === pickType ? null : pickType });
   };
 
-  const handleGameToggle = (gameId: string) => {
-    const current = filters.gameIds;
-    const updated = current.includes(gameId)
-      ? current.filter((id) => id !== gameId)
-      : [...current, gameId];
-    onFilterChange({ gameIds: updated });
-  };
-
-  const handleSelectAllGames = () => {
-    onFilterChange({ gameIds: [] }); // Empty array = all games
-  };
-
-  const handleDeselectAllGames = () => {
-    onFilterChange({ gameIds: games.map((g) => g.game_id).slice(0, 1) }); // Select only first game
-  };
-
   const toggleEdgeMode = () => {
     onFilterChange({
       edgeMode: filters.edgeMode === 'points' ? 'percentage' : 'points',
@@ -101,8 +81,7 @@ export function EnhancedFilterPanel({
     filters.minEdge > 4 ||
     filters.maxEdge !== undefined ||
     filters.pickType !== null ||
-    filters.propTypes.length < 5 ||
-    (filters.gameIds.length > 0 && filters.gameIds.length < games.length);
+    filters.propTypes.length < 5;
 
   return (
     <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
@@ -113,68 +92,6 @@ export function EnhancedFilterPanel({
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Game Filter */}
-        {games.length > 1 && (
-          <div>
-            <button
-              onClick={() => toggleSection('games')}
-              className="flex items-center justify-between w-full mb-2"
-            >
-              <label className="text-xs text-text-secondary font-medium">Games</label>
-              {expandedSections.games ? (
-                <ChevronUp size={14} className="text-text-muted" />
-              ) : (
-                <ChevronDown size={14} className="text-text-muted" />
-              )}
-            </button>
-            {expandedSections.games && (
-              <div className="space-y-2">
-                <div className="flex gap-2 text-xs mb-2">
-                  <button
-                    onClick={handleSelectAllGames}
-                    className="px-2 py-1 text-accent-primary hover:bg-accent-primary/10 rounded transition-colors"
-                  >
-                    All
-                  </button>
-                  <button
-                    onClick={handleDeselectAllGames}
-                    className="px-2 py-1 text-text-muted hover:bg-bg-hover rounded transition-colors"
-                  >
-                    Clear
-                  </button>
-                </div>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {games.map((game) => {
-                    const isSelected =
-                      filters.gameIds.length === 0 || filters.gameIds.includes(game.game_id);
-                    const matchup = formatMatchup(
-                      game.home_team.abbreviation,
-                      game.visitor_team.abbreviation
-                    );
-                    return (
-                      <label
-                        key={game.game_id}
-                        className="flex items-center gap-2 p-2 bg-bg-tertiary rounded cursor-pointer hover:bg-bg-hover transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleGameToggle(game.game_id)}
-                          className="w-3.5 h-3.5 rounded border-border text-accent-primary focus:ring-accent-primary focus:ring-offset-0 focus:ring-1"
-                        />
-                        <span className="text-xs text-text-primary">{matchup}</span>
-                        {game.status && (
-                          <span className="ml-auto text-xs text-text-muted">{game.status}</span>
-                        )}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Confidence Range */}
         <div>
           <button

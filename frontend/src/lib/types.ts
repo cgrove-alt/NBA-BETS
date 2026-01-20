@@ -232,10 +232,9 @@ export interface FilterState {
   maxEdge?: number;
   propTypes: PropType[];
   pickType: 'OVER' | 'UNDER' | null;
-  gameIds: string[];  // NEW: Filter by specific games
   sortBy: string;
   sortOrder: 'asc' | 'desc';
-  edgeMode: 'points' | 'percentage';  // NEW: Toggle between edge display modes
+  edgeMode: 'points' | 'percentage';
 }
 
 // Filter preset for saving/loading

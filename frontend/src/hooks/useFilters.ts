@@ -12,7 +12,6 @@ const defaultFilters: FilterState = {
   maxEdge: undefined,
   propTypes: [...PROP_TYPES],
   pickType: null,
-  gameIds: [],        // Empty = all games
   sortBy: 'quality',  // Match backend default (quality = confidence * edge)
   sortOrder: 'desc',
   edgeMode: 'points', // Default to points display
