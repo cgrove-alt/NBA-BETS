@@ -3686,6 +3686,7 @@ class DataService:
         result = {
             "player_name": player.get("player_name", "Unknown"),
             "player_id": player_id,
+            "team": player.get("team", "") or player.get("team_abbreviation", ""),
             "position": player.get("position", ""),
             "avg_minutes": player.get("avg_minutes", 0),
             "is_blacklisted": is_blacklisted,  # Flag for UI indication

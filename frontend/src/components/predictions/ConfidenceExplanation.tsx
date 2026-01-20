@@ -77,7 +77,7 @@ export function ConfidenceExplanation() {
           <span className="text-accent-primary shrink-0">9.</span>
           <div>
             <span className="font-medium text-text-primary">Hit Rate Boost</span>
-            <div className="text-text-muted">Player beats line >60% in last 10 games (+5%)</div>
+            <div className="text-text-muted">Player beats line {'>'}60% in last 10 games (+5%)</div>
           </div>
         </div>
       </div>
