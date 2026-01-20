@@ -1,0 +1,23 @@
+{
+  "model_name": "moneyline",
+  "model_type": "classifier",
+  "timestamp": "20260105_113114",
+  "training_date": "2026-01-05T11:31:14.390445",
+  "accuracy": 0.6216328222130129,
+  "precision": 0.6203904555314533,
+  "recall": 0.843036109064112,
+  "f1": 0.7147766323024055,
+  "log_loss": 0.6494499277245381,
+  "brier_score": 0.22902631759643555,
+  "auc_roc": 0.6412488694982248,
+  "ece": 0.04640460403391398,
+  "mce": 0.199338898062706,
+  "betting_roi_pct": 525689760.0,
+  "bets_placed": 1408,
+  "bets_won": 920,
+  "bet_win_rate": 0.6534090909090909,
+  "final_bankroll": 5256898560.0,
+  "min_edge_threshold": 0.03,
+  "train_size": 2413,
+  "calibration_method": "temperature"
+}

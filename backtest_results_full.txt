@@ -1,0 +1,21 @@
+
+============================================================
+RUNNING COMPREHENSIVE BACKTEST
+============================================================
+Loading models...
+  Loaded points model (ensemble)
+  Loaded rebounds model (ensemble)
+  Loaded assists model (ensemble)
+  Loaded threes model (ensemble)
+  Loaded pra model (ensemble)
+  Loaded minutes model (TIER 2.3)
+
+Loading games for 2025-2026 season...
+  Found 372 completed games
+  Date range: 2025-10-21 to 2025-12-12
+
+Loading historical player statistics...
+  Loaded 4167 stat records for 717 players
+  Cached box scores for 119 games
+
+Processing 372 games...

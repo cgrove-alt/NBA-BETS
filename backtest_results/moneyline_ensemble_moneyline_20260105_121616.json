@@ -1,0 +1,59 @@
+{
+  "model_name": "moneyline_ensemble",
+  "bet_type": "moneyline",
+  "timestamp": "20260105_121616",
+  "report_date": "2026-01-05T12:16:16.099551",
+  "thresholds": {
+    "min_roi": 0.0,
+    "min_win_rate": 52.0,
+    "max_ece": 0.1,
+    "min_sharpe": 0.3
+  },
+  "results": {
+    "model_name": "moneyline_backtest",
+    "bet_type": "moneyline",
+    "start_date": "2025-11-15T00:00:00",
+    "end_date": "2026-01-04T00:00:00",
+    "total_bets": 276,
+    "total_wins": 184,
+    "total_losses": 92,
+    "total_staked": 1506012.42,
+    "total_pnl": 195827.48454545462,
+    "overall_roi": 13.003045787992548,
+    "overall_win_rate": 66.66666666666666,
+    "max_drawdown": 102177.26636363636,
+    "max_drawdown_pct": 37.76742688379262,
+    "sharpe_ratio": 4.593128820597941,
+    "profit_factor": 1.3186401833870864,
+    "avg_clv": null,
+    "periods_profitable": 1,
+    "longest_winning_streak": 10,
+    "longest_losing_streak": 4,
+    "ece": 0.08019191431610483,
+    "avg_ev": 1071.5182642824939,
+    "periods": [
+      {
+        "start_date": "2025-11-15T00:00:00",
+        "end_date": "2026-01-04T00:00:00",
+        "num_bets": 276,
+        "num_wins": 184,
+        "num_losses": 92,
+        "num_pushes": 0,
+        "total_staked": 1506012.42,
+        "total_pnl": 195827.48454545462,
+        "roi": 13.003045787992548,
+        "win_rate": 66.66666666666666,
+        "avg_odds": -110.0,
+        "avg_edge": 0.1852262886491745,
+        "avg_clv": null
+      }
+    ],
+    "games_tested": 340,
+    "total_games": 1701,
+    "holdout_fraction": 0.2,
+    "holdout_start_date": "2025-11-14",
+    "holdout_end_date": "2026-01-04"
+  },
+  "thresholds_passed": true,
+  "threshold_failures": []
+}
