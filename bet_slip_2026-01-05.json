@@ -1,0 +1,596 @@
+{
+  "date": "2026-01-05",
+  "generated_at": "2026-01-05T12:39:10.187639",
+  "games_analyzed": 8,
+  "total_recommendations": 8,
+  "top_picks": [
+    {
+      "bet_type": "moneyline",
+      "description": "Denver Nuggets ML",
+      "selection": "away",
+      "line": null,
+      "probability": 0.5438867720552856,
+      "confidence": "high",
+      "edge": 0.368755423543902,
+      "expected_value": 8.777354411057118,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: 54.4% vs Market: 17.5% (odds: +471)",
+      "game_info": {
+        "home": "PHI",
+        "away": "DEN"
+      },
+      "odds": 471,
+      "implied_probability": 0.17513134851138354,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    },
+    {
+      "bet_type": "spread",
+      "description": "Denver Nuggets +11.5",
+      "selection": "away",
+      "line": 11.5,
+      "probability": 0.7631235128589837,
+      "confidence": "high",
+      "edge": 0.28235428208975294,
+      "expected_value": 52.624702571796746,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: +2.2 vs Line: -11.5 (9.3pt edge) (injury adj: +2.0)",
+      "game_info": {
+        "home": "PHI",
+        "away": "DEN"
+      },
+      "odds": 108,
+      "implied_probability": 0.4807692307692308,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    },
+    {
+      "bet_type": "spread",
+      "description": "Chicago Bulls +11.5",
+      "selection": "away",
+      "line": 11.5,
+      "probability": 0.7931747777918268,
+      "confidence": "high",
+      "edge": 0.2671084270809263,
+      "expected_value": 58.63495555836536,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: +0.9 vs Line: -11.5 (10.6pt edge) (injury adj: -5.8)",
+      "game_info": {
+        "home": "BOS",
+        "away": "CHI"
+      },
+      "odds": -111,
+      "implied_probability": 0.5260663507109005,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    },
+    {
+      "bet_type": "spread",
+      "description": "Detroit Pistons 3.5",
+      "selection": "home",
+      "line": 3.5,
+      "probability": 0.7939793211582689,
+      "confidence": "high",
+      "edge": 0.25909560022803635,
+      "expected_value": 58.79586423165378,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: +7.2 vs Line: 3.5 (10.7pt edge) (injury adj: +1.4)",
+      "game_info": {
+        "home": "DET",
+        "away": "NYK"
+      },
+      "odds": -115,
+      "implied_probability": 0.5348837209302325,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    },
+    {
+      "bet_type": "spread",
+      "description": "LA Clippers -1.5",
+      "selection": "home",
+      "line": -1.5,
+      "probability": 0.5930068115062109,
+      "confidence": "high",
+      "edge": 0.15247817714497747,
+      "expected_value": 18.60136230124219,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: +4.6 vs Line: -1.5 (3.1pt edge) (injury adj: +1.0)",
+      "game_info": {
+        "home": "LAC",
+        "away": "GSW"
+      },
+      "odds": 127,
+      "implied_probability": 0.44052863436123346,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    }
+  ],
+  "parlay_recommendations": [
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Denver Nuggets +11.5",
+          "probability": 0.7631235128589837,
+          "confidence": "high",
+          "edge": 0.28235428208975294
+        },
+        {
+          "type": "spread",
+          "description": "Chicago Bulls +11.5",
+          "probability": 0.7931747777918268,
+          "confidence": "high",
+          "edge": 0.2671084270809263
+        }
+      ],
+      "combined_probability": 0.6052903227396427,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Denver Nuggets +11.5",
+          "probability": 0.7631235128589837,
+          "confidence": "high",
+          "edge": 0.28235428208975294
+        },
+        {
+          "type": "spread",
+          "description": "Detroit Pistons 3.5",
+          "probability": 0.7939793211582689,
+          "confidence": "high",
+          "edge": 0.25909560022803635
+        }
+      ],
+      "combined_probability": 0.6059042886996894,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Denver Nuggets +11.5",
+          "probability": 0.7631235128589837,
+          "confidence": "high",
+          "edge": 0.28235428208975294
+        },
+        {
+          "type": "spread",
+          "description": "LA Clippers -1.5",
+          "probability": 0.5930068115062109,
+          "confidence": "high",
+          "edge": 0.15247817714497747
+        }
+      ],
+      "combined_probability": 0.45253744114592487,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Chicago Bulls +11.5",
+          "probability": 0.7931747777918268,
+          "confidence": "high",
+          "edge": 0.2671084270809263
+        },
+        {
+          "type": "spread",
+          "description": "Detroit Pistons 3.5",
+          "probability": 0.7939793211582689,
+          "confidence": "high",
+          "edge": 0.25909560022803635
+        }
+      ],
+      "combined_probability": 0.6297643716310154,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Chicago Bulls +11.5",
+          "probability": 0.7931747777918268,
+          "confidence": "high",
+          "edge": 0.2671084270809263
+        },
+        {
+          "type": "spread",
+          "description": "LA Clippers -1.5",
+          "probability": 0.5930068115062109,
+          "confidence": "high",
+          "edge": 0.15247817714497747
+        }
+      ],
+      "combined_probability": 0.47035804594547853,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Detroit Pistons 3.5",
+          "probability": 0.7939793211582689,
+          "confidence": "high",
+          "edge": 0.25909560022803635
+        },
+        {
+          "type": "spread",
+          "description": "LA Clippers -1.5",
+          "probability": 0.5930068115062109,
+          "confidence": "high",
+          "edge": 0.15247817714497747
+        }
+      ],
+      "combined_probability": 0.47083514564193085,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Denver Nuggets +11.5",
+          "probability": 0.7631235128589837,
+          "confidence": "high",
+          "edge": 0.28235428208975294
+        },
+        {
+          "type": "spread",
+          "description": "Chicago Bulls +11.5",
+          "probability": 0.7931747777918268,
+          "confidence": "high",
+          "edge": 0.2671084270809263
+        },
+        {
+          "type": "spread",
+          "description": "Detroit Pistons 3.5",
+          "probability": 0.7939793211582689,
+          "confidence": "high",
+          "edge": 0.25909560022803635
+        }
+      ],
+      "combined_probability": 0.48058799955249093,
+      "num_legs": 3,
+      "type": "3-leg parlay"
+    }
+  ],
+  "bankroll_allocation": {
+    "total_stake": 200.0,
+    "num_bets": 4,
+    "allocation": [
+      {
+        "bet": "Denver Nuggets ML",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Denver Nuggets +11.5",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Chicago Bulls +11.5",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Detroit Pistons 3.5",
+        "stake": 50.0,
+        "confidence": "high"
+      }
+    ],
+    "remaining_daily_budget": 0.0,
+    "bankroll_percentage_used": 20.0
+  },
+  "game_analyses": [
+    {
+      "game_id": "0022500502",
+      "home_team": "Detroit Pistons",
+      "away_team": "New York Knicks",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5389211000054653,
+        "away_win_probability": 0.46107889999453466,
+        "predicted_winner": "home",
+        "confidence": 0.5389211000054653
+      },
+      "spread_prediction": {
+        "predicted_spread": 5.77,
+        "predicted_winner": "home",
+        "predicted_margin": 5.77
+      },
+      "recommendations": [
+        {
+          "bet_type": "moneyline",
+          "description": "Detroit Pistons ML",
+          "selection": "home",
+          "line": null,
+          "probability": 0.5389211000054653,
+          "confidence": "high",
+          "edge": 0.09447665556102092,
+          "expected_value": 7.784220001093061,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: 53.9% vs Market: 44.4% (odds: +125)",
+          "game_info": {
+            "home": "DET",
+            "away": "NYK"
+          },
+          "odds": 125,
+          "implied_probability": 0.4444444444444444,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        },
+        {
+          "bet_type": "spread",
+          "description": "Detroit Pistons 3.5",
+          "selection": "home",
+          "line": 3.5,
+          "probability": 0.7939793211582689,
+          "confidence": "high",
+          "edge": 0.25909560022803635,
+          "expected_value": 58.79586423165378,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: +7.2 vs Line: 3.5 (10.7pt edge) (injury adj: +1.4)",
+          "game_info": {
+            "home": "DET",
+            "away": "NYK"
+          },
+          "odds": -115,
+          "implied_probability": 0.5348837209302325,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "0022500503",
+      "home_team": "Boston Celtics",
+      "away_team": "Chicago Bulls",
+      "moneyline_prediction": {
+        "home_win_probability": 0.6081398843085268,
+        "away_win_probability": 0.39186011569147317,
+        "predicted_winner": "home",
+        "confidence": 0.6081398843085268
+      },
+      "spread_prediction": {
+        "predicted_spread": 6.639999999999998,
+        "predicted_winner": "home",
+        "predicted_margin": 6.639999999999998
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Chicago Bulls +11.5",
+          "selection": "away",
+          "line": 11.5,
+          "probability": 0.7931747777918268,
+          "confidence": "high",
+          "edge": 0.2671084270809263,
+          "expected_value": 58.63495555836536,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: +0.9 vs Line: -11.5 (10.6pt edge) (injury adj: -5.8)",
+          "game_info": {
+            "home": "BOS",
+            "away": "CHI"
+          },
+          "odds": -111,
+          "implied_probability": 0.5260663507109005,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "0022500504",
+      "home_team": "Toronto Raptors",
+      "away_team": "Atlanta Hawks",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5343209436693046,
+        "away_win_probability": 0.4656790563306954,
+        "predicted_winner": "home",
+        "confidence": 0.5343209436693046
+      },
+      "spread_prediction": {
+        "predicted_spread": 3.9160526315789492,
+        "predicted_winner": "home",
+        "predicted_margin": 3.9160526315789492
+      },
+      "recommendations": []
+    },
+    {
+      "game_id": "0022500505",
+      "home_team": "Houston Rockets",
+      "away_team": "Phoenix Suns",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5821243051253963,
+        "away_win_probability": 0.41787569487460374,
+        "predicted_winner": "home",
+        "confidence": 0.5821243051253963
+      },
+      "spread_prediction": {
+        "predicted_spread": 6.471666666666667,
+        "predicted_winner": "home",
+        "predicted_margin": 6.471666666666667
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Phoenix Suns +8.5",
+          "selection": "away",
+          "line": 8.5,
+          "probability": 0.5514075131373486,
+          "confidence": "low",
+          "edge": 0.036844406341232094,
+          "expected_value": 10.28150262746972,
+          "recommended_stake": 10.0,
+          "reasoning": "Model: +6.8 vs Line: -8.5 (1.7pt edge)",
+          "game_info": {
+            "home": "HOU",
+            "away": "PHX"
+          },
+          "odds": -106,
+          "implied_probability": 0.5145631067961165,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "0022500506",
+      "home_team": "Oklahoma City Thunder",
+      "away_team": "Charlotte Hornets",
+      "moneyline_prediction": {
+        "home_win_probability": 0.6645194129270758,
+        "away_win_probability": 0.33548058707292416,
+        "predicted_winner": "home",
+        "confidence": 0.6645194129270758
+      },
+      "spread_prediction": {
+        "predicted_spread": 12.251666666666667,
+        "predicted_winner": "home",
+        "predicted_margin": 12.251666666666667
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Charlotte Hornets +15.5",
+          "selection": "away",
+          "line": 15.5,
+          "probability": 0.5882573002236827,
+          "confidence": "high",
+          "edge": 0.10282040701979922,
+          "expected_value": 17.651460044736538,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: +12.6 vs Line: -15.5 (2.9pt edge)",
+          "game_info": {
+            "home": "OKC",
+            "away": "CHA"
+          },
+          "odds": 106,
+          "implied_probability": 0.4854368932038835,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "0022500507",
+      "home_team": "Philadelphia 76ers",
+      "away_team": "Denver Nuggets",
+      "moneyline_prediction": {
+        "home_win_probability": 0.4561132279447145,
+        "away_win_probability": 0.5438867720552856,
+        "predicted_winner": "away",
+        "confidence": 0.5438867720552856
+      },
+      "spread_prediction": {
+        "predicted_spread": 0.13999999999999968,
+        "predicted_winner": "home",
+        "predicted_margin": 0.13999999999999968
+      },
+      "recommendations": [
+        {
+          "bet_type": "moneyline",
+          "description": "Denver Nuggets ML",
+          "selection": "away",
+          "line": null,
+          "probability": 0.5438867720552856,
+          "confidence": "high",
+          "edge": 0.368755423543902,
+          "expected_value": 8.777354411057118,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: 54.4% vs Market: 17.5% (odds: +471)",
+          "game_info": {
+            "home": "PHI",
+            "away": "DEN"
+          },
+          "odds": 471,
+          "implied_probability": 0.17513134851138354,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        },
+        {
+          "bet_type": "spread",
+          "description": "Denver Nuggets +11.5",
+          "selection": "away",
+          "line": 11.5,
+          "probability": 0.7631235128589837,
+          "confidence": "high",
+          "edge": 0.28235428208975294,
+          "expected_value": 52.624702571796746,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: +2.2 vs Line: -11.5 (9.3pt edge) (injury adj: +2.0)",
+          "game_info": {
+            "home": "PHI",
+            "away": "DEN"
+          },
+          "odds": 108,
+          "implied_probability": 0.4807692307692308,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "0022500508",
+      "home_team": "LA Clippers",
+      "away_team": "Golden State Warriors",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5122475495675138,
+        "away_win_probability": 0.48775245043248616,
+        "predicted_winner": "home",
+        "confidence": 0.5122475495675138
+      },
+      "spread_prediction": {
+        "predicted_spread": 3.513235294117647,
+        "predicted_winner": "home",
+        "predicted_margin": 3.513235294117647
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "LA Clippers -1.5",
+          "selection": "home",
+          "line": -1.5,
+          "probability": 0.5930068115062109,
+          "confidence": "high",
+          "edge": 0.15247817714497747,
+          "expected_value": 18.60136230124219,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: +4.6 vs Line: -1.5 (3.1pt edge) (injury adj: +1.0)",
+          "game_info": {
+            "home": "LAC",
+            "away": "GSW"
+          },
+          "odds": 127,
+          "implied_probability": 0.44052863436123346,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "0022500509",
+      "home_team": "Portland Trail Blazers",
+      "away_team": "Utah Jazz",
+      "moneyline_prediction": {
+        "home_win_probability": 0.5332010732738305,
+        "away_win_probability": 0.4667989267261695,
+        "predicted_winner": "home",
+        "confidence": 0.5332010732738305
+      },
+      "spread_prediction": {
+        "predicted_spread": 6.417500000000001,
+        "predicted_winner": "home",
+        "predicted_margin": 6.417500000000001
+      },
+      "recommendations": []
+    }
+  ]
+}

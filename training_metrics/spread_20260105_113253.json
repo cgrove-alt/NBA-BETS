@@ -1,0 +1,20 @@
+{
+  "model_name": "spread",
+  "model_type": "regressor",
+  "timestamp": "20260105_113253",
+  "training_date": "2026-01-05T11:32:53.709725",
+  "rmse": 13.091559396653912,
+  "mae": 10.223833797095066,
+  "r2": 0.085053845312422,
+  "mse": 171.3889274361173,
+  "ece": 0.07374073928013791,
+  "mce": 0.1123578562978228,
+  "betting_roi_pct": 801369.6418072323,
+  "bets_placed": 916,
+  "bets_won": 589,
+  "bet_win_rate": 0.6430131004366813,
+  "final_bankroll": 8014696.418072322,
+  "min_edge_threshold": 0.03,
+  "train_size": 1183,
+  "calibration_method": "beta"
+}

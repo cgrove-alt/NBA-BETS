@@ -1,0 +1,55 @@
+{
+  "model_name": "moneyline_ensemble",
+  "bet_type": "moneyline",
+  "timestamp": "20260105_112843",
+  "report_date": "2026-01-05T11:28:43.372478",
+  "thresholds": {
+    "min_roi": 0.0,
+    "min_win_rate": 52.0,
+    "max_ece": 0.1,
+    "min_sharpe": 0.3
+  },
+  "results": {
+    "model_name": "moneyline_backtest",
+    "bet_type": "moneyline",
+    "start_date": "2022-10-24T00:00:00",
+    "end_date": "2024-04-14T00:00:00",
+    "total_bets": 1974,
+    "total_wins": 1274,
+    "total_losses": 700,
+    "total_staked": 100563653022914.47,
+    "total_pnl": 20685383487936.117,
+    "overall_roi": 20.569443199545205,
+    "overall_win_rate": 64.53900709219859,
+    "max_drawdown": 3006891141471.214,
+    "max_drawdown_pct": 14.43719722524374,
+    "sharpe_ratio": 2.450510558322017,
+    "profit_factor": 1.558275997904727,
+    "avg_clv": null,
+    "periods_profitable": 1,
+    "longest_winning_streak": 16,
+    "longest_losing_streak": 6,
+    "ece": 0.04506449455729371,
+    "avg_ev": 8254785424.676689,
+    "periods": [
+      {
+        "start_date": "2022-10-24T00:00:00",
+        "end_date": "2024-04-14T00:00:00",
+        "num_bets": 1974,
+        "num_wins": 1274,
+        "num_losses": 700,
+        "num_pushes": 0,
+        "total_staked": 100563653022914.47,
+        "total_pnl": 20685383487936.117,
+        "roi": 20.569443199545205,
+        "win_rate": 64.53900709219859,
+        "avg_odds": -110.0,
+        "avg_edge": 0.1384905165602975,
+        "avg_clv": null
+      }
+    ],
+    "games_tested": 2413
+  },
+  "thresholds_passed": true,
+  "threshold_failures": []
+}

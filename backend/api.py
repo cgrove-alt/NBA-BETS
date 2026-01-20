@@ -163,14 +163,17 @@ def health_check():
 @app.get("/api/games", response_model=GamesResponse)
 def get_games(
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format (defaults to today Eastern)"),
-    force_refresh: bool = Query(False, description="Force refresh from API")
+    force_refresh: bool = Query(False, description="Force refresh from API"),
+    auto_generate_props: bool = Query(True, description="Automatically generate props for all games")
 ):
     """Get NBA games for a specific date.
 
     Args:
         date: Date string in YYYY-MM-DD format. Defaults to today (Eastern timezone).
         force_refresh: If True, bypass cache and fetch fresh data.
+        auto_generate_props: If True, automatically trigger prop generation for all games (default: True).
     """
+    global _game_teams_cache
     service = get_service()
     games_data = service.get_todays_games(force_refresh=force_refresh, date=date)
 
@@ -178,9 +181,10 @@ def get_games(
     for g in games_data:
         home = g.get("home_team", {})
         visitor = g.get("visitor_team", {})
+        game_id = str(g.get("game_id", ""))
 
         games.append(Game(
-            game_id=str(g.get("game_id", "")),
+            game_id=game_id,
             home_team=Team(
                 id=home.get("id", 0),
                 abbreviation=home.get("abbreviation", ""),
@@ -196,6 +200,30 @@ def get_games(
             game_time=g.get("game_time"),
             status=g.get("status"),
         ))
+
+        # AUTO-GENERATION: Automatically trigger prop generation for each game
+        # This ensures predictions are ready when frontend calls /api/best-bets
+        if auto_generate_props:
+            home_abbrev = home.get("abbreviation", "")
+            away_abbrev = visitor.get("abbreviation", "")
+
+            # Check if props already exist or are being generated
+            status_data = service.get_props_fetch_status(game_id)
+            if status_data.get("status") == "not_started":
+                # Cache team abbreviations
+                _game_teams_cache[game_id] = {"home": home_abbrev, "away": away_abbrev}
+
+                # Start background prop generation (non-blocking)
+                try:
+                    service.start_player_props_fetch(
+                        game_id=game_id,
+                        home_abbrev=home_abbrev,
+                        away_abbrev=away_abbrev,
+                        selected_props=None,  # All prop types
+                    )
+                except Exception as e:
+                    # Log error but don't fail the request
+                    print(f"Warning: Could not auto-generate props for game {game_id}: {e}")
 
     return GamesResponse(games=games, count=len(games))
 
@@ -767,7 +795,7 @@ def get_game_odds(game_id: str):
 @app.get("/api/best-bets", response_model=BestBetsResponse)
 def get_best_bets(
     min_confidence: float = Query(55.0, ge=0, le=100, description="Minimum confidence threshold (model outputs 50-70%)"),
-    min_edge: float = Query(4.0, ge=0, description="Minimum edge threshold in points"),
+    min_edge: float = Query(4.0, ge=0, description="Minimum edge threshold (percentage)"),
     prop_types: Optional[str] = Query(None, description="Comma-separated prop types to filter"),
     pick_type: Optional[str] = Query(None, description="Filter by OVER or UNDER"),
     sort_by: str = Query("quality", description="Sort order: quality, confidence, or edge"),
@@ -823,17 +851,24 @@ def get_best_bets(
 
                 prediction = player.get(pred_key, 0) or 0
                 line = player.get(f"{prop_key}_line", 0) or 0
-                edge = player.get(f"{prop_key}_edge", 0) or 0
+                edge_from_ds = player.get(f"{prop_key}_edge", 0) or 0  # This is ALREADY a percentage
                 confidence = player.get(f"{prop_key}_confidence", 0) or 0
                 pick = player.get(f"{prop_key}_pick", "-") or "-"
 
-                # Calculate edge_pct
-                edge_pct = (edge / line * 100) if line and line > 0 else 0
+                # data_service.py returns edge as a PERCENTAGE (line 3608)
+                # But BestBet schema expects TWO fields:
+                #   - edge: raw points difference (e.g., 1.5 assists)
+                #   - edge_pct: percentage (e.g., 300%)
+                edge = prediction - line  # Raw points
+                edge_pct = edge_from_ds  # Already a percentage from data_service
 
                 # Apply filters
                 if confidence < min_confidence:
                     continue
-                if abs(edge) < min_edge:
+                # CRITICAL: Filter using edge_pct (percentage), not edge (raw points)
+                # min_edge=4.0 means "4% edge minimum", not "4 points minimum"
+                # This ensures low-line props (assists, threes) aren't filtered out
+                if abs(edge_pct) < min_edge:
                     continue
                 if pick == "-":
                     continue
