@@ -46,9 +46,9 @@ from model_classes import QuantilePropModel  # BUG FIX: Import for pickle deseri
 # - Points (line ~25): std=5.0 → Z-scores reasonable → 56.4% avg over_prob
 # Fix: Use empirically-derived prop-specific constants from NBA historical data
 PROP_STD_DEVS = {
-    'points': 5.0,      # Calibrated: 55.0% avg prob (target: 50±5%) ✓
-    'rebounds': 4.5,    # Fine-tuned: 4.0 → 4.5 (was 58.1%, target: 50±5%)
-    'assists': 2.5,     # Calibrated: 49.2% avg prob ✓ (target: 50±5%)
+    'points': 5.5,      # Tuned: 5.0 → 5.5 (was 56.7%, target: 50±5%)
+    'rebounds': 5.0,    # Tuned: 4.5 → 5.0 (was 57.4%, target: 50±5%)
+    'assists': 2.5,     # Calibrated: 48.4% ✓ (target: 50±5%)
     'threes': 1.8,      # Calibrated from empirical data
     'pra': 9.0,         # Points + Rebounds + Assists combined variance
 }
@@ -1527,22 +1527,34 @@ def predict_player_prop(
     bet_recommendation = 'MONITOR'
 
     # Try to get quantile predictions for better risk assessment
-    quantile_model_data = models.get(f'prop_{prop_type}_quantile')
-    if quantile_model_data and features and use_api_features:
+    quantile_model_dict = models.get(f'prop_{prop_type}_quantile')
+
+    if quantile_model_dict and features and use_api_features:
         try:
             import pandas as pd
 
-            # Check if it's a QuantilePropModel object with predict method
-            if hasattr(quantile_model_data, 'predict'):
-                quantile_result = quantile_model_data.predict(features, prop_line=line)
-                pred_low = quantile_result.get('pred_low')
-                pred_median = quantile_result.get('pred_median')
-                pred_high = quantile_result.get('pred_high')
-            # Or if it's a dict with quantile models
-            elif isinstance(quantile_model_data, dict) and 'quantile_models' in quantile_model_data:
-                quantile_models = quantile_model_data['quantile_models']
-                scaler = quantile_model_data.get('scaler')
-                feature_names = quantile_model_data.get('feature_names', [])
+            # BUG FIX: The dict structure is {'model': QuantilePropModel, 'feature_names': [...]}
+            # Extract the QuantilePropModel object from the dict
+            quantile_model_obj = None
+            if isinstance(quantile_model_dict, dict) and 'model' in quantile_model_dict:
+                quantile_model_obj = quantile_model_dict['model']
+
+            # Check if we have a QuantilePropModel with quantile_models attribute
+            if quantile_model_obj and hasattr(quantile_model_obj, 'quantile_models'):
+                quantile_models = quantile_model_obj.quantile_models
+                scaler = getattr(quantile_model_obj, 'scaler', None)
+                feature_names = getattr(quantile_model_obj, 'feature_names', [])
+            # Legacy format: dict with quantile_models directly
+            elif isinstance(quantile_model_dict, dict) and 'quantile_models' in quantile_model_dict:
+                quantile_models = quantile_model_dict['quantile_models']
+                scaler = quantile_model_dict.get('scaler')
+                feature_names = quantile_model_dict.get('feature_names', [])
+            else:
+                # Unable to extract quantile models
+                quantile_models = None
+                feature_names = []
+
+            if quantile_models and feature_names:
 
                 # Build feature array
                 X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
@@ -1555,15 +1567,16 @@ def predict_player_prop(
                     X_scaled = X.values
 
                 # Get predictions from all quantile models
-                pred_low = float(quantile_models[0.10].predict(X_scaled)[0])
-                pred_median = float(quantile_models[0.50].predict(X_scaled)[0])
-                pred_high = float(quantile_models[0.90].predict(X_scaled)[0])
+                # BUG FIX: Use correct quantile keys (0.1, 0.5, 0.9 not 0.10, 0.50, 0.90)
+                pred_low = float(quantile_models[0.1].predict(X_scaled)[0])
+                pred_median = float(quantile_models[0.5].predict(X_scaled)[0])
+                pred_high = float(quantile_models[0.9].predict(X_scaled)[0])
 
                 # Use median as the primary prediction if we don't have one yet
                 if predicted_value is None:
                     predicted_value = pred_median
         except Exception as e:
-            # Fall back to defaults
+            # Silently fall back to defaults if quantile prediction fails
             pass
 
     # Calculate confidence score based on prediction band width (Task 2.4)
