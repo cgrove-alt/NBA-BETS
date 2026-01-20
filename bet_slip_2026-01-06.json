@@ -1,0 +1,478 @@
+{
+  "date": "2026-01-06",
+  "generated_at": "2026-01-06T11:38:18.222339",
+  "games_analyzed": 6,
+  "total_recommendations": 4,
+  "top_picks": [
+    {
+      "bet_type": "spread",
+      "description": "Minnesota Timberwolves -7.5",
+      "selection": "home",
+      "line": -7.5,
+      "probability": 0.7210608124732971,
+      "confidence": "high",
+      "edge": 0.23562391926941362,
+      "expected_value": 44.212162494659424,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: 72.1% vs Market: 48.5% (injury adj: -1.4)",
+      "game_info": {
+        "home": "MIN",
+        "away": "MIA"
+      },
+      "odds": 106,
+      "implied_probability": 0.4854368932038835,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    },
+    {
+      "bet_type": "spread",
+      "description": "Cleveland Cavaliers -5.5",
+      "selection": "away",
+      "line": -5.5,
+      "probability": 0.7249841690063477,
+      "confidence": "high",
+      "edge": 0.2200336739568427,
+      "expected_value": 44.99683380126953,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: 72.5% vs Market: 50.5% (injury adj: -0.7)",
+      "game_info": {
+        "home": "IND",
+        "away": "CLE"
+      },
+      "odds": -102,
+      "implied_probability": 0.504950495049505,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    },
+    {
+      "bet_type": "spread",
+      "description": "Dallas Mavericks -5.5",
+      "selection": "away",
+      "line": -5.5,
+      "probability": 0.5929191410541534,
+      "confidence": "high",
+      "edge": 0.10272306262278091,
+      "expected_value": 18.58382821083069,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: 59.3% vs Market: 49.0%",
+      "game_info": {
+        "home": "SAC",
+        "away": "DAL"
+      },
+      "odds": 104,
+      "implied_probability": 0.49019607843137253,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    },
+    {
+      "bet_type": "spread",
+      "description": "Los Angeles Lakers -6.5",
+      "selection": "away",
+      "line": -6.5,
+      "probability": 0.5815203785896301,
+      "confidence": "high",
+      "edge": 0.09608348538574663,
+      "expected_value": 16.304075717926025,
+      "recommended_stake": 50.0,
+      "reasoning": "Model: 58.2% vs Market: 48.5% (injury adj: -0.7)",
+      "game_info": {
+        "home": "NOP",
+        "away": "LAL"
+      },
+      "odds": 106,
+      "implied_probability": 0.4854368932038835,
+      "sportsbook": "polymarket",
+      "closing_line_value": null
+    }
+  ],
+  "parlay_recommendations": [
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Minnesota Timberwolves -7.5",
+          "probability": 0.7210608124732971,
+          "confidence": "high",
+          "edge": 0.23562391926941362
+        },
+        {
+          "type": "spread",
+          "description": "Cleveland Cavaliers -5.5",
+          "probability": 0.7249841690063477,
+          "confidence": "high",
+          "edge": 0.2200336739568427
+        }
+      ],
+      "combined_probability": 0.5227576739339952,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Minnesota Timberwolves -7.5",
+          "probability": 0.7210608124732971,
+          "confidence": "high",
+          "edge": 0.23562391926941362
+        },
+        {
+          "type": "spread",
+          "description": "Dallas Mavericks -5.5",
+          "probability": 0.5929191410541534,
+          "confidence": "high",
+          "edge": 0.10272306262278091
+        }
+      ],
+      "combined_probability": 0.42753075757947734,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Minnesota Timberwolves -7.5",
+          "probability": 0.7210608124732971,
+          "confidence": "high",
+          "edge": 0.23562391926941362
+        },
+        {
+          "type": "spread",
+          "description": "Los Angeles Lakers -6.5",
+          "probability": 0.5815203785896301,
+          "confidence": "high",
+          "edge": 0.09608348538574663
+        }
+      ],
+      "combined_probability": 0.41931155665561803,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Cleveland Cavaliers -5.5",
+          "probability": 0.7249841690063477,
+          "confidence": "high",
+          "edge": 0.2200336739568427
+        },
+        {
+          "type": "spread",
+          "description": "Dallas Mavericks -5.5",
+          "probability": 0.5929191410541534,
+          "confidence": "high",
+          "edge": 0.10272306262278091
+        }
+      ],
+      "combined_probability": 0.42985699076510286,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Cleveland Cavaliers -5.5",
+          "probability": 0.7249841690063477,
+          "confidence": "high",
+          "edge": 0.2200336739568427
+        },
+        {
+          "type": "spread",
+          "description": "Los Angeles Lakers -6.5",
+          "probability": 0.5815203785896301,
+          "confidence": "high",
+          "edge": 0.09608348538574663
+        }
+      ],
+      "combined_probability": 0.4215930684320597,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Dallas Mavericks -5.5",
+          "probability": 0.5929191410541534,
+          "confidence": "high",
+          "edge": 0.10272306262278091
+        },
+        {
+          "type": "spread",
+          "description": "Los Angeles Lakers -6.5",
+          "probability": 0.5815203785896301,
+          "confidence": "high",
+          "edge": 0.09608348538574663
+        }
+      ],
+      "combined_probability": 0.3447945633788496,
+      "num_legs": 2,
+      "type": "2-leg parlay"
+    },
+    {
+      "legs": [
+        {
+          "type": "spread",
+          "description": "Minnesota Timberwolves -7.5",
+          "probability": 0.7210608124732971,
+          "confidence": "high",
+          "edge": 0.23562391926941362
+        },
+        {
+          "type": "spread",
+          "description": "Cleveland Cavaliers -5.5",
+          "probability": 0.7249841690063477,
+          "confidence": "high",
+          "edge": 0.2200336739568427
+        },
+        {
+          "type": "spread",
+          "description": "Dallas Mavericks -5.5",
+          "probability": 0.5929191410541534,
+          "confidence": "high",
+          "edge": 0.10272306262278091
+        }
+      ],
+      "combined_probability": 0.30995303100841165,
+      "num_legs": 3,
+      "type": "3-leg parlay"
+    }
+  ],
+  "bankroll_allocation": {
+    "total_stake": 200.0,
+    "num_bets": 4,
+    "allocation": [
+      {
+        "bet": "Minnesota Timberwolves -7.5",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Cleveland Cavaliers -5.5",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Dallas Mavericks -5.5",
+        "stake": 50.0,
+        "confidence": "high"
+      },
+      {
+        "bet": "Los Angeles Lakers -6.5",
+        "stake": 50.0,
+        "confidence": "high"
+      }
+    ],
+    "remaining_daily_budget": 0.0,
+    "bankroll_percentage_used": 20.0
+  },
+  "game_analyses": [
+    {
+      "game_id": "18447324",
+      "home_team": "Indiana Pacers",
+      "away_team": "Cleveland Cavaliers",
+      "moneyline_prediction": {
+        "home_win_probability": 0.410233545018197,
+        "away_win_probability": 0.589766454981803,
+        "predicted_winner": "away",
+        "confidence": 0.589766454981803
+      },
+      "spread_prediction": {
+        "home_cover_probability": 0.27501583099365234,
+        "away_cover_probability": 0.7249841690063477,
+        "prediction": "away_covers",
+        "confidence": 0.7249841690063477,
+        "spread_line": 5.5,
+        "cover_probability": 0.27501583099365234
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Cleveland Cavaliers -5.5",
+          "selection": "away",
+          "line": -5.5,
+          "probability": 0.7249841690063477,
+          "confidence": "high",
+          "edge": 0.2200336739568427,
+          "expected_value": 44.99683380126953,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: 72.5% vs Market: 50.5% (injury adj: -0.7)",
+          "game_info": {
+            "home": "IND",
+            "away": "CLE"
+          },
+          "odds": -102,
+          "implied_probability": 0.504950495049505,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "18447325",
+      "home_team": "Washington Wizards",
+      "away_team": "Orlando Magic",
+      "moneyline_prediction": {
+        "home_win_probability": 0.4876275262013318,
+        "away_win_probability": 0.5123724737986681,
+        "predicted_winner": "away",
+        "confidence": 0.5123724737986681
+      },
+      "spread_prediction": {
+        "home_cover_probability": 0.49088695645332336,
+        "away_cover_probability": 0.5091130435466766,
+        "prediction": "away_covers",
+        "confidence": 0.5091130435466766,
+        "spread_line": 7.5,
+        "cover_probability": 0.49088695645332336
+      },
+      "recommendations": []
+    },
+    {
+      "game_id": "18447326",
+      "home_team": "Memphis Grizzlies",
+      "away_team": "San Antonio Spurs",
+      "moneyline_prediction": {
+        "home_win_probability": 0.43524080109677,
+        "away_win_probability": 0.56475919890323,
+        "predicted_winner": "away",
+        "confidence": 0.56475919890323
+      },
+      "spread_prediction": {
+        "home_cover_probability": 0.5108293890953064,
+        "away_cover_probability": 0.4891706109046936,
+        "prediction": "home_covers",
+        "confidence": 0.5108293890953064,
+        "spread_line": 5.5,
+        "cover_probability": 0.5108293890953064
+      },
+      "recommendations": []
+    },
+    {
+      "game_id": "18447327",
+      "home_team": "Minnesota Timberwolves",
+      "away_team": "Miami Heat",
+      "moneyline_prediction": {
+        "home_win_probability": 0.51499550161941,
+        "away_win_probability": 0.48500449838059,
+        "predicted_winner": "home",
+        "confidence": 0.51499550161941
+      },
+      "spread_prediction": {
+        "home_cover_probability": 0.7210608124732971,
+        "away_cover_probability": 0.2789391875267029,
+        "prediction": "home_covers",
+        "confidence": 0.7210608124732971,
+        "spread_line": -7.5,
+        "cover_probability": 0.7210608124732971
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Minnesota Timberwolves -7.5",
+          "selection": "home",
+          "line": -7.5,
+          "probability": 0.7210608124732971,
+          "confidence": "high",
+          "edge": 0.23562391926941362,
+          "expected_value": 44.212162494659424,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: 72.1% vs Market: 48.5% (injury adj: -1.4)",
+          "game_info": {
+            "home": "MIN",
+            "away": "MIA"
+          },
+          "odds": 106,
+          "implied_probability": 0.4854368932038835,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "18447328",
+      "home_team": "New Orleans Pelicans",
+      "away_team": "Los Angeles Lakers",
+      "moneyline_prediction": {
+        "home_win_probability": 0.4590916481776184,
+        "away_win_probability": 0.5409083518223816,
+        "predicted_winner": "away",
+        "confidence": 0.5409083518223816
+      },
+      "spread_prediction": {
+        "home_cover_probability": 0.4184796214103699,
+        "away_cover_probability": 0.5815203785896301,
+        "prediction": "away_covers",
+        "confidence": 0.5815203785896301,
+        "spread_line": 6.5,
+        "cover_probability": 0.4184796214103699
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Los Angeles Lakers -6.5",
+          "selection": "away",
+          "line": -6.5,
+          "probability": 0.5815203785896301,
+          "confidence": "high",
+          "edge": 0.09608348538574663,
+          "expected_value": 16.304075717926025,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: 58.2% vs Market: 48.5% (injury adj: -0.7)",
+          "game_info": {
+            "home": "NOP",
+            "away": "LAL"
+          },
+          "odds": 106,
+          "implied_probability": 0.4854368932038835,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    },
+    {
+      "game_id": "18447329",
+      "home_team": "Sacramento Kings",
+      "away_team": "Dallas Mavericks",
+      "moneyline_prediction": {
+        "home_win_probability": 0.43733129232018797,
+        "away_win_probability": 0.562668707679812,
+        "predicted_winner": "away",
+        "confidence": 0.562668707679812
+      },
+      "spread_prediction": {
+        "home_cover_probability": 0.40708085894584656,
+        "away_cover_probability": 0.5929191410541534,
+        "prediction": "away_covers",
+        "confidence": 0.5929191410541534,
+        "spread_line": 5.5,
+        "cover_probability": 0.40708085894584656
+      },
+      "recommendations": [
+        {
+          "bet_type": "spread",
+          "description": "Dallas Mavericks -5.5",
+          "selection": "away",
+          "line": -5.5,
+          "probability": 0.5929191410541534,
+          "confidence": "high",
+          "edge": 0.10272306262278091,
+          "expected_value": 18.58382821083069,
+          "recommended_stake": 50.0,
+          "reasoning": "Model: 59.3% vs Market: 49.0%",
+          "game_info": {
+            "home": "SAC",
+            "away": "DAL"
+          },
+          "odds": 104,
+          "implied_probability": 0.49019607843137253,
+          "sportsbook": "polymarket",
+          "closing_line_value": null
+        }
+      ]
+    }
+  ]
+}

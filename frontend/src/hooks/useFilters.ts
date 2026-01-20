@@ -17,16 +17,33 @@ const defaultFilters: FilterState = {
   edgeMode: 'points', // Default to points display
 };
 
-// Load filters from localStorage
+// Load filters from localStorage with validation
 function loadFilters(): FilterState {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      return { ...defaultFilters, ...parsed };
+
+      // Validate and sanitize loaded data
+      const loaded: FilterState = {
+        ...defaultFilters,
+        minConfidence: typeof parsed.minConfidence === 'number' ? parsed.minConfidence : defaultFilters.minConfidence,
+        minEdge: typeof parsed.minEdge === 'number' ? parsed.minEdge : defaultFilters.minEdge,
+        maxConfidence: typeof parsed.maxConfidence === 'number' ? parsed.maxConfidence : undefined,
+        maxEdge: typeof parsed.maxEdge === 'number' ? parsed.maxEdge : undefined,
+        propTypes: Array.isArray(parsed.propTypes) ? parsed.propTypes.filter((pt: string) => PROP_TYPES.includes(pt as any)) : [...PROP_TYPES],
+        pickType: (parsed.pickType === 'OVER' || parsed.pickType === 'UNDER') ? parsed.pickType : null,
+        sortBy: typeof parsed.sortBy === 'string' ? parsed.sortBy : defaultFilters.sortBy,
+        sortOrder: (parsed.sortOrder === 'asc' || parsed.sortOrder === 'desc') ? parsed.sortOrder : defaultFilters.sortOrder,
+        edgeMode: (parsed.edgeMode === 'points' || parsed.edgeMode === 'percentage') ? parsed.edgeMode : defaultFilters.edgeMode,
+      };
+
+      return loaded;
     }
   } catch (error) {
-    console.warn('Failed to load filters from localStorage:', error);
+    console.warn('Failed to load filters from localStorage, using defaults:', error);
+    // Clear corrupt data
+    localStorage.removeItem(STORAGE_KEY);
   }
   return defaultFilters;
 }
