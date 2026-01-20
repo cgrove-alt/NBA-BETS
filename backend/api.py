@@ -163,14 +163,17 @@ def health_check():
 @app.get("/api/games", response_model=GamesResponse)
 def get_games(
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format (defaults to today Eastern)"),
-    force_refresh: bool = Query(False, description="Force refresh from API")
+    force_refresh: bool = Query(False, description="Force refresh from API"),
+    auto_generate_props: bool = Query(True, description="Automatically generate props for all games")
 ):
     """Get NBA games for a specific date.
 
     Args:
         date: Date string in YYYY-MM-DD format. Defaults to today (Eastern timezone).
         force_refresh: If True, bypass cache and fetch fresh data.
+        auto_generate_props: If True, automatically trigger prop generation for all games (default: True).
     """
+    global _game_teams_cache
     service = get_service()
     games_data = service.get_todays_games(force_refresh=force_refresh, date=date)
 
@@ -178,9 +181,10 @@ def get_games(
     for g in games_data:
         home = g.get("home_team", {})
         visitor = g.get("visitor_team", {})
+        game_id = str(g.get("game_id", ""))
 
         games.append(Game(
-            game_id=str(g.get("game_id", "")),
+            game_id=game_id,
             home_team=Team(
                 id=home.get("id", 0),
                 abbreviation=home.get("abbreviation", ""),
@@ -196,6 +200,30 @@ def get_games(
             game_time=g.get("game_time"),
             status=g.get("status"),
         ))
+
+        # AUTO-GENERATION: Automatically trigger prop generation for each game
+        # This ensures predictions are ready when frontend calls /api/best-bets
+        if auto_generate_props:
+            home_abbrev = home.get("abbreviation", "")
+            away_abbrev = visitor.get("abbreviation", "")
+
+            # Check if props already exist or are being generated
+            status_data = service.get_props_fetch_status(game_id)
+            if status_data.get("status") == "not_started":
+                # Cache team abbreviations
+                _game_teams_cache[game_id] = {"home": home_abbrev, "away": away_abbrev}
+
+                # Start background prop generation (non-blocking)
+                try:
+                    service.start_player_props_fetch(
+                        game_id=game_id,
+                        home_abbrev=home_abbrev,
+                        away_abbrev=away_abbrev,
+                        selected_props=None,  # All prop types
+                    )
+                except Exception as e:
+                    # Log error but don't fail the request
+                    print(f"Warning: Could not auto-generate props for game {game_id}: {e}")
 
     return GamesResponse(games=games, count=len(games))
 
