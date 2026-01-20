@@ -17,6 +17,18 @@ interface PropTableProps {
 type SortField = 'bet' | 'player' | 'prediction' | 'confidence';
 
 /**
+ * Sort icon component - extracted to prevent recreation on every render
+ */
+function SortIcon({ field, sortField, sortOrder }: { field: SortField; sortField: SortField; sortOrder: 'asc' | 'desc' }) {
+  if (sortField !== field) return null;
+  return sortOrder === 'desc' ? (
+    <ChevronDown size={14} className="inline" />
+  ) : (
+    <ChevronUp size={14} className="inline" />
+  );
+}
+
+/**
  * Get the actual stat value from live stats for a given prop type
  */
 function getActualStat(stats: PlayerLiveStats | undefined, propType: PropType): number | undefined {
@@ -186,15 +198,27 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
     return player[propType as keyof PlayerProp] as PropPrediction | undefined;
   };
 
-  // Filter and sort players
+  // Filter and sort players with enhanced filters
   const filteredPlayers = useMemo(() => {
     return players
       .map((player) => ({ player, prop: getProp(player) }))
       .filter(({ prop }) => {
         if (!prop || prop.pick === '-') return false;
+
+        // Confidence filters
         if (prop.confidence < filters.minConfidence) return false;
-        if (Math.abs(prop.edge) < filters.minEdge) return false;
+        if (filters.maxConfidence && prop.confidence > filters.maxConfidence) return false;
+
+        // Edge filters (support both points and percentage mode)
+        const edgeValue = filters.edgeMode === 'percentage'
+          ? prop.edge_pct || Math.abs(prop.edge)
+          : Math.abs(prop.edge);
+        if (edgeValue < filters.minEdge) return false;
+        if (filters.maxEdge && edgeValue > filters.maxEdge) return false;
+
+        // Pick type filter
         if (filters.pickType && prop.pick !== filters.pickType) return false;
+
         return true;
       })
       .sort((a, b) => {
@@ -224,7 +248,7 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
 
         return sortOrder === 'desc' ? -comparison : comparison;
       });
-  }, [players, propType, filters, sortField, sortOrder]);
+  }, [players, propType, filters, sortField, sortOrder, getProp]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -233,15 +257,6 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
       setSortField(field);
       setSortOrder('desc');
     }
-  };
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return null;
-    return sortOrder === 'desc' ? (
-      <ChevronDown size={14} className="inline" />
-    ) : (
-      <ChevronUp size={14} className="inline" />
-    );
   };
 
   const headerClass = 'px-3 py-2 text-left text-xs font-medium text-text-secondary uppercase tracking-wider cursor-pointer hover:text-text-primary';
@@ -270,13 +285,13 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
               <thead className="bg-bg-tertiary">
                 <tr>
                   <th className={headerClass} onClick={() => handleSort('bet')}>
-                    Bet <SortIcon field="bet" />
+                    Bet <SortIcon field="bet" sortField={sortField} sortOrder={sortOrder} />
                   </th>
                   <th className={headerClass} onClick={() => handleSort('player')}>
-                    Player <SortIcon field="player" />
+                    Player <SortIcon field="player" sortField={sortField} sortOrder={sortOrder} />
                   </th>
                   <th className={headerClass} onClick={() => handleSort('prediction')}>
-                    Prediction <SortIcon field="prediction" />
+                    Prediction <SortIcon field="prediction" sortField={sortField} sortOrder={sortOrder} />
                   </th>
                   {(isLive || isFinal || liveStats) && (
                     <th className={headerClass}>
@@ -284,7 +299,7 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
                     </th>
                   )}
                   <th className={cn(headerClass, 'text-center')} onClick={() => handleSort('confidence')}>
-                    Confidence <SortIcon field="confidence" />
+                    Confidence <SortIcon field="confidence" sortField={sortField} sortOrder={sortOrder} />
                   </th>
                 </tr>
               </thead>
