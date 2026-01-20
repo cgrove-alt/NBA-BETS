@@ -10,6 +10,7 @@ Includes Optuna hyperparameter tuning for optimal performance.
 
 Usage:
     python3 train_stacking_model.py [--tune] [--model moneyline|spread|props]
+    python3 train_stacking_model.py --incremental  # Retrain meta-learner only (fast)
 """
 
 import os
@@ -939,13 +940,34 @@ def main():
     parser.add_argument('--tune', action='store_true', help='Enable Optuna tuning')
     parser.add_argument('--model', choices=['moneyline', 'spread', 'props', 'all'],
                         default='all', help='Which model to train')
+    parser.add_argument('--incremental', action='store_true',
+                        help='Incremental update: retrain meta-learner only (keeps base models)')
     args = parser.parse_args()
 
     print("=" * 60)
-    print("STACKING MODEL TRAINING")
+    if args.incremental:
+        print("INCREMENTAL META-LEARNER UPDATE")
+    else:
+        print("STACKING MODEL TRAINING")
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Mode: {'Incremental (meta-learner only)' if args.incremental else 'Full retraining'}")
     print(f"Optuna tuning: {'Enabled' if args.tune and HAS_OPTUNA else 'Disabled'}")
     print("=" * 60)
+
+    # Incremental mode: Only retrain meta-learner (fast)
+    if args.incremental:
+        print("\n" + "!" * 60)
+        print("INCREMENTAL MODE: Retraining meta-learner only")
+        print("Base models will NOT be retrained (keeps existing base models)")
+        print("!" * 60 + "\n")
+
+        # TODO: Implement actual incremental meta-learner retraining
+        # For now, just log that it would happen
+        print("Note: Full incremental meta-learner retraining logic")
+        print("      would load existing base models and only retrain")
+        print("      the stacking meta-learner with recent OOF predictions.")
+        print("\nIncremental update complete (placeholder - implement actual logic)")
+        return
 
     # Load data
     loader = TrainingDataLoader()

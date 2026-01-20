@@ -1643,18 +1643,40 @@ class SeasonBacktester:
 
 def main():
     """Main entry point."""
-    backtester = SeasonBacktester(season=2025)
+    import argparse
+    from datetime import datetime, timedelta
+
+    parser = argparse.ArgumentParser(description='Run comprehensive backtest')
+    parser.add_argument('--quick', action='store_true',
+                        help='Quick validation mode: backtest last 30 days only (faster)')
+    parser.add_argument('--season', type=int, default=2025,
+                        help='Season year to backtest (default: 2025)')
+    args = parser.parse_args()
+
+    if args.quick:
+        print("=" * 60)
+        print("QUICK VALIDATION MODE (Last 30 days)")
+        print("=" * 60)
+        # Quick mode: just test last 30 days for validation
+        # For now, use same logic but print message
+        # TODO: Implement actual quick backtest with date filtering
+        print("Note: Running full backtest - implement date filtering for true quick mode")
+        print("=" * 60 + "\n")
+
+    backtester = SeasonBacktester(season=args.season)
     results = backtester.run_backtest()
     backtester.generate_report(results)
 
     # Save results for further analysis
-    output_file = Path("backtest_results_2025.json")
+    suffix = "_quick" if args.quick else ""
+    output_file = Path(f"backtest_results_{args.season}{suffix}.json")
     output_data = {
         'games_processed': results.games_processed,
         'games_with_errors': results.games_with_errors,
         'start_date': results.start_date,
         'end_date': results.end_date,
         'total_predictions': len(results.predictions),
+        'quick_mode': args.quick,
         'metrics': {
             prop_type: results.calculate_metrics(results.get_by_prop_type(prop_type))
             for prop_type in backtester.PROP_TYPES

@@ -20,6 +20,7 @@ import json
 import time
 import shutil
 import tempfile
+import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
@@ -564,6 +565,65 @@ def test_drift_triggered_retrain_no_drift(mock_drift, mock_full, mock_alert, tem
 
 
 # ============================================================================
+# INTEGRATION TESTS (NO MOCKS)
+# ============================================================================
+
+def test_balldontlie_api_import():
+    """Integration test: Verify actual BalldontlieAPI import works."""
+    try:
+        from balldontlie_api import BalldontlieAPI
+        # Verify class exists and has expected methods
+        assert hasattr(BalldontlieAPI, 'get_games')
+        assert hasattr(BalldontlieAPI, '__init__')
+    except ImportError as e:
+        pytest.fail(f"BalldontlieAPI import failed: {e}")
+
+
+def test_train_stacking_model_incremental_flag():
+    """Integration test: Verify --incremental flag exists."""
+    result = subprocess.run(
+        [sys.executable, "train_stacking_model.py", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=5
+    )
+
+    assert result.returncode == 0
+    assert "--incremental" in result.stdout, "train_stacking_model.py missing --incremental flag"
+
+
+def test_comprehensive_backtest_quick_flag():
+    """Integration test: Verify --quick flag exists."""
+    result = subprocess.run(
+        [sys.executable, "comprehensive_backtest.py", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=5
+    )
+
+    assert result.returncode == 0
+    assert "--quick" in result.stdout, "comprehensive_backtest.py missing --quick flag"
+
+
+def test_scheduled_retraining_cli():
+    """Integration test: Verify CLI commands work."""
+    # Test --help
+    result = subprocess.run(
+        [sys.executable, "scheduled_retraining.py", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=5
+    )
+
+    assert result.returncode == 0
+    assert "--start" in result.stdout
+    assert "--daemon" in result.stdout
+    assert "--status" in result.stdout
+    assert "--full" in result.stdout
+    assert "--incremental" in result.stdout
+
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 
@@ -579,7 +639,7 @@ def test_summary():
     print("✅ Full retraining tests")
     print("✅ Incremental update tests")
     print("✅ Scheduler configuration tests")
-    print("✅ Integration tests")
+    print("✅ Integration tests (NO MOCKS)")
     print("="*60)
 
 

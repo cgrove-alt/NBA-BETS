@@ -36,6 +36,7 @@ import subprocess
 import logging
 import traceback
 import argparse
+import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -262,19 +263,25 @@ def fetch_new_data() -> bool:
             [sys.executable, "-c", """
 import sys
 sys.path.insert(0, '.')
-from balldontlie_client import BalldontlieClient
+from balldontlie_api import BalldontlieAPI
 from datetime import datetime, timedelta
 
-client = BalldontlieClient()
+# Initialize API client (uses BALLDONTLIE_API_KEY env var)
+api = BalldontlieAPI()
 
 # Fetch games from last 14 days
 end_date = datetime.now()
 start_date = end_date - timedelta(days=14)
 
-games = client.get_games(
-    start_date=start_date.strftime('%Y-%m-%d'),
-    end_date=end_date.strftime('%Y-%m-%d')
-)
+# Generate list of dates for the range
+dates = []
+current = start_date
+while current <= end_date:
+    dates.append(current.strftime('%Y-%m-%d'))
+    current += timedelta(days=1)
+
+# BalldontlieAPI.get_games() accepts dates parameter
+games = api.get_games(dates=dates)
 print(f"Fetched {len(games)} games from last 14 days")
 """],
             cwd=PROJECT_DIR,
@@ -320,7 +327,6 @@ def full_retrain() -> bool:
         backup_dir.mkdir(exist_ok=True)
 
         for model_file in MODELS_DIR.glob("*.pkl"):
-            import shutil
             shutil.copy2(model_file, backup_dir / model_file.name)
 
         logger.info(f"Backed up {len(list(backup_dir.glob('*.pkl')))} models to {backup_dir}")
@@ -342,7 +348,6 @@ def full_retrain() -> bool:
 
             # Restore backup
             logger.info("Restoring backup models...")
-            import shutil
             for backup_file in backup_dir.glob("*.pkl"):
                 shutil.copy2(backup_file, MODELS_DIR / backup_file.name)
 
@@ -382,7 +387,6 @@ def full_retrain() -> bool:
 
                 # Restore backup
                 logger.info("Restoring backup models due to performance degradation...")
-                import shutil
                 for backup_file in backup_dir.glob("*.pkl"):
                     shutil.copy2(backup_file, MODELS_DIR / backup_file.name)
 
@@ -455,7 +459,6 @@ def incremental_update() -> bool:
             backup_dir = MODELS_DIR / f"backup_incremental_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             backup_dir.mkdir(exist_ok=True)
 
-            import shutil
             for model_file in meta_learner_files:
                 shutil.copy2(model_file, backup_dir / model_file.name)
 
