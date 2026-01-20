@@ -38,6 +38,12 @@ from scipy.stats import norm
 from data_fetcher import fetch_player_stats_bdl
 from injury_tracker_v3 import fetch_current_injuries, is_player_available, InjuryStatus
 
+# Import performance optimizations (Task 4.1)
+from prediction_optimizer import (
+    cached, get_executor, warmup_cache, ParallelExecutor,
+    BatchProcessor, LazyFeatureLoader, timed, clear_cache
+)
+
 # Import prop injury boost calculation
 try:
     from player_impact_fetcher import calculate_prop_injury_boost
@@ -520,6 +526,7 @@ def apply_injury_adjustments(
 
     return adjusted_home, adjusted_away
 
+@cached(ttl_type='player_features')
 def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
                         bdl_player_id: int = None, is_home: bool = False,
                         vegas_total: float = None) -> dict:
@@ -531,6 +538,8 @@ def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
     were generated, causing garbage predictions (e.g., Brunson 16.8 instead of 27).
 
     Falls back to simplified generator if training features unavailable.
+
+    NOTE: Now decorated with @cached for 2-hour TTL (Task 4.1 optimization)
     """
     cache_key = f"{player_name}_{prop_type}_{opponent_id}"
     if cache_key in _player_feature_cache:
@@ -1648,9 +1657,16 @@ def main():
 
     parser = argparse.ArgumentParser(description="Daily NBA Predictions")
     parser.add_argument("--date", type=str, help="Date in YYYY-MM-DD format")
+    parser.add_argument("--no-warmup", action="store_true", help="Skip cache warmup")
+    parser.add_argument("--clear-cache", action="store_true", help="Clear cache before running")
     args = parser.parse_args()
 
     target_date = args.date or datetime.now().strftime("%Y-%m-%d")
+
+    # Clear cache if requested
+    if args.clear_cache:
+        removed = clear_cache()
+        print(f"Cleared {removed} cache entries")
 
     print("=" * 65)
     print("  NBA BETTING MODEL - Daily Predictions")
@@ -1660,8 +1676,10 @@ def main():
 
     # Load models
     print("\n  Loading models...")
+    start_time = time.time()
     models = load_models()
     print(f"  Loaded: {list(models.keys())}")
+    print(f"  Model loading time: {time.time() - start_time:.1f}s")
 
     # Initialize Balldontlie API
     try:
@@ -1776,6 +1794,22 @@ def main():
         print("\n  No games found for today.")
         return
 
+    # TASK 4.1: Cache warmup - pre-fetch all team/player data in parallel
+    if not args.no_warmup and api:
+        team_ids = []
+        for game in games:
+            home_id = game.get('home_team', {}).get('id')
+            away_id = game.get('visitor_team', {}).get('id')
+            if home_id:
+                team_ids.append(home_id)
+            if away_id:
+                team_ids.append(away_id)
+
+        team_ids = list(set(team_ids))  # Remove duplicates
+
+        if team_ids:
+            warmup_cache(api, target_date, team_ids, [])
+
     # Analyze each game
     print("\n" + "=" * 65)
     print("  GAME PREDICTIONS")
@@ -1868,13 +1902,14 @@ def main():
                         if status in ('OUT', 'DOUBTFUL'):
                             away_injured_names.append(player_inj_name)
 
-                    # Add props to analysis
+                    # TASK 4.1: Prepare player prop prediction tasks for parallel execution
+                    prop_tasks = []
+
                     for player_id, props in sorted_players:
                         player_name = player_names.get(player_id, f"Player {player_id}")
                         player_team_id = props.get('team_id')
 
                         # CHECK INJURY STATUS using injury_tracker_v3 (Task 1.4)
-                        # Primary injury checking: ID-based lookup (more reliable than name matching)
                         uncertainty_flag = None
                         if player_id in injury_lookup:
                             status = injury_lookup[player_id]
@@ -1883,28 +1918,20 @@ def main():
                                 print(f"    Skipping {player_name} ({status.value})")
                                 continue
                             elif status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
-                                # Generate prediction but flag as HIGH_UNCERTAINTY
                                 uncertainty_flag = "HIGH_UNCERTAINTY"
-                                print(f"    Warning: {player_name} is {status.value} - flagging as HIGH_UNCERTAINTY")
-                        else:
-                            # Player not in injury lookup (likely healthy, or injury fetch failed)
-                            # Log at debug level for production monitoring
-                            logger.debug(f"Player {player_name} (ID: {player_id}) not in injury lookup - assuming healthy")
 
-                        # CRITICAL: Look up the correct Balldontlie ID for stats
-                        # Props API uses different IDs than active players endpoint
+                        # Get player metadata
                         bdl_stats_id = None
-                        player_position = 'G'  # Default
+                        player_position = 'G'
                         if player_name and not player_name.startswith("Player"):
                             bdl_stats_id = get_bdl_player_id(player_name)
-                            # Get player position from mapper
                             if mapper and mapper._all_players:
                                 for p in mapper._all_players:
                                     if p.get('id') == bdl_stats_id:
                                         player_position = p.get('position', 'G') or 'G'
                                         break
 
-                        # Determine opponent/teammate injuries based on player's team
+                        # Determine opponent/teammate injuries
                         if player_team_id == home_team_id:
                             opponent_id = away_team_id
                             opponent_abbrev = analysis['away_team']
@@ -1916,22 +1943,57 @@ def main():
                             opponent_injured = home_injured_names
                             teammate_injured = away_injured_names
 
+                        # Add tasks for each prop type
                         for prop_type in ['points', 'rebounds', 'assists']:
                             line_key = f'{prop_type}_line'
                             if line_key in props:
                                 line = props[line_key]
-                                # Use bdl_stats_id for feature generation (correct ID for stats API)
-                                pred = predict_player_prop(
-                                    player_name, bdl_stats_id or player_id, prop_type, line,
-                                    opponent_abbrev, opponent_id, models,
-                                    use_api_features=True,  # Enable real predictions
-                                    player_position=player_position,
-                                    opponent_injured=opponent_injured,
-                                    teammate_injured=teammate_injured
-                                )
-                                # Add uncertainty_flag to prediction (Task 1.4)
-                                if uncertainty_flag:
-                                    pred['uncertainty_flag'] = uncertainty_flag
+                                prop_tasks.append({
+                                    'player_name': player_name,
+                                    'player_id': bdl_stats_id or player_id,
+                                    'prop_type': prop_type,
+                                    'line': line,
+                                    'opponent': opponent_abbrev,
+                                    'opponent_id': opponent_id,
+                                    'player_position': player_position,
+                                    'opponent_injured': opponent_injured,
+                                    'teammate_injured': teammate_injured,
+                                    'uncertainty_flag': uncertainty_flag
+                                })
+
+                    # TASK 4.1: Execute prop predictions in parallel
+                    if prop_tasks:
+                        executor = get_executor(max_workers=10)
+
+                        def process_prop_task(task):
+                            pred = predict_player_prop(
+                                task['player_name'],
+                                task['player_id'],
+                                task['prop_type'],
+                                task['line'],
+                                task['opponent'],
+                                task['opponent_id'],
+                                models,
+                                use_api_features=True,
+                                player_position=task['player_position'],
+                                opponent_injured=task['opponent_injured'],
+                                teammate_injured=task['teammate_injured']
+                            )
+                            if task['uncertainty_flag']:
+                                pred['uncertainty_flag'] = task['uncertainty_flag']
+                            return pred
+
+                        # Execute in parallel
+                        prop_predictions = executor.map(
+                            process_prop_task,
+                            prop_tasks,
+                            desc="Props",
+                            show_progress=False
+                        )
+
+                        # Add to results
+                        for pred in prop_predictions:
+                            if pred:
                                 analysis['player_props'].append(pred)
                                 all_player_props.append({
                                     'game': f"{analysis['away_team']}@{analysis['home_team']}",
