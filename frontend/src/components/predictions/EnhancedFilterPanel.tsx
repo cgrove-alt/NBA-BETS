@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react';
-import { ChevronDown, ChevronUp, Percent } from 'lucide-react';
+import { ChevronDown, ChevronUp, Percent, Info } from 'lucide-react';
 import { PROP_TYPES, POSITIONS } from '../../lib/types';
 import type { FilterState, PropType, FilterPreset, Game, Position, PlayerProp } from '../../lib/types';
 import { FilterPresets } from './FilterPresets';
+import { Tooltip } from '../ui/Tooltip';
+import { ConfidenceExplanation } from './ConfidenceExplanation';
 import { formatMatchup } from '../../lib/utils';
 
 interface EnhancedFilterPanelProps {
@@ -268,7 +270,12 @@ export function EnhancedFilterPanel({
             onClick={() => toggleSection('confidence')}
             className="flex items-center justify-between w-full mb-2"
           >
-            <label className="text-xs text-text-secondary font-medium">Confidence</label>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-text-secondary font-medium">Confidence</label>
+              <Tooltip content={<ConfidenceExplanation />} side="right">
+                <Info size={12} className="text-text-muted hover:text-accent-primary transition-colors" />
+              </Tooltip>
+            </div>
             {expandedSections.confidence ? (
               <ChevronUp size={14} className="text-text-muted" />
             ) : (

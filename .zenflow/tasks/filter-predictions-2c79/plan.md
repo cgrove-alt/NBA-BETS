@@ -69,3 +69,28 @@ After review feedback identified critical inaccuracies and noted that only docum
    - Passed TypeScript compilation with zero errors
 
 **COMPLETED** - See implementation-report.md for full details. No shortcuts. No excuses. All code implemented and tested.
+
+### [x] Step: Add Confidence Explanation Tooltip
+<!-- chat-id: current-3 -->
+
+Implemented educational tooltip to explain the 9-factor confidence calculation:
+
+1. **Created Reusable Tooltip Component:**
+   - Generic tooltip with smart positioning (frontend/src/components/ui/Tooltip.tsx)
+   - Viewport-aware boundary detection
+   - Keyboard and mouse accessible
+   - 82 lines, fully TypeScript-safe
+
+2. **Created Confidence Explanation Component:**
+   - All 9 factors with descriptions (frontend/src/components/predictions/ConfidenceExplanation.tsx)
+   - Historical data reference (6,076 predictions)
+   - Distribution statistics
+   - 103 lines, comprehensive educational content
+
+3. **Integrated in Filter Panel:**
+   - Added Info icon next to "Confidence" label
+   - Hover to reveal full 9-factor explanation
+   - Smooth hover effect and transitions
+   - Passes TypeScript compilation with zero errors
+
+**COMPLETED** - See confidence-tooltip-report.md for full details with visual diagrams and future enhancement options.
