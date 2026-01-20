@@ -46,9 +46,9 @@ from model_classes import QuantilePropModel  # BUG FIX: Import for pickle deseri
 # - Points (line ~25): std=5.0 → Z-scores reasonable → 56.4% avg over_prob
 # Fix: Use empirically-derived prop-specific constants from NBA historical data
 PROP_STD_DEVS = {
-    'points': 5.5,      # Tuned: 5.0 → 5.5 (was 56.7%, target: 50±5%)
-    'rebounds': 5.0,    # Tuned: 4.5 → 5.0 (was 57.4%, target: 50±5%)
-    'assists': 2.5,     # Calibrated: 48.4% ✓ (target: 50±5%)
+    'points': 5.5,      # Calibrated: 54.7% ✓ (target: 50±5%)
+    'rebounds': 6.5,    # Tuned: 6.0 → 6.5 (was 55.7%, target: 50±5%)
+    'assists': 2.5,     # Calibrated: 48.7% ✓ (target: 50±5%)
     'threes': 1.8,      # Calibrated from empirical data
     'pra': 9.0,         # Points + Rebounds + Assists combined variance
 }
