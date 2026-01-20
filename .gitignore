@@ -25,6 +25,7 @@ data/balldontlie_cache/
 .cache/
 .bdl_cache/
 .api_cache/
+.prediction_cache/
 *.cache
 
 # Databases (start fresh on deploy)

@@ -39,10 +39,7 @@ from data_fetcher import fetch_player_stats_bdl
 from injury_tracker_v3 import fetch_current_injuries, is_player_available, InjuryStatus
 
 # Import performance optimizations (Task 4.1)
-from prediction_optimizer import (
-    cached, get_executor, warmup_cache, ParallelExecutor,
-    BatchProcessor, LazyFeatureLoader, timed, clear_cache
-)
+from prediction_optimizer import get_executor, warmup_cache, clear_cache
 
 # Import prop injury boost calculation
 try:
@@ -526,7 +523,6 @@ def apply_injury_adjustments(
 
     return adjusted_home, adjusted_away
 
-@cached(ttl_type='player_features')
 def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
                         bdl_player_id: int = None, is_home: bool = False,
                         vegas_total: float = None) -> dict:
@@ -539,7 +535,8 @@ def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
 
     Falls back to simplified generator if training features unavailable.
 
-    NOTE: Now decorated with @cached for 2-hour TTL (Task 4.1 optimization)
+    NOTE: Uses in-memory cache (_player_feature_cache) for fast repeated access.
+    Cache persists for the duration of the prediction run. (Task 4.1 optimization)
     """
     cache_key = f"{player_name}_{prop_type}_{opponent_id}"
     if cache_key in _player_feature_cache:
@@ -1666,7 +1663,8 @@ def main():
     # Clear cache if requested
     if args.clear_cache:
         removed = clear_cache()
-        print(f"Cleared {removed} cache entries")
+        _player_feature_cache.clear()  # Also clear in-memory cache
+        print(f"Cleared {removed} disk cache entries + in-memory cache")
 
     print("=" * 65)
     print("  NBA BETTING MODEL - Daily Predictions")
@@ -1797,6 +1795,9 @@ def main():
     # TASK 4.1: Cache warmup - pre-fetch all team/player data in parallel
     if not args.no_warmup and api:
         team_ids = []
+        player_ids_to_warm = []
+
+        # Collect team IDs
         for game in games:
             home_id = game.get('home_team', {}).get('id')
             away_id = game.get('visitor_team', {}).get('id')
@@ -1807,8 +1808,26 @@ def main():
 
         team_ids = list(set(team_ids))  # Remove duplicates
 
-        if team_ids:
-            warmup_cache(api, target_date, team_ids, [])
+        # Collect player IDs from all games (quickly)
+        print("\n  Collecting player IDs for cache warmup...", end='', flush=True)
+        for game in games:
+            game_id = game.get('id')
+            if game_id:
+                try:
+                    props_data = get_player_props_for_game(api, game_id)
+                    if props_data:
+                        # Get players with significant lines (likely to be analyzed)
+                        for pid, props in props_data.items():
+                            if props.get('points_line', 0) >= 15:
+                                player_ids_to_warm.append(pid)
+                except Exception:
+                    pass  # Continue if one game fails
+
+        player_ids_to_warm = list(set(player_ids_to_warm))  # Remove duplicates
+        print(f" {len(player_ids_to_warm)} players")
+
+        if team_ids or player_ids_to_warm:
+            warmup_cache(api, target_date, team_ids, player_ids_to_warm)
 
     # Analyze each game
     print("\n" + "=" * 65)
