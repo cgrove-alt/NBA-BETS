@@ -581,8 +581,9 @@ def test_balldontlie_api_import():
 
 def test_train_stacking_model_incremental_flag():
     """Integration test: Verify --incremental flag exists."""
+    script_path = Path(__file__).parent.parent / "train_stacking_model.py"
     result = subprocess.run(
-        [sys.executable, "train_stacking_model.py", "--help"],
+        [sys.executable, str(script_path), "--help"],
         capture_output=True,
         text=True,
         timeout=5
@@ -594,8 +595,9 @@ def test_train_stacking_model_incremental_flag():
 
 def test_comprehensive_backtest_quick_flag():
     """Integration test: Verify --quick flag exists."""
+    script_path = Path(__file__).parent.parent / "comprehensive_backtest.py"
     result = subprocess.run(
-        [sys.executable, "comprehensive_backtest.py", "--help"],
+        [sys.executable, str(script_path), "--help"],
         capture_output=True,
         text=True,
         timeout=5
@@ -608,8 +610,9 @@ def test_comprehensive_backtest_quick_flag():
 def test_scheduled_retraining_cli():
     """Integration test: Verify CLI commands work."""
     # Test --help
+    script_path = Path(__file__).parent.parent / "scheduled_retraining.py"
     result = subprocess.run(
-        [sys.executable, "scheduled_retraining.py", "--help"],
+        [sys.executable, str(script_path), "--help"],
         capture_output=True,
         text=True,
         timeout=5

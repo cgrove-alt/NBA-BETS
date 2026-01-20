@@ -1,0 +1,17 @@
+{
+  "games_processed": 179,
+  "games_with_errors": 0,
+  "start_date": "2025-12-21",
+  "end_date": "2026-01-13",
+  "total_predictions": 0,
+  "quick_mode": true,
+  "metrics": {
+    "points": {},
+    "rebounds": {},
+    "assists": {},
+    "threes": {},
+    "pra": {}
+  },
+  "overall": {},
+  "raw_predictions": []
+}

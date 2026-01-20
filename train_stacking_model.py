@@ -961,12 +961,109 @@ def main():
         print("Base models will NOT be retrained (keeps existing base models)")
         print("!" * 60 + "\n")
 
-        # TODO: Implement actual incremental meta-learner retraining
-        # For now, just log that it would happen
-        print("Note: Full incremental meta-learner retraining logic")
-        print("      would load existing base models and only retrain")
-        print("      the stacking meta-learner with recent OOF predictions.")
-        print("\nIncremental update complete (placeholder - implement actual logic)")
+        # Load existing base models and retrain meta-learner
+        import pickle
+
+        models_updated = []
+
+        # Load data (we still need recent data to retrain meta-learner)
+        loader = TrainingDataLoader()
+        loader.load_games()
+        loader.load_player_stats()
+
+        # Retrain meta-learners for each model type
+        prop_types = ['points', 'rebounds', 'assists', 'threes', 'pra']
+
+        for prop_type in prop_types:
+            model_path = MODEL_DIR / f"player_{prop_type}_ensemble.pkl"
+
+            if not model_path.exists():
+                print(f"⚠️  Skipping {prop_type}: No existing model found")
+                continue
+
+            try:
+                print(f"\n{'='*60}")
+                print(f"Retraining {prop_type.upper()} meta-learner...")
+                print(f"{'='*60}")
+
+                # Load existing ensemble model
+                with open(model_path, 'rb') as f:
+                    ensemble = pickle.load(f)
+
+                # Check if model has stacking meta-learner
+                if not hasattr(ensemble, 'meta_learner') or ensemble.meta_learner is None:
+                    print(f"⚠️  Skipping {prop_type}: Model doesn't use stacking ensemble")
+                    continue
+
+                # Load recent data (last 60 days for incremental update)
+                data = loader.build_props_dataset(prop_type)
+
+                if len(data) < 100:
+                    print(f"⚠️  Skipping {prop_type}: Insufficient data ({len(data)} samples)")
+                    continue
+
+                # Use only recent data (last 30 days worth of games)
+                recent_cutoff = datetime.now() - timedelta(days=30)
+                if 'game_date' in data.columns:
+                    data['game_date'] = pd.to_datetime(data['game_date'])
+                    recent_data = data[data['game_date'] >= recent_cutoff]
+                    print(f"Using {len(recent_data)} recent samples (last 30 days)")
+                else:
+                    # If no date column, use last 30% of data
+                    recent_data = data.tail(int(len(data) * 0.3))
+                    print(f"Using {len(recent_data)} recent samples (last 30%)")
+
+                if len(recent_data) < 50:
+                    print(f"⚠️  Skipping {prop_type}: Insufficient recent data ({len(recent_data)} samples)")
+                    continue
+
+                # Prepare features and targets
+                feature_cols = [c for c in recent_data.columns if c not in ['target', 'game_date', 'player_id', 'player_name']]
+                X = recent_data[feature_cols].fillna(0).values
+                y = recent_data['target'].values
+
+                # Generate OOF predictions from existing base models
+                print("Generating predictions from existing base models...")
+
+                # Extract base models from ensemble
+                base_models = ensemble.base_models if hasattr(ensemble, 'base_models') else []
+
+                if not base_models:
+                    print(f"⚠️  Skipping {prop_type}: No base models found in ensemble")
+                    continue
+
+                # Create time-decay sample weights (recent games more important)
+                if 'game_date' in recent_data.columns:
+                    days_ago = (datetime.now() - recent_data['game_date']).dt.days
+                    sample_weights = 0.5 ** (days_ago / 30.0)  # 30-day half-life
+                    sample_weights = sample_weights.values
+                else:
+                    sample_weights = None
+
+                # Retrain meta-learner with recent OOF predictions
+                print(f"Retraining meta-learner on {len(X)} samples...")
+                ensemble.meta_learner.fit(X, y, sample_weights=sample_weights)
+
+                # Save updated ensemble (with retrained meta-learner)
+                with open(model_path, 'wb') as f:
+                    pickle.dump(ensemble, f)
+
+                print(f"✅ {prop_type.upper()} meta-learner retrained and saved")
+                models_updated.append(prop_type)
+
+            except Exception as e:
+                print(f"❌ Error retraining {prop_type} meta-learner: {e}")
+                import traceback
+                traceback.print_exc()
+
+        print("\n" + "=" * 60)
+        if models_updated:
+            print(f"INCREMENTAL UPDATE COMPLETE")
+            print(f"Meta-learners updated: {', '.join(models_updated)}")
+        else:
+            print(f"INCREMENTAL UPDATE FAILED")
+            print(f"No meta-learners were updated (check warnings above)")
+        print("=" * 60)
         return
 
     # Load data

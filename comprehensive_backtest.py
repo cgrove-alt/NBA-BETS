@@ -1657,14 +1657,166 @@ def main():
         print("=" * 60)
         print("QUICK VALIDATION MODE (Last 30 days)")
         print("=" * 60)
-        # Quick mode: just test last 30 days for validation
-        # For now, use same logic but print message
-        # TODO: Implement actual quick backtest with date filtering
-        print("Note: Running full backtest - implement date filtering for true quick mode")
-        print("=" * 60 + "\n")
 
     backtester = SeasonBacktester(season=args.season)
-    results = backtester.run_backtest()
+
+    # Load and optionally filter games for quick mode
+    if args.quick:
+        # Load everything first
+        backtester.load_models()
+        backtester.load_games()
+        backtester.load_historical_player_stats()
+
+        # Filter to last 30 days
+        cutoff_date = datetime.now() - timedelta(days=30)
+        original_count = len(backtester.games)
+
+        backtester.games = [
+            g for g in backtester.games
+            if isinstance(g.get('date'), str) and datetime.fromisoformat(g['date'].replace('Z', '')) >= cutoff_date
+        ]
+
+        filtered_count = len(backtester.games)
+        print(f"Filtered {original_count} games → {filtered_count} games (last 30 days)")
+        print("=" * 60 + "\n")
+
+        # Now run backtest manually (since models/data already loaded)
+        if not backtester.games:
+            print("No games in last 30 days!")
+            return
+
+        results = BacktestResults()
+        results.start_date = backtester.games[0]['date']
+        results.end_date = backtester.games[-1]['date']
+
+        print(f"\nProcessing {len(backtester.games)} games...", flush=True)
+
+        # Process each game (copied from run_backtest logic)
+        for i, game in enumerate(backtester.games):
+            game_id = game['id']
+            game_date = game['date']
+            home_team = game.get('home_team', {})
+            away_team = game.get('visitor_team', {})
+
+            if (i + 1) % 10 == 0:
+                print(f"  Processed {i + 1}/{len(backtester.games)} games...", flush=True)
+
+            # Get box scores
+            box_scores = backtester.fetch_box_scores_for_game(game)
+
+            if not box_scores:
+                # Try to find in player_stats cache
+                for player_id, stats_list in backtester.player_stats.items():
+                    for date, stat in stats_list:
+                        if date == game_date:
+                            stat_game = stat.get('game', {})
+                            if stat_game.get('id') == game_id:
+                                player = stat.get('player', {})
+                                team = stat.get('team', {})
+                                box_scores[player_id] = {
+                                    'player': player,
+                                    'pts': stat.get('pts', 0) or 0,
+                                    'reb': stat.get('reb', 0) or 0,
+                                    'ast': stat.get('ast', 0) or 0,
+                                    'fg3m': stat.get('fg3m', 0) or 0,
+                                    'min': stat.get('min', '0'),
+                                    'team_id': team.get('id'),
+                                }
+
+            if not box_scores:
+                results.games_with_errors += 1
+                continue
+
+            results.games_processed += 1
+
+            # Process position defense for this game
+            player_stats_list = []
+            for pid, stats in box_scores.items():
+                player_stats_list.append({
+                    'player': stats.get('player', {}),
+                    'team_id': stats.get('team_id'),
+                    'pts': stats.get('pts', 0),
+                    'reb': stats.get('reb', 0),
+                    'ast': stats.get('ast', 0),
+                    'fg3m': stats.get('fg3m', 0),
+                    'min': stats.get('min', '0'),
+                })
+            backtester.position_defense_calc.process_game(
+                game_id=game_id,
+                game_date=game_date,
+                home_team_id=home_team.get('id'),
+                away_team_id=away_team.get('id'),
+                player_stats=player_stats_list
+            )
+
+            # Generate predictions for each player
+            for player_id, actual_stats in box_scores.items():
+                player_name = actual_stats.get('player', {}).get('first_name', '') + ' ' + \
+                             actual_stats.get('player', {}).get('last_name', 'Unknown')
+                player_team_id = actual_stats.get('team_id')
+                is_home = player_team_id == home_team.get('id')
+                player_position = actual_stats.get('player', {}).get('position', 'F')
+
+                features = backtester.get_player_features_before_date(
+                    player_id, game_date,
+                    opponent_id=away_team.get('id') if is_home else home_team.get('id'),
+                    is_home=is_home,
+                    player_position=player_position
+                )
+
+                if not features:
+                    continue
+
+                # Check minutes played (DNP detection)
+                minutes_played_str = actual_stats.get('min', '0')
+                try:
+                    if isinstance(minutes_played_str, str):
+                        if ':' in minutes_played_str:
+                            mins, secs = minutes_played_str.split(':')
+                            minutes_played = int(mins) + int(secs) / 60
+                        else:
+                            minutes_played = float(minutes_played_str)
+                    else:
+                        minutes_played = float(minutes_played_str)
+                except:
+                    minutes_played = 0
+
+                if minutes_played < 5:
+                    continue  # Skip DNP players
+
+                # Generate predictions for each prop type
+                for prop_type in backtester.PROP_TYPES:
+                    model = backtester.models.get(prop_type)
+                    if not model:
+                        continue
+
+                    try:
+                        prediction = model.predict([features])[0]
+                        actual_value = actual_stats.get(backtester.PROP_STAT_MAP[prop_type], 0)
+
+                        if prop_type == 'pra':
+                            actual_value = (actual_stats.get('pts', 0) or 0) + \
+                                         (actual_stats.get('reb', 0) or 0) + \
+                                         (actual_stats.get('ast', 0) or 0)
+
+                        results.predictions.append(PropPrediction(
+                            player_id=player_id,
+                            player_name=player_name,
+                            team=player_team_id,
+                            prop_type=prop_type,
+                            predicted=float(prediction),
+                            actual=float(actual_value),
+                            game_date=game_date,
+                            is_home=is_home
+                        ))
+                    except Exception as e:
+                        if backtester.verbose:
+                            print(f"    Error predicting {prop_type} for {player_name}: {e}")
+
+    else:
+        # Full backtest
+        results = backtester.run_backtest()
+
     backtester.generate_report(results)
 
     # Save results for further analysis

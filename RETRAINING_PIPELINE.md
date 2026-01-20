@@ -241,7 +241,7 @@ python3 scheduled_retraining.py --daemon
 pytest tests/test_scheduled_retraining.py -v
 ```
 
-**27 tests** covering:
+**31 tests** covering:
 - Helper functions (history, metrics, game counting)
 - Alert system (email, Slack)
 - Drift detection integration
@@ -250,11 +250,11 @@ pytest tests/test_scheduled_retraining.py -v
 - Incremental updates
 - Scheduler configuration
 - PID file management
-- Integration tests
+- Integration tests (BalldontlieAPI import, CLI flags, command validation)
 
 ### Test Results
 ```
-27 passed in 1.44s ✅
+31 passed in 4.16s ✅
 ```
 
 ## Troubleshooting
@@ -392,9 +392,10 @@ If automated retraining fails repeatedly:
 - ✅ Incremental update completes in <15 minutes
 - ✅ Performance validation prevents regressions
 - ✅ Alert system working (email + Slack)
-- ✅ 27/27 tests passing (100%)
+- ✅ 31/31 tests passing (100%)
 - ✅ Drift detection triggers emergency retrain
 - ✅ Automated rollback on degradation
+- ✅ Integration tests verify all CLI flags work
 
 ## Next Steps (Task 4.3+)
 
