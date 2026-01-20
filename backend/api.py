@@ -855,8 +855,9 @@ def get_best_bets(
                 confidence = player.get(f"{prop_key}_confidence", 0) or 0
                 pick = player.get(f"{prop_key}_pick", "-") or "-"
 
-                # Calculate edge_pct
-                edge_pct = (edge / line * 100) if line and line > 0 else 0
+                # edge is ALREADY a percentage from data_service.py (line 3608)
+                # Do NOT recalculate or it will be inflated 100x-200x
+                edge_pct = edge
 
                 # Apply filters
                 if confidence < min_confidence:
