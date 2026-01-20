@@ -1,13 +1,18 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronUp, Percent } from 'lucide-react';
 import { PROP_TYPES } from '../../lib/types';
-import type { FilterState, PropType, FilterPreset } from '../../lib/types';
+import type { FilterState, PropType, FilterPreset, Game } from '../../lib/types';
 import { FilterPresets } from './FilterPresets';
+import { formatMatchup } from '../../lib/utils';
 
 interface EnhancedFilterPanelProps {
   filters: FilterState;
   onFilterChange: (filters: Partial<FilterState>) => void;
   resultCount: number;
+  // Game selection
+  games: Game[];
+  selectedGameId: string | null;
+  onGameSelect: (gameId: string) => void;
   // Preset management
   presets: FilterPreset[];
   onSavePreset: (name: string, description?: string) => void;
@@ -19,12 +24,16 @@ export function EnhancedFilterPanel({
   filters,
   onFilterChange,
   resultCount,
+  games,
+  selectedGameId,
+  onGameSelect,
   presets,
   onSavePreset,
   onLoadPreset,
   onDeletePreset,
 }: EnhancedFilterPanelProps) {
   const [expandedSections, setExpandedSections] = useState({
+    game: false,
     confidence: true,
     edge: true,
     propTypes: true,
@@ -92,6 +101,43 @@ export function EnhancedFilterPanel({
       </div>
 
       <div className="p-4 space-y-4">
+        {/* Game Selection */}
+        {games.length > 1 && (
+          <div>
+            <button
+              onClick={() => toggleSection('game')}
+              className="flex items-center justify-between w-full mb-2"
+            >
+              <label className="text-xs text-text-secondary font-medium">Game</label>
+              {expandedSections.game ? (
+                <ChevronUp size={14} className="text-text-muted" />
+              ) : (
+                <ChevronDown size={14} className="text-text-muted" />
+              )}
+            </button>
+            {expandedSections.game && (
+              <select
+                value={selectedGameId || ''}
+                onChange={(e) => onGameSelect(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent-primary"
+              >
+                {games.map((game) => {
+                  const matchup = formatMatchup(
+                    game.home_team.abbreviation,
+                    game.visitor_team.abbreviation
+                  );
+                  return (
+                    <option key={game.game_id} value={game.game_id}>
+                      {matchup}
+                      {game.status && game.status !== 'scheduled' ? ` - ${game.status}` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+          </div>
+        )}
+
         {/* Confidence Range */}
         <div>
           <button

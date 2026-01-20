@@ -249,6 +249,9 @@ export function Predictions() {
               filters={filters}
               onFilterChange={updateFilters}
               resultCount={filteredCount}
+              games={games}
+              selectedGameId={selectedGameId}
+              onGameSelect={handleGameSelect}
               presets={presets}
               onSavePreset={savePreset}
               onLoadPreset={loadPreset}
