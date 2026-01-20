@@ -1,8 +1,8 @@
 {
-  "games_processed": 100,
+  "games_processed": 173,
   "games_with_errors": 0,
-  "start_date": "2025-12-30",
-  "end_date": "2026-01-12",
+  "start_date": "2025-12-22",
+  "end_date": "2026-01-13",
   "total_predictions": 0,
   "quick_mode": true,
   "metrics": {
