@@ -11,7 +11,7 @@
 
 ### Code Quality
 - ✅ All 8 bug fixes applied to `daily_predictions.py`
-- ✅ Backtest completed: 37,140 predictions, RMSE 5.459
+- ✅ Backtest completed: 61,320 predictions, RMSE 5.42 (complete 596-game dataset)
 - ✅ Calibration verified: All props 48-55% hit rate
 - ✅ Health check endpoint working: `/api/health`
 - ✅ API endpoints tested and functional
@@ -431,10 +431,10 @@ railway deploy main
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| RMSE | <5.0 | 5.459 | ⚠️ 9.2% over |
+| RMSE | <5.0 | 5.42 | ⚠️ 8.4% over (2.6% worse than baseline 5.285) |
 | Calibration | 50±5% | 48-55% | ✅ Pass |
-| R² | >0.60 | 0.671 | ✅ Pass |
-| Bias | <0.5 | 0.156 | ✅ Pass |
+| R² | >0.60 | 0.68 | ✅ Pass |
+| Bias | <0.5 | 0.255 | ✅ Pass |
 | API Response Time | <200ms | ~50ms | ✅ Excellent |
 | Predictions/Day | 100-150 | 102 | ✅ Good |
 
@@ -512,7 +512,7 @@ railway deploy main
 
 **What's Complete**:
 - ✅ All code bugs fixed
-- ✅ Backtest verified (37,140 predictions)
+- ✅ Backtest verified (61,320 predictions on complete 596-game dataset)
 - ✅ Calibration working (48-55%)
 - ✅ Configuration files ready
 - ✅ Environment variables documented
