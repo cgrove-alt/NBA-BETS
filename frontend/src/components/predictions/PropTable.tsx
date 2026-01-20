@@ -186,15 +186,27 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
     return player[propType as keyof PlayerProp] as PropPrediction | undefined;
   };
 
-  // Filter and sort players
+  // Filter and sort players with enhanced filters
   const filteredPlayers = useMemo(() => {
     return players
       .map((player) => ({ player, prop: getProp(player) }))
       .filter(({ prop }) => {
         if (!prop || prop.pick === '-') return false;
+
+        // Confidence filters
         if (prop.confidence < filters.minConfidence) return false;
-        if (Math.abs(prop.edge) < filters.minEdge) return false;
+        if (filters.maxConfidence && prop.confidence > filters.maxConfidence) return false;
+
+        // Edge filters (support both points and percentage mode)
+        const edgeValue = filters.edgeMode === 'percentage'
+          ? prop.edge_pct || Math.abs(prop.edge)
+          : Math.abs(prop.edge);
+        if (edgeValue < filters.minEdge) return false;
+        if (filters.maxEdge && edgeValue > filters.maxEdge) return false;
+
+        // Pick type filter
         if (filters.pickType && prop.pick !== filters.pickType) return false;
+
         return true;
       })
       .sort((a, b) => {

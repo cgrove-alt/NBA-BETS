@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Loader2, Lock, Radio } from 'lucide-react';
 import { GameSelector } from '../components/game/GameSelector';
 import { DateSelector, getTodayDate } from '../components/game/DateSelector';
-import { FilterPanel } from '../components/predictions/FilterPanel';
+import { EnhancedFilterPanel } from '../components/predictions/EnhancedFilterPanel';
+import { ActiveFiltersBar } from '../components/predictions/ActiveFiltersBar';
 import { PropTable } from '../components/predictions/PropTable';
 import { BestBets } from '../components/predictions/BestBets';
 import { QuickPicks } from '../components/predictions/QuickPicks';
@@ -11,6 +12,7 @@ import { useGames } from '../hooks/useGames';
 import { usePredictions } from '../hooks/usePredictions';
 import { useFilters } from '../hooks/useFilters';
 import { useLiveStats } from '../hooks/useLiveStats';
+import { PROP_TYPES } from '../lib/types';
 
 export function Predictions() {
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDate());
@@ -42,8 +44,16 @@ export function Predictions() {
     isStarting,
   } = usePredictions(selectedGameId, selectedGame);
 
-  // Filters
-  const { filters, updateFilters } = useFilters();
+  // Filters with preset management
+  const {
+    filters,
+    updateFilters,
+    resetFilters,
+    presets,
+    savePreset,
+    loadPreset,
+    deletePreset,
+  } = useFilters();
 
   // Live stats tracking
   const { liveStats, isLive, isFinal } = useLiveStats(selectedGameId, selectedGame?.status);
@@ -68,26 +78,67 @@ export function Predictions() {
     return [...(propsData.home_props || []), ...(propsData.away_props || [])];
   }, [propsData]);
 
-  // Count filtered results
-  const filteredCount = useMemo(() => {
-    if (allPlayers.length === 0) return 0;
+  // Count filtered results with new max filters
+  const { filteredCount, totalCount } = useMemo(() => {
+    if (allPlayers.length === 0) return { filteredCount: 0, totalCount: 0 };
 
-    let count = 0;
+    let total = 0;
+    let filtered = 0;
+
     for (const player of allPlayers) {
       for (const propType of filters.propTypes) {
         const prop = propType === '3PM' ? player['3PM'] : player[propType as keyof typeof player];
         if (prop && typeof prop === 'object' && 'pick' in prop) {
           const p = prop as { pick: string; confidence: number; edge: number };
           if (p.pick === '-') continue;
+
+          total++;
+
+          // Apply all filters
           if (p.confidence < filters.minConfidence) continue;
-          if (Math.abs(p.edge) < filters.minEdge) continue;
+          if (filters.maxConfidence && p.confidence > filters.maxConfidence) continue;
+
+          const edgeValue = filters.edgeMode === 'percentage'
+            ? (p as any).edge_pct || Math.abs(p.edge)
+            : Math.abs(p.edge);
+          if (edgeValue < filters.minEdge) continue;
+          if (filters.maxEdge && edgeValue > filters.maxEdge) continue;
+
           if (filters.pickType && p.pick !== filters.pickType) continue;
-          count++;
+
+          filtered++;
         }
       }
     }
-    return count;
+    return { filteredCount: filtered, totalCount: total };
   }, [allPlayers, filters]);
+
+  // Handle filter chip removal
+  const handleRemoveFilter = (filterKey: keyof typeof filters, value?: string) => {
+    switch (filterKey) {
+      case 'minConfidence':
+        updateFilters({ minConfidence: 55, maxConfidence: undefined });
+        break;
+      case 'minEdge':
+        updateFilters({ minEdge: 4, maxEdge: undefined });
+        break;
+      case 'pickType':
+        updateFilters({ pickType: null });
+        break;
+      case 'propTypes':
+        if (value) {
+          const updated = filters.propTypes.filter((p) => p !== value);
+          updateFilters({ propTypes: updated.length > 0 ? updated : [...PROP_TYPES] });
+        }
+        break;
+      case 'gameIds':
+        if (value) {
+          const updated = filters.gameIds.filter((id) => id !== value);
+          updateFilters({ gameIds: updated });
+        }
+        break;
+    }
+  };
 
   const handleGameSelect = (gameId: string) => {
     setSelectedGameId(gameId);
@@ -181,15 +232,32 @@ export function Predictions() {
         </div>
       )}
 
+      {/* Active Filters Bar */}
+      {isReady && allPlayers.length > 0 && (
+        <ActiveFiltersBar
+          filters={filters}
+          games={games}
+          onRemoveFilter={handleRemoveFilter}
+          onResetAll={resetFilters}
+          totalCount={totalCount}
+          filteredCount={filteredCount}
+        />
+      )}
+
       {/* Main content */}
       {isReady && allPlayers.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Sidebar */}
           <div className="lg:col-span-1 space-y-4">
-            <FilterPanel
+            <EnhancedFilterPanel
               filters={filters}
+              games={games}
               onFilterChange={updateFilters}
               resultCount={filteredCount}
+              presets={presets}
+              onSavePreset={savePreset}
+              onLoadPreset={loadPreset}
+              onDeletePreset={deletePreset}
             />
           </div>
 

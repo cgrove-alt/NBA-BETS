@@ -228,8 +228,21 @@ export type PropType = (typeof PROP_TYPES)[number];
 export interface FilterState {
   minConfidence: number;
   minEdge: number;
+  maxConfidence?: number;
+  maxEdge?: number;
   propTypes: PropType[];
   pickType: 'OVER' | 'UNDER' | null;
+  gameIds: string[];  // NEW: Filter by specific games
   sortBy: string;
   sortOrder: 'asc' | 'desc';
+  edgeMode: 'points' | 'percentage';  // NEW: Toggle between edge display modes
+}
+
+// Filter preset for saving/loading
+export interface FilterPreset {
+  id: string;
+  name: string;
+  description?: string;
+  filters: FilterState;
+  createdAt: string;
 }
