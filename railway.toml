@@ -4,18 +4,66 @@ builder = "nixpacks"
 [deploy]
 startCommand = "python -m uvicorn backend.api:app --host 0.0.0.0 --port $PORT"
 restartPolicyType = "on_failure"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
 
-# NOTE: The automated retraining scheduler service should be deployed separately
-# as a second Railway service. To deploy the scheduler:
+# Environment variables (set in Railway dashboard)
+# Required:
+# - BALLDONTLIE_API_KEY
+# - DATABASE_URL (PostgreSQL connection string, auto-provisioned by Railway)
+# Optional:
+# - THE_ODDS_API_KEY
+# - JWT_SECRET_KEY
+# - API_KEY
+# - FRONTEND_URL
+# - AUTH_ENABLED (default: false)
+# - ALERT_EMAIL (for monitoring alerts)
+# - SLACK_WEBHOOK (for monitoring alerts)
+
+# NOTE: Multi-Service Deployment Strategy
+# ========================================
+# This Railway project should contain 4 separate services:
 #
-# 1. In Railway dashboard, create a new service in the same project
-# 2. Link to this same GitHub repository
-# 3. Set the start command to: python3 scheduled_retraining.py --daemon
-# 4. Configure environment variables:
-#    - BALLDONTLIE_API_KEY (same as API service)
-#    - DATABASE_URL (same as API service)
-#    - ALERT_EMAIL (optional - for email alerts)
-#    - SLACK_WEBHOOK (optional - for Slack alerts)
-#    - MAX_TRAINING_TIME=7200 (optional - default 2 hours)
+# 1. API Service (this file)
+#    - Start command: python -m uvicorn backend.api:app --host 0.0.0.0 --port $PORT
+#    - Handles all REST API endpoints
+#    - Connects to shared PostgreSQL database
 #
-# This keeps the API and retraining scheduler as separate,independently scalable services.
+# 2. Daily Predictions Service
+#    - Start command: python daily_predictions.py
+#    - Cron schedule: 0 9 * * * (every day at 9 AM EST)
+#    - Generates predictions for all games
+#    - Stores results in database and CSV
+#
+# 3. Odds Tracker Service
+#    - Start command: python odds_tracker_service.py --daemon
+#    - Runs continuously as background daemon
+#    - Fetches odds every 5 minutes during operating hours (8 AM - 11 PM EST)
+#    - NBA season only (Oct-Jun)
+#
+# 4. Retraining Scheduler Service
+#    - Start command: python scheduled_retraining.py --daemon
+#    - Runs continuously as background daemon
+#    - Full retrain: Every 14 days (Sundays at 2 AM)
+#    - Incremental update: Every 3 days at 4 AM
+#    - Drift detection: Daily at 6 AM
+#
+# All services share:
+# - Same GitHub repository
+# - Same PostgreSQL database (DATABASE_URL)
+# - Same environment variables (BALLDONTLIE_API_KEY, etc.)
+#
+# Railway Cron Service Setup:
+# ---------------------------
+# For services #2-4, create separate Railway services with:
+# - Service name: nba-betting-{service-name}
+# - Same repo link
+# - Custom start command (see above)
+# - Shared environment variables
+# - Shared PostgreSQL database link
+#
+# This architecture allows:
+# - Independent scaling of API vs background jobs
+# - Separate logs for debugging
+# - Zero-downtime API during retraining
+# - Automatic restarts if any service crashes

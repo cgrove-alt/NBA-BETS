@@ -1,0 +1,205 @@
+# Railway Cron Jobs Configuration
+# This file documents the cron schedules for Railway services
+# Note: Railway doesn't use this file directly - schedules are configured in the Railway dashboard
+
+# ============================================================================
+# Service #2: Daily Predictions Service
+# ============================================================================
+# Service Type: Cron Job
+# Start Command: python daily_predictions.py
+# Schedule: 0 9 * * * (9 AM EST daily)
+# Description: Generates predictions for all NBA games scheduled for today
+
+daily_predictions:
+  schedule: "0 9 * * *"  # Every day at 9 AM EST
+  command: python daily_predictions.py
+  timezone: America/New_York
+  timeout: 600  # 10 minutes max execution time
+  expected_duration: 300  # ~5 minutes typical
+  retry_on_failure: true
+  max_retries: 3
+  success_criteria:
+    - exit_code: 0
+    - log_contains: "Predictions complete"
+    - database_records: predictions_history table updated
+
+# ============================================================================
+# Service #3: Odds Tracker Service
+# ============================================================================
+# Service Type: Worker (Always-On Daemon)
+# Start Command: python odds_tracker_service.py --daemon
+# Schedule: Managed internally by APScheduler
+# Description: Fetches betting odds every 5 minutes during operating hours
+
+odds_tracker:
+  service_type: worker
+  command: python odds_tracker_service.py --daemon
+  internal_schedule:
+    - interval: "*/5 * * * *"  # Every 5 minutes
+    - operating_hours: "8-23"  # 8 AM - 11 PM EST
+    - season: "Oct-Jun"  # NBA season only
+  health_check:
+    - heartbeat_interval: 300  # 5 minutes
+    - alert_threshold: 1800  # Alert if no activity for 30 minutes
+  expected_memory: 200  # MB
+  restart_policy: on_failure
+
+# ============================================================================
+# Service #4: Retraining Scheduler Service
+# ============================================================================
+# Service Type: Worker (Always-On Daemon)
+# Start Command: python scheduled_retraining.py --daemon
+# Schedule: Managed internally by APScheduler
+# Description: Automatic model retraining and drift detection
+
+retraining_scheduler:
+  service_type: worker
+  command: python scheduled_retraining.py --daemon
+  internal_schedules:
+    # Full retraining (all base models + meta-learner)
+    full_retrain:
+      schedule: "0 2 * * 0"  # Sundays at 2 AM EST
+      frequency: "Every 14 days"
+      expected_duration: 7200  # 2 hours max
+      timeout: 7200
+      success_criteria:
+        - new_model_rmse <= old_model_rmse * 1.05  # Within 5% degradation
+        - backtest_roi > 0  # Positive ROI
+
+    # Incremental update (meta-learner only)
+    incremental_update:
+      schedule: "0 4 */3 * *"  # Every 3 days at 4 AM EST
+      expected_duration: 900  # 15 minutes max
+      timeout: 1800
+      success_criteria:
+        - exit_code: 0
+        - meta_learner_updated: true
+
+    # Drift detection (daily monitoring)
+    drift_check:
+      schedule: "0 6 * * *"  # Daily at 6 AM EST
+      expected_duration: 120  # 2 minutes
+      alert_conditions:
+        - rmse_increase > 10%  # RMSE increased by 10%+
+        - accuracy_drop_3_days: true  # 3 consecutive days of accuracy drop
+        - r2_below_threshold: -0.5  # R² drops below -0.5
+      action_on_drift:
+        - trigger: full_retrain
+        - send_alert: true
+
+  health_check:
+    - heartbeat_interval: 3600  # 1 hour
+    - log_monitoring: true
+  expected_memory: 1500  # MB during training
+  restart_policy: on_failure
+
+# ============================================================================
+# Environment Variables Required
+# ============================================================================
+# All cron jobs and workers require these environment variables:
+# - BALLDONTLIE_API_KEY (required)
+# - DATABASE_URL (required, auto-provisioned by Railway)
+# - THE_ODDS_API_KEY (optional, for odds tracker)
+# - ALERT_EMAIL (optional, for alerts)
+# - SLACK_WEBHOOK (optional, for alerts)
+# - MAX_TRAINING_TIME (optional, default: 7200)
+
+# ============================================================================
+# Monitoring & Alerts
+# ============================================================================
+monitoring:
+  # Railway automatically monitors service health
+  railway_health_checks:
+    - api_service: /api/health every 60s
+    - worker_services: Process running check
+
+  # Custom alerts (sent by services themselves)
+  alerts:
+    - retraining_complete:
+        severity: info
+        channels: [email, slack]
+    - retraining_failed:
+        severity: error
+        channels: [email, slack]
+    - drift_detected:
+        severity: warning
+        channels: [email, slack]
+    - predictions_failed:
+        severity: error
+        channels: [email, slack]
+    - odds_tracker_down:
+        severity: warning
+        channels: [email, slack]
+
+# ============================================================================
+# Cost Optimization Notes
+# ============================================================================
+# To reduce Railway costs:
+# 1. Use Cron Jobs instead of Workers when possible
+#    - Daily Predictions: ✅ Uses Cron Job (only runs once/day)
+#    - Odds Tracker: ❌ Uses Worker (needs to run every 5 min)
+#    - Retraining: ❌ Uses Worker (needs internal scheduler)
+#
+# 2. Optimize schedules
+#    - Only fetch odds during NBA games (8 AM - 11 PM)
+#    - Only run predictions on game days (check schedule first)
+#    - Run retraining off-peak hours (2 AM)
+#
+# 3. Archive old data
+#    - Delete odds_history older than 30 days
+#    - Delete predictions_history older than 90 days
+#
+# 4. Use Railway's free tier
+#    - $5/month credit included
+#    - Sufficient for light usage
+
+# ============================================================================
+# Deployment Checklist
+# ============================================================================
+# Before going live, ensure:
+# - [x] All environment variables set in Railway dashboard
+# - [x] PostgreSQL database provisioned and migrated
+# - [x] Cron schedules configured correctly in Railway UI
+# - [x] Worker services set to "Worker" type (not "Web")
+# - [x] Health checks passing for API service
+# - [x] Logs show successful execution of scheduled jobs
+# - [x] Database tables populated with initial data
+# - [x] Models trained and saved to models/ directory
+# - [x] Alerts configured (email/Slack)
+# - [x] Cost monitoring enabled
+
+# ============================================================================
+# Emergency Procedures
+# ============================================================================
+# If a service is malfunctioning:
+#
+# 1. Check logs in Railway dashboard
+# 2. Verify environment variables are set
+# 3. Restart service from Railway dashboard
+# 4. If persistent, rollback to previous deployment
+# 5. Check database connectivity
+# 6. Review recent code changes
+# 7. Contact support if Railway issue
+#
+# Emergency contacts:
+# - Railway Support: https://railway.app/help
+# - GitHub Issues: [your-repo]/issues
+
+# ============================================================================
+# Success Metrics (Production)
+# ============================================================================
+# After 7 days of deployment, verify:
+# - API uptime: > 99.5%
+# - Daily predictions: 7/7 successful runs
+# - Odds tracker: > 95% data capture rate
+# - No critical alerts
+# - Database size: < 2 GB
+# - API response time: < 500ms (p95)
+# - Zero model deployment failures
+# - Positive paper trading ROI
+
+# ============================================================================
+# This configuration file is for reference only.
+# Actual schedules are configured in Railway dashboard.
+# See RAILWAY_DEPLOYMENT.md for detailed setup instructions.
+# ============================================================================
