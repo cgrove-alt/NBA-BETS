@@ -545,8 +545,11 @@ class Phase3Backtester(SeasonBacktester):
 
                     # Generate features using parent class method (point-in-time)
                     # Determine home/away and opponent
-                    is_home = box_score.get('team_id') == game.get('home_team_id')
-                    opponent_id = game.get('away_team_id') if is_home else game.get('home_team_id')
+                    # Handle both object format (home_team: {id: X}) and ID format (home_team_id: X)
+                    home_id = game.get('home_team_id') or game.get('home_team', {}).get('id')
+                    away_id = game.get('away_team_id') or game.get('visitor_team', {}).get('id') or game.get('away_team', {}).get('id')
+                    is_home = box_score.get('team_id') == home_id
+                    opponent_id = away_id if is_home else home_id
                     player_position = player.get('position', 'F')
 
                     features = self.get_player_features_before_date(

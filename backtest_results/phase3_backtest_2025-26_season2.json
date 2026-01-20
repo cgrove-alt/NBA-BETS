@@ -4,45 +4,45 @@
   "total_predictions": 8220,
   "overall_performance": {
     "count": 8220,
-    "rmse": 7.926821794535947,
-    "mae": 4.981000763629569,
-    "mean_error": 3.2094284192910667,
-    "bias": 3.2094284192910667
+    "rmse": 7.904355339648526,
+    "mae": 4.9760692968842,
+    "mean_error": 3.2034055042160072,
+    "bias": 3.2034055042160072
   },
   "tier_performance": {
     "strong": {
-      "count": 6534,
-      "rmse": 4.730018771849045,
-      "mae": 3.3962999342354587,
-      "bias": 1.8694058076961624
+      "count": 6535,
+      "rmse": 4.732142127489601,
+      "mae": 3.3975223843984006,
+      "bias": 1.8682127269053106
     },
     "moderate": {
-      "count": 891,
-      "rmse": 9.144728617242185,
-      "mae": 7.879045493253286,
-      "bias": 5.121939030858135
+      "count": 890,
+      "rmse": 9.142818372808096,
+      "mae": 7.875980407564827,
+      "bias": 5.125555592821957
     },
     "weak": {
       "count": 795,
-      "rmse": 19.289359377317712,
-      "mae": 14.757450279562127,
-      "bias": 12.079441990680811
+      "rmse": 19.19252167358627,
+      "mae": 14.705482107687896,
+      "bias": 12.027017102789726
     }
   },
   "prop_type_performance": {
     "points": {
       "count": 1644,
-      "rmse": 10.123236562233124,
-      "mae": 8.033475554406207,
-      "r2": -0.4066233180844918,
-      "bias": 5.896581319370118
+      "rmse": 10.128020333464477,
+      "mae": 8.037764292668543,
+      "r2": -0.40795304183814096,
+      "bias": 5.894916390513851
     },
     "rebounds": {
       "count": 1644,
-      "rmse": 3.001720770251663,
-      "mae": 2.4156489961654892,
-      "r2": 0.031859295697990064,
-      "bias": 1.009971207102285
+      "rmse": 3.0091136416273807,
+      "mae": 2.4244344993805074,
+      "r2": 0.02708459873219371,
+      "bias": 1.028215642655273
     },
     "assists": {
       "count": 1644,
@@ -53,46 +53,46 @@
     },
     "threes": {
       "count": 1644,
-      "rmse": 1.7261872197030939,
-      "mae": 1.4591930443221415,
-      "r2": -0.6510954084538891,
-      "bias": 1.1288287867166626
+      "rmse": 1.7191313761699778,
+      "mae": 1.4512998892062152,
+      "r2": -0.6376251879305783,
+      "bias": 1.1171636982929785
     },
     "pra": {
       "count": 1644,
-      "rmse": 13.679737036735403,
-      "mae": 10.034965529712156,
-      "r2": -0.2038907412269766,
-      "bias": 5.737729972306829
+      "rmse": 13.610284647385626,
+      "mae": 10.005127109623881,
+      "r2": -0.19169740222762321,
+      "bias": 5.702700978658495
     }
   },
   "elite_strong_performance": {
-    "count": 6534,
-    "rmse": 4.730018771849045,
-    "mae": 3.3962999342354587,
-    "bias": 1.8694058076961624,
-    "percentage": 79.4890510948905
+    "count": 6535,
+    "rmse": 4.732142127489601,
+    "mae": 3.3975223843984006,
+    "bias": 1.8682127269053106,
+    "percentage": 79.50121654501217
   },
   "betting_performance": {
-    "total_bets": 299,
-    "wins": 133,
-    "losses": 98,
-    "pushes": 68,
-    "win_rate": 57.57575757575758,
-    "roi": 4.768148017345895,
-    "total_wagered": 14723.949999999988,
-    "total_profit": 702.0597300000004,
-    "final_bankroll": 1702.059729999999,
-    "peak_bankroll": 1702.059729999999,
+    "total_bets": 295,
+    "wins": 138,
+    "losses": 92,
+    "pushes": 65,
+    "win_rate": 60.0,
+    "roi": 7.314765783680177,
+    "total_wagered": 16429.470000000005,
+    "total_profit": 1201.7772499999999,
+    "final_bankroll": 2201.777250000001,
+    "peak_bankroll": 2201.777250000001,
     "max_drawdown": 0.0,
-    "sharpe_ratio": 1.6611306888369128,
+    "sharpe_ratio": 2.4582319649841033,
     "stopped": false,
     "stop_reason": null
   },
   "calibration": {
-    "confidence_accuracy_correlation": 0.5678788128820181,
+    "confidence_accuracy_correlation": 0.5672798237676218,
     "avg_confidence_elite": NaN,
-    "avg_confidence_all": 79.9087591240876
+    "avg_confidence_all": 79.91058394160584
   },
   "sample_predictions": [
     {
@@ -143,14 +143,14 @@
     {
       "player": "Jonathan Kuminga",
       "prop_type": "threes",
-      "pred_low": 2.16,
-      "pred_median": 2.55,
-      "pred_high": 2.93,
-      "predicted": 2.55,
+      "pred_low": 2.07,
+      "pred_median": 2.44,
+      "pred_high": 2.81,
+      "predicted": 2.44,
       "actual": 1,
       "confidence": 85.0,
       "tier": "strong",
-      "error": 1.55,
+      "error": 1.44,
       "bet_rec": "BET",
       "bet_size": 49.66,
       "game_date": "2025-10-28"
@@ -158,14 +158,14 @@
     {
       "player": "Jonathan Kuminga",
       "prop_type": "pra",
-      "pred_low": 35.7,
-      "pred_median": 42.0,
-      "pred_high": 48.3,
-      "predicted": 42.0,
+      "pred_low": 34.86,
+      "pred_median": 41.01,
+      "pred_high": 47.16,
+      "predicted": 41.01,
       "actual": 15,
       "confidence": 40.0,
       "tier": "weak",
-      "error": 27.0,
+      "error": 26.01,
       "bet_rec": "MONITOR",
       "bet_size": 0.0,
       "game_date": "2025-10-28"
@@ -368,14 +368,14 @@
     {
       "player": "Jimmy Butler",
       "prop_type": "threes",
-      "pred_low": 2.01,
-      "pred_median": 2.37,
-      "pred_high": 2.72,
-      "predicted": 2.37,
+      "pred_low": 1.9,
+      "pred_median": 2.23,
+      "pred_high": 2.56,
+      "predicted": 2.23,
       "actual": 3,
       "confidence": 85.0,
       "tier": "strong",
-      "error": -0.63,
+      "error": -0.77,
       "bet_rec": "BET",
       "bet_size": 47.87,
       "game_date": "2025-10-28"
@@ -383,14 +383,14 @@
     {
       "player": "Jimmy Butler",
       "prop_type": "pra",
-      "pred_low": 31.3,
-      "pred_median": 36.83,
-      "pred_high": 42.35,
-      "predicted": 36.83,
+      "pred_low": 30.85,
+      "pred_median": 36.29,
+      "pred_high": 41.74,
+      "predicted": 36.29,
       "actual": 31,
       "confidence": 40.0,
       "tier": "weak",
-      "error": 5.83,
+      "error": 5.29,
       "bet_rec": "MONITOR",
       "bet_size": 0.0,
       "game_date": "2025-10-28"
@@ -458,14 +458,14 @@
     {
       "player": "Stephen Curry",
       "prop_type": "pra",
-      "pred_low": 30.02,
-      "pred_median": 35.32,
-      "pred_high": 40.62,
-      "predicted": 35.32,
+      "pred_low": 29.6,
+      "pred_median": 34.82,
+      "pred_high": 40.04,
+      "predicted": 34.82,
       "actual": 29,
       "confidence": 40.0,
       "tier": "weak",
-      "error": 6.32,
+      "error": 5.82,
       "bet_rec": "MONITOR",
       "bet_size": 0.0,
       "game_date": "2025-10-28"
@@ -788,14 +788,14 @@
     {
       "player": "Gary Payton II",
       "prop_type": "rebounds",
-      "pred_low": 1.76,
-      "pred_median": 2.07,
-      "pred_high": 2.38,
-      "predicted": 2.07,
+      "pred_low": 1.86,
+      "pred_median": 2.19,
+      "pred_high": 2.52,
+      "predicted": 2.19,
       "actual": 0,
       "confidence": 85.0,
       "tier": "strong",
-      "error": 2.07,
+      "error": 2.19,
       "bet_rec": "BET",
       "bet_size": 47.87,
       "game_date": "2025-10-28"
@@ -818,14 +818,14 @@
     {
       "player": "Gary Payton II",
       "prop_type": "threes",
-      "pred_low": 1.1,
-      "pred_median": 1.3,
-      "pred_high": 1.49,
-      "predicted": 1.3,
+      "pred_low": 1.06,
+      "pred_median": 1.25,
+      "pred_high": 1.43,
+      "predicted": 1.25,
       "actual": 0,
       "confidence": 85.0,
       "tier": "strong",
-      "error": 1.3,
+      "error": 1.25,
       "bet_rec": "BET",
       "bet_size": 0.0,
       "game_date": "2025-10-28"
@@ -849,22 +849,22 @@
   "phase3_targets": {
     "overall_rmse": {
       "target": "< 4.8",
-      "actual": 7.927,
+      "actual": 7.904,
       "met": false
     },
     "points_rmse": {
       "target": "< 5.5",
-      "actual": 10.123,
+      "actual": 10.128,
       "met": false
     },
     "threes_r2": {
       "target": "> 0.10",
-      "actual": -0.651,
+      "actual": -0.638,
       "met": false
     },
     "roi_all": {
       "target": "> 3%",
-      "actual": 4.77,
+      "actual": 7.31,
       "met": true
     },
     "roi_elite": {
@@ -874,7 +874,7 @@
     },
     "sharpe_ratio": {
       "target": "> 1.5",
-      "actual": 1.66,
+      "actual": 2.46,
       "met": true
     },
     "max_drawdown": {
@@ -884,7 +884,7 @@
     },
     "confidence_correlation": {
       "target": "> 0.5",
-      "actual": 0.568,
+      "actual": 0.567,
       "met": true
     }
   }
