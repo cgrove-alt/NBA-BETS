@@ -795,7 +795,7 @@ def get_game_odds(game_id: str):
 @app.get("/api/best-bets", response_model=BestBetsResponse)
 def get_best_bets(
     min_confidence: float = Query(55.0, ge=0, le=100, description="Minimum confidence threshold (model outputs 50-70%)"),
-    min_edge: float = Query(4.0, ge=0, description="Minimum edge threshold in points"),
+    min_edge: float = Query(4.0, ge=0, description="Minimum edge threshold (percentage)"),
     prop_types: Optional[str] = Query(None, description="Comma-separated prop types to filter"),
     pick_type: Optional[str] = Query(None, description="Filter by OVER or UNDER"),
     sort_by: str = Query("quality", description="Sort order: quality, confidence, or edge"),
@@ -851,18 +851,24 @@ def get_best_bets(
 
                 prediction = player.get(pred_key, 0) or 0
                 line = player.get(f"{prop_key}_line", 0) or 0
-                edge = player.get(f"{prop_key}_edge", 0) or 0
+                edge_from_ds = player.get(f"{prop_key}_edge", 0) or 0  # This is ALREADY a percentage
                 confidence = player.get(f"{prop_key}_confidence", 0) or 0
                 pick = player.get(f"{prop_key}_pick", "-") or "-"
 
-                # edge is ALREADY a percentage from data_service.py (line 3608)
-                # Do NOT recalculate or it will be inflated 100x-200x
-                edge_pct = edge
+                # data_service.py returns edge as a PERCENTAGE (line 3608)
+                # But BestBet schema expects TWO fields:
+                #   - edge: raw points difference (e.g., 1.5 assists)
+                #   - edge_pct: percentage (e.g., 300%)
+                edge = prediction - line  # Raw points
+                edge_pct = edge_from_ds  # Already a percentage from data_service
 
                 # Apply filters
                 if confidence < min_confidence:
                     continue
-                if abs(edge) < min_edge:
+                # CRITICAL: Filter using edge_pct (percentage), not edge (raw points)
+                # min_edge=4.0 means "4% edge minimum", not "4 points minimum"
+                # This ensures low-line props (assists, threes) aren't filtered out
+                if abs(edge_pct) < min_edge:
                     continue
                 if pick == "-":
                     continue
