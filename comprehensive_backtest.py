@@ -575,6 +575,69 @@ class SeasonBacktester:
                 except Exception as e:
                     print(f"  Warning: Could not load {season_file}: {e}")
 
+        # Load all box_score_*.json files
+        # First, create game_id -> date mapping from games
+        game_id_to_date = {}
+        for game in self.games:
+            game_id_to_date[game['id']] = game['date']
+
+        box_files = list(CACHE_DIR.glob("box_score_*.json"))
+        print(f"  Loading {len(box_files)} cached box score files...")
+        box_loaded = 0
+
+        for box_file in box_files:
+            try:
+                # Extract game_id from filename: box_score_12345.json
+                game_id = int(box_file.stem.replace('box_score_', ''))
+                game_date = game_id_to_date.get(game_id)
+
+                if not game_date:
+                    continue  # Skip if we don't have the game date
+
+                with open(box_file) as f:
+                    box_data = json.load(f)
+
+                # box_data is {player_id: {...player stats...}}
+                for player_id_str, player_stat in box_data.items():
+                    player_id = int(player_id_str)
+                    player_info = player_stat.get('player', {})
+
+                    # Create a stat dict in the expected format
+                    stat = {
+                        'player': player_info,
+                        'game': {'id': game_id, 'date': game_date},
+                        'pts': player_stat.get('pts', 0) or 0,
+                        'reb': player_stat.get('reb', 0) or 0,
+                        'ast': player_stat.get('ast', 0) or 0,
+                        'fg3m': player_stat.get('fg3m', 0) or 0,
+                        'min': player_stat.get('min', '0'),
+                        'team': {'id': player_stat.get('team_id')},
+                    }
+
+                    self.player_stats[player_id].append((game_date, stat))
+                    box_loaded += 1
+
+                    if player_id not in self.player_info:
+                        self.player_info[player_id] = player_info
+
+                    # Cache box score by game_id
+                    if game_id not in self.game_box_scores:
+                        self.game_box_scores[game_id] = {}
+                    self.game_box_scores[game_id][player_id] = {
+                        'player': player_info,
+                        'pts': stat['pts'],
+                        'reb': stat['reb'],
+                        'ast': stat['ast'],
+                        'fg3m': stat['fg3m'],
+                        'min': stat['min'],
+                        'team_id': stat['team']['id'],
+                    }
+
+            except Exception as e:
+                print(f"  Warning: Could not load {box_file}: {e}")
+
+        print(f"  Loaded {box_loaded} player stats from box score files")
+
         # Sort each player's games by date
         for player_id in self.player_stats:
             self.player_stats[player_id].sort(key=lambda x: x[0])
@@ -1765,6 +1828,16 @@ def main():
                 )
 
                 if not features:
+                    # DEBUG: Track why no features
+                    if i == 0 and len(results.predictions) == 0:  # First game, no predictions yet
+                        player_games = backtester.player_stats.get(player_id, [])
+                        games_before = [(d, s) for d, s in player_games if d < game_date]
+                        print(f"  DEBUG: Player {player_name} (ID {player_id})")
+                        print(f"    Total games in cache: {len(player_games)}")
+                        print(f"    Games before {game_date}: {len(games_before)}")
+                        if len(games_before) > 0:
+                            print(f"    First game date: {games_before[0][0]}")
+                            print(f"    Last game date: {games_before[-1][0]}")
                     continue
 
                 # Check minutes played (DNP detection)
