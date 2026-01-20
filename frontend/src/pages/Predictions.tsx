@@ -232,7 +232,6 @@ export function Predictions() {
       {isReady && allPlayers.length > 0 && (
         <ActiveFiltersBar
           filters={filters}
-          games={games}
           onRemoveFilter={handleRemoveFilter}
           onResetAll={resetFilters}
           totalCount={totalCount}

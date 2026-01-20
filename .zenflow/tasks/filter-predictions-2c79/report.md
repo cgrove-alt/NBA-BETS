@@ -26,14 +26,14 @@ Implemented a comprehensive filtering system for NBA predictions with the follow
 
 ### Files Created
 
-1. **`frontend/src/components/predictions/EnhancedFilterPanel.tsx`** (371 lines)
+1. **`frontend/src/components/predictions/EnhancedFilterPanel.tsx`** (388 lines)
    - Comprehensive filtering UI with collapsible sections
    - Game selector dropdown for quick game switching
    - Min/max range controls for confidence and edge
    - Edge mode toggle (points vs percentage)
    - Integrated preset management
 
-2. **`frontend/src/components/predictions/ActiveFiltersBar.tsx`** (95 lines)
+2. **`frontend/src/components/predictions/ActiveFiltersBar.tsx`** (103 lines)
    - Visual filter chips with removal capability
    - Shows filtered vs total count
    - "Reset All" functionality

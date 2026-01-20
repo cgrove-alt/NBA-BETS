@@ -1,9 +1,8 @@
 import { X, RotateCcw } from 'lucide-react';
-import type { FilterState, Game } from '../../lib/types';
+import type { FilterState } from '../../lib/types';
 
 interface ActiveFiltersBarProps {
   filters: FilterState;
-  games: Game[];
   onRemoveFilter: (filterKey: keyof FilterState, value?: string) => void;
   onResetAll: () => void;
   totalCount: number;
@@ -12,7 +11,6 @@ interface ActiveFiltersBarProps {
 
 export function ActiveFiltersBar({
   filters,
-  games,
   onRemoveFilter,
   onResetAll,
   totalCount,
