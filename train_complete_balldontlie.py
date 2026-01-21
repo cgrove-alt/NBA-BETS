@@ -4235,14 +4235,20 @@ class PropEnsembleModel:
         if not base_preds:
             raise ValueError("No base models available for prediction")
 
-        # Weighted average prediction (more robust than meta-learner)
-        ensemble_pred = 0.0
-        if hasattr(self, 'model_weights') and self.model_weights:
+        # Use stacking meta-learner for final prediction (upgraded from weighted avg)
+        # Meta-learner learns non-linear combinations of base predictions
+        if self.meta_model is not None and hasattr(self, 'meta_model'):
+            # Stack base predictions into features for meta-learner
+            stacked_features = np.array([base_preds])
+            ensemble_pred = float(self.meta_model.predict(stacked_features)[0])
+        elif hasattr(self, 'model_weights') and self.model_weights:
+            # Fallback to weighted average if meta-model not available
+            ensemble_pred = 0.0
             for name, pred in individual_preds.items():
                 weight = self.model_weights.get(name, 1.0 / len(individual_preds))
                 ensemble_pred += weight * pred
         else:
-            # Fallback to simple average
+            # Final fallback to simple average
             ensemble_pred = float(np.mean(base_preds))
 
         result = {
