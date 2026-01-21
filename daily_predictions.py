@@ -1582,12 +1582,21 @@ def predict_player_prop(
     # Calculate confidence score based on prediction band width (Task 2.4)
     if pred_low is not None and pred_high is not None and pred_median is not None:
         band_width = pred_high - pred_low
-        # BUG FIX: Continuous confidence calculation, not binary thresholds
-        # Narrow bands = high confidence, wide bands = low confidence
-        # Backtest validation: Testing multiplier=3.0 for STRONG BET tier (75%+ confidence)
-        # Formula: confidence = 90 - (band_width * 3.0), clamped to [40, 90]
-        # Aggressive but potentially more profitable - testing in production
-        confidence_score = max(40.0, min(90.0, 90.0 - (band_width * 3.0)))
+        # Prop-specific confidence multipliers (addresses ASSISTS dominance)
+        # ASSISTS has lowest RMSE (2.01) → narrowest bands → needs higher multiplier
+        # POINTS has higher RMSE (6.12) → wider bands → needs lower multiplier
+        # This rebalances bet distribution and optimizes for profitability
+        multipliers = {
+            'assists': 3.5,    # More conservative (was dominating at 82% of bets)
+            'points': 2.5,     # More aggressive (higher RMSE needs boost)
+            'rebounds': 3.0,   # Baseline (moderate RMSE)
+            'threes': 3.2,     # Slightly conservative (moderate-low RMSE)
+            'pra': 2.8,        # Slightly aggressive (combo stat, higher variance)
+        }
+        multiplier = multipliers.get(prop_type.lower(), 3.0)  # Default 3.0
+
+        # Formula: confidence = 90 - (band_width * multiplier), clamped to [40, 90]
+        confidence_score = max(40.0, min(90.0, 90.0 - (band_width * multiplier)))
     elif predicted_value is not None:
         # BUG FIX: More granular confidence based on edge magnitude and prediction difference
         # Higher edge and larger prediction difference = higher confidence

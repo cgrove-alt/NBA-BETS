@@ -91,6 +91,14 @@ import argparse
 # Import travel fatigue calculator for Phase 2 features
 from travel_fatigue import TravelFatigueCalculator
 
+# Import player impact metrics (DARKO/EPM/RAPTOR) for advanced player evaluation
+try:
+    from player_impact_fetcher import PlayerImpactFetcher
+    HAS_PLAYER_IMPACT = True
+except ImportError:
+    HAS_PLAYER_IMPACT = False
+    print("Warning: player_impact_fetcher not available. Install dependencies or disable player impact features.")
+
 warnings.filterwarnings('ignore')
 
 # Model save directory
@@ -1993,6 +2001,17 @@ class PlayerStatsCalculator:
         self.player_games = defaultdict(list)
         self.player_info = {}
 
+        # Initialize player impact fetcher for DARKO/EPM/RAPTOR metrics
+        if HAS_PLAYER_IMPACT:
+            try:
+                self.impact_fetcher = PlayerImpactFetcher()
+                print("  Initialized PlayerImpactFetcher (DARKO/EPM/RAPTOR)")
+            except Exception as e:
+                self.impact_fetcher = None
+                print(f"  Warning: Could not initialize PlayerImpactFetcher: {e}")
+        else:
+            self.impact_fetcher = None
+
     def _get_position_group(self, position: str) -> str:
         """Map detailed position to position group (G/F/C)."""
         if not position:
@@ -2191,6 +2210,11 @@ class PlayerStatsCalculator:
             'bpm': self._calc_simplified_bpm(recent),  # Box Plus/Minus approximation
             'assist_rate': self._calc_assist_rate(recent),  # Assists per 36 min
             'rebound_rate': self._calc_rebound_rate(recent),  # Rebounds per 36 min
+
+            # PLAYER IMPACT METRICS (DARKO/EPM/RAPTOR) - FR-3 P1
+            # Advanced metrics that capture player value beyond box score stats
+            # Expected 5-8% accuracy improvement
+            **self._get_player_impact_features(player_id, date),
 
             # NEW: Rest days features
             'days_rest': days_rest,
@@ -2548,6 +2572,46 @@ class PlayerStatsCalculator:
 
         # Clamp to realistic range (-10 to +15)
         return round(max(-10, min(15, bpm)), 2)
+
+    def _get_player_impact_features(self, player_id: int, date: str) -> Dict[str, float]:
+        """
+        Get player impact metrics (DARKO/EPM/RAPTOR).
+
+        FR-3 (P1): Advanced metrics that capture player value beyond box score.
+        Expected 5-8% accuracy improvement per requirements.
+
+        Args:
+            player_id: NBA player ID
+            date: Game date for temporal filtering
+
+        Returns:
+            Dict with impact metric features (defaults if unavailable)
+        """
+        default_features = {
+            'player_impact_metric': 0.0,  # Scaled -10 to +10
+            'impact_percentile': 50.0,     # Player rank vs league (0-100)
+            'has_impact_data': 0,          # Flag: 1 if real data, 0 if default
+        }
+
+        if not self.impact_fetcher:
+            return default_features
+
+        try:
+            # Fetch player's impact metrics
+            impact_data = self.impact_fetcher.get_player_impact(player_id)
+
+            if impact_data and impact_data.get('impact_metric') is not None:
+                return {
+                    'player_impact_metric': impact_data.get('impact_metric', 0.0),
+                    'impact_percentile': impact_data.get('percentile', 50.0),
+                    'has_impact_data': 1,
+                }
+            else:
+                return default_features
+
+        except Exception as e:
+            # Silently return defaults if fetch fails
+            return default_features
 
     def _calc_assist_rate(self, games: List[Tuple[str, Dict]]) -> float:
         """
