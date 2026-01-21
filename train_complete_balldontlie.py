@@ -92,9 +92,10 @@ import argparse
 from travel_fatigue import TravelFatigueCalculator
 
 # Import player impact metrics (DARKO/EPM/RAPTOR) for advanced player evaluation
+# TEMPORARILY DISABLED: Player impact fetcher creating too many instances
 try:
     from player_impact_fetcher import PlayerImpactFetcher
-    HAS_PLAYER_IMPACT = True
+    HAS_PLAYER_IMPACT = False  # Temporarily disabled for testing
 except ImportError:
     HAS_PLAYER_IMPACT = False
     print("Warning: player_impact_fetcher not available. Install dependencies or disable player impact features.")

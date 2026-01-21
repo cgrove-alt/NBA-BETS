@@ -1587,7 +1587,7 @@ def predict_player_prop(
         # POINTS has higher RMSE (6.12) → wider bands → needs lower multiplier
         # This rebalances bet distribution and optimizes for profitability
         multipliers = {
-            'assists': 3.5,    # More conservative (was dominating at 82% of bets)
+            'assists': 5.0,    # VERY conservative (still 82% of high-conf bets at 3.5)
             'points': 2.5,     # More aggressive (higher RMSE needs boost)
             'rebounds': 3.0,   # Baseline (moderate RMSE)
             'threes': 3.2,     # Slightly conservative (moderate-low RMSE)
