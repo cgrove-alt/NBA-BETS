@@ -195,6 +195,7 @@ def main():
         4.50,  # Aggressive
         4.00,  # Very aggressive
         3.50,  # Extremely aggressive
+        3.00,  # Maximum aggressive (IMPLEMENTED)
     ]
 
     results = []
