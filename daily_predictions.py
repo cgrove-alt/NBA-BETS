@@ -2209,6 +2209,104 @@ def main():
             print(f"\n  Predictions saved to: {csv_filename}")
             print(f"  Total props: {len(all_player_props)}")
 
+            # RAILWAY FIX: Also save to PostgreSQL database (persists across deployments)
+            try:
+                import psycopg2
+                import os
+                database_url = os.getenv("DATABASE_URL")
+
+                if database_url:
+                    print(f"\n  Saving to database...")
+                    conn = psycopg2.connect(database_url)
+                    cursor = conn.cursor()
+
+                    # Create table if not exists
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS predictions_history (
+                            id SERIAL PRIMARY KEY,
+                            date DATE NOT NULL,
+                            game VARCHAR(100),
+                            player_name VARCHAR(100) NOT NULL,
+                            team VARCHAR(10),
+                            prop_type VARCHAR(20) NOT NULL,
+                            prediction FLOAT NOT NULL,
+                            pred_low FLOAT,
+                            pred_median FLOAT,
+                            pred_high FLOAT,
+                            line FLOAT NOT NULL,
+                            over_prob FLOAT,
+                            edge FLOAT,
+                            confidence_score FLOAT NOT NULL,
+                            edge_quality_tier VARCHAR(20),
+                            suggested_bet_size FLOAT,
+                            bet_recommendation VARCHAR(20),
+                            pick VARCHAR(10),
+                            uncertainty_flag VARCHAR(50),
+                            injury_boost BOOLEAN,
+                            created_at TIMESTAMP DEFAULT NOW(),
+                            UNIQUE(date, player_name, prop_type)
+                        )
+                    """)
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_date ON predictions_history(date)")
+                    conn.commit()
+
+                    # Delete existing predictions for this date
+                    cursor.execute("DELETE FROM predictions_history WHERE date = %s", (target_date,))
+                    deleted_count = cursor.rowcount
+                    print(f"  Cleared {deleted_count} old predictions for {target_date}")
+
+                    # Insert new predictions
+                    inserted_count = 0
+                    for _, row in df.iterrows():
+                        def safe_val(val):
+                            return None if pd.isna(val) or val == '' else val
+
+                        cursor.execute("""
+                            INSERT INTO predictions_history (
+                                date, game, player_name, team, prop_type,
+                                prediction, pred_low, pred_median, pred_high,
+                                line, over_prob, edge, confidence_score,
+                                edge_quality_tier, suggested_bet_size, bet_recommendation,
+                                pick, uncertainty_flag, injury_boost
+                            ) VALUES (
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s, %s,
+                                %s, %s, %s
+                            )
+                        """, (
+                            target_date,
+                            safe_val(row.get('game')),
+                            row['player_name'],
+                            safe_val(row.get('team')),
+                            row['prop_type'],
+                            row['prediction'],
+                            safe_val(row.get('pred_low')),
+                            safe_val(row.get('pred_median')),
+                            safe_val(row.get('pred_high')),
+                            row['line'],
+                            safe_val(row.get('over_prob')),
+                            safe_val(row.get('edge')),
+                            row['confidence_score'],
+                            safe_val(row.get('edge_quality_tier')),
+                            safe_val(row.get('suggested_bet_size')),
+                            safe_val(row.get('bet_recommendation')),
+                            safe_val(row.get('pick')),
+                            safe_val(row.get('uncertainty_flag')),
+                            safe_val(row.get('injury_boost'))
+                        ))
+                        inserted_count += 1
+
+                    conn.commit()
+                    conn.close()
+                    print(f"  ✓ Saved {inserted_count} predictions to database!")
+                else:
+                    print(f"  ℹ️ DATABASE_URL not set - skipping database save (CSV only)")
+            except Exception as db_error:
+                print(f"  ⚠️ Database save failed: {db_error}")
+                print(f"     CSV file still available as fallback")
+
             # Show summary by recommendation
             if 'bet_recommendation' in df.columns:
                 rec_counts = df['bet_recommendation'].value_counts()
