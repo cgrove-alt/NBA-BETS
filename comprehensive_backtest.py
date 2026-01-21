@@ -464,6 +464,9 @@ class SeasonBacktester:
             if model_path.exists():
                 with open(model_path, 'rb') as f:
                     data = pickle.load(f)
+
+                # Store the full model data structure
+                # The predict() method knows how to handle dicts with 'meta_model', 'model', etc.
                 self.models[prop_type] = data
                 model_type = "ensemble" if "ensemble" in str(model_path) else "legacy"
                 print(f"  Loaded {prop_type} model ({model_type})")
@@ -1730,17 +1733,28 @@ def main():
         backtester.load_games()
         backtester.load_historical_player_stats()
 
-        # Filter to last 30 days
+        # Filter to last 30 days OR most recent available games
         cutoff_date = datetime.now() - timedelta(days=30)
         original_count = len(backtester.games)
 
-        backtester.games = [
+        # First try last 30 days
+        recent_games = [
             g for g in backtester.games
             if isinstance(g.get('date'), str) and datetime.fromisoformat(g['date'].replace('Z', '')) >= cutoff_date
         ]
 
+        # If no games in last 30 days, take most recent 30 games
+        if not recent_games and backtester.games:
+            print("No games in last 30 days, using most recent 30 games from available data")
+            # Sort by date descending and take first 30
+            sorted_games = sorted(backtester.games,
+                                key=lambda g: g.get('date', ''),
+                                reverse=True)
+            recent_games = sorted_games[:30]
+
+        backtester.games = recent_games
         filtered_count = len(backtester.games)
-        print(f"Filtered {original_count} games → {filtered_count} games (last 30 days)")
+        print(f"Filtered {original_count} games → {filtered_count} games (quick mode)")
         print("=" * 60 + "\n")
 
         # Now run backtest manually (since models/data already loaded)
@@ -1828,16 +1842,6 @@ def main():
                 )
 
                 if not features:
-                    # DEBUG: Track why no features
-                    if i == 0 and len(results.predictions) == 0:  # First game, no predictions yet
-                        player_games = backtester.player_stats.get(player_id, [])
-                        games_before = [(d, s) for d, s in player_games if d < game_date]
-                        print(f"  DEBUG: Player {player_name} (ID {player_id})")
-                        print(f"    Total games in cache: {len(player_games)}")
-                        print(f"    Games before {game_date}: {len(games_before)}")
-                        if len(games_before) > 0:
-                            print(f"    First game date: {games_before[0][0]}")
-                            print(f"    Last game date: {games_before[-1][0]}")
                     continue
 
                 # Check minutes played (DNP detection)
@@ -1857,14 +1861,18 @@ def main():
                 if minutes_played < 5:
                     continue  # Skip DNP players
 
+                # TIER 2.3: Predict expected minutes for this player
+                predicted_minutes = backtester.predict_minutes(features)
+
                 # Generate predictions for each prop type
                 for prop_type in backtester.PROP_TYPES:
-                    model = backtester.models.get(prop_type)
-                    if not model:
-                        continue
-
                     try:
-                        prediction = model.predict([features])[0]
+                        # Use backtester.predict() method which handles feature conversion properly
+                        prediction = backtester.predict(prop_type, features, predicted_minutes=predicted_minutes)
+
+                        if prediction is None:
+                            continue
+
                         actual_value = actual_stats.get(backtester.PROP_STAT_MAP[prop_type], 0)
 
                         if prop_type == 'pra':
@@ -1879,12 +1887,14 @@ def main():
                             prop_type=prop_type,
                             predicted=float(prediction),
                             actual=float(actual_value),
+                            game_id=game_id,
                             game_date=game_date,
                             is_home=is_home
                         ))
+
                     except Exception as e:
                         if backtester.verbose:
-                            print(f"    Error predicting {prop_type} for {player_name}: {e}")
+                            print(f"    ERROR predicting {prop_type} for {player_name}: {type(e).__name__}: {e}")
 
     else:
         # Full backtest
