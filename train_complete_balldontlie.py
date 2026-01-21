@@ -2180,6 +2180,13 @@ class PlayerStatsCalculator:
             'fg3_rate': self._calc_fg3_rate(recent),  # 3PA / FGA
             'fta_rate': self._calc_fta_rate(recent),  # FTA / FGA (free throw rate)
 
+            # DEAN OLIVER'S FOUR FACTORS (Model Improvements V2)
+            # These 4 factors explain ~90% of scoring variance in basketball
+            'tov_pct': self._calc_tov_pct(recent),  # Turnover % (lower is better)
+            'orb_pct': self._calc_orb_pct(recent),  # Offensive rebound % (approx)
+            'ft_rate': self._calc_ft_rate(recent),  # Free throw rate (FTM/FGA)
+            # Note: efg_pct already included above as part of eFG%
+
             # TIER 1.2: Advanced stats (BPM, assist rate, rebound rate)
             'bpm': self._calc_simplified_bpm(recent),  # Box Plus/Minus approximation
             'assist_rate': self._calc_assist_rate(recent),  # Assists per 36 min
@@ -2312,6 +2319,50 @@ class PlayerStatsCalculator:
         if total_fg3a > 0:
             return round(total_fg3m / total_fg3a, 3)
         return 0.36  # League average default
+
+    def _calc_tov_pct(self, games: List[Tuple[str, Dict]]) -> float:
+        """
+        Calculate Turnover Percentage (Dean Oliver's Four Factors).
+        TOV% = TOV / (FGA + 0.44*FTA + TOV)
+        Lower is better. League average ~12.5%.
+        """
+        total_tov = sum(g.get('turnover', 0) for _, g in games)
+        total_fga = sum(g['fga'] for _, g in games)
+        total_fta = sum(g.get('fta', 0) for _, g in games)
+        possessions = total_fga + 0.44 * total_fta + total_tov
+        if possessions > 0:
+            return round(total_tov / possessions, 3)
+        return 0.125  # League average default
+
+    def _calc_orb_pct(self, games: List[Tuple[str, Dict]]) -> float:
+        """
+        Calculate Offensive Rebound Percentage (Dean Oliver's Four Factors).
+        ORB% = ORB / (ORB + Team DRB opportunities)
+
+        Note: Individual player ORB% approximated as ORB per minute played.
+        Team-level ORB% requires opponent defensive rebounds which we don't have.
+        Using simplified per-minute rate instead: ORB per 36 minutes.
+        """
+        total_orb = sum(g.get('oreb', 0) or 0 for _, g in games)
+        total_min = sum(g['min'] for _, g in games)
+        if total_min > 0:
+            # Return per-36-minute rate (scaled to 0-1 range like percentage)
+            orb_per36 = (total_orb / total_min) * 36
+            # Normalize: Centers ~3.0, Forwards ~1.5, Guards ~0.5 per 36
+            return round(orb_per36 / 10.0, 3)  # Scale to 0.05-0.30 range
+        return 0.15  # League average default
+
+    def _calc_ft_rate(self, games: List[Tuple[str, Dict]]) -> float:
+        """
+        Calculate Free Throw Rate (Dean Oliver's Four Factors).
+        FT Rate = FTM / FGA
+        Measures ability to get to the line and convert.
+        """
+        total_ftm = sum(g.get('ftm', 0) for _, g in games)
+        total_fga = sum(g['fga'] for _, g in games)
+        if total_fga > 0:
+            return round(total_ftm / total_fga, 3)
+        return 0.195  # League average default
 
     def _calc_fg3_streak_features(self, games: List[Tuple[str, Dict]]) -> Dict[str, float]:
         """Detect hot/cold shooting streaks for 3-pointers."""
