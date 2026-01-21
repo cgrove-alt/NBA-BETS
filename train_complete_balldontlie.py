@@ -91,6 +91,21 @@ import argparse
 # Import travel fatigue calculator for Phase 2 features
 from travel_fatigue import TravelFatigueCalculator
 
+# Import player impact metrics (DARKO/EPM/RAPTOR) for advanced player evaluation
+# Use module-level singleton to prevent multiple instances
+_PLAYER_IMPACT_FETCHER = None
+try:
+    from player_impact_fetcher import PlayerImpactFetcher
+    _PLAYER_IMPACT_FETCHER = PlayerImpactFetcher()  # Single instance
+    HAS_PLAYER_IMPACT = True
+    print("✓ Initialized PlayerImpactFetcher (singleton)")
+except ImportError:
+    HAS_PLAYER_IMPACT = False
+    print("Warning: player_impact_fetcher not available. Install dependencies or disable player impact features.")
+except Exception as e:
+    HAS_PLAYER_IMPACT = False
+    print(f"Warning: Could not initialize PlayerImpactFetcher: {e}")
+
 warnings.filterwarnings('ignore')
 
 # Model save directory
@@ -1993,6 +2008,10 @@ class PlayerStatsCalculator:
         self.player_games = defaultdict(list)
         self.player_info = {}
 
+        # Use module-level singleton for player impact fetcher
+        # Prevents creating multiple instances during prediction
+        self.impact_fetcher = _PLAYER_IMPACT_FETCHER
+
     def _get_position_group(self, position: str) -> str:
         """Map detailed position to position group (G/F/C)."""
         if not position:
@@ -2180,10 +2199,22 @@ class PlayerStatsCalculator:
             'fg3_rate': self._calc_fg3_rate(recent),  # 3PA / FGA
             'fta_rate': self._calc_fta_rate(recent),  # FTA / FGA (free throw rate)
 
+            # DEAN OLIVER'S FOUR FACTORS (Model Improvements V2)
+            # These 4 factors explain ~90% of scoring variance in basketball
+            'tov_pct': self._calc_tov_pct(recent),  # Turnover % (lower is better)
+            'orb_pct': self._calc_orb_pct(recent),  # Offensive rebound % (approx)
+            'ft_rate': self._calc_ft_rate(recent),  # Free throw rate (FTM/FGA)
+            # Note: efg_pct already included above as part of eFG%
+
             # TIER 1.2: Advanced stats (BPM, assist rate, rebound rate)
             'bpm': self._calc_simplified_bpm(recent),  # Box Plus/Minus approximation
             'assist_rate': self._calc_assist_rate(recent),  # Assists per 36 min
             'rebound_rate': self._calc_rebound_rate(recent),  # Rebounds per 36 min
+
+            # PLAYER IMPACT METRICS (DARKO/EPM/RAPTOR) - FR-3 P1
+            # Advanced metrics that capture player value beyond box score stats
+            # Expected 5-8% accuracy improvement
+            **self._get_player_impact_features(player_id, date),
 
             # NEW: Rest days features
             'days_rest': days_rest,
@@ -2312,6 +2343,50 @@ class PlayerStatsCalculator:
         if total_fg3a > 0:
             return round(total_fg3m / total_fg3a, 3)
         return 0.36  # League average default
+
+    def _calc_tov_pct(self, games: List[Tuple[str, Dict]]) -> float:
+        """
+        Calculate Turnover Percentage (Dean Oliver's Four Factors).
+        TOV% = TOV / (FGA + 0.44*FTA + TOV)
+        Lower is better. League average ~12.5%.
+        """
+        total_tov = sum(g.get('turnover', 0) for _, g in games)
+        total_fga = sum(g['fga'] for _, g in games)
+        total_fta = sum(g.get('fta', 0) for _, g in games)
+        possessions = total_fga + 0.44 * total_fta + total_tov
+        if possessions > 0:
+            return round(total_tov / possessions, 3)
+        return 0.125  # League average default
+
+    def _calc_orb_pct(self, games: List[Tuple[str, Dict]]) -> float:
+        """
+        Calculate Offensive Rebound Percentage (Dean Oliver's Four Factors).
+        ORB% = ORB / (ORB + Team DRB opportunities)
+
+        Note: Individual player ORB% approximated as ORB per minute played.
+        Team-level ORB% requires opponent defensive rebounds which we don't have.
+        Using simplified per-minute rate instead: ORB per 36 minutes.
+        """
+        total_orb = sum(g.get('oreb', 0) or 0 for _, g in games)
+        total_min = sum(g['min'] for _, g in games)
+        if total_min > 0:
+            # Return per-36-minute rate (scaled to 0-1 range like percentage)
+            orb_per36 = (total_orb / total_min) * 36
+            # Normalize: Centers ~3.0, Forwards ~1.5, Guards ~0.5 per 36
+            return round(orb_per36 / 10.0, 3)  # Scale to 0.05-0.30 range
+        return 0.15  # League average default
+
+    def _calc_ft_rate(self, games: List[Tuple[str, Dict]]) -> float:
+        """
+        Calculate Free Throw Rate (Dean Oliver's Four Factors).
+        FT Rate = FTM / FGA
+        Measures ability to get to the line and convert.
+        """
+        total_ftm = sum(g.get('ftm', 0) for _, g in games)
+        total_fga = sum(g['fga'] for _, g in games)
+        if total_fga > 0:
+            return round(total_ftm / total_fga, 3)
+        return 0.195  # League average default
 
     def _calc_fg3_streak_features(self, games: List[Tuple[str, Dict]]) -> Dict[str, float]:
         """Detect hot/cold shooting streaks for 3-pointers."""
@@ -2497,6 +2572,46 @@ class PlayerStatsCalculator:
 
         # Clamp to realistic range (-10 to +15)
         return round(max(-10, min(15, bpm)), 2)
+
+    def _get_player_impact_features(self, player_id: int, date: str) -> Dict[str, float]:
+        """
+        Get player impact metrics (DARKO/EPM/RAPTOR).
+
+        FR-3 (P1): Advanced metrics that capture player value beyond box score.
+        Expected 5-8% accuracy improvement per requirements.
+
+        Args:
+            player_id: NBA player ID
+            date: Game date for temporal filtering
+
+        Returns:
+            Dict with impact metric features (defaults if unavailable)
+        """
+        default_features = {
+            'player_impact_metric': 0.0,  # Scaled -10 to +10
+            'impact_percentile': 50.0,     # Player rank vs league (0-100)
+            'has_impact_data': 0,          # Flag: 1 if real data, 0 if default
+        }
+
+        if not self.impact_fetcher:
+            return default_features
+
+        try:
+            # Fetch player's impact metrics
+            impact_data = self.impact_fetcher.get_player_impact(player_id)
+
+            if impact_data and impact_data.get('impact_metric') is not None:
+                return {
+                    'player_impact_metric': impact_data.get('impact_metric', 0.0),
+                    'impact_percentile': impact_data.get('percentile', 50.0),
+                    'has_impact_data': 1,
+                }
+            else:
+                return default_features
+
+        except Exception as e:
+            # Silently return defaults if fetch fails
+            return default_features
 
     def _calc_assist_rate(self, games: List[Tuple[str, Dict]]) -> float:
         """
@@ -4184,14 +4299,20 @@ class PropEnsembleModel:
         if not base_preds:
             raise ValueError("No base models available for prediction")
 
-        # Weighted average prediction (more robust than meta-learner)
-        ensemble_pred = 0.0
-        if hasattr(self, 'model_weights') and self.model_weights:
+        # Use stacking meta-learner for final prediction (upgraded from weighted avg)
+        # Meta-learner learns non-linear combinations of base predictions
+        if self.meta_model is not None and hasattr(self, 'meta_model'):
+            # Stack base predictions into features for meta-learner
+            stacked_features = np.array([base_preds])
+            ensemble_pred = float(self.meta_model.predict(stacked_features)[0])
+        elif hasattr(self, 'model_weights') and self.model_weights:
+            # Fallback to weighted average if meta-model not available
+            ensemble_pred = 0.0
             for name, pred in individual_preds.items():
                 weight = self.model_weights.get(name, 1.0 / len(individual_preds))
                 ensemble_pred += weight * pred
         else:
-            # Fallback to simple average
+            # Final fallback to simple average
             ensemble_pred = float(np.mean(base_preds))
 
         result = {

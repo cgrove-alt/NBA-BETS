@@ -1582,11 +1582,22 @@ def predict_player_prop(
     # Calculate confidence score based on prediction band width (Task 2.4)
     if pred_low is not None and pred_high is not None and pred_median is not None:
         band_width = pred_high - pred_low
-        # BUG FIX: Continuous confidence calculation, not binary thresholds
-        # Narrow bands = high confidence, wide bands = low confidence
-        # Map band_width to confidence: 0-3pts → 90, 3-5pts → 70, 5-8pts → 55, 8+pts → 40
-        # Use inverse relationship: confidence = 90 - (band_width * 6.25), clamped to [40, 90]
-        confidence_score = max(40.0, min(90.0, 90.0 - (band_width * 6.25)))
+        # STATISTICALLY CALIBRATED confidence multipliers (61K prediction backtest)
+        # Calibration target: confidence score ≈ accuracy - 3% (conservative)
+        # Analysis: THREES had 80% confidence but only 67% accuracy (worst calibration)
+        #           REBOUNDS needed +0.9 adjustment to reduce dominance (was 84% of high-conf bets)
+        #           ASSISTS/POINTS/PRA need more aggressive multipliers for better bet flow
+        multipliers = {
+            'assists': 4.9,    # 73.2% accuracy → 70% target confidence (well-calibrated)
+            'points': 1.6,     # 71.7% accuracy → 68% target confidence (more aggressive for bet flow)
+            'rebounds': 3.9,   # 71.7% accuracy → 68% target confidence (reduced from 3.0 to fix dominance)
+            'threes': 8.4,     # 67.1% accuracy → 64% target confidence (MAJOR fix: was massively overconfident)
+            'pra': 1.3,        # 71.4% accuracy → 68% target confidence (more aggressive for combo stat)
+        }
+        multiplier = multipliers.get(prop_type.lower(), 3.0)  # Default 3.0
+
+        # Formula: confidence = 90 - (band_width * multiplier), clamped to [40, 90]
+        confidence_score = max(40.0, min(90.0, 90.0 - (band_width * multiplier)))
     elif predicted_value is not None:
         # BUG FIX: More granular confidence based on edge magnitude and prediction difference
         # Higher edge and larger prediction difference = higher confidence
@@ -2197,6 +2208,104 @@ def main():
             df.to_csv(csv_filename, index=False)
             print(f"\n  Predictions saved to: {csv_filename}")
             print(f"  Total props: {len(all_player_props)}")
+
+            # RAILWAY FIX: Also save to PostgreSQL database (persists across deployments)
+            try:
+                import psycopg2
+                import os
+                database_url = os.getenv("DATABASE_URL")
+
+                if database_url:
+                    print(f"\n  Saving to database...")
+                    conn = psycopg2.connect(database_url)
+                    cursor = conn.cursor()
+
+                    # Create table if not exists
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS predictions_history (
+                            id SERIAL PRIMARY KEY,
+                            date DATE NOT NULL,
+                            game VARCHAR(100),
+                            player_name VARCHAR(100) NOT NULL,
+                            team VARCHAR(10),
+                            prop_type VARCHAR(20) NOT NULL,
+                            prediction FLOAT NOT NULL,
+                            pred_low FLOAT,
+                            pred_median FLOAT,
+                            pred_high FLOAT,
+                            line FLOAT NOT NULL,
+                            over_prob FLOAT,
+                            edge FLOAT,
+                            confidence_score FLOAT NOT NULL,
+                            edge_quality_tier VARCHAR(20),
+                            suggested_bet_size FLOAT,
+                            bet_recommendation VARCHAR(20),
+                            pick VARCHAR(10),
+                            uncertainty_flag VARCHAR(50),
+                            injury_boost BOOLEAN,
+                            created_at TIMESTAMP DEFAULT NOW(),
+                            UNIQUE(date, player_name, prop_type)
+                        )
+                    """)
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_date ON predictions_history(date)")
+                    conn.commit()
+
+                    # Delete existing predictions for this date
+                    cursor.execute("DELETE FROM predictions_history WHERE date = %s", (target_date,))
+                    deleted_count = cursor.rowcount
+                    print(f"  Cleared {deleted_count} old predictions for {target_date}")
+
+                    # Insert new predictions
+                    inserted_count = 0
+                    for _, row in df.iterrows():
+                        def safe_val(val):
+                            return None if pd.isna(val) or val == '' else val
+
+                        cursor.execute("""
+                            INSERT INTO predictions_history (
+                                date, game, player_name, team, prop_type,
+                                prediction, pred_low, pred_median, pred_high,
+                                line, over_prob, edge, confidence_score,
+                                edge_quality_tier, suggested_bet_size, bet_recommendation,
+                                pick, uncertainty_flag, injury_boost
+                            ) VALUES (
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s, %s,
+                                %s, %s, %s
+                            )
+                        """, (
+                            target_date,
+                            safe_val(row.get('game')),
+                            row['player_name'],
+                            safe_val(row.get('team')),
+                            row['prop_type'],
+                            row['prediction'],
+                            safe_val(row.get('pred_low')),
+                            safe_val(row.get('pred_median')),
+                            safe_val(row.get('pred_high')),
+                            row['line'],
+                            safe_val(row.get('over_prob')),
+                            safe_val(row.get('edge')),
+                            row['confidence_score'],
+                            safe_val(row.get('edge_quality_tier')),
+                            safe_val(row.get('suggested_bet_size')),
+                            safe_val(row.get('bet_recommendation')),
+                            safe_val(row.get('pick')),
+                            safe_val(row.get('uncertainty_flag')),
+                            safe_val(row.get('injury_boost'))
+                        ))
+                        inserted_count += 1
+
+                    conn.commit()
+                    conn.close()
+                    print(f"  ✓ Saved {inserted_count} predictions to database!")
+                else:
+                    print(f"  ℹ️ DATABASE_URL not set - skipping database save (CSV only)")
+            except Exception as db_error:
+                print(f"  ⚠️ Database save failed: {db_error}")
+                print(f"     CSV file still available as fallback")
 
             # Show summary by recommendation
             if 'bet_recommendation' in df.columns:

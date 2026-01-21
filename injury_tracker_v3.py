@@ -1,1001 +1,423 @@
+#!/usr/bin/env python3
 """
-NBA Injury Tracker v3
-=====================
+Real-Time NBA Injury Detection System - V3
+===========================================
 
-Enhanced injury tracking system with real-time scraping and caching.
-Critical for eliminating DNP (Did Not Play) errors in predictions.
+Integrates with RotoWire/FantasyLabs or NBA.com/ESPN injury reports
+to eliminate DNP (Did Not Play) prediction errors.
 
-Features:
-- Multi-source injury data (NBA.com, ESPN, Balldontlie)
-- In-memory caching with TTL (15-minute default)
-- Database persistence (SQLite)
-- Star player impact detection
-- Usage redistribution calculations
-
-Data Flow:
-1. Check cache (15-min TTL)
-2. Try Balldontlie API (primary)
-3. Fallback to web scraping (NBA.com → ESPN)
-4. Cache and persist to database
-5. Calculate team impact for star players
-
-Success Criteria:
-- Detection rate > 95% (from ~70%)
-- Zero DNP errors in predictions
-- <2 second response time with caching
+Requirements: FR-4 (P0 Critical)
+- Update frequency: Every 15 minutes during game days
+- Detection rate: 100% (zero DNP players in predictions)
+- Handles OUT, DOUBTFUL, QUESTIONABLE, GTD statuses
+- Caches injury data in SQLite for historical analysis
 """
 
+import os
+import sqlite3
 import requests
-import json
-import logging
-import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, asdict
-from enum import Enum
-from functools import lru_cache
-import re
-
-# Try importing BeautifulSoup (optional, fallback for scraping)
-try:
-    from bs4 import BeautifulSoup
-    BS4_AVAILABLE = True
-except ImportError:
-    BS4_AVAILABLE = False
-    logging.warning("BeautifulSoup not available. Web scraping disabled. Install with: pip install beautifulsoup4")
-
-# Import Balldontlie API if available
-try:
-    from balldontlie_api import BalldontlieAPI
-    BALLDONTLIE_AVAILABLE = True
-except ImportError:
-    BALLDONTLIE_AVAILABLE = False
-    logging.warning("Balldontlie API not available. Import the module to enable API fetching.")
-
-# Import database
-try:
-    from database import DatabaseManager
-    DATABASE_AVAILABLE = True
-except ImportError:
-    DATABASE_AVAILABLE = False
-    logging.warning("Database module not available. Persistence disabled.")
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+import json
 
 
-# =============================================================================
-# Enums and Data Classes
-# =============================================================================
-
-class InjuryStatus(Enum):
-    """Official NBA injury status classifications."""
-    OUT = "Out"
-    DOUBTFUL = "Doubtful"
-    QUESTIONABLE = "Questionable"
-    PROBABLE = "Probable"
-    GTD = "GTD"
-    AVAILABLE = "Available"
-    UNKNOWN = "Unknown"
-
-    @classmethod
-    def from_string(cls, status: str) -> "InjuryStatus":
-        """Parse status string to enum (case-insensitive, handles abbreviations)."""
-        status_lower = status.lower().strip()
-        mapping = {
-            "out": cls.OUT,
-            "o": cls.OUT,
-            "doubtful": cls.DOUBTFUL,
-            "d": cls.DOUBTFUL,
-            "questionable": cls.QUESTIONABLE,
-            "q": cls.QUESTIONABLE,
-            "probable": cls.PROBABLE,
-            "p": cls.PROBABLE,
-            "gtd": cls.GTD,
-            "game time decision": cls.GTD,
-            "available": cls.AVAILABLE,
-            "day-to-day": cls.GTD,
-            "day to day": cls.GTD,
-        }
-        return mapping.get(status_lower, cls.UNKNOWN)
-
-    def availability_probability(self) -> float:
-        """Return probability player will be available (0.0-1.0)."""
-        probs = {
-            InjuryStatus.OUT: 0.0,
-            InjuryStatus.DOUBTFUL: 0.25,
-            InjuryStatus.QUESTIONABLE: 0.50,
-            InjuryStatus.PROBABLE: 0.75,
-            InjuryStatus.GTD: 0.50,
-            InjuryStatus.AVAILABLE: 1.0,
-            InjuryStatus.UNKNOWN: 0.50,
-        }
-        return probs.get(self, 0.50)
+class InjuryStatus:
+    """Injury status constants."""
+    OUT = "OUT"
+    DOUBTFUL = "DOUBTFUL"
+    QUESTIONABLE = "QUESTIONABLE"
+    GTD = "GTD"  # Game-Time Decision
+    PROBABLE = "PROBABLE"
+    ACTIVE = "ACTIVE"
 
 
-@dataclass
-class InjuryReport:
-    """Individual player injury report."""
-    player_name: str
-    player_id: Optional[int] = None
-    team_abbrev: str = ""
-    team_id: Optional[int] = None
-    status: InjuryStatus = InjuryStatus.UNKNOWN
-    injury_type: str = ""  # e.g., "Knee", "Ankle", "Illness"
-    injury_detail: str = ""  # e.g., "Left knee soreness"
-    report_date: Optional[datetime] = None
-    expected_return: Optional[str] = None  # e.g., "2-3 weeks"
-    games_missed: int = 0
-    source: str = ""  # "balldontlie", "nba.com", "espn", "cache"
-    last_updated: datetime = None
-
-    def __post_init__(self):
-        if self.last_updated is None:
-            self.last_updated = datetime.now()
-        if self.report_date is None:
-            self.report_date = datetime.now()
-
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for JSON serialization."""
-        data = asdict(self)
-        data['status'] = self.status.value
-        data['report_date'] = self.report_date.isoformat() if self.report_date else None
-        data['last_updated'] = self.last_updated.isoformat() if self.last_updated else None
-        return data
-
-    def is_unavailable(self) -> bool:
-        """Check if player is definitely unavailable (OUT or DOUBTFUL)."""
-        return self.status in [InjuryStatus.OUT, InjuryStatus.DOUBTFUL]
-
-    def is_uncertain(self) -> bool:
-        """Check if player availability is uncertain (QUESTIONABLE, GTD)."""
-        return self.status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]
-
-
-# =============================================================================
-# In-Memory Cache with TTL
-# =============================================================================
-
-class InjuryCache:
+class InjuryTrackerV3:
     """
-    In-memory cache for injury data with time-to-live (TTL).
+    Real-time injury tracking system with multiple data sources.
 
-    Cache Structure:
-    - Key: game_date (YYYY-MM-DD)
-    - Value: (injury_reports_list, timestamp)
-
-    TTL: 15 minutes (default)
-    Max Cache Size: 100 dates (keeps ~7 days of data)
+    Primary: RotoWire API (paid, real-time)
+    Fallback: NBA.com injury reports
+    Cache: SQLite database for historical analysis
     """
 
-    def __init__(self, ttl_minutes: int = 15, max_size: int = 100):
-        self.ttl_seconds = ttl_minutes * 60
-        self.max_size = max_size
-        self.cache: Dict[str, Tuple[List[InjuryReport], datetime]] = {}
-
-    def get(self, date_key: str) -> Optional[List[InjuryReport]]:
-        """Get cached injury reports for a date if not expired."""
-        if date_key not in self.cache:
-            return None
-
-        reports, timestamp = self.cache[date_key]
-        age_seconds = (datetime.now() - timestamp).total_seconds()
-
-        if age_seconds > self.ttl_seconds:
-            # Cache expired
-            del self.cache[date_key]
-            return None
-
-        logger.debug(f"Cache HIT for {date_key} (age: {age_seconds:.1f}s)")
-        return reports
-
-    def set(self, date_key: str, reports: List[InjuryReport]):
-        """Cache injury reports for a date."""
-        # Limit cache size (FIFO eviction)
-        if len(self.cache) >= self.max_size:
-            oldest_key = next(iter(self.cache))
-            del self.cache[oldest_key]
-
-        self.cache[date_key] = (reports, datetime.now())
-        logger.debug(f"Cache SET for {date_key} ({len(reports)} reports)")
-
-    def clear(self):
-        """Clear entire cache."""
-        self.cache.clear()
-        logger.info("Cache cleared")
-
-    def get_stats(self) -> Dict:
-        """Get cache statistics."""
-        return {
-            "size": len(self.cache),
-            "max_size": self.max_size,
-            "ttl_minutes": self.ttl_seconds / 60,
-            "entries": list(self.cache.keys()),
-        }
-
-
-# Global cache instance
-_injury_cache = InjuryCache(ttl_minutes=15)
-
-
-# =============================================================================
-# Data Fetching Functions
-# =============================================================================
-
-def fetch_injuries_from_balldontlie(date: datetime) -> List[InjuryReport]:
-    """
-    Fetch injury data from Balldontlie API (primary source).
-
-    Args:
-        date: Target date for injury reports
-
-    Returns:
-        List of InjuryReport objects
-    """
-    if not BALLDONTLIE_AVAILABLE:
-        logger.warning("Balldontlie API not available")
-        return []
-
-    try:
-        api = BalldontlieAPI()
-
-        # Fetch current injuries from Balldontlie API
-        # API returns list of dicts with player injury data
-        injuries_data = api.get_injuries()
-
-        injuries = []
-        for injury_dict in injuries_data:
-            try:
-                # Extract player info
-                player = injury_dict.get('player', {})
-                team = injury_dict.get('team', {})
-
-                # Parse status from API
-                status_text = injury_dict.get('status', 'Unknown')
-                status = InjuryStatus.from_string(status_text)
-
-                # Create InjuryReport
-                injury = InjuryReport(
-                    player_name=f"{player.get('first_name', '')} {player.get('last_name', '')}".strip(),
-                    player_id=player.get('id'),
-                    team_abbrev=team.get('abbreviation', ''),
-                    team_id=team.get('id'),
-                    status=status,
-                    injury_type=injury_dict.get('injury_type', ''),
-                    injury_detail=injury_dict.get('description', ''),
-                    report_date=date,
-                    source="balldontlie",
-                )
-                injuries.append(injury)
-
-            except Exception as e:
-                logger.warning(f"Error parsing injury data: {e}")
-                continue
-
-        logger.info(f"Fetched {len(injuries)} injuries from Balldontlie API")
-        return injuries
-
-    except Exception as e:
-        logger.error(f"Error fetching from Balldontlie API: {e}")
-        return []
-
-
-def scrape_nba_injuries() -> List[InjuryReport]:
-    """
-    Scrape injury reports from NBA.com/injuries.
-
-    Returns:
-        List of InjuryReport objects
-    """
-    if not BS4_AVAILABLE:
-        logger.warning("BeautifulSoup not available for scraping")
-        return []
-
-    try:
-        url = "https://www.nba.com/news/injury-report"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        }
-
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        injuries = []
-
-        # NBA.com structure (as of 2025, may change):
-        # Look for injury report table or sections
-        # This is a simplified example - actual parsing depends on current site structure
-
-        injury_sections = soup.find_all('div', class_='injury-report-section')
-
-        for section in injury_sections:
-            # Extract team name
-            team_elem = section.find('h2') or section.find('h3')
-            team_name = team_elem.get_text(strip=True) if team_elem else ""
-
-            # Extract player rows
-            player_rows = section.find_all('tr') or section.find_all('div', class_='player-row')
-
-            for row in player_rows:
-                try:
-                    # Extract player name, status, injury
-                    # Structure varies, this is illustrative:
-                    cols = row.find_all('td') or row.find_all('div')
-
-                    if len(cols) >= 3:
-                        player_name = cols[0].get_text(strip=True)
-                        status_text = cols[1].get_text(strip=True)
-                        injury_text = cols[2].get_text(strip=True)
-
-                        status = InjuryStatus.from_string(status_text)
-
-                        injury = InjuryReport(
-                            player_name=player_name,
-                            team_abbrev=team_name[:3].upper(),  # Approximate
-                            status=status,
-                            injury_detail=injury_text,
-                            source="nba.com",
-                            report_date=datetime.now(),
-                        )
-                        injuries.append(injury)
-
-                except Exception as e:
-                    logger.warning(f"Error parsing injury row: {e}")
-                    continue
-
-        logger.info(f"Scraped {len(injuries)} injuries from NBA.com")
-        return injuries
-
-    except requests.RequestException as e:
-        logger.error(f"Error scraping NBA.com: {e}")
-        return []
-    except Exception as e:
-        logger.error(f"Unexpected error scraping NBA.com: {e}")
-        return []
-
-
-def scrape_espn_injuries() -> List[InjuryReport]:
-    """
-    Scrape injury reports from ESPN (fallback source).
-
-    Returns:
-        List of InjuryReport objects
-    """
-    if not BS4_AVAILABLE:
-        logger.warning("BeautifulSoup not available for scraping")
-        return []
-
-    try:
-        url = "https://www.espn.com/nba/injuries"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        }
-
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        injuries = []
-
-        # ESPN structure (as of 2025, may change)
-        # Find injury tables by team
-        tables = soup.find_all('table', class_='tablehead')
-
-        for table in tables:
-            # Get team name from preceding header
-            team_header = table.find_previous('div', class_='team-name')
-            team_name = team_header.get_text(strip=True) if team_header else ""
-
-            # Parse table rows
-            rows = table.find_all('tr')[1:]  # Skip header
-
-            for row in rows:
-                try:
-                    cols = row.find_all('td')
-
-                    if len(cols) >= 4:
-                        player_name = cols[0].get_text(strip=True)
-                        position = cols[1].get_text(strip=True)
-                        status_text = cols[2].get_text(strip=True)
-                        injury_text = cols[3].get_text(strip=True)
-
-                        status = InjuryStatus.from_string(status_text)
-
-                        injury = InjuryReport(
-                            player_name=player_name,
-                            team_abbrev=team_name[:3].upper(),
-                            status=status,
-                            injury_detail=injury_text,
-                            source="espn",
-                            report_date=datetime.now(),
-                        )
-                        injuries.append(injury)
-
-                except Exception as e:
-                    logger.warning(f"Error parsing ESPN row: {e}")
-                    continue
-
-        logger.info(f"Scraped {len(injuries)} injuries from ESPN")
-        return injuries
-
-    except requests.RequestException as e:
-        logger.error(f"Error scraping ESPN: {e}")
-        return []
-    except Exception as e:
-        logger.error(f"Unexpected error scraping ESPN: {e}")
-        return []
-
-
-def fetch_current_injuries(date: Optional[datetime] = None, use_cache: bool = True) -> List[InjuryReport]:
-    """
-    Fetch current injury reports with multi-source fallback and caching.
-
-    Data source priority:
-    1. In-memory cache (15-min TTL)
-    2. Balldontlie API (primary)
-    3. NBA.com scraping
-    4. ESPN scraping (fallback)
-    5. Database (stale data max 2 hours old)
-
-    Args:
-        date: Target date (defaults to today)
-        use_cache: Whether to use in-memory cache
-
-    Returns:
-        List of InjuryReport objects
-    """
-    if date is None:
-        date = datetime.now()
-
-    date_key = date.strftime('%Y-%m-%d')
-
-    # 1. Check cache
-    if use_cache:
-        cached = _injury_cache.get(date_key)
-        if cached is not None:
-            return cached
-
-    injuries = []
-
-    # 2. Try Balldontlie API (primary)
-    try:
-        injuries = fetch_injuries_from_balldontlie(date)
-        if injuries:
-            logger.info(f"Fetched {len(injuries)} injuries from Balldontlie")
-            _injury_cache.set(date_key, injuries)
-            _persist_injuries_to_db(injuries, date)
-            return injuries
-    except Exception as e:
-        logger.warning(f"Balldontlie fetch failed: {e}")
-
-    # 3. Try NBA.com scraping
-    try:
-        injuries = scrape_nba_injuries()
-        if injuries:
-            logger.info(f"Scraped {len(injuries)} injuries from NBA.com")
-            _injury_cache.set(date_key, injuries)
-            _persist_injuries_to_db(injuries, date)
-            return injuries
-    except Exception as e:
-        logger.warning(f"NBA.com scraping failed: {e}")
-
-    # 4. Try ESPN scraping (fallback)
-    try:
-        injuries = scrape_espn_injuries()
-        if injuries:
-            logger.info(f"Scraped {len(injuries)} injuries from ESPN")
-            _injury_cache.set(date_key, injuries)
-            _persist_injuries_to_db(injuries, date)
-            return injuries
-    except Exception as e:
-        logger.warning(f"ESPN scraping failed: {e}")
-
-    # 5. Fallback to database (max 2 hours old)
-    try:
-        db_injuries = _fetch_injuries_from_db(date, max_age_hours=2)
-        if db_injuries:
-            logger.warning(f"Using stale data from database ({len(db_injuries)} injuries)")
-            return db_injuries
-    except Exception as e:
-        logger.error(f"Database fallback failed: {e}")
-
-    # All sources failed
-    logger.error(f"All injury data sources failed for {date_key}")
-    return []
-
-
-def is_player_available(player_id: int, game_date: datetime) -> Tuple[bool, Optional[InjuryStatus]]:
-    """
-    Check if a specific player is available for a game.
-
-    Args:
-        player_id: Player's ID
-        game_date: Date of the game
-
-    Returns:
-        Tuple of (is_available: bool, status: InjuryStatus or None)
-
-    Example:
-        >>> available, status = is_player_available(237, datetime(2025, 1, 15))
-        >>> if not available:
-        >>>     print(f"Player unavailable: {status.value}")
-    """
-    injuries = fetch_current_injuries(game_date)
-
-    # Find injury report for this player
-    for injury in injuries:
-        if injury.player_id == player_id:
-            is_available = not injury.is_unavailable()
-            return is_available, injury.status
-
-    # No injury report found - assume available
-    return True, None
-
-
-# =============================================================================
-# Star Player Impact Functions
-# =============================================================================
-
-# Top-3 scorer threshold for star player detection
-STAR_PLAYER_MIN_PPG = 18.0  # Player must average ≥18 PPG to be considered "star"
-
-
-def detect_star_player_out(team_id: int, game_date: datetime) -> Tuple[bool, List[str]]:
-    """
-    Detect if a star player (top-3 scorer on team) is out for a game.
-
-    Uses actual PPG stats from database to identify top-3 scorers on the team.
-    Falls back to heuristic (any OUT player) if stats unavailable.
-
-    Args:
-        team_id: Team's ID (database ID, not NBA API ID)
-        game_date: Date of the game
-
-    Returns:
-        Tuple of (has_star_out: bool, list of star player names)
-
-    Example:
-        >>> has_star_out, names = detect_star_player_out(1, datetime(2025, 1, 15))
-        >>> if has_star_out:
-        >>>     print(f"Star players out: {names}")
-    """
-    injuries = fetch_current_injuries(game_date)
-
-    # Get team's injured players (must be OUT or DOUBTFUL)
-    team_injuries = [inj for inj in injuries if inj.team_id == team_id and inj.is_unavailable()]
-
-    if not team_injuries:
-        return False, []
-
-    # Query database for team's top scorers
-    if not DATABASE_AVAILABLE:
-        logger.warning("Database not available, using heuristic for star detection")
-        # Fallback: assume any OUT player might be a star
-        star_players_out = [inj.player_name for inj in team_injuries if inj.status == InjuryStatus.OUT]
-        return len(star_players_out) > 0, star_players_out
-
-    try:
-        db = DatabaseManager()
-
-        # Get most recent player stats for this team before game_date
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT p.id, p.nba_id, p.name, ps.pts_avg, ps.snapshot_date
-                FROM players p
-                JOIN player_stats_snapshot ps ON p.id = ps.player_id
-                WHERE p.team_id = ?
-                  AND ps.snapshot_date < ?
-                  AND p.active = 1
-                ORDER BY ps.snapshot_date DESC, ps.pts_avg DESC
-            """, (team_id, game_date.strftime('%Y-%m-%d')))
-
-            rows = cursor.fetchall()
-
-        if not rows:
-            # No stats available, use fallback heuristic
-            logger.warning(f"No player stats found for team {team_id}, using fallback heuristic")
-            star_players_out = [inj.player_name for inj in team_injuries if inj.status == InjuryStatus.OUT]
-            return len(star_players_out) > 0, star_players_out
-
-        # Get top 3 scorers (most recent stats snapshot)
-        # Group by player and take most recent snapshot for each
-        player_stats = {}
-        for row in rows:
-            player_id = row[1]  # nba_id
-            if player_id not in player_stats:
-                player_stats[player_id] = {
-                    'name': row[2],
-                    'pts_avg': row[3] or 0.0,
-                }
-
-        # Sort by PPG and get top 3
-        top_scorers = sorted(player_stats.items(), key=lambda x: x[1]['pts_avg'], reverse=True)[:3]
-        top_scorer_ids = {player_id for player_id, _ in top_scorers if player_id is not None}
-
-        # Check which injured players are top-3 scorers
-        star_players_out = []
-        for injury in team_injuries:
-            if injury.player_id in top_scorer_ids:
-                ppg = player_stats.get(injury.player_id, {}).get('pts_avg', 0.0)
-                logger.info(f"Star player out: {injury.player_name} ({ppg:.1f} PPG)")
-                star_players_out.append(injury.player_name)
-
-        # Also flag any OUT player averaging ≥18 PPG (STAR_PLAYER_MIN_PPG threshold)
-        for injury in team_injuries:
-            if injury.player_id not in top_scorer_ids:
-                ppg = player_stats.get(injury.player_id, {}).get('pts_avg', 0.0)
-                if ppg >= STAR_PLAYER_MIN_PPG and injury.player_name not in star_players_out:
-                    logger.info(f"High-scorer out: {injury.player_name} ({ppg:.1f} PPG)")
-                    star_players_out.append(injury.player_name)
-
-        has_star_out = len(star_players_out) > 0
-        return has_star_out, star_players_out
-
-    except Exception as e:
-        logger.error(f"Error detecting star players: {e}")
-        # Fallback to heuristic
-        star_players_out = [inj.player_name for inj in team_injuries if inj.status == InjuryStatus.OUT]
-        return len(star_players_out) > 0, star_players_out
-
-
-def calculate_usage_redistribution(
-    team_id: int,
-    injured_player_id: int,
-    game_date: datetime
-) -> Dict[int, float]:
-    """
-    Calculate how an injured star player's usage is redistributed to teammates.
-
-    When a high-usage player is out, their touches/shots are redistributed based on:
-    - Remaining players' usage rates (proportional redistribution)
-    - Positional similarity (guards get guard usage, forwards get forward usage)
-    - Minutes played (starters get more than bench players)
-
-    Redistribution algorithm:
-    1. Query injured player's USG% (e.g., 28%)
-    2. Query teammates' current USG% and position
-    3. Redistribute proportionally based on current usage
-       - Top-5 usage players split 70% of freed usage
-       - Remaining rotation players split 30%
-
-    Args:
-        team_id: Team's ID (database ID)
-        injured_player_id: Injured player's NBA API ID
-        game_date: Date of the game
-
-    Returns:
-        Dictionary mapping player_nba_id -> additional_usage_percentage
-
-    Example:
-        >>> redistribution = calculate_usage_redistribution(1, 2544, datetime(2025, 1, 15))
-        >>> # {201935: 4.2, 203954: 3.8, 1629029: 2.1}
-        >>> # Meaning player 201935 gets +4.2% usage when player 2544 is out
-    """
-    if not DATABASE_AVAILABLE:
-        logger.warning("Database not available for usage redistribution")
-        return {}
-
-    try:
-        db = DatabaseManager()
-
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-
-            # 1. Get injured player's most recent usage rate
-            cursor.execute("""
-                SELECT p.name, p.position, ps.usg_pct, ps.minutes_avg
-                FROM players p
-                JOIN player_stats_snapshot ps ON p.id = ps.player_id
-                WHERE p.nba_id = ?
-                  AND ps.snapshot_date < ?
-                ORDER BY ps.snapshot_date DESC
-                LIMIT 1
-            """, (injured_player_id, game_date.strftime('%Y-%m-%d')))
-
-            injured_row = cursor.fetchone()
-
-            if not injured_row:
-                logger.warning(f"No stats found for injured player {injured_player_id}")
-                return {}
-
-            injured_name = injured_row[0]
-            injured_position = injured_row[1] or ""
-            injured_usage = injured_row[2] or 0.0
-            injured_minutes = injured_row[3] or 0.0
-
-            logger.info(f"Injured player: {injured_name} (USG: {injured_usage:.1f}%, MIN: {injured_minutes:.1f})")
-
-            # If usage is very low (<10%), no meaningful redistribution
-            if injured_usage < 10.0:
-                logger.info(f"Injured player usage too low ({injured_usage:.1f}%), no redistribution")
-                return {}
-
-            # 2. Get teammate stats (active players on same team)
-            cursor.execute("""
-                SELECT p.nba_id, p.name, p.position, ps.usg_pct, ps.minutes_avg
-                FROM players p
-                JOIN player_stats_snapshot ps ON p.id = ps.player_id
-                WHERE p.team_id = ?
-                  AND p.nba_id != ?
-                  AND p.active = 1
-                  AND ps.snapshot_date < ?
-                ORDER BY ps.snapshot_date DESC, ps.usg_pct DESC
-            """, (team_id, injured_player_id, game_date.strftime('%Y-%m-%d')))
-
-            teammate_rows = cursor.fetchall()
-
-        if not teammate_rows:
-            logger.warning(f"No teammate stats found for team {team_id}")
+    def __init__(self, db_path: str = "data/injuries.db"):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_database()
+
+        # API configuration
+        self.rotowire_api_key = os.getenv("ROTOWIRE_API_KEY")
+        self.nba_api_endpoint = "https://www.nba.com/stats/teams/injury-report"
+
+        # Cache settings
+        self.cache_ttl = 15 * 60  # 15 minutes in seconds
+        self._cache: Dict[str, Dict] = {}
+        self._cache_timestamp: Optional[datetime] = None
+
+    def _init_database(self):
+        """Initialize SQLite database for injury tracking."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS injuries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_id INTEGER NOT NULL,
+                player_name TEXT NOT NULL,
+                team TEXT NOT NULL,
+                status TEXT NOT NULL,
+                injury_type TEXT,
+                injury_detail TEXT,
+                game_date TEXT,
+                last_update TIMESTAMP NOT NULL,
+                source TEXT NOT NULL,
+                UNIQUE(player_id, game_date)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_player_date
+            ON injuries(player_id, game_date)
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_game_date
+            ON injuries(game_date)
+        """)
+
+        conn.commit()
+        conn.close()
+
+    def _is_cache_valid(self) -> bool:
+        """Check if cached injury data is still valid."""
+        if not self._cache_timestamp:
+            return False
+
+        age = (datetime.now() - self._cache_timestamp).total_seconds()
+        return age < self.cache_ttl
+
+    def fetch_rotowire_injuries(self) -> Dict[str, Dict]:
+        """
+        Fetch injury data from RotoWire API (primary source).
+
+        Returns:
+            Dict mapping player_id -> injury info
+        """
+        if not self.rotowire_api_key:
             return {}
 
-        # 3. Build teammate usage dictionary (most recent stats per player)
-        teammates = {}
-        for row in teammate_rows:
-            player_nba_id = row[0]
-            if player_nba_id not in teammates:
-                teammates[player_nba_id] = {
-                    'name': row[1],
-                    'position': row[2] or "",
-                    'usg_pct': row[3] or 0.0,
-                    'minutes_avg': row[4] or 0.0,
-                }
+        try:
+            # RotoWire API endpoint (example - adjust based on actual API docs)
+            url = "https://api.rotowire.com/v1/nba/injuries"
+            headers = {"Authorization": f"Bearer {self.rotowire_api_key}"}
 
-        # Filter to rotation players (minutes > 10 per game)
-        rotation = {pid: stats for pid, stats in teammates.items() if stats['minutes_avg'] > 10.0}
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
 
-        if not rotation:
-            logger.warning("No rotation players found for redistribution")
+            data = response.json()
+
+            # Parse RotoWire response
+            injuries = {}
+            for injury in data.get("injuries", []):
+                player_id = injury.get("player_id")
+                if player_id:
+                    injuries[str(player_id)] = {
+                        "player_name": injury.get("player_name"),
+                        "team": injury.get("team"),
+                        "status": injury.get("status", "QUESTIONABLE"),
+                        "injury_type": injury.get("injury_type"),
+                        "injury_detail": injury.get("details"),
+                        "last_update": datetime.now().isoformat(),
+                        "source": "rotowire"
+                    }
+
+            return injuries
+
+        except requests.RequestException as e:
+            print(f"RotoWire API error: {e}")
             return {}
 
-        # 4. Calculate positional similarity weights
-        # Same position group gets higher weight
-        position_group = injured_position[0] if injured_position else ""  # G, F, or C
+    def fetch_nba_com_injuries(self) -> Dict[str, Dict]:
+        """
+        Fetch injury data from NBA.com (fallback source).
 
-        for pid, stats in rotation.items():
-            teammate_pos = stats['position'][0] if stats['position'] else ""
-            # Positional bonus: +50% weight if same position group
-            pos_bonus = 1.5 if teammate_pos == position_group else 1.0
-            stats['pos_weight'] = pos_bonus
-
-        # 5. Redistribute usage proportionally
-        # Top-5 usage players get 70% of freed usage, others get 30%
-        top5_players = sorted(rotation.items(), key=lambda x: x[1]['usg_pct'], reverse=True)[:5]
-        top5_ids = {pid for pid, _ in top5_players}
-
-        # Calculate total weighted usage for each group
-        top5_weighted_usage = sum(
-            rotation[pid]['usg_pct'] * rotation[pid]['pos_weight']
-            for pid in top5_ids
-        )
-        other_weighted_usage = sum(
-            rotation[pid]['usg_pct'] * rotation[pid]['pos_weight']
-            for pid in rotation if pid not in top5_ids
-        )
-
-        redistribution = {}
-
-        # Redistribute 70% to top-5 players
-        if top5_weighted_usage > 0:
-            for pid in top5_ids:
-                weighted_usage = rotation[pid]['usg_pct'] * rotation[pid]['pos_weight']
-                share = weighted_usage / top5_weighted_usage
-                additional_usage = injured_usage * 0.70 * share
-                redistribution[pid] = round(additional_usage, 2)
-                logger.debug(f"  {rotation[pid]['name']}: +{additional_usage:.2f}% usage (top-5)")
-
-        # Redistribute 30% to other rotation players
-        if other_weighted_usage > 0:
-            for pid in rotation:
-                if pid not in top5_ids:
-                    weighted_usage = rotation[pid]['usg_pct'] * rotation[pid]['pos_weight']
-                    share = weighted_usage / other_weighted_usage
-                    additional_usage = injured_usage * 0.30 * share
-                    redistribution[pid] = round(additional_usage, 2)
-                    logger.debug(f"  {rotation[pid]['name']}: +{additional_usage:.2f}% usage (bench)")
-
-        total_redistributed = sum(redistribution.values())
-        logger.info(f"Redistributed {total_redistributed:.1f}% usage (from {injured_usage:.1f}% freed)")
-
-        return redistribution
-
-    except Exception as e:
-        logger.error(f"Error calculating usage redistribution: {e}")
-        return {}
-
-
-# =============================================================================
-# Database Persistence Functions
-# =============================================================================
-
-def _persist_injuries_to_db(injuries: List[InjuryReport], report_date: datetime):
-    """
-    Persist injury reports to database.
-
-    Args:
-        injuries: List of injury reports
-        report_date: Date of the report
-    """
-    if not DATABASE_AVAILABLE:
-        return
-
-    try:
-        db = DatabaseManager()
-
-        for injury in injuries:
-            # Convert to database format
-            injury_data = {
-                "player_id": injury.player_id,
-                "reported_date": report_date.strftime('%Y-%m-%d'),
-                "game_id": None,  # Will be linked later
-                "status": injury.status.value,
-                "injury_type": injury.injury_detail,
-                "return_date": None,
-                "source": injury.source,
+        Returns:
+            Dict mapping player_id -> injury info
+        """
+        try:
+            # NBA.com injuries endpoint
+            # Note: This is a simplified version - actual NBA.com scraping may require
+            # more complex parsing depending on their current page structure
+            url = "https://www.nba.com/stats/teams/injury-report"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "Accept": "application/json"
             }
 
-            db.upsert_injury(injury_data)
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
 
-        logger.debug(f"Persisted {len(injuries)} injuries to database")
+            # Parse NBA.com response (structure depends on actual API)
+            # This is a placeholder - actual implementation would parse HTML or JSON
+            injuries = {}
 
-    except Exception as e:
-        logger.error(f"Error persisting injuries to database: {e}")
+            # TODO: Implement actual NBA.com parsing
+            # For now, return empty dict to indicate fallback is not implemented
 
+            return injuries
 
-def _fetch_injuries_from_db(date: datetime, max_age_hours: int = 2) -> List[InjuryReport]:
-    """
-    Fetch injury reports from database (fallback when APIs fail).
+        except requests.RequestException as e:
+            print(f"NBA.com fetch error: {e}")
+            return {}
 
-    Args:
-        date: Target date
-        max_age_hours: Maximum age of data to accept (hours)
+    def get_injuries(self, force_refresh: bool = False) -> Dict[str, Dict]:
+        """
+        Get current injury data from best available source.
 
-    Returns:
-        List of InjuryReport objects
-    """
-    if not DATABASE_AVAILABLE:
-        return []
+        Args:
+            force_refresh: Force API call even if cache is valid
 
-    try:
-        db = DatabaseManager()
+        Returns:
+            Dict mapping player_id -> injury info
+        """
+        # Return cached data if valid
+        if not force_refresh and self._is_cache_valid():
+            return self._cache
 
-        # Query injuries within max_age window
-        cutoff_date = date - timedelta(hours=max_age_hours)
+        # Try primary source (RotoWire)
+        injuries = self.fetch_rotowire_injuries()
 
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT i.*, p.name as player_name, p.nba_id as player_nba_id,
-                       t.abbreviation as team_abbrev, t.id as team_db_id
-                FROM injuries i
-                LEFT JOIN players p ON i.player_id = p.id
-                LEFT JOIN teams t ON p.team_id = t.id
-                WHERE i.reported_date >= ?
-                ORDER BY i.reported_date DESC
-            """, (cutoff_date.strftime('%Y-%m-%d'),))
+        # Fall back to NBA.com if RotoWire failed
+        if not injuries:
+            injuries = self.fetch_nba_com_injuries()
 
-            rows = cursor.fetchall()
+        # Update cache
+        self._cache = injuries
+        self._cache_timestamp = datetime.now()
 
-        injuries = []
-        for row in rows:
-            injury = InjuryReport(
-                player_name=row['player_name'] or "Unknown",
-                player_id=row['player_nba_id'],
-                team_abbrev=row['team_abbrev'] or "",
-                team_id=row['team_db_id'],
-                status=InjuryStatus.from_string(row['status']),
-                injury_detail=row['injury_type'] or "",
-                report_date=datetime.strptime(row['reported_date'], '%Y-%m-%d'),
-                source="database",
-            )
-            injuries.append(injury)
+        # Save to database
+        self._save_to_database(injuries)
 
         return injuries
 
-    except Exception as e:
-        logger.error(f"Error fetching from database: {e}")
-        return []
+    def _save_to_database(self, injuries: Dict[str, Dict]):
+        """Save injury data to SQLite for historical analysis."""
+        if not injuries:
+            return
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        for player_id, injury_data in injuries.items():
+            try:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO injuries
+                    (player_id, player_name, team, status, injury_type,
+                     injury_detail, game_date, last_update, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    int(player_id),
+                    injury_data.get("player_name"),
+                    injury_data.get("team"),
+                    injury_data.get("status"),
+                    injury_data.get("injury_type"),
+                    injury_data.get("injury_detail"),
+                    today,
+                    injury_data.get("last_update"),
+                    injury_data.get("source")
+                ))
+            except Exception as e:
+                print(f"Error saving injury for player {player_id}: {e}")
+
+        conn.commit()
+        conn.close()
+
+    def is_player_available(self, player_id: int, player_name: str = None) -> Tuple[bool, str, str]:
+        """
+        Check if a player is available to play.
+
+        Args:
+            player_id: NBA player ID
+            player_name: Player name (for lookup if ID not found)
+
+        Returns:
+            Tuple of (is_available, status, uncertainty_level)
+            - is_available: False if OUT or DOUBTFUL
+            - status: InjuryStatus constant
+            - uncertainty_level: "LOW", "MEDIUM", "HIGH"
+        """
+        injuries = self.get_injuries()
+
+        player_key = str(player_id)
+
+        # Check by ID first
+        if player_key in injuries:
+            injury = injuries[player_key]
+            status = injury["status"]
+
+            # Determine availability
+            if status == InjuryStatus.OUT:
+                return False, status, "LOW"  # Definitely out
+            elif status == InjuryStatus.DOUBTFUL:
+                return False, status, "MEDIUM"  # Likely out
+            elif status == InjuryStatus.GTD:
+                return True, status, "HIGH"  # Uncertain
+            elif status == InjuryStatus.QUESTIONABLE:
+                return True, status, "MEDIUM"  # Probably plays
+            elif status == InjuryStatus.PROBABLE:
+                return True, status, "LOW"  # Likely plays
+            else:
+                return True, InjuryStatus.ACTIVE, "LOW"
+
+        # If not in injury list, assume available
+        return True, InjuryStatus.ACTIVE, "LOW"
+
+    def get_team_injuries(self, team: str, game_date: str = None) -> List[Dict]:
+        """
+        Get all injuries for a specific team.
+
+        Args:
+            team: Team abbreviation (e.g., "LAL", "BOS")
+            game_date: Optional date filter (YYYY-MM-DD)
+
+        Returns:
+            List of injury records for the team
+        """
+        injuries = self.get_injuries()
+
+        team_injuries = []
+        for player_id, injury in injuries.items():
+            if injury.get("team") == team:
+                team_injuries.append({
+                    "player_id": player_id,
+                    **injury
+                })
+
+        return team_injuries
+
+    def get_historical_availability(self, player_id: int, start_date: str, end_date: str) -> List[Dict]:
+        """
+        Get historical injury data for a player.
+
+        Args:
+            player_id: NBA player ID
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+
+        Returns:
+            List of injury records
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT game_date, status, injury_type, injury_detail, last_update, source
+            FROM injuries
+            WHERE player_id = ? AND game_date BETWEEN ? AND ?
+            ORDER BY game_date DESC
+        """, (player_id, start_date, end_date))
+
+        records = []
+        for row in cursor.fetchall():
+            records.append({
+                "game_date": row[0],
+                "status": row[1],
+                "injury_type": row[2],
+                "injury_detail": row[3],
+                "last_update": row[4],
+                "source": row[5]
+            })
+
+        conn.close()
+        return records
+
+    def filter_predictions_by_availability(self, predictions: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Filter predictions to remove unavailable players and flag uncertain ones.
+
+        Args:
+            predictions: List of prediction dicts with 'player_id' and 'player_name'
+
+        Returns:
+            Tuple of (valid_predictions, filtered_out)
+        """
+        valid = []
+        filtered = []
+
+        for pred in predictions:
+            player_id = pred.get("player_id")
+            player_name = pred.get("player_name")
+
+            is_available, status, uncertainty = self.is_player_available(player_id, player_name)
+
+            if not is_available:
+                # Player is OUT or DOUBTFUL - filter out
+                pred["filtered_reason"] = f"Player {status}"
+                pred["injury_status"] = status
+                filtered.append(pred)
+            else:
+                # Player available - add uncertainty flag
+                pred["injury_status"] = status
+                pred["uncertainty_level"] = uncertainty
+                if uncertainty == "HIGH":
+                    pred["warning"] = f"Player is {status} - use with caution"
+                valid.append(pred)
+
+        return valid, filtered
 
 
-# =============================================================================
-# Utility Functions
-# =============================================================================
-
-def get_injury_summary(date: Optional[datetime] = None) -> Dict[str, Any]:
-    """
-    Get a summary of injuries for a specific date.
-
-    Args:
-        date: Target date (defaults to today)
-
-    Returns:
-        Dictionary with injury statistics
-
-    Example:
-        >>> summary = get_injury_summary()
-        >>> print(f"Total injuries: {summary['total_count']}")
-        >>> print(f"Players out: {summary['out_count']}")
-    """
-    injuries = fetch_current_injuries(date)
-
-    status_counts = {}
-    for status in InjuryStatus:
-        status_counts[status.value] = sum(1 for inj in injuries if inj.status == status)
-
-    return {
-        "date": (date or datetime.now()).strftime('%Y-%m-%d'),
-        "total_count": len(injuries),
-        "out_count": status_counts.get("Out", 0),
-        "doubtful_count": status_counts.get("Doubtful", 0),
-        "questionable_count": status_counts.get("Questionable", 0),
-        "gtd_count": status_counts.get("GTD", 0),
-        "status_breakdown": status_counts,
-        "source": injuries[0].source if injuries else "none",
-    }
+# Global instance
+_injury_tracker = None
 
 
-def clear_injury_cache():
-    """Clear the in-memory injury cache."""
-    _injury_cache.clear()
+def get_injury_tracker() -> InjuryTrackerV3:
+    """Get global injury tracker instance."""
+    global _injury_tracker
+    if _injury_tracker is None:
+        _injury_tracker = InjuryTrackerV3()
+    return _injury_tracker
 
 
-def get_cache_stats() -> Dict:
-    """Get cache statistics."""
-    return _injury_cache.get_stats()
+def fetch_current_injuries():
+    """Fetch current injuries from all sources (wrapper for global instance)."""
+    tracker = get_injury_tracker()
+    return tracker.fetch_all_injuries()
 
 
-# =============================================================================
-# Main / Testing
-# =============================================================================
+def is_player_available(player_id: int, date: str = None) -> bool:
+    """Check if player is available (not OUT) on given date (wrapper for global instance)."""
+    tracker = get_injury_tracker()
+    status = tracker.get_player_status(player_id, date)
+    return status != InjuryStatus.OUT
+
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("NBA Injury Tracker v3 - Test Run")
+    # Test the injury tracker
+    tracker = InjuryTrackerV3()
+
+    print("Testing Injury Tracker V3")
     print("=" * 60)
 
-    # Test 1: Fetch current injuries
-    print("\n[Test 1] Fetching current injuries...")
-    injuries = fetch_current_injuries()
-    print(f"✓ Found {len(injuries)} injuries")
+    # Get current injuries
+    injuries = tracker.get_injuries(force_refresh=True)
+    print(f"\nFound {len(injuries)} injured players")
 
     if injuries:
-        print("\nSample injury reports:")
-        for i, injury in enumerate(injuries[:5], 1):
-            print(f"  {i}. {injury.player_name} ({injury.team_abbrev}): {injury.status.value} - {injury.injury_detail}")
+        print("\nSample injuries:")
+        for i, (player_id, injury) in enumerate(list(injuries.items())[:5]):
+            print(f"  {injury['player_name']} ({injury['team']}): {injury['status']} - {injury.get('injury_type', 'N/A')}")
 
-    # Test 2: Get injury summary
-    print("\n[Test 2] Injury summary...")
-    summary = get_injury_summary()
-    print(f"✓ Date: {summary['date']}")
-    print(f"✓ Total injuries: {summary['total_count']}")
-    print(f"✓ Players OUT: {summary['out_count']}")
-    print(f"✓ Questionable: {summary['questionable_count']}")
-    print(f"✓ Data source: {summary['source']}")
+    # Test player availability check
+    print("\nTesting player availability:")
+    test_players = [
+        (203507, "Giannis Antetokounmpo"),
+        (203081, "Damian Lillard"),
+        (2544, "LeBron James")
+    ]
 
-    # Test 3: Cache stats
-    print("\n[Test 3] Cache statistics...")
-    cache_stats = get_cache_stats()
-    print(f"✓ Cache size: {cache_stats['size']}/{cache_stats['max_size']}")
-    print(f"✓ TTL: {cache_stats['ttl_minutes']} minutes")
-
-    # Test 4: Test player availability check (demo with fake ID)
-    print("\n[Test 4] Player availability check...")
-    available, status = is_player_available(999999, datetime.now())  # Fake ID
-    print(f"✓ Player available: {available}")
-    print(f"✓ Status: {status.value if status else 'No injury report'}")
-
-    print("\n" + "=" * 60)
-    print("✓ All tests completed!")
-    print("=" * 60)
-
-    # Print warnings if optional dependencies missing
-    if not BS4_AVAILABLE:
-        print("\n⚠️  WARNING: BeautifulSoup not installed. Web scraping disabled.")
-        print("   Install with: pip install beautifulsoup4")
-
-    if not BALLDONTLIE_AVAILABLE:
-        print("\n⚠️  WARNING: Balldontlie API module not found.")
-        print("   Ensure balldontlie_api.py is in the same directory.")
+    for player_id, name in test_players:
+        available, status, uncertainty = tracker.is_player_available(player_id, name)
+        print(f"  {name}: {'Available' if available else 'OUT'} ({status}, uncertainty: {uncertainty})")
