@@ -381,6 +381,19 @@ def get_injury_tracker() -> InjuryTrackerV3:
     return _injury_tracker
 
 
+def fetch_current_injuries():
+    """Fetch current injuries from all sources (wrapper for global instance)."""
+    tracker = get_injury_tracker()
+    return tracker.fetch_all_injuries()
+
+
+def is_player_available(player_id: int, date: str = None) -> bool:
+    """Check if player is available (not OUT) on given date (wrapper for global instance)."""
+    tracker = get_injury_tracker()
+    status = tracker.get_player_status(player_id, date)
+    return status != InjuryStatus.OUT
+
+
 if __name__ == "__main__":
     # Test the injury tracker
     tracker = InjuryTrackerV3()

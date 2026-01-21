@@ -92,13 +92,19 @@ import argparse
 from travel_fatigue import TravelFatigueCalculator
 
 # Import player impact metrics (DARKO/EPM/RAPTOR) for advanced player evaluation
-# TEMPORARILY DISABLED: Player impact fetcher creating too many instances
+# Use module-level singleton to prevent multiple instances
+_PLAYER_IMPACT_FETCHER = None
 try:
     from player_impact_fetcher import PlayerImpactFetcher
-    HAS_PLAYER_IMPACT = False  # Temporarily disabled for testing
+    _PLAYER_IMPACT_FETCHER = PlayerImpactFetcher()  # Single instance
+    HAS_PLAYER_IMPACT = True
+    print("✓ Initialized PlayerImpactFetcher (singleton)")
 except ImportError:
     HAS_PLAYER_IMPACT = False
     print("Warning: player_impact_fetcher not available. Install dependencies or disable player impact features.")
+except Exception as e:
+    HAS_PLAYER_IMPACT = False
+    print(f"Warning: Could not initialize PlayerImpactFetcher: {e}")
 
 warnings.filterwarnings('ignore')
 
@@ -2002,16 +2008,9 @@ class PlayerStatsCalculator:
         self.player_games = defaultdict(list)
         self.player_info = {}
 
-        # Initialize player impact fetcher for DARKO/EPM/RAPTOR metrics
-        if HAS_PLAYER_IMPACT:
-            try:
-                self.impact_fetcher = PlayerImpactFetcher()
-                print("  Initialized PlayerImpactFetcher (DARKO/EPM/RAPTOR)")
-            except Exception as e:
-                self.impact_fetcher = None
-                print(f"  Warning: Could not initialize PlayerImpactFetcher: {e}")
-        else:
-            self.impact_fetcher = None
+        # Use module-level singleton for player impact fetcher
+        # Prevents creating multiple instances during prediction
+        self.impact_fetcher = _PLAYER_IMPACT_FETCHER
 
     def _get_position_group(self, position: str) -> str:
         """Map detailed position to position group (G/F/C)."""
