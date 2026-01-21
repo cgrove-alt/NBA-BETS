@@ -2,8 +2,24 @@
 """
 Test different confidence formulas against backtest data.
 
-This script loads backtest results and simulates different confidence
-formulas to find the optimal balance of bet count, win rate, and ROI.
+⚠️ IMPORTANT: SIMULATED RESULTS ONLY ⚠️
+
+This script provides DIRECTIONAL GUIDANCE for confidence formula optimization.
+Results are APPROXIMATIONS and NOT validated betting performance:
+
+- Band widths approximated as 2.5 × RMSE (not actual quantile predictions)
+- Win/loss determined by abs_error < RMSE threshold (simplified logic)
+- No actual sportsbook lines used
+- No vig, line movement, or market dynamics modeled
+- Assumes -110 odds (0.91 payout) uniformly
+
+Real-world betting has additional complexity:
+- Vig/juice (need 52.4% win rate to break even)
+- Line movement from sharp money
+- Variance (cold streaks, bad beats)
+- Limits (sportsbooks limit winning bettors)
+
+USE FOR PARAMETER TESTING ONLY. VALIDATE ON REAL DATA BEFORE DEPLOYMENT.
 """
 
 import json
