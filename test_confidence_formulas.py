@@ -181,12 +181,15 @@ def main():
     print("CONFIDENCE FORMULA TESTING")
     print("="*60)
 
-    # Load backtest results
-    backtest_file = Path("backtest_results_2025_quick.json")
+    # Load backtest results - try full season first, fall back to quick
+    backtest_file = Path("backtest_results_2025.json")
 
     if not backtest_file.exists():
-        print(f"ERROR: {backtest_file} not found")
-        print("Run: python3 comprehensive_backtest.py --quick")
+        backtest_file = Path("backtest_results_2025_quick.json")
+
+    if not backtest_file.exists():
+        print(f"ERROR: No backtest results found")
+        print("Run: python3 comprehensive_backtest.py")
         return
 
     print(f"\nLoading backtest data from {backtest_file}...")
