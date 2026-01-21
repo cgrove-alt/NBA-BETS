@@ -1584,9 +1584,10 @@ def predict_player_prop(
         band_width = pred_high - pred_low
         # BUG FIX: Continuous confidence calculation, not binary thresholds
         # Narrow bands = high confidence, wide bands = low confidence
-        # Map band_width to confidence: 0-3pts → 90, 3-5pts → 70, 5-8pts → 55, 8+pts → 40
-        # Use inverse relationship: confidence = 90 - (band_width * 6.25), clamped to [40, 90]
-        confidence_score = max(40.0, min(90.0, 90.0 - (band_width * 6.25)))
+        # Backtest validation: Changed multiplier from 6.25 to 5.0 based on historical testing
+        # 166 games (Dec 23 - Jan 13): multiplier=5.0 → 56.9% win rate, 8.62% ROI (3,334 bets)
+        # Use inverse relationship: confidence = 90 - (band_width * 5.0), clamped to [40, 90]
+        confidence_score = max(40.0, min(90.0, 90.0 - (band_width * 5.0)))
     elif predicted_value is not None:
         # BUG FIX: More granular confidence based on edge magnitude and prediction difference
         # Higher edge and larger prediction difference = higher confidence
