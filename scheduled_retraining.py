@@ -3,7 +3,7 @@
 Automated Model Retraining Pipeline with APScheduler
 
 This production-grade retraining system:
-1. Runs full retraining every 14 days (Sundays at 2 AM)
+1. Runs full retraining every 7 days (Sundays at 2 AM)
 2. Performs incremental meta-learner updates every 3 days
 3. Detects drift and triggers emergency retraining
 4. Validates new models before deployment
@@ -599,12 +599,12 @@ def create_scheduler(daemon: bool = False):
     """
     scheduler = BackgroundScheduler() if daemon else BlockingScheduler()
 
-    # Job 1: Full retraining every 14 days (Sundays at 2 AM)
+    # Job 1: Full retraining every 7 days (Sundays at 2 AM)
     scheduler.add_job(
         full_retrain,
         CronTrigger(day_of_week='sun', hour=2, minute=0),
         id='full_retrain',
-        name='Full Model Retraining',
+        name='Full Model Retraining (Weekly)',
         max_instances=1,
         coalesce=True,
         misfire_grace_time=3600  # 1 hour grace period
