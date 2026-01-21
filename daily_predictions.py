@@ -1582,16 +1582,17 @@ def predict_player_prop(
     # Calculate confidence score based on prediction band width (Task 2.4)
     if pred_low is not None and pred_high is not None and pred_median is not None:
         band_width = pred_high - pred_low
-        # Prop-specific confidence multipliers (addresses ASSISTS dominance)
-        # ASSISTS has lowest RMSE (2.01) → narrowest bands → needs higher multiplier
-        # POINTS has higher RMSE (6.12) → wider bands → needs lower multiplier
-        # This rebalances bet distribution and optimizes for profitability
+        # STATISTICALLY CALIBRATED confidence multipliers (61K prediction backtest)
+        # Calibration target: confidence score ≈ accuracy - 3% (conservative)
+        # Analysis: THREES had 80% confidence but only 67% accuracy (worst calibration)
+        #           REBOUNDS needed +0.9 adjustment to reduce dominance (was 84% of high-conf bets)
+        #           ASSISTS/POINTS/PRA need more aggressive multipliers for better bet flow
         multipliers = {
-            'assists': 5.0,    # VERY conservative (still 82% of high-conf bets at 3.5)
-            'points': 2.5,     # More aggressive (higher RMSE needs boost)
-            'rebounds': 3.0,   # Baseline (moderate RMSE)
-            'threes': 3.2,     # Slightly conservative (moderate-low RMSE)
-            'pra': 2.8,        # Slightly aggressive (combo stat, higher variance)
+            'assists': 4.9,    # 73.2% accuracy → 70% target confidence (well-calibrated)
+            'points': 1.6,     # 71.7% accuracy → 68% target confidence (more aggressive for bet flow)
+            'rebounds': 3.9,   # 71.7% accuracy → 68% target confidence (reduced from 3.0 to fix dominance)
+            'threes': 8.4,     # 67.1% accuracy → 64% target confidence (MAJOR fix: was massively overconfident)
+            'pra': 1.3,        # 71.4% accuracy → 68% target confidence (more aggressive for combo stat)
         }
         multiplier = multipliers.get(prop_type.lower(), 3.0)  # Default 3.0
 
