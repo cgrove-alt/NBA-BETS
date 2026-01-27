@@ -5,6 +5,7 @@
  * Uses shimmer animation for visual feedback.
  */
 
+
 interface SkeletonProps {
   className?: string;
 }
@@ -188,17 +189,20 @@ export function GameCardSkeleton() {
   );
 }
 
+// Generate random bar heights once at module level for ChartSkeleton
+const CHART_BAR_HEIGHTS = Array.from({ length: 14 }, () => 20 + Math.random() * 60);
+
 /**
  * Chart Skeleton - Placeholder for charts
  */
 export function ChartSkeleton({ height = 'h-48' }: { height?: string }) {
   return (
     <div className={`${height} flex items-end justify-between gap-1 animate-fade-in`}>
-      {Array.from({ length: 14 }).map((_, i) => (
+      {CHART_BAR_HEIGHTS.map((barHeight, i) => (
         <div
           key={i}
           className="flex-1 animate-shimmer rounded-t"
-          style={{ height: `${20 + Math.random() * 60}%` }}
+          style={{ height: `${barHeight}%` }}
         />
       ))}
     </div>

@@ -76,6 +76,7 @@ export function DateSelector({ selectedDate, onSelectDate }: DateSelectorProps) 
 /**
  * Get today's date in YYYY-MM-DD format.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getTodayDate(): string {
   const now = new Date();
   const year = now.getFullYear();

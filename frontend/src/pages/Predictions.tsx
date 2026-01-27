@@ -22,10 +22,17 @@ export function Predictions() {
 
   // Fetch games for selected date
   const { data: gamesData, isLoading: gamesLoading, error: gamesError } = useGames(selectedDate);
-  const games = gamesData?.games || [];
+  const games = useMemo(() => gamesData?.games || [], [gamesData]);
+
+  // Compute effective selected game ID (auto-select first if none selected)
+  const effectiveSelectedGameId = useMemo(() => {
+    if (selectedGameId) return selectedGameId;
+    if (games.length > 0) return games[0].game_id;
+    return null;
+  }, [selectedGameId, games]);
 
   // Get selected game
-  const selectedGame = games.find((g) => g.game_id === selectedGameId) || null;
+  const selectedGame = games.find((g) => g.game_id === effectiveSelectedGameId) || null;
 
   // Build game context string (e.g., "NYK @ DET")
   const gameContext = selectedGame
@@ -43,7 +50,7 @@ export function Predictions() {
     gameStarted,
     startFetch,
     isStarting,
-  } = usePredictions(selectedGameId, selectedGame);
+  } = usePredictions(effectiveSelectedGameId, selectedGame);
 
   // Filters with preset management
   const {
@@ -57,21 +64,14 @@ export function Predictions() {
   } = useFilters();
 
   // Live stats tracking
-  const { liveStats, isLive, isFinal } = useLiveStats(selectedGameId, selectedGame?.status);
-
-  // Auto-select first game
-  useEffect(() => {
-    if (games.length > 0 && !selectedGameId) {
-      setSelectedGameId(games[0].game_id);
-    }
-  }, [games, selectedGameId]);
+  const { liveStats, isLive, isFinal } = useLiveStats(effectiveSelectedGameId, selectedGame?.status);
 
   // Auto-start fetch when game selected and not started (only if game hasn't started)
   useEffect(() => {
-    if (selectedGameId && selectedGame && propsData?.status === 'not_started' && !gameStarted) {
+    if (effectiveSelectedGameId && selectedGame && propsData?.status === 'not_started' && !gameStarted) {
       startFetch();
     }
-  }, [selectedGameId, selectedGame, propsData?.status, startFetch, gameStarted]);
+  }, [effectiveSelectedGameId, selectedGame, propsData?.status, startFetch, gameStarted]);
 
   // All players from both teams
   const allPlayers = useMemo(() => {
@@ -205,8 +205,8 @@ export function Predictions() {
       )}
 
       {/* Game Predictions (Spread/Moneyline) */}
-      {selectedGameId && selectedGame && (
-        <GamePredictions gameId={selectedGameId} game={selectedGame} />
+      {effectiveSelectedGameId && selectedGame && (
+        <GamePredictions gameId={effectiveSelectedGameId} game={selectedGame} />
       )}
 
       {/* Quick Picks Summary Bar */}
@@ -215,7 +215,7 @@ export function Predictions() {
       )}
 
       {/* Live tracking banner */}
-      {isLive && selectedGameId && (
+      {isLive && effectiveSelectedGameId && (
         <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4 flex items-center gap-3">
           <Radio className="text-blue-500 shrink-0 animate-pulse" size={20} />
           <div>
@@ -228,7 +228,7 @@ export function Predictions() {
       )}
 
       {/* Locked state - Game has started but not live tracking */}
-      {isLocked && !isLive && selectedGameId && (
+      {isLocked && !isLive && effectiveSelectedGameId && (
         <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4 flex items-center gap-3">
           <Lock className="text-yellow-500 shrink-0" size={20} />
           <div>
@@ -241,7 +241,7 @@ export function Predictions() {
       )}
 
       {/* Loading state */}
-      {(propsLoading || isPending || isStarting) && selectedGameId && (
+      {(propsLoading || isPending || isStarting) && effectiveSelectedGameId && (
         <div className="flex items-center justify-center py-12">
           <div className="flex items-center gap-3 text-text-secondary">
             <Loader2 className="animate-spin" size={24} />
@@ -312,7 +312,7 @@ export function Predictions() {
       )}
 
       {/* No game selected */}
-      {!selectedGameId && games.length > 0 && (
+      {!effectiveSelectedGameId && games.length > 0 && (
         <div className="text-center py-12">
           <p className="text-text-muted">Select a game to view predictions.</p>
         </div>

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { PROP_TYPES } from '../lib/types';
-import type { FilterState, FilterPreset } from '../lib/types';
+import type { FilterState, FilterPreset, PropType } from '../lib/types';
 
 const STORAGE_KEY = 'nba-props-filters';
 const PRESETS_KEY = 'nba-props-filter-presets';
@@ -31,7 +31,7 @@ function loadFilters(): FilterState {
         minEdge: typeof parsed.minEdge === 'number' ? parsed.minEdge : defaultFilters.minEdge,
         maxConfidence: typeof parsed.maxConfidence === 'number' ? parsed.maxConfidence : undefined,
         maxEdge: typeof parsed.maxEdge === 'number' ? parsed.maxEdge : undefined,
-        propTypes: Array.isArray(parsed.propTypes) ? parsed.propTypes.filter((pt: string) => PROP_TYPES.includes(pt as any)) : [...PROP_TYPES],
+        propTypes: Array.isArray(parsed.propTypes) ? parsed.propTypes.filter((pt: string) => PROP_TYPES.includes(pt as PropType)) : [...PROP_TYPES],
         pickType: (parsed.pickType === 'OVER' || parsed.pickType === 'UNDER') ? parsed.pickType : null,
         sortBy: typeof parsed.sortBy === 'string' ? parsed.sortBy : defaultFilters.sortBy,
         sortOrder: (parsed.sortOrder === 'asc' || parsed.sortOrder === 'desc') ? parsed.sortOrder : defaultFilters.sortOrder,

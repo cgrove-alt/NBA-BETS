@@ -10,6 +10,7 @@ interface ConfidenceTierProps {
 }
 
 // Thresholds adjusted for model's natural confidence range (50-70%)
+// eslint-disable-next-line react-refresh/only-export-components
 export function getConfidenceLevel(confidence: number): ConfidenceLevel {
   if (confidence >= 70) return 'fire';    // Top tier for this model
   if (confidence >= 65) return 'strong';
@@ -18,6 +19,7 @@ export function getConfidenceLevel(confidence: number): ConfidenceLevel {
   return 'risky';
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getConfidenceTierConfig(level: ConfidenceLevel) {
   const configs = {
     fire: {
