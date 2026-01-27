@@ -1,0 +1,46 @@
+# Ruff configuration for NBA Betting Model
+# Ruff is an extremely fast Python linter (10-100x faster than flake8)
+
+line-length = 100
+
+[lint]
+# Enable comprehensive rule sets
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes (undefined names, unused imports, etc)
+    "B",    # flake8-bugbear (common bugs and design problems)
+    "C4",   # flake8-comprehensions (better list/dict/set comprehensions)
+    "UP",   # pyupgrade (modern Python idioms)
+    "SIM",  # flake8-simplify (simplification suggestions)
+    "RET",  # flake8-return (return statement issues)
+    "PTH",  # flake8-use-pathlib (use pathlib instead of os.path)
+    "PD",   # pandas-vet (pandas best practices)
+    "NPY",  # NumPy-specific rules
+]
+
+# Ignore specific rules that may be too strict for this project
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "B008",   # Do not perform function calls in argument defaults (FastAPI uses this)
+    "UP007",  # Use X | Y for type annotations (not available in Python 3.9)
+]
+
+# Exclude paths from linting
+exclude = [
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".git",
+    "build",
+    "dist",
+    "*.egg-info",
+    "catboost_info",
+    "frontend",
+]
+
+[lint.per-file-ignores]
+# Test files can have additional flexibility
+"tests/*.py" = ["F401", "F811"]  # Allow unused imports and redefinitions in tests
+"test_*.py" = ["F401", "F811"]

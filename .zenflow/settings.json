@@ -1,6 +1,6 @@
 {
   "setup_script": "pip install -r requirements.txt && cd frontend && npm install",
   "dev_script": "python -m uvicorn backend.api:app --host 0.0.0.0 --port 8000 --reload",
-  "verification_script": "python3 -m compileall backend/ -q && cd frontend && npm run lint && npm run build",
+  "verification_script": "./scripts/quick_verify.sh",
   "copy_files": [".env"]
 }
