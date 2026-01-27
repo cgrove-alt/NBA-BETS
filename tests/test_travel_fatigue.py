@@ -213,7 +213,7 @@ class TestResearchBackedAdjustments:
             {'date': '2025-01-13'},
         ]
 
-        features = calculator.get_travel_features(
+        calculator.get_travel_features(
             team_id=14,
             game_date='2025-01-13',  # Same day as last game = back-to-back (but this won't work)
             opponent_id=2,

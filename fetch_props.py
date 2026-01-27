@@ -21,10 +21,7 @@ target_game = None
 for g in games:
     home = g.get('home_team', {}).get('abbreviation', '')
     away = g.get('visitor_team', {}).get('abbreviation', '')
-    if 'CHI' in home and 'CLE' in away:
-        target_game = g
-        break
-    elif 'CLE' in home and 'CHI' in away:
+    if 'CHI' in home and 'CLE' in away or 'CLE' in home and 'CHI' in away:
         target_game = g
         break
 

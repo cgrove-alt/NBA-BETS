@@ -11,9 +11,8 @@ This framework supports both classification (moneyline) and regression (props/sp
 import numpy as np
 import pandas as pd
 import pickle
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Union
-from sklearn.model_selection import KFold, StratifiedKFold, cross_val_predict
+from typing import Any
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge, LogisticRegression, ElasticNet
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -76,7 +75,7 @@ class StackingClassifier:
         self.feature_names = []
         self.is_fitted = False
 
-    def _build_base_models(self) -> Dict[str, Any]:
+    def _build_base_models(self) -> dict[str, Any]:
         """Build diverse base classifiers."""
         models = {}
 
@@ -182,7 +181,7 @@ class StackingClassifier:
 
             oof_pred = np.zeros(n_samples)
 
-            for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled, y)):
+            for _fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled, y)):
                 X_train_fold = X_scaled[train_idx]
                 y_train_fold = y[train_idx]
                 X_val_fold = X_scaled[val_idx]
@@ -224,7 +223,7 @@ class StackingClassifier:
         stacked_brier = brier_score_loss(y, meta_pred_proba)
 
         if self.verbose:
-            print(f"\n  Stacked Model Metrics:")
+            print("\n  Stacked Model Metrics:")
             print(f"    Accuracy:  {stacked_acc:.4f}")
             print(f"    Log Loss:  {stacked_logloss:.4f}")
             print(f"    Brier:     {stacked_brier:.4f}")
@@ -241,7 +240,7 @@ class StackingClassifier:
         X_scaled = self.scaler.transform(X_aligned)
 
         base_predictions = np.zeros((len(X), len(self.base_models)))
-        for model_idx, (name, model) in enumerate(self.base_models.items()):
+        for model_idx, (_name, model) in enumerate(self.base_models.items()):
             if self.use_proba:
                 base_predictions[:, model_idx] = model.predict_proba(X_scaled)[:, 1]
             else:
@@ -258,7 +257,7 @@ class StackingClassifier:
         X_scaled = self.scaler.transform(X_aligned)
 
         base_predictions = np.zeros((len(X), len(self.base_models)))
-        for model_idx, (name, model) in enumerate(self.base_models.items()):
+        for model_idx, (_name, model) in enumerate(self.base_models.items()):
             if self.use_proba:
                 base_predictions[:, model_idx] = model.predict_proba(X_scaled)[:, 1]
             else:
@@ -313,7 +312,7 @@ class StackingRegressor:
         self.feature_names = []
         self.is_fitted = False
 
-    def _build_base_models(self) -> Dict[str, Any]:
+    def _build_base_models(self) -> dict[str, Any]:
         """Build diverse base regressors."""
         models = {}
 
@@ -407,7 +406,7 @@ class StackingRegressor:
 
             oof_pred = np.zeros(n_samples)
 
-            for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled)):
+            for _fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled)):
                 X_train_fold = X_scaled[train_idx]
                 y_train_fold = y[train_idx]
                 X_val_fold = X_scaled[val_idx]
@@ -436,7 +435,7 @@ class StackingRegressor:
         stacked_r2 = r2_score(y, meta_pred)
 
         if self.verbose:
-            print(f"\n  Stacked Model Metrics:")
+            print("\n  Stacked Model Metrics:")
             print(f"    RMSE: {stacked_rmse:.3f}")
             print(f"    MAE:  {stacked_mae:.3f}")
             print(f"    R²:   {stacked_r2:.3f}")
@@ -453,7 +452,7 @@ class StackingRegressor:
         X_scaled = self.scaler.transform(X_aligned)
 
         base_predictions = np.zeros((len(X), len(self.base_models)))
-        for model_idx, (name, model) in enumerate(self.base_models.items()):
+        for model_idx, (_name, model) in enumerate(self.base_models.items()):
             base_predictions[:, model_idx] = model.predict(X_scaled)
 
         return self.meta_model.predict(base_predictions)
@@ -498,7 +497,6 @@ def create_stacking_model(task: str = 'classification', **kwargs):
     """
     if task == 'classification':
         return StackingClassifier(**kwargs)
-    elif task == 'regression':
+    if task == 'regression':
         return StackingRegressor(**kwargs)
-    else:
-        raise ValueError(f"Unknown task: {task}")
+    raise ValueError(f"Unknown task: {task}")

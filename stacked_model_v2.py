@@ -22,12 +22,11 @@ import numpy as np
 import pandas as pd
 import pickle
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-from sklearn.model_selection import KFold, cross_val_predict
+from typing import Any
+from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge, Lasso, ElasticNet
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import warnings
 
@@ -114,7 +113,7 @@ class StackedPropModel:
         # Fitted state
         self.is_fitted = False
 
-    def _build_base_models(self) -> Dict[str, Any]:
+    def _build_base_models(self) -> dict[str, Any]:
         """
         Build diverse base models.
 
@@ -239,7 +238,7 @@ class StackedPropModel:
 
             oof_pred = np.zeros(n_samples)
 
-            for fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled)):
+            for _fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled)):
                 X_train_fold = X_scaled[train_idx]
                 y_train_fold = y[train_idx]
                 X_val_fold = X_scaled[val_idx]
@@ -272,7 +271,7 @@ class StackedPropModel:
         overall_r2 = r2_score(y, meta_pred)
 
         if self.verbose:
-            print(f"\n  Stacked Model Metrics:")
+            print("\n  Stacked Model Metrics:")
             print(f"    RMSE: {overall_rmse:.3f}")
             print(f"    MAE:  {overall_mae:.3f}")
             print(f"    R²:   {overall_r2:.3f}")
@@ -304,7 +303,7 @@ class StackedPropModel:
 
         # Get base model predictions
         base_predictions = np.zeros((len(X), len(self.base_models)))
-        for model_idx, (name, model) in enumerate(self.base_models.items()):
+        for model_idx, (_name, model) in enumerate(self.base_models.items()):
             base_predictions[:, model_idx] = model.predict(X_scaled)
 
         # Combine with meta-learner
@@ -319,11 +318,10 @@ class StackedPropModel:
             'pra': (0, 100),
         }
         min_val, max_val = PROP_BOUNDS.get(self.prop_type, (0, 100))
-        final_predictions = np.clip(final_predictions, min_val, max_val)
+        return np.clip(final_predictions, min_val, max_val)
 
-        return final_predictions
 
-    def get_base_predictions(self, X: pd.DataFrame) -> Dict[str, np.ndarray]:
+    def get_base_predictions(self, X: pd.DataFrame) -> dict[str, np.ndarray]:
         """
         Get predictions from each base model (for analysis).
 
@@ -371,8 +369,7 @@ class StackedPropModel:
 
         df = pd.DataFrame(importance_data)
         # Average across models
-        avg_importance = df.groupby('feature')['importance'].mean().sort_values(ascending=False)
-        return avg_importance
+        return df.groupby('feature')['importance'].mean().sort_values(ascending=False)
 
     def save(self, filepath: str):
         """Save model to disk."""
@@ -444,7 +441,7 @@ class QuantileStackedModel(StackedPropModel):
 
         return self
 
-    def predict_quantiles(self, X: pd.DataFrame) -> Dict[str, np.ndarray]:
+    def predict_quantiles(self, X: pd.DataFrame) -> dict[str, np.ndarray]:
         """
         Predict with uncertainty bounds.
 
@@ -466,10 +463,10 @@ class QuantileStackedModel(StackedPropModel):
 
 def train_stacked_prop_models(
     training_data: pd.DataFrame,
-    prop_types: List[str] = None,
+    prop_types: list[str] = None,
     output_dir: Path = Path('models'),
     verbose: bool = True
-) -> Dict[str, StackedPropModel]:
+) -> dict[str, StackedPropModel]:
     """
     Train stacked models for all prop types.
 

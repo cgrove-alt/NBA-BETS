@@ -17,10 +17,8 @@ Reference: FiveThirtyEight's NBA Elo methodology
 
 import math
 import json
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, field, asdict
+from datetime import datetime
+from dataclasses import dataclass, asdict
 from collections import defaultdict
 
 
@@ -127,16 +125,16 @@ class EloRatingSystem:
         self.season_regression = season_regression
 
         # Current ratings (most recent)
-        self.ratings: Dict[int, EloRating] = {}
+        self.ratings: dict[int, EloRating] = {}
 
         # Historical ratings: {team_id: [(date, rating), ...]}
-        self.rating_history: Dict[int, List[Tuple[str, float]]] = defaultdict(list)
+        self.rating_history: dict[int, list[tuple[str, float]]] = defaultdict(list)
 
         # Game-by-game updates for auditing
-        self.updates: List[EloUpdate] = []
+        self.updates: list[EloUpdate] = []
 
         # Season tracking for regression
-        self.current_season: Optional[str] = None
+        self.current_season: str | None = None
 
     def get_team_rating(self, team_id: int, team_name: str = None) -> EloRating:
         """Get current rating for a team, creating if necessary."""
@@ -159,7 +157,7 @@ class EloRatingSystem:
         home_team_id: int,
         away_team_id: int,
         date: str
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """
         Get team ratings as of a specific date.
 
@@ -410,7 +408,7 @@ class EloRatingSystem:
             date = datetime.now().strftime("%Y-%m-%d")
             self.rating_history[team_id].append((f"{date}_regression", new_rating))
 
-    def get_standings(self) -> List[EloRating]:
+    def get_standings(self) -> list[EloRating]:
         """Get all teams sorted by Elo rating."""
         return sorted(self.ratings.values(), key=lambda x: x.rating, reverse=True)
 
@@ -536,7 +534,7 @@ class EloRatingSystem:
     @classmethod
     def load_from_file(cls, filepath: str) -> "EloRatingSystem":
         """Load Elo system from JSON file."""
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             data = json.load(f)
 
         config = data.get("config", {})
@@ -584,11 +582,10 @@ def elo_to_moneyline(win_prob: float) -> int:
 
     if win_prob > 0.5:
         return int(-100 * win_prob / (1 - win_prob))
-    else:
-        return int(100 * (1 - win_prob) / win_prob)
+    return int(100 * (1 - win_prob) / win_prob)
 
 
-def build_elo_from_games(games: List[Dict]) -> EloRatingSystem:
+def build_elo_from_games(games: list[dict]) -> EloRatingSystem:
     """
     Build an Elo rating system from a list of historical games.
 
@@ -629,9 +626,9 @@ def generate_elo_features(
     home_team_id: int,
     away_team_id: int,
     game_date: str,
-    market_spread: Optional[float] = None,
-    market_home_prob: Optional[float] = None
-) -> Dict[str, float]:
+    market_spread: float | None = None,
+    market_home_prob: float | None = None
+) -> dict[str, float]:
     """
     Generate Elo-based features for ML models.
 

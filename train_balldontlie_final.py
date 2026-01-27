@@ -15,13 +15,11 @@ import pickle
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, GradientBoostingRegressor
-from sklearn.svm import SVR
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -55,7 +53,7 @@ def _load_env():
 _load_env()
 
 
-def load_training_data(cache_file: str) -> List[Dict]:
+def load_training_data(cache_file: str) -> list[dict]:
     """Load cached training data."""
     if not Path(cache_file).exists():
         print(f"Error: Cache file not found: {cache_file}")
@@ -69,7 +67,7 @@ def load_training_data(cache_file: str) -> List[Dict]:
     return data
 
 
-def prepare_moneyline_data(games_data: List[Dict]) -> Tuple[pd.DataFrame, np.ndarray]:
+def prepare_moneyline_data(games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarray]:
     """Prepare data for moneyline model training."""
     features_list = []
     labels = []
@@ -91,7 +89,7 @@ def prepare_moneyline_data(games_data: List[Dict]) -> Tuple[pd.DataFrame, np.nda
     return X, y
 
 
-def prepare_spread_data(games_data: List[Dict]) -> Tuple[pd.DataFrame, np.ndarray]:
+def prepare_spread_data(games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarray]:
     """Prepare data for spread model training."""
     features_list = []
     labels = []
@@ -128,7 +126,7 @@ class SimpleMoneylineModel:
         self.is_fitted = False
         self.training_metrics = {}
 
-    def train(self, X: pd.DataFrame, y: np.ndarray, test_size: float = 0.2) -> Dict:
+    def train(self, X: pd.DataFrame, y: np.ndarray, test_size: float = 0.2) -> dict:
         """Train the model."""
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(
@@ -164,7 +162,7 @@ class SimpleMoneylineModel:
 
         return self.training_metrics
 
-    def predict(self, features: Dict) -> Dict:
+    def predict(self, features: dict) -> dict:
         """Make a prediction."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -223,7 +221,7 @@ class SimpleSpreadModel:
         self.is_fitted = False
         self.training_metrics = {}
 
-    def train(self, X: pd.DataFrame, y: np.ndarray, test_size: float = 0.2) -> Dict:
+    def train(self, X: pd.DataFrame, y: np.ndarray, test_size: float = 0.2) -> dict:
         """Train the model."""
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(
@@ -259,7 +257,7 @@ class SimpleSpreadModel:
 
         return self.training_metrics
 
-    def predict(self, features: Dict, spread_line: float = None) -> Dict:
+    def predict(self, features: dict, spread_line: float = None) -> dict:
         """Make a prediction."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -326,7 +324,7 @@ class EnsembleMoneylineModel:
         self.training_metrics = {}
         self.model_weights = {'lr': 0.2, 'rf': 0.4, 'gb': 0.4}  # Weighted average
 
-    def train(self, X: pd.DataFrame, y: np.ndarray, test_size: float = 0.2) -> Dict:
+    def train(self, X: pd.DataFrame, y: np.ndarray, test_size: float = 0.2) -> dict:
         """Train all models in the ensemble."""
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(
@@ -390,7 +388,7 @@ class EnsembleMoneylineModel:
 
         return probs
 
-    def predict(self, features: Dict) -> Dict:
+    def predict(self, features: dict) -> dict:
         """Make a prediction."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -473,7 +471,7 @@ def main():
     home_wins = sum(1 for t in training_data if t.get('home_win', False))
     avg_diff = np.mean([t.get('point_differential', 0) for t in training_data])
 
-    print(f"\nData Statistics:")
+    print("\nData Statistics:")
     print(f"  Total games: {len(training_data)}")
     print(f"  Home win rate: {home_wins / len(training_data):.1%}")
     print(f"  Avg point differential: {avg_diff:+.1f}")
@@ -495,7 +493,7 @@ def main():
     ensemble_model = EnsembleMoneylineModel()
     ml_metrics = ensemble_model.train(X_ml, y_ml)
 
-    print(f"\n  Ensemble Results:")
+    print("\n  Ensemble Results:")
     print(f"    Accuracy: {ml_metrics['accuracy']:.4f}")
     print(f"    Precision: {ml_metrics['precision']:.4f}")
     print(f"    Recall: {ml_metrics['recall']:.4f}")
@@ -512,7 +510,7 @@ def main():
     simple_ml = SimpleMoneylineModel()
     simple_ml_metrics = simple_ml.train(X_ml, y_ml)
 
-    print(f"\n  Results:")
+    print("\n  Results:")
     print(f"    Accuracy: {simple_ml_metrics['accuracy']:.4f}")
     print(f"    F1 Score: {simple_ml_metrics['f1']:.4f}")
 
@@ -526,7 +524,7 @@ def main():
     spread_model = SimpleSpreadModel()
     sp_metrics = spread_model.train(X_sp, y_sp)
 
-    print(f"\n  Results:")
+    print("\n  Results:")
     print(f"    RMSE: {sp_metrics['rmse']:.2f} points")
     print(f"    MAE: {sp_metrics['mae']:.2f} points")
     print(f"    R2: {sp_metrics['r2']:.4f}")
@@ -542,7 +540,7 @@ def main():
     print("  - moneyline_gradient_boosting.pkl (single GB classifier)")
     print("  - spread_svm_regressor.pkl (GB regressor for spread)")
 
-    print(f"\nFinal Performance Summary:")
+    print("\nFinal Performance Summary:")
     print(f"  Moneyline Ensemble Accuracy: {ml_metrics['accuracy']:.2%}")
     print(f"  Spread Model RMSE: {sp_metrics['rmse']:.2f} points")
 

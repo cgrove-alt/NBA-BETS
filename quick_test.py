@@ -36,7 +36,7 @@ def predict_with_model(model_data, features):
 
         # Get base model predictions
         base_preds = []
-        for name, model in base_models.items():
+        for _name, model in base_models.items():
             pred = model.predict(X_scaled)[0]
             base_preds.append(pred)
 
@@ -44,27 +44,25 @@ def predict_with_model(model_data, features):
         if meta_model is not None:
             meta_features = np.array(base_preds).reshape(1, -1)
             return float(meta_model.predict(meta_features)[0])
-        else:
-            return float(np.mean(base_preds))
+        return float(np.mean(base_preds))
 
-    elif hasattr(model_data, 'predict'):
+    if hasattr(model_data, 'predict'):
         X = pd.DataFrame([features])
         return float(model_data.predict(X)[0])
 
-    else:
-        # Legacy format
-        model = model_data['model']
-        scaler = model_data['scaler']
-        feature_names = model_data['feature_names']
+    # Legacy format
+    model = model_data['model']
+    scaler = model_data['scaler']
+    feature_names = model_data['feature_names']
 
-        X = pd.DataFrame([features])
-        for col in feature_names:
-            if col not in X.columns:
-                X[col] = 0
-        X = X[feature_names].fillna(0)
+    X = pd.DataFrame([features])
+    for col in feature_names:
+        if col not in X.columns:
+            X[col] = 0
+    X = X[feature_names].fillna(0)
 
-        X_scaled = scaler.transform(X)
-        return float(model.predict(X_scaled)[0])
+    X_scaled = scaler.transform(X)
+    return float(model.predict(X_scaled)[0])
 
 def test_models():
     """Test all player prop models."""
@@ -84,7 +82,7 @@ def test_models():
 
     minutes_model = load_model('player_minutes_model')
     if minutes_model:
-        print(f"✅ Loaded minutes model")
+        print("✅ Loaded minutes model")
 
     print()
 

@@ -57,10 +57,10 @@ def check_model_priority():
                     print(f"  3PM-specific features: {len(fg3_features)}")
 
                     if i == 1 and exists:
-                        print(f"\n  ⚠️  THIS MODEL WILL BE LOADED BY comprehensive_backtest.py")
+                        print("\n  ⚠️  THIS MODEL WILL BE LOADED BY comprehensive_backtest.py")
                         print(f"      Feature count: {num_features} (should be 100+)")
                         if num_features < 20:
-                            print(f"      🔴 CRITICAL: Very few features! Model likely broken.")
+                            print("      🔴 CRITICAL: Very few features! Model likely broken.")
             except Exception as e:
                 print(f"  Error loading: {e}")
 
@@ -77,24 +77,24 @@ def check_model_priority():
 
         stacking_features = len(stacking_data.get('feature_names', []))
 
-        print(f"\n✗ PROBLEM IDENTIFIED:")
+        print("\n✗ PROBLEM IDENTIFIED:")
         print(f"  player_threes_stacking.pkl exists but only has {stacking_features} features")
-        print(f"  This model takes priority over player_threes_ensemble.pkl (150 features)")
-        print(f"\n💡 SOLUTION OPTIONS:")
-        print(f"  Option A: Delete player_threes_stacking.pkl to use ensemble")
-        print(f"  Option B: Retrain stacking model with proper features")
-        print(f"  Option C: Rename ensemble to stacking after validation")
+        print("  This model takes priority over player_threes_ensemble.pkl (150 features)")
+        print("\n💡 SOLUTION OPTIONS:")
+        print("  Option A: Delete player_threes_stacking.pkl to use ensemble")
+        print("  Option B: Retrain stacking model with proper features")
+        print("  Option C: Rename ensemble to stacking after validation")
 
         if ensemble_path.exists():
             with open(ensemble_path, 'rb') as f:
                 ensemble_data = pickle.load(f)
             ensemble_features = len(ensemble_data.get('feature_names', []))
 
-            print(f"\n📊 MODEL COMPARISON:")
+            print("\n📊 MODEL COMPARISON:")
             print(f"  Stacking: {stacking_features} features (LOADED BY BACKTEST)")
             print(f"  Ensemble: {ensemble_features} features (IGNORED)")
             print(f"\n  The ensemble model has {ensemble_features - stacking_features} more features!")
-            print(f"  This likely explains the negative R².")
+            print("  This likely explains the negative R².")
 
 if __name__ == "__main__":
     check_model_priority()

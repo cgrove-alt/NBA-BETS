@@ -13,19 +13,17 @@ import pickle
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVR, SVC
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, VotingClassifier, StackingClassifier
-from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor, StackingClassifier
+from sklearn.neural_network import MLPClassifier
 # DIVERSITY MODELS: Add non-tree-based models to reduce ensemble correlation
 from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
-from sklearn.gaussian_process import GaussianProcessClassifier
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -36,7 +34,6 @@ from sklearn.metrics import (
     mean_squared_error,
     mean_absolute_error,
     r2_score,
-    classification_report,
     confusion_matrix,
 )
 
@@ -80,12 +77,12 @@ def smart_fillna_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def calculate_uncertainty_flags(
-    features: Dict,
+    features: dict,
     confidence_score: float,
     is_player_gtd: bool = False,
     missing_feature_count: int = 0,
-    required_features: List[str] = None
-) -> Dict[str, Any]:
+    required_features: list[str] = None
+) -> dict[str, Any]:
     """
     Calculate uncertainty flags for predictions.
 
@@ -162,7 +159,7 @@ except ImportError:
 try:
     import lightgbm as lgb
     HAS_LIGHTGBM = True
-except (ImportError, OSError) as e:
+except (ImportError, OSError):
     HAS_LIGHTGBM = False
     # OSError can occur if libomp is missing on macOS
     # print("LightGBM not available (may need libomp on macOS)")
@@ -229,10 +226,10 @@ class DataLeakageError(Exception):
 
 
 def check_sanity_limits(
-    results: Dict,
+    results: dict,
     context: str = "backtest",
     raise_on_failure: bool = True
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """
     Check if results exceed sanity limits indicating data leakage.
 
@@ -313,10 +310,10 @@ def check_sanity_limits(
 
 
 def check_improvement_thresholds(
-    results: Dict,
+    results: dict,
     bet_type: str,
     check_leakage: bool = True
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """
     Check if backtest results meet promotion thresholds.
 
@@ -386,11 +383,11 @@ class BacktestReporter:
     def run_moneyline_backtest(
         self,
         model,
-        games_data: List[Dict],
+        games_data: list[dict],
         initial_bankroll: float = 10000.0,
         min_edge: float = 0.02,
         holdout_fraction: float = 0.2,
-    ) -> Dict:
+    ) -> dict:
         """
         Run backtest for moneyline model on HOLDOUT data only.
 
@@ -505,11 +502,11 @@ class BacktestReporter:
     def run_spread_backtest(
         self,
         model,
-        games_data: List[Dict],
+        games_data: list[dict],
         initial_bankroll: float = 10000.0,
         min_edge: float = 0.02,
         holdout_fraction: float = 0.2,
-    ) -> Dict:
+    ) -> dict:
         """
         Run backtest for spread model on HOLDOUT data only.
 
@@ -619,7 +616,7 @@ class BacktestReporter:
 
     def save_report(
         self,
-        results: Dict,
+        results: dict,
         model_name: str,
         bet_type: str,
     ) -> Path:
@@ -658,7 +655,7 @@ class BacktestReporter:
 
         return filepath
 
-    def print_summary(self, results: Dict, bet_type: str) -> None:
+    def print_summary(self, results: dict, bet_type: str) -> None:
         """Print backtest summary to console."""
         print(f"\n  {'='*50}")
         print(f"  BACKTEST RESULTS: {bet_type.upper()}")
@@ -677,9 +674,9 @@ class BacktestReporter:
         # Check thresholds
         passed, failures = check_improvement_thresholds(results, bet_type)
         if passed:
-            print(f"\n  ✓ Model PASSES promotion thresholds")
+            print("\n  ✓ Model PASSES promotion thresholds")
         else:
-            print(f"\n  ✗ Model FAILS promotion thresholds:")
+            print("\n  ✗ Model FAILS promotion thresholds:")
             for failure in failures:
                 print(f"    - {failure}")
         print(f"  {'='*50}")
@@ -727,7 +724,7 @@ class TrainingMetricsLogger:
         y_true: np.ndarray,
         y_pred: np.ndarray,
         y_prob: np.ndarray = None
-    ) -> Dict:
+    ) -> dict:
         """Log classification metrics."""
         self.metrics["accuracy"] = float(accuracy_score(y_true, y_pred))
         self.metrics["precision"] = float(precision_score(y_true, y_pred, zero_division=0))
@@ -749,7 +746,7 @@ class TrainingMetricsLogger:
         self,
         y_true: np.ndarray,
         y_pred: np.ndarray
-    ) -> Dict:
+    ) -> dict:
         """Log regression metrics."""
         self.metrics["rmse"] = float(np.sqrt(mean_squared_error(y_true, y_pred)))
         self.metrics["mae"] = float(mean_absolute_error(y_true, y_pred))
@@ -762,7 +759,7 @@ class TrainingMetricsLogger:
         y_prob: np.ndarray,
         y_true: np.ndarray,
         n_bins: int = 10
-    ) -> Dict:
+    ) -> dict:
         """
         Log calibration metrics (ECE, MCE).
 
@@ -799,7 +796,7 @@ class TrainingMetricsLogger:
         odds: np.ndarray = None,
         min_edge: float = 0.03,
         kelly_fraction: float = 0.25
-    ) -> Dict:
+    ) -> dict:
         """
         Simulate betting ROI with Kelly criterion.
 
@@ -820,8 +817,7 @@ class TrainingMetricsLogger:
         def american_to_decimal(american: float) -> float:
             if american > 0:
                 return (american / 100) + 1
-            else:
-                return (100 / abs(american)) + 1
+            return (100 / abs(american)) + 1
 
         # Simulate betting
         bankroll = 1000.0
@@ -829,7 +825,7 @@ class TrainingMetricsLogger:
         bets_placed = 0
         bets_won = 0
 
-        for i, (prob, outcome, odd) in enumerate(zip(predicted_probs, actual_outcomes, odds)):
+        for _i, (prob, outcome, odd) in enumerate(zip(predicted_probs, actual_outcomes, odds, strict=False)):
             # Calculate implied probability from odds
             decimal_odd = american_to_decimal(odd)
             implied_prob = 1 / decimal_odd
@@ -865,10 +861,10 @@ class TrainingMetricsLogger:
     def log_time_series_split(
         self,
         n_splits: int,
-        train_sizes: List[int],
-        test_sizes: List[int],
-        fold_metrics: List[Dict]
-    ) -> Dict:
+        train_sizes: list[int],
+        test_sizes: list[int],
+        fold_metrics: list[dict]
+    ) -> dict:
         """Log time-series cross-validation results."""
         self.metrics["cv_n_splits"] = n_splits
         self.metrics["cv_train_sizes"] = train_sizes
@@ -876,7 +872,7 @@ class TrainingMetricsLogger:
         self.metrics["cv_fold_metrics"] = fold_metrics
 
         # Calculate mean and std across folds
-        for key in fold_metrics[0].keys():
+        for key in fold_metrics[0]:
             values = [f[key] for f in fold_metrics if key in f and f[key] is not None]
             if values:
                 self.metrics[f"cv_{key}_mean"] = float(np.mean(values))
@@ -890,10 +886,10 @@ class TrainingMetricsLogger:
 
     def log_clv_metrics(
         self,
-        bet_odds: List[float],
-        closing_odds: List[float],
-        outcomes: List[int] = None
-    ) -> Dict:
+        bet_odds: list[float],
+        closing_odds: list[float],
+        outcomes: list[int] = None
+    ) -> dict:
         """
         Log Closing Line Value metrics.
 
@@ -915,11 +911,10 @@ class TrainingMetricsLogger:
             def american_to_prob(odds: float) -> float:
                 if odds > 0:
                     return 100 / (odds + 100)
-                else:
-                    return abs(odds) / (abs(odds) + 100)
+                return abs(odds) / (abs(odds) + 100)
 
             clv_values = []
-            for bet, closing in zip(bet_odds, closing_odds):
+            for bet, closing in zip(bet_odds, closing_odds, strict=False):
                 bet_prob = american_to_prob(bet)
                 closing_prob = american_to_prob(closing)
                 clv = (closing_prob - bet_prob) * 100
@@ -1049,7 +1044,7 @@ class BaseModelTrainer:
             return self.scaler.fit_transform(X_clean)
         return self.scaler.transform(X_clean)
 
-    def save_model(self, filepath: Optional[Path] = None):
+    def save_model(self, filepath: Path | None = None):
         """Save model, scaler, and metadata to disk."""
         if filepath is None:
             filepath = MODEL_DIR / f"{self.model_name}.pkl"
@@ -1069,7 +1064,7 @@ class BaseModelTrainer:
         print(f"Model saved to {filepath}")
         return filepath
 
-    def load_model(self, filepath: Optional[Path] = None):
+    def load_model(self, filepath: Path | None = None):
         """Load model, scaler, and metadata from disk."""
         if filepath is None:
             filepath = MODEL_DIR / f"{self.model_name}.pkl"
@@ -1086,7 +1081,7 @@ class BaseModelTrainer:
         print(f"Model loaded from {filepath}")
         return self
 
-    def get_feature_importance(self) -> Dict[str, float]:
+    def get_feature_importance(self) -> dict[str, float]:
         """Get feature importance if available."""
         if not self.is_fitted:
             return {}
@@ -1098,7 +1093,7 @@ class BaseModelTrainer:
         else:
             return {}
 
-        return dict(zip(self.feature_names, importance))
+        return dict(zip(self.feature_names, importance, strict=False))
 
 
 class PropModelWrapper:
@@ -1116,9 +1111,8 @@ class PropModelWrapper:
         self.is_fitted = True
         self.model_name = f"player_{prop_type}"
 
-    def predict(self, features: Dict, prop_line: float = None) -> Dict:
+    def predict(self, features: dict, prop_line: float = None) -> dict:
         """Make a prediction - compatible with app.py interface."""
-        import numpy as np
         import pandas as pd
 
         X = pd.DataFrame([features])
@@ -1161,7 +1155,7 @@ class EnsembleMoneylineWrapper:
         self.is_fitted = True
         self.model_name = "moneyline_ensemble"
 
-    def predict(self, features: Dict) -> Dict:
+    def predict(self, features: dict) -> dict:
         """Make a prediction - compatible with app.py interface."""
         import numpy as np
         import pandas as pd
@@ -1212,7 +1206,7 @@ class MoneylineModel(BaseModelTrainer):
             random_state=42,
         )
 
-    def prepare_training_data(self, games_data: List[Dict]) -> Tuple[pd.DataFrame, np.ndarray]:
+    def prepare_training_data(self, games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarray]:
         """
         Prepare training data from historical games.
 
@@ -1260,7 +1254,7 @@ class MoneylineModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
         use_time_series_cv: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train the moneyline prediction model.
 
@@ -1287,14 +1281,14 @@ class MoneylineModel(BaseModelTrainer):
             y_train = y[:-test_samples]
             y_test = y[-test_samples:]
 
-            print(f"\n  Using TIME-SERIES validation (walk-forward)")
+            print("\n  Using TIME-SERIES validation (walk-forward)")
             print(f"  Train: games 0-{len(X_train)-1}, Test: games {len(X_train)}-{n_samples-1}")
         else:
             # Legacy random split (NOT recommended for time-series data)
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42, stratify=y
             )
-            print(f"\n  Using RANDOM split (not recommended for time-series)")
+            print("\n  Using RANDOM split (not recommended for time-series)")
 
         # Preprocess
         X_train_scaled = self.preprocess_features(X_train, fit=True)
@@ -1313,7 +1307,7 @@ class MoneylineModel(BaseModelTrainer):
 
         # Predictions on held-out test set
         y_pred = self.model.predict(X_test_scaled)
-        y_prob = self.model.predict_proba(X_test_scaled)[:, 1]
+        self.model.predict_proba(X_test_scaled)[:, 1]
 
         # Calculate metrics
         self.training_metrics = {
@@ -1329,7 +1323,7 @@ class MoneylineModel(BaseModelTrainer):
             "validation_type": "time_series" if use_time_series_cv else "random",
         }
 
-        print(f"\nMoneyline Model Training Results:")
+        print("\nMoneyline Model Training Results:")
         print(f"  Accuracy: {self.training_metrics['accuracy']:.4f}")
         print(f"  Precision: {self.training_metrics['precision']:.4f}")
         print(f"  Recall: {self.training_metrics['recall']:.4f}")
@@ -1338,7 +1332,7 @@ class MoneylineModel(BaseModelTrainer):
 
         return self.training_metrics
 
-    def predict(self, features: Dict) -> Dict[str, float]:
+    def predict(self, features: dict) -> dict[str, float]:
         """
         Predict home team win probability.
 
@@ -1411,9 +1405,9 @@ class SpreadModel(BaseModelTrainer):
 
     def prepare_training_data(
         self,
-        games_data: List[Dict],
-        spread_line: Optional[float] = None,
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        games_data: list[dict],
+        spread_line: float | None = None,
+    ) -> tuple[pd.DataFrame, np.ndarray]:
         """
         Prepare training data from historical games.
 
@@ -1467,7 +1461,7 @@ class SpreadModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
         use_time_series_cv: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train the spread prediction model.
 
@@ -1490,7 +1484,7 @@ class SpreadModel(BaseModelTrainer):
             X_test = X.iloc[-test_samples:]
             y_train = y[:-test_samples]
             y_test = y[-test_samples:]
-            print(f"\n  Using TIME-SERIES validation (walk-forward)")
+            print("\n  Using TIME-SERIES validation (walk-forward)")
         elif self.use_classifier:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42, stratify=y
@@ -1531,7 +1525,7 @@ class SpreadModel(BaseModelTrainer):
                 "test_size": len(X_test),
                 "validation_type": "time_series" if use_time_series_cv else "random",
             }
-            print(f"\nSpread Classifier Training Results:")
+            print("\nSpread Classifier Training Results:")
             print(f"  Accuracy: {self.training_metrics['accuracy']:.4f}")
             print(f"  F1 Score: {self.training_metrics['f1']:.4f}")
         else:
@@ -1546,7 +1540,7 @@ class SpreadModel(BaseModelTrainer):
                 "test_size": len(X_test),
                 "validation_type": "time_series" if use_time_series_cv else "random",
             }
-            print(f"\nSpread Regressor Training Results:")
+            print("\nSpread Regressor Training Results:")
             print(f"  RMSE: {self.training_metrics['rmse']:.2f} points")
             print(f"  MAE: {self.training_metrics['mae']:.2f} points")
             print(f"  R2: {self.training_metrics['r2']:.4f}")
@@ -1555,7 +1549,7 @@ class SpreadModel(BaseModelTrainer):
 
         return self.training_metrics
 
-    def predict(self, features: Dict, spread_line: Optional[float] = None) -> Dict[str, Any]:
+    def predict(self, features: dict, spread_line: float | None = None) -> dict[str, Any]:
         """
         Predict spread outcome.
 
@@ -1593,28 +1587,27 @@ class SpreadModel(BaseModelTrainer):
                 "prediction": "cover" if prob[1] > 0.5 else "no_cover",
                 "confidence": float(np.clip(max(prob), 0.0, 1.0)),
             }
-        else:
-            predicted_diff = self.model.predict(X_scaled)[0]
+        predicted_diff = self.model.predict(X_scaled)[0]
 
-            # CRITICAL FIX: Clip spread prediction to realistic NBA range
-            # NBA games are never decided by more than ~50 points, typical range is -20 to +20
-            predicted_diff = float(np.clip(predicted_diff, -30.0, 30.0))
+        # CRITICAL FIX: Clip spread prediction to realistic NBA range
+        # NBA games are never decided by more than ~50 points, typical range is -20 to +20
+        predicted_diff = float(np.clip(predicted_diff, -30.0, 30.0))
 
-            result = {
-                "predicted_spread": predicted_diff,
-                "predicted_winner": "home" if predicted_diff > 0 else "away",
-                "predicted_margin": abs(predicted_diff),
-            }
+        result = {
+            "predicted_spread": predicted_diff,
+            "predicted_winner": "home" if predicted_diff > 0 else "away",
+            "predicted_margin": abs(predicted_diff),
+        }
 
-            if spread_line is not None:
-                result["covers_spread"] = predicted_diff > spread_line
-                result["spread_line"] = spread_line
-                # Edge is capped to realistic values (-20 to +20)
-                result["edge"] = float(np.clip(predicted_diff - spread_line, -20.0, 20.0))
+        if spread_line is not None:
+            result["covers_spread"] = predicted_diff > spread_line
+            result["spread_line"] = spread_line
+            # Edge is capped to realistic values (-20 to +20)
+            result["edge"] = float(np.clip(predicted_diff - spread_line, -20.0, 20.0))
 
-            return result
+        return result
 
-    def predict_with_confidence(self, features: Dict, spread_line: Optional[float] = None) -> Tuple[Dict[str, Any], float]:
+    def predict_with_confidence(self, features: dict, spread_line: float | None = None) -> tuple[dict[str, Any], float]:
         """
         Predict spread outcome with confidence score.
 
@@ -1758,8 +1751,8 @@ class SpreadCoverClassifier(BaseModelTrainer):
 
     def prepare_training_data(
         self,
-        games_data: List[Dict],
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        games_data: list[dict],
+    ) -> tuple[pd.DataFrame, np.ndarray]:
         """
         Prepare training data with spread_line as a feature.
 
@@ -1837,7 +1830,7 @@ class SpreadCoverClassifier(BaseModelTrainer):
         y: np.ndarray,
         test_size: float = 0.2,
         cv_folds: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train the spread cover classifier with time-series validation.
 
@@ -1891,7 +1884,7 @@ class SpreadCoverClassifier(BaseModelTrainer):
 
         return metrics
 
-    def predict(self, features: Dict, spread_line: float) -> Dict[str, Any]:
+    def predict(self, features: dict, spread_line: float) -> dict[str, Any]:
         """
         Predict probability that home team covers the spread.
 
@@ -2059,9 +2052,9 @@ class QuantilePropModel(BaseModelTrainer):
 
     def prepare_training_data(
         self,
-        player_data: List[Dict],
-        prop_line: Optional[float] = None,
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        player_data: list[dict],
+        prop_line: float | None = None,
+    ) -> tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data from historical player games."""
         prop_feature_map = {
             "points": "points_features",
@@ -2123,9 +2116,9 @@ class QuantilePropModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
         use_time_series_cv: bool = True,
-        context_features: Optional[np.ndarray] = None,
-        sample_weights: Optional[np.ndarray] = None,
-    ) -> Dict[str, Any]:
+        context_features: np.ndarray | None = None,
+        sample_weights: np.ndarray | None = None,
+    ) -> dict[str, Any]:
         """Train all three quantile models with optional stacking."""
         # Time-series split
         n_samples = len(X)
@@ -2141,10 +2134,7 @@ class QuantilePropModel(BaseModelTrainer):
         else:
             context_train = context_test = None
 
-        if sample_weights is not None:
-            weights_train = sample_weights[:-test_samples]
-        else:
-            weights_train = None
+        weights_train = sample_weights[:-test_samples] if sample_weights is not None else None
 
         X_train_scaled = self.preprocess_features(X_train, fit=True)
         X_test_scaled = self.preprocess_features(X_test, fit=False)
@@ -2248,11 +2238,11 @@ class QuantilePropModel(BaseModelTrainer):
         print(f"    Avg band width (Q90-Q10): {avg_band_width:.2f}")
         print(f"    Empirical coverage: {empirical_coverage:.1%} (target: 80%)")
         if len(self.stacking_ensembles) > 0:
-            print(f"    Using StackingMetaLearner: Yes")
+            print("    Using StackingMetaLearner: Yes")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, prop_line: Optional[float] = None, context_features: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    def predict(self, features: dict, prop_line: float | None = None, context_features: np.ndarray | None = None) -> dict[str, Any]:
         """
         Predict with quantile-based implied probability.
 
@@ -2302,7 +2292,6 @@ class QuantilePropModel(BaseModelTrainer):
         band_width = q90 - q10
 
         # Bet sizing logic based on prediction bands
-        base_confidence = 75.0  # Default confidence
         if band_width > 8.0:
             # Wide bands (high uncertainty) → Reduce bet size by 50%
             bet_size_multiplier = 0.5
@@ -2366,7 +2355,7 @@ class QuantilePropModel(BaseModelTrainer):
 
         return result
 
-    def save_model(self, filepath: Optional[Path] = None):
+    def save_model(self, filepath: Path | None = None):
         """Save all quantile models, scaler, and metadata."""
         if filepath is None:
             filepath = MODEL_DIR / f"{self.model_name}.pkl"
@@ -2388,7 +2377,7 @@ class QuantilePropModel(BaseModelTrainer):
         print(f"Quantile model saved to {filepath}")
         return filepath
 
-    def load_model(self, filepath: Optional[Path] = None):
+    def load_model(self, filepath: Path | None = None):
         """Load quantile models from disk."""
         if filepath is None:
             filepath = MODEL_DIR / f"{self.model_name}.pkl"
@@ -2473,10 +2462,10 @@ class LineAwarePropClassifier(BaseModelTrainer):
 
     def prepare_training_data(
         self,
-        player_data: List[Dict],
-        line_range: Tuple[float, float] = None,
+        player_data: list[dict],
+        line_range: tuple[float, float] = None,
         n_lines_per_game: int = 5,
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
+    ) -> tuple[pd.DataFrame, np.ndarray]:
         """
         Prepare training data with prop line as a feature.
 
@@ -2618,7 +2607,7 @@ class LineAwarePropClassifier(BaseModelTrainer):
         y: np.ndarray,
         test_size: float = 0.2,
         calibrate: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train the line-aware classifier with temporal split.
 
@@ -2631,8 +2620,7 @@ class LineAwarePropClassifier(BaseModelTrainer):
         Returns:
             Training metrics dictionary
         """
-        from sklearn.calibration import CalibratedClassifierCV
-        from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+        from sklearn.metrics import brier_score_loss, roc_auc_score
 
         # Temporal split (data should be sorted by date)
         n_samples = len(X)
@@ -2724,7 +2712,7 @@ class LineAwarePropClassifier(BaseModelTrainer):
             "line_stats": self.line_stats,
         }
 
-        print(f"  Line-Aware Classifier Results:")
+        print("  Line-Aware Classifier Results:")
         print(f"    Accuracy: {accuracy:.2%}")
         print(f"    Brier Score: {brier_final:.4f}")
         print(f"    ECE: {ece:.4f}")
@@ -2732,7 +2720,7 @@ class LineAwarePropClassifier(BaseModelTrainer):
 
         return self.training_metrics
 
-    def predict(self, features: Dict, prop_line: float) -> Dict[str, Any]:
+    def predict(self, features: dict, prop_line: float) -> dict[str, Any]:
         """
         Predict Over probability for a given prop line.
 
@@ -2786,9 +2774,9 @@ class LineAwarePropClassifier(BaseModelTrainer):
 
     def predict_multiple_lines(
         self,
-        features: Dict,
-        lines: List[float]
-    ) -> List[Dict[str, Any]]:
+        features: dict,
+        lines: list[float]
+    ) -> list[dict[str, Any]]:
         """
         Predict Over probabilities for multiple lines efficiently.
 
@@ -2801,8 +2789,8 @@ class LineAwarePropClassifier(BaseModelTrainer):
 
     def find_fair_line(
         self,
-        features: Dict,
-        search_range: Tuple[float, float] = None
+        features: dict,
+        search_range: tuple[float, float] = None
     ) -> float:
         """
         Find the prop line where P(Over) = 50%.
@@ -2831,7 +2819,7 @@ class LineAwarePropClassifier(BaseModelTrainer):
 
         return round((low + high) / 2 * 2) / 2  # Round to 0.5
 
-    def save_model(self, filepath: Optional[Path] = None):
+    def save_model(self, filepath: Path | None = None):
         """Save the line-aware classifier."""
         if filepath is None:
             filepath = MODEL_DIR / f"{self.model_name}.pkl"
@@ -2854,7 +2842,7 @@ class LineAwarePropClassifier(BaseModelTrainer):
         print(f"Line-aware classifier saved to {filepath}")
         return filepath
 
-    def load_model(self, filepath: Optional[Path] = None):
+    def load_model(self, filepath: Path | None = None):
         """Load a saved line-aware classifier."""
         if filepath is None:
             filepath = MODEL_DIR / f"{self.model_name}.pkl"
@@ -2936,9 +2924,9 @@ class PlayerPropModel(BaseModelTrainer):
 
     def prepare_training_data(
         self,
-        player_data: List[Dict],
-        prop_line: Optional[float] = None,
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        player_data: list[dict],
+        prop_line: float | None = None,
+    ) -> tuple[pd.DataFrame, np.ndarray]:
         """
         Prepare training data from historical player games.
 
@@ -3019,9 +3007,9 @@ class PlayerPropModel(BaseModelTrainer):
         cv_folds: int = 5,
         tune_hyperparameters: bool = False,
         use_time_series_cv: bool = True,
-        context_features: Optional[np.ndarray] = None,
-        sample_weights: Optional[np.ndarray] = None,
-    ) -> Dict[str, Any]:
+        context_features: np.ndarray | None = None,
+        sample_weights: np.ndarray | None = None,
+    ) -> dict[str, Any]:
         """
         Train the player prop model.
 
@@ -3050,10 +3038,7 @@ class PlayerPropModel(BaseModelTrainer):
             else:
                 context_train = context_test = None
 
-            if sample_weights is not None:
-                weights_train = sample_weights[:split_idx]
-            else:
-                weights_train = None
+            weights_train = sample_weights[:split_idx] if sample_weights is not None else None
         elif self.use_classifier:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42, stratify=y
@@ -3098,10 +3083,7 @@ class PlayerPropModel(BaseModelTrainer):
             y_pred_raw = self.stacking_ensemble.predict(X_test_scaled, context_features=context_test)
 
             # For classification, convert probabilities to binary predictions
-            if self.use_classifier:
-                y_pred = (y_pred_raw > 0.5).astype(int)
-            else:
-                y_pred = y_pred_raw
+            y_pred = (y_pred_raw > 0.5).astype(int) if self.use_classifier else y_pred_raw
 
         elif tune_hyperparameters:
             # Hyperparameter tuning
@@ -3151,7 +3133,7 @@ class PlayerPropModel(BaseModelTrainer):
             print(f"  Accuracy: {self.training_metrics['accuracy']:.4f}")
             print(f"  F1 Score: {self.training_metrics['f1']:.4f}")
             if self.stacking_ensemble is not None:
-                print(f"  Using StackingMetaLearner: Yes")
+                print("  Using StackingMetaLearner: Yes")
         else:
             self.training_metrics = {
                 "mse": mean_squared_error(y_test, y_pred),
@@ -3169,11 +3151,11 @@ class PlayerPropModel(BaseModelTrainer):
             print(f"  MAE: {self.training_metrics['mae']:.2f}")
             print(f"  R2: {self.training_metrics['r2']:.4f}")
             if self.stacking_ensemble is not None:
-                print(f"  Using StackingMetaLearner: Yes")
+                print("  Using StackingMetaLearner: Yes")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, prop_line: Optional[float] = None, context_features: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    def predict(self, features: dict, prop_line: float | None = None, context_features: np.ndarray | None = None) -> dict[str, Any]:
         """
         Predict player prop outcome.
 
@@ -3218,26 +3200,25 @@ class PlayerPropModel(BaseModelTrainer):
                 "confidence": max(prob),
                 "prop_type": self.prop_type,
             }
+        # Use stacking ensemble if available
+        if self.stacking_ensemble is not None:
+            predicted_value = self.stacking_ensemble.predict(X_scaled, context_features=context_features)[0]
         else:
-            # Use stacking ensemble if available
-            if self.stacking_ensemble is not None:
-                predicted_value = self.stacking_ensemble.predict(X_scaled, context_features=context_features)[0]
-            else:
-                predicted_value = self.model.predict(X_scaled)[0]
+            predicted_value = self.model.predict(X_scaled)[0]
 
-            result = {
-                "predicted_value": predicted_value,
-                "prop_type": self.prop_type,
-            }
+        result = {
+            "predicted_value": predicted_value,
+            "prop_type": self.prop_type,
+        }
 
-            if prop_line is not None:
-                result["prop_line"] = prop_line
-                result["prediction"] = "over" if predicted_value > prop_line else "under"
-                result["edge"] = predicted_value - prop_line
+        if prop_line is not None:
+            result["prop_line"] = prop_line
+            result["prediction"] = "over" if predicted_value > prop_line else "under"
+            result["edge"] = predicted_value - prop_line
 
-            return result
+        return result
 
-    def predict_with_confidence(self, features: Dict, prop_line: Optional[float] = None, context_features: Optional[np.ndarray] = None) -> Tuple[Dict[str, Any], float]:
+    def predict_with_confidence(self, features: dict, prop_line: float | None = None, context_features: np.ndarray | None = None) -> tuple[dict[str, Any], float]:
         """
         Predict player prop outcome with confidence score.
 
@@ -3394,7 +3375,7 @@ class XGBoostMoneylineModel(BaseModelTrainer):
             eval_metric='logloss',
         )
 
-    def prepare_training_data(self, games_data: List[Dict]) -> Tuple[pd.DataFrame, np.ndarray]:
+    def prepare_training_data(self, games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data (same as MoneylineModel) - SORTED CHRONOLOGICALLY."""
         features_list = []
         labels = []
@@ -3432,7 +3413,7 @@ class XGBoostMoneylineModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
         use_time_series_cv: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Train the XGBoost moneyline model with time-series validation."""
         if use_time_series_cv:
             # TIME-SERIES WALK-FORWARD VALIDATION
@@ -3456,7 +3437,7 @@ class XGBoostMoneylineModel(BaseModelTrainer):
         self.is_fitted = True
 
         y_pred = self.model.predict(X_test_scaled)
-        y_prob = self.model.predict_proba(X_test_scaled)[:, 1]
+        self.model.predict_proba(X_test_scaled)[:, 1]
 
         self.training_metrics = {
             "accuracy": accuracy_score(y_test, y_pred),
@@ -3469,14 +3450,14 @@ class XGBoostMoneylineModel(BaseModelTrainer):
             "test_size": len(X_test),
         }
 
-        print(f"\nXGBoost Moneyline Model Training Results:")
+        print("\nXGBoost Moneyline Model Training Results:")
         print(f"  Accuracy: {self.training_metrics['accuracy']:.4f}")
         print(f"  F1 Score: {self.training_metrics['f1']:.4f}")
         print(f"  CV Score: {self.training_metrics['cv_mean']:.4f} (+/- {self.training_metrics['cv_std']:.4f})")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, calibrate: bool = True) -> Dict[str, float]:
+    def predict(self, features: dict, calibrate: bool = True) -> dict[str, float]:
         """
         Predict home team win probability.
 
@@ -3566,7 +3547,7 @@ class LightGBMSpreadModel(BaseModelTrainer):
             verbose=-1,
         )
 
-    def prepare_training_data(self, games_data: List[Dict]) -> Tuple[pd.DataFrame, np.ndarray]:
+    def prepare_training_data(self, games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data for spread prediction - SORTED CHRONOLOGICALLY."""
         features_list = []
         labels = []
@@ -3604,9 +3585,9 @@ class LightGBMSpreadModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
         use_time_series_cv: bool = True,
-        context_features: Optional[np.ndarray] = None,
-        sample_weights: Optional[np.ndarray] = None,
-    ) -> Dict[str, Any]:
+        context_features: np.ndarray | None = None,
+        sample_weights: np.ndarray | None = None,
+    ) -> dict[str, Any]:
         """Train the LightGBM spread model.
 
         Parameters:
@@ -3642,10 +3623,7 @@ class LightGBMSpreadModel(BaseModelTrainer):
             else:
                 context_train = context_test = None
 
-            if sample_weights is not None:
-                weights_train = sample_weights[:-test_samples]
-            else:
-                weights_train = None
+            weights_train = sample_weights[:-test_samples] if sample_weights is not None else None
         else:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42
@@ -3684,7 +3662,7 @@ class LightGBMSpreadModel(BaseModelTrainer):
 
         else:
             # Use single LightGBM model
-            cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=cv_folds,
+            cross_val_score(self.model, X_train_scaled, y_train, cv=cv_folds,
                                          scoring='neg_mean_squared_error')
 
             if weights_train is not None:
@@ -3705,16 +3683,16 @@ class LightGBMSpreadModel(BaseModelTrainer):
             "using_stacking_meta_learner": self.stacking_ensemble is not None,
         }
 
-        print(f"\nLightGBM Spread Model Training Results:")
+        print("\nLightGBM Spread Model Training Results:")
         print(f"  RMSE: {self.training_metrics['rmse']:.2f} points")
         print(f"  MAE: {self.training_metrics['mae']:.2f} points")
         print(f"  R2: {self.training_metrics['r2']:.4f}")
         if self.stacking_ensemble is not None:
-            print(f"  Using StackingMetaLearner: Yes")
+            print("  Using StackingMetaLearner: Yes")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, spread_line: Optional[float] = None, context_features: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    def predict(self, features: dict, spread_line: float | None = None, context_features: np.ndarray | None = None) -> dict[str, Any]:
         """Predict spread outcome."""
         if not self.is_fitted:
             raise ValueError("Model not fitted. Train or load a model first.")
@@ -3846,7 +3824,7 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             n_jobs=-1,
         )
 
-    def prepare_training_data(self, games_data: List[Dict]) -> Tuple[pd.DataFrame, np.ndarray]:
+    def prepare_training_data(self, games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data - SORTED CHRONOLOGICALLY."""
         features_list = []
         labels = []
@@ -3884,9 +3862,9 @@ class EnsembleMoneylineModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
         use_time_series_cv: bool = True,
-        context_features: Optional[np.ndarray] = None,
-        sample_weights: Optional[np.ndarray] = None,
-    ) -> Dict[str, Any]:
+        context_features: np.ndarray | None = None,
+        sample_weights: np.ndarray | None = None,
+    ) -> dict[str, Any]:
         """Train the ensemble model with walk-forward validation.
 
         Parameters:
@@ -3923,12 +3901,9 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             else:
                 context_train = context_test = None
 
-            if sample_weights is not None:
-                weights_train = sample_weights[:-test_samples]
-            else:
-                weights_train = None
+            weights_train = sample_weights[:-test_samples] if sample_weights is not None else None
 
-            print(f"\n  Using TIME-SERIES validation (walk-forward)")
+            print("\n  Using TIME-SERIES validation (walk-forward)")
         else:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42, stratify=y
@@ -4007,16 +3982,16 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             "using_stacking_meta_learner": self.stacking_ensemble is not None,
         }
 
-        print(f"\nEnsemble Moneyline Model Training Results:")
+        print("\nEnsemble Moneyline Model Training Results:")
         print(f"  Accuracy: {self.training_metrics['accuracy']:.4f}")
         print(f"  F1 Score: {self.training_metrics['f1']:.4f}")
         print(f"  Base Estimators: {self.training_metrics['num_base_estimators']}")
         if self.stacking_ensemble is not None:
-            print(f"  Using StackingMetaLearner: Yes")
+            print("  Using StackingMetaLearner: Yes")
 
         return self.training_metrics
 
-    def predict(self, features: Dict, context_features: Optional[np.ndarray] = None) -> Dict[str, float]:
+    def predict(self, features: dict, context_features: np.ndarray | None = None) -> dict[str, float]:
         """Predict home team win probability.
 
         Parameters:
@@ -4059,7 +4034,7 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             "confidence": float(np.clip(max(home_prob, away_prob), 0.0, 1.0)),
         }
 
-    def predict_with_confidence(self, features: Dict, context_features: Optional[np.ndarray] = None) -> Tuple[Dict[str, float], float]:
+    def predict_with_confidence(self, features: dict, context_features: np.ndarray | None = None) -> tuple[dict[str, float], float]:
         """Predict home team win probability with confidence score.
 
         Parameters:
@@ -4209,7 +4184,7 @@ class TunedEnsembleMoneylineModel(BaseModelTrainer):
         self.best_params[model_name] = search.best_params_
         return search.best_estimator_
 
-    def prepare_training_data(self, games_data: List[Dict]) -> Tuple[pd.DataFrame, np.ndarray]:
+    def prepare_training_data(self, games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data - SORTED CHRONOLOGICALLY for time-series validation."""
         features_list = []
         labels = []
@@ -4246,7 +4221,7 @@ class TunedEnsembleMoneylineModel(BaseModelTrainer):
         y: np.ndarray,
         test_size: float = 0.2,
         tune_hyperparameters: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train the tuned ensemble model.
 
@@ -4267,7 +4242,7 @@ class TunedEnsembleMoneylineModel(BaseModelTrainer):
         y_train = y[:-test_samples]
         y_test = y[-test_samples:]
 
-        print(f"\n  Training TunedEnsembleMoneylineModel")
+        print("\n  Training TunedEnsembleMoneylineModel")
         print(f"  Train: {len(X_train)} games, Test: {len(X_test)} games")
 
         X_train_scaled = self.preprocess_features(X_train, fit=True)
@@ -4342,7 +4317,7 @@ class TunedEnsembleMoneylineModel(BaseModelTrainer):
 
         # Evaluate
         y_pred = self.model.predict(X_test_scaled)
-        y_prob = self.model.predict_proba(X_test_scaled)[:, 1]
+        self.model.predict_proba(X_test_scaled)[:, 1]
 
         self.training_metrics = {
             "accuracy": accuracy_score(y_test, y_pred),
@@ -4356,14 +4331,14 @@ class TunedEnsembleMoneylineModel(BaseModelTrainer):
             "best_params": self.best_params,
         }
 
-        print(f"\n  Tuned Ensemble Training Results:")
+        print("\n  Tuned Ensemble Training Results:")
         print(f"    Accuracy: {self.training_metrics['accuracy']:.4f}")
         print(f"    F1 Score: {self.training_metrics['f1']:.4f}")
         print(f"    Base Estimators: {len(estimators)}")
 
         return self.training_metrics
 
-    def predict(self, features: Dict) -> Dict[str, float]:
+    def predict(self, features: dict) -> dict[str, float]:
         """Predict home team win probability."""
         if not self.is_fitted:
             raise ValueError("Model not fitted. Train or load a model first.")
@@ -4429,9 +4404,9 @@ class TotalsModel(BaseModelTrainer):
 
     def prepare_training_data(
         self,
-        games_data: List[Dict],
-        total_line: Optional[float] = None,
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        games_data: list[dict],
+        total_line: float | None = None,
+    ) -> tuple[pd.DataFrame, np.ndarray]:
         """
         Prepare training data for totals prediction - SORTED CHRONOLOGICALLY.
 
@@ -4490,7 +4465,7 @@ class TotalsModel(BaseModelTrainer):
         y: np.ndarray,
         test_size: float = 0.2,
         cv_folds: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Train the totals model."""
         if self.use_classifier:
             X_train, X_test, y_train, y_test = train_test_split(
@@ -4522,7 +4497,7 @@ class TotalsModel(BaseModelTrainer):
                 "train_size": len(X_train),
                 "test_size": len(X_test),
             }
-            print(f"\nTotals Classifier Training Results:")
+            print("\nTotals Classifier Training Results:")
             print(f"  Accuracy: {self.training_metrics['accuracy']:.4f}")
             print(f"  F1 Score: {self.training_metrics['f1']:.4f}")
         else:
@@ -4536,7 +4511,7 @@ class TotalsModel(BaseModelTrainer):
                 "train_size": len(X_train),
                 "test_size": len(X_test),
             }
-            print(f"\nTotals Regressor Training Results:")
+            print("\nTotals Regressor Training Results:")
             print(f"  RMSE: {self.training_metrics['rmse']:.2f} points")
             print(f"  MAE: {self.training_metrics['mae']:.2f} points")
             print(f"  R2: {self.training_metrics['r2']:.4f}")
@@ -4544,7 +4519,7 @@ class TotalsModel(BaseModelTrainer):
         print(f"  CV Score: {self.training_metrics['cv_mean']:.4f} (+/- {self.training_metrics['cv_std']:.4f})")
         return self.training_metrics
 
-    def predict(self, features: Dict, total_line: Optional[float] = None) -> Dict[str, Any]:
+    def predict(self, features: dict, total_line: float | None = None) -> dict[str, Any]:
         """
         Predict total points.
 
@@ -4579,29 +4554,28 @@ class TotalsModel(BaseModelTrainer):
                 "prediction": "over" if prob[1] > 0.5 else "under",
                 "confidence": float(np.clip(max(prob), 0.0, 1.0)),
             }
-        else:
-            predicted_total = self.model.predict(X_scaled)[0]
+        predicted_total = self.model.predict(X_scaled)[0]
 
-            # Clip to realistic NBA total range (160-280)
-            predicted_total = float(np.clip(predicted_total, 160.0, 280.0))
+        # Clip to realistic NBA total range (160-280)
+        predicted_total = float(np.clip(predicted_total, 160.0, 280.0))
 
-            result = {
-                "predicted_total": predicted_total,
-            }
+        result = {
+            "predicted_total": predicted_total,
+        }
 
-            if total_line is not None:
-                result["total_line"] = total_line
-                result["prediction"] = "over" if predicted_total > total_line else "under"
-                result["edge"] = float(np.clip(predicted_total - total_line, -30.0, 30.0))
+        if total_line is not None:
+            result["total_line"] = total_line
+            result["prediction"] = "over" if predicted_total > total_line else "under"
+            result["edge"] = float(np.clip(predicted_total - total_line, -30.0, 30.0))
 
-                # Convert edge to probability estimate
-                edge_in_points = predicted_total - total_line
-                # Roughly: 10 points edge = ~70% probability
-                prob = 1 / (1 + np.exp(-edge_in_points / 10.0))
-                result["over_probability"] = float(np.clip(prob, 0.0, 1.0))
-                result["under_probability"] = float(np.clip(1.0 - prob, 0.0, 1.0))
+            # Convert edge to probability estimate
+            edge_in_points = predicted_total - total_line
+            # Roughly: 10 points edge = ~70% probability
+            prob = 1 / (1 + np.exp(-edge_in_points / 10.0))
+            result["over_probability"] = float(np.clip(prob, 0.0, 1.0))
+            result["under_probability"] = float(np.clip(1.0 - prob, 0.0, 1.0))
 
-            return result
+        return result
 
 
 class ParlayCalculator:
@@ -4618,7 +4592,7 @@ class ParlayCalculator:
         """Add a trained model for parlay calculations."""
         self.models[model_type] = model
 
-    def calculate_parlay_probability(self, legs: List[Dict]) -> Dict[str, Any]:
+    def calculate_parlay_probability(self, legs: list[dict]) -> dict[str, Any]:
         """
         Calculate combined probability for a parlay.
 
@@ -4700,7 +4674,7 @@ class ParlayCalculator:
         parlay_prob: float,
         odds: float,
         stake: float = 100,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Calculate expected value for a parlay.
 
@@ -4713,10 +4687,7 @@ class ParlayCalculator:
             Dictionary with EV analysis
         """
         # Convert American odds to decimal
-        if odds > 0:
-            decimal_odds = (odds / 100) + 1
-        else:
-            decimal_odds = (100 / abs(odds)) + 1
+        decimal_odds = odds / 100 + 1 if odds > 0 else 100 / abs(odds) + 1
 
         # Calculate potential profit and EV
         potential_profit = stake * (decimal_odds - 1)
@@ -4763,8 +4734,7 @@ class ParlayCalculator:
 
         if prob >= 0.5:
             return -100 * prob / (1 - prob)
-        else:
-            return 100 * (1 - prob) / prob
+        return 100 * (1 - prob) / prob
 
 
 class ModelTrainingPipeline:
@@ -4778,15 +4748,15 @@ class ModelTrainingPipeline:
 
     def train_all_models(
         self,
-        games_data: List[Dict],
-        player_data: Optional[List[Dict]] = None,
+        games_data: list[dict],
+        player_data: list[dict] | None = None,
         save_models: bool = True,
         use_ensemble: bool = True,
         use_tuned_ensemble: bool = True,
         use_line_aware: bool = True,
         run_backtest: bool = False,
         backtest_min_games: int = 100,
-    ) -> Dict[str, Dict]:
+    ) -> dict[str, dict]:
         """
         Train all models with provided data.
 
@@ -4865,7 +4835,7 @@ class ModelTrainingPipeline:
                     # STEP 1: Get predictions on CALIBRATION VALIDATION set only
                     # Model was trained on X_train_only, so cal_val is unseen
                     y_prob_cal = np.array([
-                        moneyline_model.predict(dict(zip(moneyline_model.feature_names, x)))["home_win_probability"]
+                        moneyline_model.predict(dict(zip(moneyline_model.feature_names, x, strict=False)))["home_win_probability"]
                         for x in X_cal_val.values
                     ])
 
@@ -4891,7 +4861,7 @@ class ModelTrainingPipeline:
 
                         # Get predictions on truly held-out test set
                         y_prob_test = np.array([
-                            moneyline_model.predict(dict(zip(moneyline_model.feature_names, x)))["home_win_probability"]
+                            moneyline_model.predict(dict(zip(moneyline_model.feature_names, x, strict=False)))["home_win_probability"]
                             for x in X_test.values
                         ])
 
@@ -5144,7 +5114,7 @@ class ModelTrainingPipeline:
 
         return results
 
-    def load_all_models(self) -> Dict[str, BaseModelTrainer]:
+    def load_all_models(self) -> dict[str, BaseModelTrainer]:
         """Load all saved models."""
         model_files = list(MODEL_DIR.glob("*.pkl"))
 
@@ -5275,7 +5245,7 @@ class ModelTrainingPipeline:
         return calculator
 
 
-def create_sample_training_data() -> Tuple[List[Dict], List[Dict]]:
+def create_sample_training_data() -> tuple[list[dict], list[dict]]:
     """
     Create sample training data structure for demonstration.
 

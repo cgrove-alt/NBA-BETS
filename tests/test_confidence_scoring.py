@@ -341,13 +341,6 @@ class TestSpreadModelConfidence:
     def test_spread_classifier_high_confidence(self):
         """Test classifier gives high confidence for strong predictions."""
         # Mock features for high-confidence spread prediction
-        features = {
-            'elo_diff': 15.0,
-            'off_rating_diff': 8.0,
-            'def_rating_diff': -7.0,
-            'net_rating_diff': 12.0,
-            'pace_combined': 102.0,
-        }
 
         # Note: This test validates the confidence calculation logic
         # For a real prediction, the model would need to be trained first

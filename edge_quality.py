@@ -13,7 +13,6 @@ A higher edge quality score indicates greater confidence in the edge being real.
 """
 
 import numpy as np
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -38,10 +37,10 @@ class EdgeQualityResult:
     recency_score: float
     situational_score: float
     recommended_kelly_multiplier: float
-    confidence_interval: Tuple[float, float]
-    risk_factors: List[str]
-    positive_factors: List[str]
-    detailed_breakdown: Dict[str, float]
+    confidence_interval: tuple[float, float]
+    risk_factors: list[str]
+    positive_factors: list[str]
+    detailed_breakdown: dict[str, float]
 
 
 class EdgeQualityScorer:
@@ -73,7 +72,7 @@ class EdgeQualityScorer:
 
     def __init__(
         self,
-        historical_edges: Optional[List[Dict]] = None,
+        historical_edges: list[dict] | None = None,
         min_edge_threshold: float = 0.02,
     ):
         """
@@ -88,9 +87,9 @@ class EdgeQualityScorer:
 
     def calculate_ensemble_agreement_score(
         self,
-        individual_predictions: Dict[str, float],
+        individual_predictions: dict[str, float],
         ensemble_prediction: float,
-    ) -> Tuple[float, List[str]]:
+    ) -> tuple[float, list[str]]:
         """
         Score how well individual models agree with each other.
 
@@ -117,7 +116,7 @@ class EdgeQualityScorer:
         all_same_direction = all(p > 0.5 for p in probs) or all(p < 0.5 for p in probs)
 
         # Calculate coefficient of variation for disagreement
-        cv = std_dev / max(abs(mean_prob - 0.5), 0.01)
+        std_dev / max(abs(mean_prob - 0.5), 0.01)
 
         # Base score from standard deviation
         # STD < 0.02 = excellent (95-100)
@@ -159,10 +158,10 @@ class EdgeQualityScorer:
         opening_odds: float,
         current_odds: float,
         is_home: bool,
-        public_betting_pct: Optional[float] = None,
+        public_betting_pct: float | None = None,
         is_reverse_line_movement: bool = False,
         is_steam_move: bool = False,
-    ) -> Tuple[float, List[str]]:
+    ) -> tuple[float, list[str]]:
         """
         Score alignment between model and sharp money.
 
@@ -242,10 +241,10 @@ class EdgeQualityScorer:
 
     def calculate_feature_stability_score(
         self,
-        recent_form: Dict[str, float],
-        season_averages: Dict[str, float],
+        recent_form: dict[str, float],
+        season_averages: dict[str, float],
         games_played: int,
-    ) -> Tuple[float, List[str]]:
+    ) -> tuple[float, list[str]]:
         """
         Score the stability of key features used in prediction.
 
@@ -306,7 +305,7 @@ class EdgeQualityScorer:
         training_data_age_days: float,
         last_game_days_ago: float,
         is_back_to_back: bool,
-    ) -> Tuple[float, List[str]]:
+    ) -> tuple[float, list[str]]:
         """
         Score based on data freshness and schedule factors.
 
@@ -356,7 +355,7 @@ class EdgeQualityScorer:
         playoff_implications: bool,
         injury_impact_score: float,
         travel_fatigue_score: float,
-    ) -> Tuple[float, List[str]]:
+    ) -> tuple[float, list[str]]:
         """
         Score based on situational factors that affect prediction reliability.
 
@@ -410,7 +409,7 @@ class EdgeQualityScorer:
         self,
         raw_probability: float,
         calibrated_probability: float,
-    ) -> Tuple[float, List[str]]:
+    ) -> tuple[float, list[str]]:
         """
         Score based on how confident the probability prediction is.
 
@@ -454,19 +453,19 @@ class EdgeQualityScorer:
         # Core prediction data
         model_probability: float,
         implied_probability: float,
-        individual_model_predictions: Optional[Dict[str, float]] = None,
-        raw_probability: Optional[float] = None,
+        individual_model_predictions: dict[str, float] | None = None,
+        raw_probability: float | None = None,
 
         # Line movement data
-        opening_odds: Optional[float] = None,
-        current_odds: Optional[float] = None,
-        public_betting_pct: Optional[float] = None,
+        opening_odds: float | None = None,
+        current_odds: float | None = None,
+        public_betting_pct: float | None = None,
         is_reverse_line_movement: bool = False,
         is_steam_move: bool = False,
 
         # Form/stability data
-        recent_form: Optional[Dict[str, float]] = None,
-        season_averages: Optional[Dict[str, float]] = None,
+        recent_form: dict[str, float] | None = None,
+        season_averages: dict[str, float] | None = None,
         games_played: int = 30,
 
         # Recency data
@@ -587,7 +586,7 @@ class EdgeQualityScorer:
         # Calculate weighted overall score
         overall_score = sum(
             detailed_scores[k] * self.WEIGHTS[k]
-            for k in self.WEIGHTS.keys()
+            for k in self.WEIGHTS
         )
 
         # Apply edge magnitude bonus/penalty
@@ -690,8 +689,7 @@ class DynamicKellyCalculator:
         p = probability
         q = 1 - p
 
-        kelly = (b * p - q) / b
-        return kelly
+        return (b * p - q) / b
 
     def calculate_dynamic_kelly(
         self,
@@ -702,7 +700,7 @@ class DynamicKellyCalculator:
         recent_win_rate: float = 0.5,
         consecutive_losses: int = 0,
         bankroll_volatility: float = 0.1,
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate dynamically adjusted Kelly bet size.
 
@@ -822,7 +820,7 @@ class DynamicKellyCalculator:
         decimal_odds: float,
         edge_quality: EdgeQualityResult,
         **kwargs
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate actual dollar bet size.
 
@@ -852,8 +850,7 @@ def american_to_decimal(american_odds: int) -> float:
     """Convert American odds to decimal odds."""
     if american_odds > 0:
         return 1 + (american_odds / 100)
-    else:
-        return 1 + (100 / abs(american_odds))
+    return 1 + (100 / abs(american_odds))
 
 
 def decimal_to_implied_prob(decimal_odds: float) -> float:
@@ -884,18 +881,18 @@ if __name__ == "__main__":
         home_away="home",
     )
 
-    print(f"\nEdge Quality Evaluation")
-    print(f"=" * 50)
+    print("\nEdge Quality Evaluation")
+    print("=" * 50)
     print(f"Overall Score: {result.overall_score:.1f}/100")
     print(f"Tier: {result.tier.value.upper()}")
     print(f"Recommended Kelly Multiplier: {result.recommended_kelly_multiplier:.2f}")
-    print(f"\nScore Breakdown:")
+    print("\nScore Breakdown:")
     for k, v in result.detailed_breakdown.items():
         print(f"  {k}: {v:.1f}")
-    print(f"\nPositive Factors:")
+    print("\nPositive Factors:")
     for f in result.positive_factors[:5]:
         print(f"  + {f}")
-    print(f"\nRisk Factors:")
+    print("\nRisk Factors:")
     for f in result.risk_factors[:5]:
         print(f"  - {f}")
 
@@ -910,8 +907,8 @@ if __name__ == "__main__":
         consecutive_losses=1,
     )
 
-    print(f"\nBet Sizing")
-    print(f"=" * 50)
+    print("\nBet Sizing")
+    print("=" * 50)
     print(f"Should Bet: {bet['should_bet']}")
     print(f"Full Kelly: {bet['full_kelly']:.2%}")
     print(f"Recommended: {bet['recommended_bet_pct']:.2%}")

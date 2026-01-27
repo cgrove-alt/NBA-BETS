@@ -6,10 +6,8 @@ Stores predictions before games and settles them after games complete.
 """
 
 import sqlite3
-import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 import uuid
 
 
@@ -151,9 +149,7 @@ class PropTracker:
 
             # Determine if pick hit
             hit = 0
-            if pick == "OVER" and actual_value > market_line:
-                hit = 1
-            elif pick == "UNDER" and actual_value < market_line:
+            if pick == "OVER" and actual_value > market_line or pick == "UNDER" and actual_value < market_line:
                 hit = 1
             elif pick == "-":
                 hit = -1  # No pick made
@@ -170,7 +166,7 @@ class PropTracker:
     def settle_game_predictions(
         self,
         game_id: str,
-        player_stats: Dict[int, Dict],
+        player_stats: dict[int, dict],
     ) -> int:
         """Settle all predictions for a completed game.
 
@@ -227,7 +223,7 @@ class PropTracker:
     def get_unsettled_predictions(
         self,
         game_date: str = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Get all unsettled predictions.
 
         Args:
@@ -249,7 +245,7 @@ class PropTracker:
                 )
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_predictions_for_game(self, game_id: str) -> List[Dict]:
+    def get_predictions_for_game(self, game_id: str) -> list[dict]:
         """Get all predictions for a specific game.
 
         Args:
@@ -273,7 +269,7 @@ class PropTracker:
         self,
         days: int = 30,
         min_confidence: float = 0,
-    ) -> Dict:
+    ) -> dict:
         """Get performance summary for settled predictions.
 
         Args:
@@ -353,7 +349,7 @@ class PropTracker:
             "by_confidence": by_confidence,
         }
 
-    def get_calibration_data(self, days: int = 30) -> List[Dict]:
+    def get_calibration_data(self, days: int = 30) -> list[dict]:
         """Get calibration data - confidence vs actual win rate.
 
         Args:
@@ -395,7 +391,7 @@ class PropTracker:
         print(f"PROP PREDICTION PERFORMANCE REPORT - Last {days} Days")
         print(f"{'='*60}")
 
-        print(f"\nOverall Performance:")
+        print("\nOverall Performance:")
         print(f"  Total Predictions: {summary['total_predictions']}")
         print(f"  Wins: {summary['wins']}")
         print(f"  Losses: {summary['losses']}")
@@ -403,16 +399,16 @@ class PropTracker:
         print(f"  Avg Confidence: {summary['avg_confidence']:.1f}")
         print(f"  Avg Edge: {summary['avg_edge']:.1f}%")
 
-        print(f"\nBy Prop Type:")
+        print("\nBy Prop Type:")
         for prop_type, stats in summary['by_prop_type'].items():
             win_rate = stats['wins'] / stats['total'] if stats['total'] > 0 else 0
             print(f"  {prop_type.upper()}: {stats['wins']}/{stats['total']} ({win_rate*100:.1f}%)")
 
-        print(f"\nBy Confidence Level:")
+        print("\nBy Confidence Level:")
         for level, stats in summary['by_confidence'].items():
             print(f"  {level.upper()}: {stats['wins']}/{stats['total']} ({stats['win_rate']*100:.1f}%)")
 
-        print(f"\nCalibration (Predicted vs Actual Win Rate):")
+        print("\nCalibration (Predicted vs Actual Win Rate):")
         print(f"  {'Confidence':>12} | {'Predicted':>10} | {'Actual':>10} | {'N':>6}")
         print(f"  {'-'*12}-+-{'-'*10}-+-{'-'*10}-+-{'-'*6}")
         for bucket in calibration:
@@ -424,7 +420,7 @@ class PropTracker:
         print(f"\n{'='*60}\n")
 
 
-    def get_player_performance(self, min_predictions: int = 20, days: int = 60) -> Dict:
+    def get_player_performance(self, min_predictions: int = 20, days: int = 60) -> dict:
         """Get player-level prediction performance for blacklist/whitelist.
 
         Players with <30% win rate on 20+ predictions should be blacklisted.
@@ -487,7 +483,7 @@ class PropTracker:
                 'whitelist_count': len(whitelist),
             }
 
-    def get_blacklisted_players(self, min_predictions: int = 20, days: int = 60) -> List[int]:
+    def get_blacklisted_players(self, min_predictions: int = 20, days: int = 60) -> list[int]:
         """Get list of player IDs that should be blacklisted (skipped).
 
         Args:
@@ -500,7 +496,7 @@ class PropTracker:
         performance = self.get_player_performance(min_predictions, days)
         return performance['blacklist']
 
-    def calculate_bias_corrections(self, min_predictions: int = 100, days: int = 60) -> Dict[str, float]:
+    def calculate_bias_corrections(self, min_predictions: int = 100, days: int = 60) -> dict[str, float]:
         """Calculate bias corrections from settled predictions.
 
         Computes the mean error (actual - predicted) for each prop type.
@@ -541,7 +537,7 @@ class PropTracker:
 
             return corrections
 
-    def get_direction_calibration(self, days: int = 60) -> Dict[str, Dict[str, float]]:
+    def get_direction_calibration(self, days: int = 60) -> dict[str, dict[str, float]]:
         """Get confidence calibration by prop_type and pick direction.
 
         Calculates how well-calibrated confidence scores are for OVER vs UNDER picks.

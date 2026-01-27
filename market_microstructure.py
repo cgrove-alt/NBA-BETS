@@ -28,8 +28,7 @@ CLV (Closing Line Value): The difference between the odds you bet at and
 import time
 import json
 import hashlib
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections import defaultdict
@@ -70,21 +69,21 @@ class OddsSnapshot:
     game_id: str
 
     # Moneyline
-    home_ml: Optional[int] = None  # American odds
-    away_ml: Optional[int] = None
+    home_ml: int | None = None  # American odds
+    away_ml: int | None = None
 
     # Spread
-    home_spread: Optional[float] = None
-    home_spread_odds: Optional[int] = None
-    away_spread: Optional[float] = None
-    away_spread_odds: Optional[int] = None
+    home_spread: float | None = None
+    home_spread_odds: int | None = None
+    away_spread: float | None = None
+    away_spread_odds: int | None = None
 
     # Total
-    total_line: Optional[float] = None
-    over_odds: Optional[int] = None
-    under_odds: Optional[int] = None
+    total_line: float | None = None
+    over_odds: int | None = None
+    under_odds: int | None = None
 
-    def get_implied_prob(self, market: str, side: str) -> Optional[float]:
+    def get_implied_prob(self, market: str, side: str) -> float | None:
         """Convert American odds to implied probability."""
         odds = None
 
@@ -116,7 +115,7 @@ class SteamAlert:
     leader_current_prob: float
 
     # Laggard opportunities
-    laggard_books: List[Dict] = field(default_factory=list)  # [{book, odds, edge}]
+    laggard_books: list[dict] = field(default_factory=list)  # [{book, odds, edge}]
 
     # Confidence
     confidence: float = 0.0  # 0-1, how confident in the steam move
@@ -161,8 +160,7 @@ def american_to_prob(odds: int) -> float:
         return 0.5
     if odds > 0:
         return 100 / (odds + 100)
-    else:
-        return abs(odds) / (abs(odds) + 100)
+    return abs(odds) / (abs(odds) + 100)
 
 
 def prob_to_american(prob: float) -> int:
@@ -171,11 +169,10 @@ def prob_to_american(prob: float) -> int:
         return -110  # Default
     if prob >= 0.5:
         return int(-100 * prob / (1 - prob))
-    else:
-        return int(100 * (1 - prob) / prob)
+    return int(100 * (1 - prob) / prob)
 
 
-def remove_vig(prob1: float, prob2: float) -> Tuple[float, float]:
+def remove_vig(prob1: float, prob2: float) -> tuple[float, float]:
     """
     Remove vig from two-way market probabilities.
 
@@ -187,7 +184,7 @@ def remove_vig(prob1: float, prob2: float) -> Tuple[float, float]:
     return (prob1 / total, prob2 / total)
 
 
-def calculate_consensus(odds_list: List[Tuple[str, float]]) -> Tuple[float, float]:
+def calculate_consensus(odds_list: list[tuple[str, float]]) -> tuple[float, float]:
     """
     Calculate consensus (fair) probability from multiple books.
 
@@ -252,7 +249,7 @@ class OddsFetcher:
         self.rate_limit_reset = 0
 
         # Historical snapshots for movement analysis
-        self.snapshots: Dict[str, List[OddsSnapshot]] = defaultdict(list)
+        self.snapshots: dict[str, list[OddsSnapshot]] = defaultdict(list)
         self.max_snapshot_age = 3600 * 4  # Keep 4 hours of history
 
         # Lock for thread safety
@@ -267,7 +264,7 @@ class OddsFetcher:
             except Exception as e:
                 raise RuntimeError(f"Failed to initialize API: {e}")
 
-    def fetch_odds(self, date: str = None, force: bool = False) -> List[Dict]:
+    def fetch_odds(self, date: str = None, force: bool = False) -> list[dict]:
         """
         Fetch current betting odds.
 
@@ -302,7 +299,7 @@ class OddsFetcher:
             print(f"Error fetching odds: {e}")
             return self._load_cache(date)
 
-    def _store_snapshots(self, odds_data: List[Dict]):
+    def _store_snapshots(self, odds_data: list[dict]):
         """Store odds snapshots for historical analysis."""
         now = time.time()
 
@@ -328,9 +325,9 @@ class OddsFetcher:
     def _parse_book_odds(
         self,
         game_id: str,
-        book_data: Dict,
+        book_data: dict,
         timestamp: float
-    ) -> Optional[OddsSnapshot]:
+    ) -> OddsSnapshot | None:
         """Parse book odds into OddsSnapshot."""
         book = book_data.get('book', book_data.get('sportsbook', '')).lower()
         if not book:
@@ -355,13 +352,13 @@ class OddsFetcher:
         self,
         game_id: str,
         lookback_seconds: int = 3600
-    ) -> List[OddsSnapshot]:
+    ) -> list[OddsSnapshot]:
         """Get historical snapshots for a game."""
         cutoff = time.time() - lookback_seconds
         with self._lock:
             return [s for s in self.snapshots.get(game_id, []) if s.timestamp > cutoff]
 
-    def _save_cache(self, date: str, data: List[Dict]):
+    def _save_cache(self, date: str, data: list[dict]):
         """Save odds to cache file."""
         date = date or datetime.now().strftime('%Y-%m-%d')
         cache_file = self.cache_dir / f"odds_{date}.json"
@@ -372,19 +369,19 @@ class OddsFetcher:
                     'date': date,
                     'data': data
                 }, f)
-        except IOError:
+        except OSError:
             pass
 
-    def _load_cache(self, date: str = None) -> List[Dict]:
+    def _load_cache(self, date: str = None) -> list[dict]:
         """Load odds from cache file."""
         date = date or datetime.now().strftime('%Y-%m-%d')
         cache_file = self.cache_dir / f"odds_{date}.json"
         try:
             if cache_file.exists():
-                with open(cache_file, 'r') as f:
+                with open(cache_file) as f:
                     cached = json.load(f)
                     return cached.get('data', [])
-        except (IOError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError):
             pass
         return []
 
@@ -420,10 +417,10 @@ class SteamDetector:
         self.time_window = time_window
 
         # Track detected steam moves to avoid duplicates
-        self.detected_moves: Dict[str, float] = {}  # key -> timestamp
+        self.detected_moves: dict[str, float] = {}  # key -> timestamp
         self.duplicate_window = 300  # 5 minutes
 
-    def detect(self, game_id: str = None) -> List[SteamAlert]:
+    def detect(self, game_id: str = None) -> list[SteamAlert]:
         """
         Detect steam moves.
 
@@ -436,10 +433,7 @@ class SteamDetector:
         alerts = []
         now = time.time()
 
-        if game_id:
-            game_ids = [game_id]
-        else:
-            game_ids = list(self.fetcher.snapshots.keys())
+        game_ids = [game_id] if game_id else list(self.fetcher.snapshots.keys())
 
         for gid in game_ids:
             snapshots = self.fetcher.get_historical_snapshots(gid, self.time_window * 2)
@@ -447,7 +441,7 @@ class SteamDetector:
                 continue
 
             # Group by book
-            by_book: Dict[str, List[OddsSnapshot]] = defaultdict(list)
+            by_book: dict[str, list[OddsSnapshot]] = defaultdict(list)
             for s in snapshots:
                 by_book[s.book].append(s)
 
@@ -460,21 +454,20 @@ class SteamDetector:
 
         return alerts
 
-    def _get_sides(self, market: str) -> List[str]:
+    def _get_sides(self, market: str) -> list[str]:
         """Get sides for a market."""
         if market in ['moneyline', 'spread']:
             return ['home', 'away']
-        else:
-            return ['over', 'under']
+        return ['over', 'under']
 
     def _check_market(
         self,
         game_id: str,
-        by_book: Dict[str, List[OddsSnapshot]],
+        by_book: dict[str, list[OddsSnapshot]],
         market: str,
         side: str,
         now: float
-    ) -> Optional[SteamAlert]:
+    ) -> SteamAlert | None:
         """Check a specific market for steam moves."""
 
         # Find sharp book movements
@@ -580,13 +573,13 @@ class SteamDetector:
         snapshot: OddsSnapshot,
         market: str,
         side: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """Get American odds for a specific market/side."""
         if market == 'moneyline':
             return snapshot.home_ml if side == 'home' else snapshot.away_ml
-        elif market == 'spread':
+        if market == 'spread':
             return snapshot.home_spread_odds if side == 'home' else snapshot.away_spread_odds
-        elif market == 'total':
+        if market == 'total':
             return snapshot.over_odds if side == 'over' else snapshot.under_odds
         return None
 
@@ -621,7 +614,7 @@ class StaleLineFinder:
         self.threshold = threshold
         self.min_books = min_books
 
-    def find_stale_lines(self, game_id: str = None) -> List[StaleLine]:
+    def find_stale_lines(self, game_id: str = None) -> list[StaleLine]:
         """
         Find stale lines across all games or a specific game.
 
@@ -655,11 +648,11 @@ class StaleLineFinder:
     def _check_for_stale(
         self,
         game_id: str,
-        book_odds: List[Dict],
+        book_odds: list[dict],
         market: str,
         side: str,
         now: float
-    ) -> List[StaleLine]:
+    ) -> list[StaleLine]:
         """Check for stale lines in a specific market."""
         stale = []
 
@@ -707,15 +700,15 @@ class StaleLineFinder:
 
         return stale
 
-    def _get_odds(self, book_data: Dict, market: str, side: str) -> Optional[int]:
+    def _get_odds(self, book_data: dict, market: str, side: str) -> int | None:
         """Extract odds for a market/side from book data."""
         if market == 'moneyline':
             key = 'home_ml' if side == 'home' else 'away_ml'
             return book_data.get(key, book_data.get(f'{side}_moneyline'))
-        elif market == 'spread':
+        if market == 'spread':
             key = f'{side}_spread_odds'
             return book_data.get(key)
-        elif market == 'total':
+        if market == 'total':
             key = f'{side}_odds'
             return book_data.get(key)
         return None
@@ -763,7 +756,7 @@ class MarketMonitor:
         """Register callback for stale line alerts."""
         self.stale_callbacks.append(callback)
 
-    def check_once(self) -> Dict[str, List]:
+    def check_once(self) -> dict[str, list]:
         """
         Perform a single check for opportunities.
 
@@ -840,7 +833,7 @@ class ConsensusCalculator:
     def __init__(self, odds_fetcher: OddsFetcher):
         self.fetcher = odds_fetcher
 
-    def calculate_game_consensus(self, game_id: str) -> Dict[str, Dict]:
+    def calculate_game_consensus(self, game_id: str) -> dict[str, dict]:
         """
         Calculate consensus probabilities for a game.
 
@@ -939,7 +932,7 @@ class CLVTracker:
 
     def __init__(self, odds_fetcher: OddsFetcher):
         self.fetcher = odds_fetcher
-        self.tracked_bets: List[Dict] = []
+        self.tracked_bets: list[dict] = []
 
     def track_bet(
         self,
@@ -1006,7 +999,7 @@ class CLVTracker:
             # Positive CLV = we got better odds than closing line
             bet['clv'] = bet['prob_at_bet'] - bet['closing_prob']
 
-    def get_clv_summary(self) -> Dict:
+    def get_clv_summary(self) -> dict:
         """Get summary of CLV across all tracked bets."""
         self.update_closing_lines()
 
@@ -1036,7 +1029,7 @@ def demo_market_microstructure():
     print("=" * 70)
 
     # Initialize (will use cached data if API not available)
-    fetcher = OddsFetcher()
+    OddsFetcher()
 
     print("\n1. ODDS UTILITIES DEMO")
     print("-" * 40)

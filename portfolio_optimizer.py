@@ -29,12 +29,9 @@ Multi-bet Kelly: Maximize E[log(wealth)] subject to constraints
 """
 
 import numpy as np
-from scipy.optimize import minimize, minimize_scalar
-from typing import Dict, List, Optional, Tuple, Any
+from scipy.optimize import minimize
 from dataclasses import dataclass, field
 from enum import Enum
-import json
-from pathlib import Path
 
 
 # =============================================================================
@@ -75,9 +72,9 @@ class Bet:
     edge: float  # probability - implied_probability
 
     # Additional context for correlation calculation
-    team: Optional[str] = None
-    player: Optional[str] = None
-    side: Optional[str] = None  # 'home', 'away', 'over', 'under'
+    team: str | None = None
+    player: str | None = None
+    side: str | None = None  # 'home', 'away', 'over', 'under'
 
     # Optimization results
     kelly_fraction: float = 0.0
@@ -89,22 +86,20 @@ class Bet:
         """Convert American odds to decimal."""
         if self.odds > 0:
             return 1 + self.odds / 100
-        else:
-            return 1 + 100 / abs(self.odds)
+        return 1 + 100 / abs(self.odds)
 
     @property
     def implied_probability(self) -> float:
         """Get implied probability from odds."""
         if self.odds > 0:
             return 100 / (self.odds + 100)
-        else:
-            return abs(self.odds) / (abs(self.odds) + 100)
+        return abs(self.odds) / (abs(self.odds) + 100)
 
 
 @dataclass
 class PortfolioResult:
     """Results from portfolio optimization."""
-    bets: List[Bet]
+    bets: list[Bet]
     total_stake: float
     expected_return: float
     expected_variance: float
@@ -112,7 +107,7 @@ class PortfolioResult:
     max_drawdown_risk: float
     correlation_matrix: np.ndarray = field(default_factory=lambda: np.array([]))
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             'bets': [
                 {
@@ -176,7 +171,7 @@ class CovarianceCalculator:
     def __init__(self):
         self.custom_correlations = {}
 
-    def calculate_covariance(self, bets: List[Bet]) -> np.ndarray:
+    def calculate_covariance(self, bets: list[Bet]) -> np.ndarray:
         """
         Calculate covariance matrix for a list of bets.
 
@@ -205,9 +200,8 @@ class CovarianceCalculator:
                 cov_matrix[j, i] = cov
 
         # Ensure positive semi-definite
-        cov_matrix = self._ensure_psd(cov_matrix)
+        return self._ensure_psd(cov_matrix)
 
-        return cov_matrix
 
     def _calculate_correlation(self, bet1: Bet, bet2: Bet) -> float:
         """Calculate correlation between two bets."""
@@ -230,10 +224,7 @@ class CovarianceCalculator:
         type1, type2 = bet1.bet_type.value, bet2.bet_type.value
 
         # Game context
-        if same_game:
-            game_context = 'same_game'
-        else:
-            game_context = 'different_game'
+        game_context = 'same_game' if same_game else 'different_game'
 
         # Side context
         if same_player:
@@ -286,7 +277,7 @@ class CovarianceCalculator:
         # Reconstruct matrix
         return eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
 
-    def update_from_simulation(self, sim_results: Dict, bet1: Bet, bet2: Bet):
+    def update_from_simulation(self, sim_results: dict, bet1: Bet, bet2: Bet):
         """
         Update correlation estimate from simulation results.
 
@@ -346,11 +337,10 @@ class KellyOptimizer:
         kelly *= self.kelly_fraction
 
         # Clamp to constraints
-        kelly = max(0, min(kelly, self.max_single_bet))
+        return max(0, min(kelly, self.max_single_bet))
 
-        return kelly
 
-    def optimize_portfolio(self, bets: List[Bet], bankroll: float = 1.0) -> PortfolioResult:
+    def optimize_portfolio(self, bets: list[Bet], bankroll: float = 1.0) -> PortfolioResult:
         """
         Optimize bet sizing for a portfolio of bets.
 
@@ -374,7 +364,7 @@ class KellyOptimizer:
                 max_drawdown_risk=0,
             )
 
-        n = len(bets)
+        len(bets)
 
         # Calculate single Kelly fractions first
         for bet in bets:
@@ -448,7 +438,7 @@ class KellyOptimizer:
         self,
         edges: np.ndarray,
         cov_matrix: np.ndarray,
-        bets: List[Bet]
+        bets: list[Bet]
     ) -> np.ndarray:
         """
         Solve the portfolio optimization problem.
@@ -518,10 +508,10 @@ class KellyOptimizer:
 
     def _find_correlated_groups(
         self,
-        bets: List[Bet],
+        bets: list[Bet],
         cov_matrix: np.ndarray,
         threshold: float = 0.3
-    ) -> List[set]:
+    ) -> list[set]:
         """Find groups of highly correlated bets."""
         n = len(bets)
         groups = []
@@ -598,7 +588,7 @@ class PortfolioOptimizer:
             kelly_fraction=kelly_fraction
         )
 
-        self.pending_bets: List[Bet] = []
+        self.pending_bets: list[Bet] = []
         self._bet_counter = 0
 
     def add_bet(
@@ -617,10 +607,7 @@ class PortfolioOptimizer:
         bet_id = f"bet_{self._bet_counter}"
 
         # Calculate edge
-        if odds > 0:
-            implied = 100 / (odds + 100)
-        else:
-            implied = abs(odds) / (abs(odds) + 100)
+        implied = 100 / (odds + 100) if odds > 0 else abs(odds) / (abs(odds) + 100)
 
         edge = probability - implied
 
@@ -642,18 +629,17 @@ class PortfolioOptimizer:
 
     def optimize(self) -> PortfolioResult:
         """Optimize the current portfolio."""
-        result = self.kelly_optimizer.optimize_portfolio(
+        return self.kelly_optimizer.optimize_portfolio(
             self.pending_bets,
             bankroll=self.bankroll
         )
-        return result
 
     def clear(self):
         """Clear pending bets."""
         self.pending_bets = []
         self._bet_counter = 0
 
-    def get_bet_recommendation(self, bet: Bet) -> Dict:
+    def get_bet_recommendation(self, bet: Bet) -> dict:
         """Get recommendation for a single bet."""
         kelly = self.kelly_optimizer.single_kelly(bet)
         stake = kelly * self.bankroll
@@ -674,7 +660,7 @@ class PortfolioOptimizer:
 # INTEGRATION FUNCTIONS
 # =============================================================================
 
-def calculate_covariance(active_bets: List[Dict]) -> np.ndarray:
+def calculate_covariance(active_bets: list[dict]) -> np.ndarray:
     """
     Calculate covariance matrix for active bets.
 
@@ -710,10 +696,10 @@ def calculate_covariance(active_bets: List[Dict]) -> np.ndarray:
 
 
 def optimize_portfolio_kelly(
-    bets: List[Dict],
+    bets: list[dict],
     covariance: np.ndarray = None,
     bankroll: float = 1000
-) -> Dict:
+) -> dict:
     """
     Optimize bet sizing using Kelly criterion.
 
@@ -821,14 +807,14 @@ def demo_portfolio_optimization():
 
     result = optimizer.optimize()
 
-    print(f"\n  PORTFOLIO SUMMARY:")
+    print("\n  PORTFOLIO SUMMARY:")
     print(f"    Total Stake: ${result.total_stake:.2f} / ${bankroll:.2f} ({result.total_stake/bankroll:.1%})")
     print(f"    Expected Return: ${result.expected_return:.2f}")
     print(f"    Expected Variance: ${result.expected_variance:.4f}")
     print(f"    Sharpe Ratio: {result.sharpe_ratio:.2f}")
     print(f"    Max Drawdown Risk: ${result.max_drawdown_risk:.2f}")
 
-    print(f"\n  INDIVIDUAL BETS:")
+    print("\n  INDIVIDUAL BETS:")
     for bet in result.bets:
         if bet.final_stake > 0:
             print(f"    {bet.selection}:")
@@ -838,7 +824,7 @@ def demo_portfolio_optimization():
             print(f"    {bet.selection}: NO BET (insufficient edge)")
 
     # Show correlation analysis
-    print(f"\n3. CORRELATION ANALYSIS")
+    print("\n3. CORRELATION ANALYSIS")
     print("-" * 40)
 
     if result.correlation_matrix.size > 0:
@@ -853,7 +839,7 @@ def demo_portfolio_optimization():
                     print(f"    {positive_bets[i].selection} <-> {positive_bets[j].selection}: {corr_val:.2f}")
 
     # Single bet Kelly comparison
-    print(f"\n4. SINGLE VS PORTFOLIO KELLY")
+    print("\n4. SINGLE VS PORTFOLIO KELLY")
     print("-" * 40)
 
     total_single_kelly = 0

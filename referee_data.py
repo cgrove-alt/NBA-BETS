@@ -19,12 +19,10 @@ API Endpoints used:
 
 import json
 import time
-import os
 import requests
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
 from pathlib import Path
-import pickle
 
 # NBA.com API headers (required to avoid 403)
 NBA_HEADERS = {
@@ -98,7 +96,7 @@ class RefereeDataFetcher:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         self.session = requests.Session()
         self.session.headers.update(NBA_HEADERS)
-        self._referee_cache: Dict[str, Dict] = {}
+        self._referee_cache: dict[str, dict] = {}
         self._load_cache()
 
     def _load_cache(self) -> None:
@@ -106,7 +104,7 @@ class RefereeDataFetcher:
         cache_file = CACHE_DIR / "referee_tendencies.json"
         if cache_file.exists():
             try:
-                with open(cache_file, 'r') as f:
+                with open(cache_file) as f:
                     cache_data = json.load(f)
                     # Check if cache is expired
                     cache_time = datetime.fromisoformat(cache_data.get('timestamp', '2000-01-01'))
@@ -126,7 +124,7 @@ class RefereeDataFetcher:
         with open(cache_file, 'w') as f:
             json.dump(cache_data, f, indent=2)
 
-    def _fetch_nba_api(self, endpoint: str, params: Dict) -> Optional[Dict]:
+    def _fetch_nba_api(self, endpoint: str, params: dict) -> dict | None:
         """
         Fetch data from NBA.com/stats API.
 
@@ -145,15 +143,14 @@ class RefereeDataFetcher:
 
             if response.status_code == 200:
                 return response.json()
-            else:
-                print(f"[REFEREE] API error {response.status_code}: {endpoint}")
-                return None
+            print(f"[REFEREE] API error {response.status_code}: {endpoint}")
+            return None
 
         except requests.RequestException as e:
             print(f"[REFEREE] Request failed: {e}")
             return None
 
-    def fetch_game_referees(self, game_id: str) -> List[str]:
+    def fetch_game_referees(self, game_id: str) -> list[str]:
         """
         Fetch referee names for a specific game.
 
@@ -169,7 +166,7 @@ class RefereeDataFetcher:
 
         if cache_file.exists():
             try:
-                with open(cache_file, 'r') as f:
+                with open(cache_file) as f:
                     data = json.load(f)
                     return data.get('referees', [])
             except json.JSONDecodeError:
@@ -206,7 +203,7 @@ class RefereeDataFetcher:
 
         return []
 
-    def get_referee_tendencies(self, referee_name: str) -> Dict[str, float]:
+    def get_referee_tendencies(self, referee_name: str) -> dict[str, float]:
         """
         Get historical tendencies for a referee.
 
@@ -243,7 +240,7 @@ class RefereeDataFetcher:
             "is_unknown": True,
         }
 
-    def calculate_crew_features(self, referee_names: List[str]) -> Dict[str, float]:
+    def calculate_crew_features(self, referee_names: list[str]) -> dict[str, float]:
         """
         Calculate combined features for a referee crew (usually 3 refs).
 
@@ -278,10 +275,10 @@ class RefereeDataFetcher:
             weights = [t.get('games', 1) / total_games for t in tendencies]
 
         # Weighted averages
-        home_win_pct = sum(t.get('home_win_pct', 0.515) * w for t, w in zip(tendencies, weights))
-        avg_fouls = sum(t.get('avg_fouls', 40.0) * w for t, w in zip(tendencies, weights))
-        avg_total = sum(t.get('avg_total', 214.5) * w for t, w in zip(tendencies, weights))
-        avg_experience = sum(t.get('experience', 0) * w for t, w in zip(tendencies, weights))
+        home_win_pct = sum(t.get('home_win_pct', 0.515) * w for t, w in zip(tendencies, weights, strict=False))
+        avg_fouls = sum(t.get('avg_fouls', 40.0) * w for t, w in zip(tendencies, weights, strict=False))
+        avg_total = sum(t.get('avg_total', 214.5) * w for t, w in zip(tendencies, weights, strict=False))
+        avg_experience = sum(t.get('experience', 0) * w for t, w in zip(tendencies, weights, strict=False))
 
         # Count known referees
         crew_known = sum(1 for t in tendencies if not t.get('is_unknown', False))
@@ -302,7 +299,7 @@ class RefereeDataFetcher:
             "ref_crew_known": crew_known,
         }
 
-    def get_game_referee_features(self, game_id: str) -> Dict[str, float]:
+    def get_game_referee_features(self, game_id: str) -> dict[str, float]:
         """
         Get all referee-based features for a game.
 
@@ -325,7 +322,7 @@ class RefereeDataFetcher:
 
 
 # Global instance for easy access
-_fetcher: Optional[RefereeDataFetcher] = None
+_fetcher: RefereeDataFetcher | None = None
 
 
 def get_referee_fetcher() -> RefereeDataFetcher:
@@ -336,7 +333,7 @@ def get_referee_fetcher() -> RefereeDataFetcher:
     return _fetcher
 
 
-def get_referee_features(game_id: str) -> Dict[str, float]:
+def get_referee_features(game_id: str) -> dict[str, float]:
     """
     Convenience function to get referee features for a game.
 
@@ -358,7 +355,7 @@ def get_referee_features(game_id: str) -> Dict[str, float]:
     return fetcher.get_game_referee_features(game_id)
 
 
-def get_referee_features_from_names(referee_names: List[str]) -> Dict[str, float]:
+def get_referee_features_from_names(referee_names: list[str]) -> dict[str, float]:
     """
     Get referee features when you already have referee names.
 
@@ -374,10 +371,10 @@ def get_referee_features_from_names(referee_names: List[str]) -> Dict[str, float
 
 # For integration with existing training pipeline
 def add_referee_features_to_game(
-    game_features: Dict[str, Any],
-    game_id: Optional[str] = None,
-    referee_names: Optional[List[str]] = None
-) -> Dict[str, Any]:
+    game_features: dict[str, Any],
+    game_id: str | None = None,
+    referee_names: list[str] | None = None
+) -> dict[str, Any]:
     """
     Add referee features to an existing game feature dict.
 

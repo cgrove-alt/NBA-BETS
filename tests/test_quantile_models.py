@@ -336,7 +336,7 @@ class TestQuantilePropModel(unittest.TestCase):
             self.assertFalse(model.is_fitted)
 
             # Should train without errors
-            metrics = model.train(
+            model.train(
                 self.X_train,
                 self.y_train,
                 test_size=0.2,

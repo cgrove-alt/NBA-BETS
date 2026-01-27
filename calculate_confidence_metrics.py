@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 
 def load_phase2_results():
     """Load Phase 2 backtest results."""
-    with open('backtest_results/phase2_backtest.json', 'r') as f:
+    with open('backtest_results/phase2_backtest.json') as f:
         return json.load(f)
 
 
@@ -174,7 +174,7 @@ def plot_calibration_curve(calibration_data, output_file='backtest_results/calib
     curve = calibration_data['calibration_curve']
 
     confidences = [c['avg_confidence'] / 100 for c in curve]
-    expected = [c['expected_accuracy'] for c in curve]
+    [c['expected_accuracy'] for c in curve]
     actual = [c['actual_accuracy'] for c in curve]
 
     plt.figure(figsize=(10, 8))
@@ -197,7 +197,7 @@ def plot_calibration_curve(calibration_data, output_file='backtest_results/calib
     plt.ylim(-0.05, 1.05)
 
     # Add annotations
-    for conf, acc, count in zip(confidences, actual, counts):
+    for conf, acc, count in zip(confidences, actual, counts, strict=False):
         if count > 100:
             plt.annotate(f'n={count}', (conf, acc), xytext=(5, 5),
                         textcoords='offset points', fontsize=8, alpha=0.7)
@@ -235,8 +235,8 @@ def plot_confidence_vs_error(predictions, output_file='backtest_results/confiden
 
     # Plot by tier
     for tier in ['elite', 'strong', 'moderate', 'weak', 'avoid']:
-        tier_conf = [c for c, t in zip(confidences, tiers) if t == tier]
-        tier_err = [e for e, t in zip(errors, tiers) if t == tier]
+        tier_conf = [c for c, t in zip(confidences, tiers, strict=False) if t == tier]
+        tier_err = [e for e, t in zip(errors, tiers, strict=False) if t == tier]
 
         if tier_conf:
             plt.scatter(tier_conf, tier_err, alpha=0.3, s=10,
@@ -258,7 +258,7 @@ def plot_confidence_vs_error(predictions, output_file='backtest_results/confiden
     corr, _ = pearsonr(confidences, [-e for e in errors])
     plt.text(0.02, 0.98, f'Correlation: {corr:.4f}',
              transform=plt.gca().transAxes, fontsize=12,
-             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+             verticalalignment='top', bbox={'boxstyle': 'round', 'facecolor': 'wheat', 'alpha': 0.5})
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
@@ -310,13 +310,13 @@ def main():
     print(f'\nExpected Calibration Error (ECE): {calibration["expected_calibration_error"]:.4f}')
     print(f'Total predictions analyzed: {calibration["total_predictions"]}')
     print('\nCalibration by confidence bin:')
-    print(f'  {\"Bin\":12s} {\"Count\":>6s} {\"Avg Conf\":>9s} {\"Avg Err\":>9s} {\"Expected\":>9s} {\"Actual\":>9s} {\"Gap\":>9s}')
-    print(f'  {\"-\"*12} {\"------\"} {\"--------\"} {\"--------\"} {\"--------\"} {\"--------\"} {\"--------\"}')
+    print(f'  {"Bin":12s} {"Count":>6s} {"Avg Conf":>9s} {"Avg Err":>9s} {"Expected":>9s} {"Actual":>9s} {"Gap":>9s}')
+    print(f'  {"-"*12} {"------"} {"--------"} {"--------"} {"--------"} {"--------"} {"--------"}')
 
     for c in calibration['calibration_curve']:
-        print(f'  {c[\"confidence_range\"]:12s} {c[\"count\"]:6d} {c[\"avg_confidence\"]:9.2f} '
-              f'{c[\"avg_error\"]:9.3f} {c[\"expected_accuracy\"]:9.3f} '
-              f'{c[\"actual_accuracy\"]:9.3f} {c[\"calibration_gap\"]:+9.3f}')
+        print(f'  {c['confidence_range']:12s} {c['count']:6d} {c['avg_confidence']:9.2f} '
+              f'{c['avg_error']:9.3f} {c['expected_accuracy']:9.3f} '
+              f'{c['actual_accuracy']:9.3f} {c['calibration_gap']:+9.3f}')
 
     # 3. Tier Analysis
     print('\n' + '='*70)
@@ -324,15 +324,15 @@ def main():
     print('='*70)
 
     tier_stats = analyze_confidence_by_tier(predictions)
-    print(f'\n{\"Tier\":10s} {\"Count\":>7s} {\"Avg Conf\":>9s} {\"Std Conf\":>9s} {\"Avg Err\":>9s} {\"Med Err\":>9s} {\"90th %\":>9s}')
-    print(f'{\"-\"*10} {\"-------\"} {\"--------\"} {\"--------\"} {\"--------\"} {\"--------\"} {\"--------\"}')
+    print(f'\n{"Tier":10s} {"Count":>7s} {"Avg Conf":>9s} {"Std Conf":>9s} {"Avg Err":>9s} {"Med Err":>9s} {"90th %":>9s}')
+    print(f'{"-"*10} {"-------"} {"--------"} {"--------"} {"--------"} {"--------"} {"--------"}')
 
     for tier in ['elite', 'strong', 'moderate', 'weak', 'avoid']:
         if tier in tier_stats:
             s = tier_stats[tier]
-            print(f'{tier:10s} {s[\"count\"]:7d} {s[\"avg_confidence\"]:9.2f} '
-                  f'{s[\"std_confidence\"]:9.2f} {s[\"avg_error\"]:9.3f} '
-                  f'{s[\"median_error\"]:9.3f} {s[\"90th_pct_error\"]:9.3f}')
+            print(f'{tier:10s} {s['count']:7d} {s['avg_confidence']:9.2f} '
+                  f'{s['std_confidence']:9.2f} {s['avg_error']:9.3f} '
+                  f'{s['median_error']:9.3f} {s['90th_pct_error']:9.3f}')
 
     # Generate plots
     print('\n' + '='*70)
@@ -357,13 +357,13 @@ def main():
     # Add recommendations
     if corr_result and corr_result['correlation'] < 0.5:
         output['summary']['recommendations'].append(
-            f'Confidence correlation ({corr_result[\"correlation\"]}) below target (0.5). '
+            f'Confidence correlation ({corr_result['correlation']}) below target (0.5). '
             'Consider recalibrating confidence thresholds or using different confidence metric.'
         )
 
     if calibration['expected_calibration_error'] > 0.1:
         output['summary']['recommendations'].append(
-            f'ECE ({calibration[\"expected_calibration_error\"]:.4f}) indicates poor calibration. '
+            f'ECE ({calibration['expected_calibration_error']:.4f}) indicates poor calibration. '
             'Model is over/under-confident. Consider calibration methods like Platt scaling or isotonic regression.'
         )
 
@@ -380,10 +380,10 @@ def main():
 
     if corr_result:
         status = '✅ MET' if corr_result['status'] == 'MET' else '❌ NOT MET'
-        print(f'\nConfidence Correlation: {corr_result[\"correlation\"]} {status}')
+        print(f'\nConfidence Correlation: {corr_result['correlation']} {status}')
 
     cal_status = '✅ Good' if calibration['expected_calibration_error'] < 0.1 else '❌ Poor'
-    print(f'Calibration (ECE): {calibration["expected_calibration_error"]:.4f} {cal_status}')
+    print(f'Calibration (ECE): {calibration['expected_calibration_error']:.4f} {cal_status}')
 
     if output['summary']['recommendations']:
         print('\nRecommendations:')

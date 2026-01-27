@@ -4,10 +4,8 @@ Bet Tracker Page
 Track betting history, active bets, and P&L.
 """
 
-from dash import html, dcc, register_page, dash_table, callback, Input, Output, State
+from dash import html, dcc, register_page, dash_table, callback, Input, Output
 import dash_bootstrap_components as dbc
-from datetime import datetime, timedelta
-import plotly.graph_objects as go
 
 # Register this page
 register_page(__name__, path="/tracker", name="Bet Tracker")

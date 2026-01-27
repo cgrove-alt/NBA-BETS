@@ -76,7 +76,6 @@ def test_injury_lookup_logic():
         player_id = 12345
         player_name = "Test Player"
 
-        uncertainty_flag = None
         if player_id in injury_lookup:
             status = injury_lookup[player_id]
             if status in [InjuryStatus.OUT, InjuryStatus.DOUBTFUL]:
@@ -96,7 +95,7 @@ def test_injury_lookup_logic():
         else:
             # This line would fail with NameError if logger not defined
             logger.debug(f"Player {player_name} (ID: {player_id}) not in injury lookup - assuming healthy")
-            print(f"    ✓ Logger.debug() executed successfully for healthy player")
+            print("    ✓ Logger.debug() executed successfully for healthy player")
 
         print("  ✓ Injury lookup code path works correctly")
         return True
@@ -140,14 +139,13 @@ def test_injury_integration_workflow():
 
         for player_id in test_player_ids:
             player_name = f"Player_{player_id}"
-            uncertainty_flag = None
 
             if player_id in injury_lookup:
                 status = injury_lookup[player_id]
                 if status in [InjuryStatus.OUT, InjuryStatus.DOUBTFUL]:
                     continue  # Skip
-                elif status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
-                    uncertainty_flag = "HIGH_UNCERTAINTY"
+                if status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
+                    pass
             else:
                 # The critical code path that had the bug
                 logger.debug(f"Player {player_name} (ID: {player_id}) not in injury lookup - assuming healthy")
@@ -193,11 +191,10 @@ def main():
         print("  The code is ready for production deployment")
         print("=" * 70)
         return 0
-    else:
-        print(f"\n✗ {total - passed} TEST(S) FAILED")
-        print("  Fix the issues before deploying to production")
-        print("=" * 70)
-        return 1
+    print(f"\n✗ {total - passed} TEST(S) FAILED")
+    print("  Fix the issues before deploying to production")
+    print("=" * 70)
+    return 1
 
 
 if __name__ == "__main__":

@@ -3,8 +3,7 @@ Pydantic schemas for NBA Props API request/response validation.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from typing import Any
 
 
 # ============== TEAM SCHEMAS ==============
@@ -12,8 +11,8 @@ from datetime import datetime
 class Team(BaseModel):
     id: int
     abbreviation: str
-    city: Optional[str] = None
-    name: Optional[str] = None
+    city: str | None = None
+    name: str | None = None
 
 
 # ============== GAME SCHEMAS ==============
@@ -22,12 +21,12 @@ class Game(BaseModel):
     game_id: str
     home_team: Team
     visitor_team: Team
-    game_time: Optional[str] = None
-    status: Optional[str] = None
+    game_time: str | None = None
+    status: str | None = None
 
 
 class GamesResponse(BaseModel):
-    games: List[Game]
+    games: list[Game]
     count: int
 
 
@@ -39,21 +38,21 @@ class PropPrediction(BaseModel):
     edge: float
     edge_pct: float
     pick: str  # "OVER", "UNDER", or "-"
-    line: Optional[float] = None
-    implied_probability: Optional[float] = None
+    line: float | None = None
+    implied_probability: float | None = None
 
 
 class PlayerProp(BaseModel):
     player_name: str
     player_id: int
-    team: Optional[str] = None
-    position: Optional[str] = None
-    avg_minutes: Optional[float] = None
-    Points: Optional[PropPrediction] = None
-    Rebounds: Optional[PropPrediction] = None
-    Assists: Optional[PropPrediction] = None
-    three_pm: Optional[PropPrediction] = Field(None, alias="3PM")
-    PRA: Optional[PropPrediction] = None
+    team: str | None = None
+    position: str | None = None
+    avg_minutes: float | None = None
+    Points: PropPrediction | None = None
+    Rebounds: PropPrediction | None = None
+    Assists: PropPrediction | None = None
+    three_pm: PropPrediction | None = Field(None, alias="3PM")
+    PRA: PropPrediction | None = None
     is_best_bet: bool = False
 
     class Config:
@@ -63,17 +62,17 @@ class PlayerProp(BaseModel):
 class PropsResponse(BaseModel):
     game_id: str
     status: str  # "pending", "ready", "error", "not_started", "locked"
-    error: Optional[str] = None  # Error message for error/locked status
-    home_team: Optional[str] = None
-    away_team: Optional[str] = None
-    home_props: List[PlayerProp] = []
-    away_props: List[PlayerProp] = []
-    all_props: List[PlayerProp] = []
+    error: str | None = None  # Error message for error/locked status
+    home_team: str | None = None
+    away_team: str | None = None
+    home_props: list[PlayerProp] = []
+    away_props: list[PlayerProp] = []
+    all_props: list[PlayerProp] = []
     count: int = 0
 
 
 class StartPropsRequest(BaseModel):
-    prop_types: Optional[List[str]] = None  # Default: ["Points", "Rebounds", "Assists", "3PM", "PRA"]
+    prop_types: list[str] | None = None  # Default: ["Points", "Rebounds", "Assists", "3PM", "PRA"]
 
 
 # ============== ANALYSIS SCHEMAS ==============
@@ -94,9 +93,9 @@ class SpreadPrediction(BaseModel):
 class AnalysisStatus(BaseModel):
     game_id: str
     status: str  # "not_started", "pending", "ready", "error"
-    moneyline: Optional[MoneylinePrediction] = None
-    spread: Optional[SpreadPrediction] = None
-    error: Optional[str] = None
+    moneyline: MoneylinePrediction | None = None
+    spread: SpreadPrediction | None = None
+    error: str | None = None
 
 
 class GameAnalysis(BaseModel):
@@ -105,12 +104,12 @@ class GameAnalysis(BaseModel):
     home_abbrev: str
     away_team: str
     away_abbrev: str
-    game_time: Optional[str] = None
-    status: Optional[str] = None
-    moneyline_prediction: Optional[MoneylinePrediction] = None
-    spread_prediction: Optional[SpreadPrediction] = None
-    market_odds: Optional[Dict[str, Any]] = None
-    recommendations: List[Dict[str, Any]] = []
+    game_time: str | None = None
+    status: str | None = None
+    moneyline_prediction: MoneylinePrediction | None = None
+    spread_prediction: SpreadPrediction | None = None
+    market_odds: dict[str, Any] | None = None
+    recommendations: list[dict[str, Any]] = []
 
 
 # ============== ODDS SCHEMAS ==============
@@ -134,16 +133,16 @@ class TotalOdds(BaseModel):
 
 
 class GameOdds(BaseModel):
-    game_id: Optional[str] = None
-    moneyline: Optional[MoneylineOdds] = None
-    spread: Optional[SpreadOdds] = None
-    total: Optional[TotalOdds] = None
-    sportsbook: Optional[str] = None
-    last_updated: Optional[str] = None
+    game_id: str | None = None
+    moneyline: MoneylineOdds | None = None
+    spread: SpreadOdds | None = None
+    total: TotalOdds | None = None
+    sportsbook: str | None = None
+    last_updated: str | None = None
 
 
 class OddsResponse(BaseModel):
-    odds: Dict[str, GameOdds]
+    odds: dict[str, GameOdds]
 
 
 # ============== BEST BETS SCHEMA ==============
@@ -163,9 +162,9 @@ class BestBet(BaseModel):
 
 
 class BestBetsResponse(BaseModel):
-    best_bets: List[BestBet]
+    best_bets: list[BestBet]
     count: int
-    filters: Dict[str, Any]
+    filters: dict[str, Any]
 
 
 # ============== GAME RESULTS SCHEMAS ==============
@@ -177,9 +176,9 @@ class PlayerResult(BaseModel):
     prop_type: str
     predicted: float
     actual: float
-    line: Optional[float] = None
-    pick: Optional[str] = None
-    hit: Optional[bool] = None  # True = win, False = loss, None = no pick
+    line: float | None = None
+    pick: str | None = None
+    hit: bool | None = None  # True = win, False = loss, None = no pick
     difference: float  # actual - predicted
 
 
@@ -194,8 +193,8 @@ class MoneylineResult(BaseModel):
     predicted_winner: str
     actual_winner: str
     correct: bool
-    home_win_probability: Optional[float] = None
-    away_win_probability: Optional[float] = None
+    home_win_probability: float | None = None
+    away_win_probability: float | None = None
 
 
 class ResultsSummary(BaseModel):
@@ -208,11 +207,11 @@ class ResultsSummary(BaseModel):
 class GameResults(BaseModel):
     game_id: str
     status: str  # "completed", "not_completed", "error"
-    message: Optional[str] = None
-    final_score: Optional[FinalScore] = None
-    moneyline_result: Optional[MoneylineResult] = None
-    player_results: List[PlayerResult] = []
-    summary: Optional[ResultsSummary] = None
+    message: str | None = None
+    final_score: FinalScore | None = None
+    moneyline_result: MoneylineResult | None = None
+    player_results: list[PlayerResult] = []
+    summary: ResultsSummary | None = None
 
 
 # ============== HEALTH CHECK ==============
@@ -231,24 +230,24 @@ class DailyPrediction(BaseModel):
     team: str
     prop_type: str
     prediction: float
-    pred_low: Optional[float] = None
-    pred_median: Optional[float] = None
-    pred_high: Optional[float] = None
-    line: Optional[float] = None
-    confidence_score: Optional[float] = None
-    edge_quality_tier: Optional[str] = None
-    suggested_bet_size: Optional[float] = None
-    bet_recommendation: Optional[str] = None
-    uncertainty_flag: Optional[str] = None
-    pick: Optional[str] = None
-    edge: Optional[float] = None
+    pred_low: float | None = None
+    pred_median: float | None = None
+    pred_high: float | None = None
+    line: float | None = None
+    confidence_score: float | None = None
+    edge_quality_tier: str | None = None
+    suggested_bet_size: float | None = None
+    bet_recommendation: str | None = None
+    uncertainty_flag: str | None = None
+    pick: str | None = None
+    edge: float | None = None
 
 
 class DailyPredictionsResponse(BaseModel):
     date: str
-    predictions: List[DailyPrediction]
+    predictions: list[DailyPrediction]
     count: int
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
 
 # ============== INJURY REPORT SCHEMAS ==============
@@ -259,13 +258,13 @@ class InjuryReport(BaseModel):
     team_id: int
     team_abbrev: str
     status: str  # OUT, DOUBTFUL, QUESTIONABLE, GTD
-    injury_type: Optional[str] = None
+    injury_type: str | None = None
     detected_at: str
 
 
 class InjuryReportResponse(BaseModel):
     date: str
-    injuries: List[InjuryReport]
+    injuries: list[InjuryReport]
     count: int
     last_updated: str
 
@@ -276,17 +275,17 @@ class OddsSnapshot(BaseModel):
     timestamp: str
     book_name: str
     market: str  # moneyline, spread, total, props
-    home_odds: Optional[int] = None
-    away_odds: Optional[int] = None
-    home_line: Optional[float] = None
-    away_line: Optional[float] = None
-    total: Optional[float] = None
+    home_odds: int | None = None
+    away_odds: int | None = None
+    home_line: float | None = None
+    away_line: float | None = None
+    total: float | None = None
 
 
 class LineMovement(BaseModel):
-    opening_line: Optional[float] = None
-    closing_line: Optional[float] = None
-    movement: Optional[float] = None  # closing - opening
+    opening_line: float | None = None
+    closing_line: float | None = None
+    movement: float | None = None  # closing - opening
     rlm_detected: bool = False
     steam_move_detected: bool = False
 
@@ -294,18 +293,18 @@ class LineMovement(BaseModel):
 class LineMovementResponse(BaseModel):
     game_id: str
     market: str
-    odds_history: List[OddsSnapshot]
-    movement_analysis: Optional[LineMovement] = None
+    odds_history: list[OddsSnapshot]
+    movement_analysis: LineMovement | None = None
     count: int
 
 
 # ============== BACKTEST RESULTS SCHEMAS ==============
 
 class BacktestMetrics(BaseModel):
-    rmse: Optional[float] = None
-    mae: Optional[float] = None
-    r2: Optional[float] = None
-    bias: Optional[float] = None
+    rmse: float | None = None
+    mae: float | None = None
+    r2: float | None = None
+    bias: float | None = None
 
 
 class BacktestBettingMetrics(BaseModel):
@@ -317,8 +316,8 @@ class BacktestBettingMetrics(BaseModel):
     roi: float
     total_wagered: float
     total_profit: float
-    sharpe_ratio: Optional[float] = None
-    max_drawdown: Optional[float] = None
+    sharpe_ratio: float | None = None
+    max_drawdown: float | None = None
 
 
 class BacktestByProp(BaseModel):
@@ -333,15 +332,15 @@ class BacktestResults(BaseModel):
     games_analyzed: int
     total_predictions: int
     overall_metrics: BacktestMetrics
-    betting_metrics: Optional[BacktestBettingMetrics] = None
-    by_prop_type: Optional[List[BacktestByProp]] = None
-    elite_strong_metrics: Optional[BacktestMetrics] = None
-    confidence_correlation: Optional[float] = None
-    phase: Optional[str] = None
+    betting_metrics: BacktestBettingMetrics | None = None
+    by_prop_type: list[BacktestByProp] | None = None
+    elite_strong_metrics: BacktestMetrics | None = None
+    confidence_correlation: float | None = None
+    phase: str | None = None
     timestamp: str
 
 
 class LatestBacktestResponse(BaseModel):
-    latest_backtest: Optional[BacktestResults] = None
-    available_backtests: List[str]
+    latest_backtest: BacktestResults | None = None
+    available_backtests: list[str]
     count: int

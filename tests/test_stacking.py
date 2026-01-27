@@ -568,7 +568,7 @@ class TestIntegration(unittest.TestCase):
         rmse = np.sqrt(np.mean((y_test - predictions) ** 2))
         mae = np.mean(np.abs(y_test - predictions))
 
-        print(f"\nReal-world Scenario Results:")
+        print("\nReal-world Scenario Results:")
         print(f"  RMSE: {rmse:.4f}")
         print(f"  MAE: {mae:.4f}")
         print(f"  Avg Confidence: {np.mean(confidence):.2f}")

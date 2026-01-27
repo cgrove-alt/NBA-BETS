@@ -16,10 +16,8 @@ Requirements: FR-4 (P0 Critical)
 import os
 import sqlite3
 import requests
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
 from pathlib import Path
-import json
 
 
 class InjuryStatus:
@@ -52,8 +50,8 @@ class InjuryTrackerV3:
 
         # Cache settings
         self.cache_ttl = 15 * 60  # 15 minutes in seconds
-        self._cache: Dict[str, Dict] = {}
-        self._cache_timestamp: Optional[datetime] = None
+        self._cache: dict[str, dict] = {}
+        self._cache_timestamp: datetime | None = None
 
     def _init_database(self):
         """Initialize SQLite database for injury tracking."""
@@ -97,7 +95,7 @@ class InjuryTrackerV3:
         age = (datetime.now() - self._cache_timestamp).total_seconds()
         return age < self.cache_ttl
 
-    def fetch_rotowire_injuries(self) -> Dict[str, Dict]:
+    def fetch_rotowire_injuries(self) -> dict[str, dict]:
         """
         Fetch injury data from RotoWire API (primary source).
 
@@ -138,7 +136,7 @@ class InjuryTrackerV3:
             print(f"RotoWire API error: {e}")
             return {}
 
-    def fetch_nba_com_injuries(self) -> Dict[str, Dict]:
+    def fetch_nba_com_injuries(self) -> dict[str, dict]:
         """
         Fetch injury data from NBA.com (fallback source).
 
@@ -160,18 +158,17 @@ class InjuryTrackerV3:
 
             # Parse NBA.com response (structure depends on actual API)
             # This is a placeholder - actual implementation would parse HTML or JSON
-            injuries = {}
+            return {}
 
             # TODO: Implement actual NBA.com parsing
             # For now, return empty dict to indicate fallback is not implemented
 
-            return injuries
 
         except requests.RequestException as e:
             print(f"NBA.com fetch error: {e}")
             return {}
 
-    def get_injuries(self, force_refresh: bool = False) -> Dict[str, Dict]:
+    def get_injuries(self, force_refresh: bool = False) -> dict[str, dict]:
         """
         Get current injury data from best available source.
 
@@ -201,7 +198,7 @@ class InjuryTrackerV3:
 
         return injuries
 
-    def _save_to_database(self, injuries: Dict[str, Dict]):
+    def _save_to_database(self, injuries: dict[str, dict]):
         """Save injury data to SQLite for historical analysis."""
         if not injuries:
             return
@@ -235,7 +232,7 @@ class InjuryTrackerV3:
         conn.commit()
         conn.close()
 
-    def is_player_available(self, player_id: int, player_name: str = None) -> Tuple[bool, str, str]:
+    def is_player_available(self, player_id: int, player_name: str = None) -> tuple[bool, str, str]:
         """
         Check if a player is available to play.
 
@@ -261,21 +258,20 @@ class InjuryTrackerV3:
             # Determine availability
             if status == InjuryStatus.OUT:
                 return False, status, "LOW"  # Definitely out
-            elif status == InjuryStatus.DOUBTFUL:
+            if status == InjuryStatus.DOUBTFUL:
                 return False, status, "MEDIUM"  # Likely out
-            elif status == InjuryStatus.GTD:
+            if status == InjuryStatus.GTD:
                 return True, status, "HIGH"  # Uncertain
-            elif status == InjuryStatus.QUESTIONABLE:
+            if status == InjuryStatus.QUESTIONABLE:
                 return True, status, "MEDIUM"  # Probably plays
-            elif status == InjuryStatus.PROBABLE:
+            if status == InjuryStatus.PROBABLE:
                 return True, status, "LOW"  # Likely plays
-            else:
-                return True, InjuryStatus.ACTIVE, "LOW"
+            return True, InjuryStatus.ACTIVE, "LOW"
 
         # If not in injury list, assume available
         return True, InjuryStatus.ACTIVE, "LOW"
 
-    def get_team_injuries(self, team: str, game_date: str = None) -> List[Dict]:
+    def get_team_injuries(self, team: str, game_date: str = None) -> list[dict]:
         """
         Get all injuries for a specific team.
 
@@ -298,7 +294,7 @@ class InjuryTrackerV3:
 
         return team_injuries
 
-    def get_historical_availability(self, player_id: int, start_date: str, end_date: str) -> List[Dict]:
+    def get_historical_availability(self, player_id: int, start_date: str, end_date: str) -> list[dict]:
         """
         Get historical injury data for a player.
 
@@ -334,7 +330,7 @@ class InjuryTrackerV3:
         conn.close()
         return records
 
-    def filter_predictions_by_availability(self, predictions: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    def filter_predictions_by_availability(self, predictions: list[dict]) -> tuple[list[dict], list[dict]]:
         """
         Filter predictions to remove unavailable players and flag uncertain ones.
 
@@ -407,7 +403,7 @@ if __name__ == "__main__":
 
     if injuries:
         print("\nSample injuries:")
-        for i, (player_id, injury) in enumerate(list(injuries.items())[:5]):
+        for _i, (player_id, injury) in enumerate(list(injuries.items())[:5]):
             print(f"  {injury['player_name']} ({injury['team']}): {injury['status']} - {injury.get('injury_type', 'N/A')}")
 
     # Test player availability check

@@ -16,28 +16,22 @@ Usage:
     python3 train_enhanced_v2.py
 """
 
-import os
-import sys
 import json
-import pickle
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split, TimeSeriesSplit
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 warnings.filterwarnings('ignore')
 
 # Import our new modules
 from advanced_stats_v2 import FourFactorsCalculator, StyleClashCalculator
-from injury_impact_v2 import TeamInjuryManager, PlayerUsageTracker
-from stacked_model_v2 import StackedPropModel, QuantileStackedModel
+from injury_impact_v2 import TeamInjuryManager
+from stacked_model_v2 import StackedPropModel
 
 # Model save directory
 MODEL_DIR = Path("models")
@@ -104,7 +98,7 @@ class EnhancedFeatureGenerator:
                 if home_id and home_score > 0:
                     self.four_factors.add_game(
                         home_id, game_date,
-                        {'pts': home_score, 'fga': 85, 'fgm': 35, 'fg3m': 12, 'fta': 20, 'fta': 20, 'orb': 10, 'tov': 13},
+                        {'pts': home_score, 'fga': 85, 'fgm': 35, 'fg3m': 12, 'fta': 20, 'orb': 10, 'tov': 13},
                         opponent_id=away_id
                     )
                 if away_id and away_score > 0:
@@ -123,7 +117,7 @@ class EnhancedFeatureGenerator:
                     batch_data = json.load(f)
 
                 if isinstance(batch_data, dict):
-                    for game_id_str, game_stats in batch_data.items():
+                    for _game_id_str, game_stats in batch_data.items():
                         if isinstance(game_stats, list):
                             for stat in game_stats:
                                 player = stat.get('player', {})
@@ -168,7 +162,7 @@ class EnhancedFeatureGenerator:
         team_id: int = None,
         opponent_id: int = None,
         is_home: bool = True
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Generate all features for a player prediction.
 
@@ -330,7 +324,7 @@ class EnhancedFeatureGenerator:
             if len(games) < 5:
                 continue
 
-            for i, (game_date, stat) in enumerate(games):
+            for _i, (game_date, stat) in enumerate(games):
                 if game_date < start_date:
                     continue
                 if end_date and game_date > end_date:
@@ -456,7 +450,7 @@ def train_enhanced_models():
         mae = mean_absolute_error(y_test, y_pred)
         r2 = r2_score(y_test, y_pred)
 
-        print(f"\n  Test Set Metrics:")
+        print("\n  Test Set Metrics:")
         print(f"    RMSE: {rmse:.3f}")
         print(f"    MAE:  {mae:.3f}")
         print(f"    R²:   {r2:.3f}")
@@ -471,7 +465,7 @@ def train_enhanced_models():
         # Print feature importance
         importance = model.get_feature_importance()
         if len(importance) > 0:
-            print(f"\n  Top 10 Features:")
+            print("\n  Top 10 Features:")
             for i, (feat, imp) in enumerate(importance.head(10).items()):
                 print(f"    {i+1}. {feat}: {imp:.4f}")
 

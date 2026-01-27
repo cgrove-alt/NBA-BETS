@@ -10,7 +10,7 @@ import pickle
 import queue
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any
 from dataclasses import dataclass
 import threading
 import traceback
@@ -105,14 +105,14 @@ def get_position_group(position: str) -> str:
     # Handle edge cases
     if 'G' in position:
         return 'G'
-    elif 'F' in position:
+    if 'F' in position:
         return 'F'
-    elif 'C' in position:
+    if 'C' in position:
         return 'C'
     return 'G'  # Default
 
 
-def encode_position(position: str) -> Dict[str, int]:
+def encode_position(position: str) -> dict[str, int]:
     """Encode position as binary features for ML model."""
     pos_group = get_position_group(position)
     return {
@@ -122,7 +122,7 @@ def encode_position(position: str) -> Dict[str, int]:
     }
 
 
-def get_role_features(pts_avg: float, min_avg: float, ast_avg: float, fga: float, is_guard: int) -> Dict[str, int]:
+def get_role_features(pts_avg: float, min_avg: float, ast_avg: float, fga: float, is_guard: int) -> dict[str, int]:
     """Calculate player role features based on performance metrics."""
     return {
         'is_starter': 1 if min_avg >= 25 else 0,
@@ -179,7 +179,7 @@ NBA_ARENA_DATA = {
 TEAM_ABBREV_MAP = {'NJN': 'BKN', 'SEA': 'OKC', 'VAN': 'MEM', 'NOH': 'NOP', 'NOK': 'NOP'}
 
 
-def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
     """Calculate great-circle distance between two points in miles."""
     from math import radians, cos, sin, asin, sqrt
     lat1, lon1 = radians(coord1[0]), radians(coord1[1])
@@ -189,7 +189,7 @@ def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float])
     return 2 * 3956 * asin(sqrt(a))  # 3956 = Earth's radius in miles
 
 
-def calc_travel_fatigue(last_team: str, current_team: str, days_rest: int) -> Dict[str, float]:
+def calc_travel_fatigue(last_team: str, current_team: str, days_rest: int) -> dict[str, float]:
     """
     TIER 2.1: Calculate travel-related fatigue features for predictions.
 
@@ -241,7 +241,7 @@ def calc_travel_fatigue(last_team: str, current_team: str, days_rest: int) -> Di
     return result
 
 
-def get_position_factors(is_guard: int, is_forward: int, is_center: int) -> Dict[str, float]:
+def get_position_factors(is_guard: int, is_forward: int, is_center: int) -> dict[str, float]:
     """Get position-specific factor adjustments."""
     # Guards: Higher assists, lower rebounds
     # Forwards: Balanced
@@ -317,7 +317,7 @@ def calc_rebound_rate(reb_avg: float, min_avg: float) -> float:
 
 def calc_three_pm_specialized_features(fg3a_avg: float, fg3m_avg: float, fg3a_std: float,
                                         fg3m_std: float, fg3_pct: float, min_avg: float,
-                                        games_played: int) -> Dict[str, float]:
+                                        games_played: int) -> dict[str, float]:
     """
     Calculate specialized features for 3PM prediction.
 
@@ -365,7 +365,7 @@ def calc_three_pm_specialized_features(fg3a_avg: float, fg3m_avg: float, fg3a_st
     }
 
 
-def get_position_group_from_features(features: Dict) -> str:
+def get_position_group_from_features(features: dict) -> str:
     """
     TIER 1.4: Determine position group from features for position-aware model routing.
 
@@ -377,10 +377,9 @@ def get_position_group_from_features(features: Dict) -> str:
     """
     if features.get('is_center', 0) == 1:
         return 'centers'
-    elif features.get('is_forward', 0) == 1:
+    if features.get('is_forward', 0) == 1:
         return 'forwards'
-    else:
-        return 'guards'  # Default to guards
+    return 'guards'  # Default to guards
 
 
 # Import calibration functions for probability adjustment
@@ -422,7 +421,7 @@ class SpreadEnsembleWrapper:
         self.feature_names = feature_names or []
         self.training_metrics = metrics or {}
 
-    def predict(self, features: Dict) -> Dict:
+    def predict(self, features: dict) -> dict:
         """Make spread prediction from features dictionary."""
         import pandas as pd
 
@@ -469,7 +468,7 @@ class EnsembleMoneylineWrapper:
         self.feature_names = feature_names or []
         self.training_metrics = training_metrics or {}
 
-    def predict(self, features: Dict) -> Dict:
+    def predict(self, features: dict) -> dict:
         """Make moneyline prediction from features dictionary."""
         import pandas as pd
 
@@ -594,10 +593,10 @@ class CacheManager:
     }
 
     def __init__(self):
-        self._cache: Dict[str, CacheEntry] = {}
+        self._cache: dict[str, CacheEntry] = {}
         self._lock = threading.RLock()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         with self._lock:
             entry = self._cache.get(key)
             if entry and not entry.is_expired():
@@ -796,8 +795,7 @@ class DataService:
                         if hasattr(self._moneyline_model, 'predict'):
                             print(f"Moneyline FALLBACK loaded: {fallback}")
                             break
-                        else:
-                            self._moneyline_model = None
+                        self._moneyline_model = None
                 except Exception as fb_e:
                     print(f"Fallback {fallback} failed: {fb_e}")
 
@@ -826,9 +824,9 @@ class DataService:
 
         # Log spread model status
         if self._spread_model:
-            print(f"Spread model loaded successfully")
+            print("Spread model loaded successfully")
         else:
-            print(f"Spread model not available - will use feature-based fallback")
+            print("Spread model not available - will use feature-based fallback")
 
         # Load prop models with full metadata (model, scaler, feature_names)
         prop_types = ["points", "rebounds", "assists", "threes", "pra"]
@@ -939,13 +937,13 @@ class DataService:
             print(f"Error starting Continuous Learning System: {e}")
             traceback.print_exc()
 
-    def get_continuous_learning_status(self) -> Dict:
+    def get_continuous_learning_status(self) -> dict:
         """Get status of the continuous learning system."""
         if self._continuous_learning:
             return self._continuous_learning.get_status()
         return {'status': 'not_initialized'}
 
-    def _feature_based_spread_prediction(self, features: Dict) -> Dict:
+    def _feature_based_spread_prediction(self, features: dict) -> dict:
         """Generate spread prediction from features when ML model unavailable.
 
         Uses a weighted combination of key predictive features:
@@ -1026,7 +1024,7 @@ class DataService:
             "method": "feature_based_vegas" if vegas_spread != 0 else "feature_based"
         }
 
-    def get_todays_games(self, force_refresh: bool = False, date: str = None) -> List[Dict]:
+    def get_todays_games(self, force_refresh: bool = False, date: str = None) -> list[dict]:
         """Get scheduled NBA games for a specific date.
 
         OPTIMIZATION: Uses Balldontlie API only (fast, no rate limiting).
@@ -1043,10 +1041,7 @@ class DataService:
         eastern = ZoneInfo("America/New_York")
 
         # Use provided date or default to today (Eastern timezone)
-        if date:
-            target_date = date
-        else:
-            target_date = datetime.now(eastern).strftime("%Y-%m-%d")
+        target_date = date or datetime.now(eastern).strftime("%Y-%m-%d")
 
         print(f"[DEBUG] get_todays_games called for date={target_date}, force_refresh={force_refresh}", flush=True)
         cache_key = f"games_{target_date}"
@@ -1085,7 +1080,7 @@ class DataService:
         print(f"[DEBUG] Returning {len(games)} games", flush=True)
         return games
 
-    def _format_balldontlie_games(self, bdl_games: List[Dict]) -> List[Dict]:
+    def _format_balldontlie_games(self, bdl_games: list[dict]) -> list[dict]:
         """Convert Balldontlie game format to standard format."""
         formatted = []
         for game in bdl_games:
@@ -1227,7 +1222,7 @@ class DataService:
 
         return manager
 
-    def _get_opponent_stats(self, opponent_abbrev: str) -> Dict:
+    def _get_opponent_stats(self, opponent_abbrev: str) -> dict:
         """Fetch real defensive stats for opponent team from Balldontlie standings.
 
         Args:
@@ -1312,7 +1307,7 @@ class DataService:
 
         return default_stats
 
-    def _get_recent_stats(self, player_id: int, num_games: int = 5, use_cache: bool = True) -> Dict:
+    def _get_recent_stats(self, player_id: int, num_games: int = 5, use_cache: bool = True) -> dict:
         """Get player's recent game stats from Balldontlie for trend analysis.
 
         Args:
@@ -1454,7 +1449,7 @@ class DataService:
 
     def _get_player_vs_team_adjustment(
         self, player_id: int, opponent_team_id: int, prop_type: str, season_avg: float
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate adjustment factor based on player's historical performance vs specific team.
 
@@ -1497,10 +1492,7 @@ class DataService:
                 home_team_id = home_team.get('id')
                 visitor_team_id = visitor_team.get('id')
 
-                if player_team_id == home_team_id:
-                    opp_id = visitor_team_id
-                else:
-                    opp_id = home_team_id
+                opp_id = visitor_team_id if player_team_id == home_team_id else home_team_id
 
                 if opp_id == opponent_team_id:
                     mins = _parse_minutes(game_stat.get('min', 0))
@@ -1554,11 +1546,11 @@ class DataService:
                 'avg_vs_team': avg_vs_team
             }
 
-        except Exception as e:
+        except Exception:
             # Silently return no adjustment on error
             return {'adjustment': 1.0, 'games_vs_team': 0, 'avg_vs_team': None}
 
-    def _get_team_rest_info(self, team_abbrev: str, game_date: str = None) -> Dict:
+    def _get_team_rest_info(self, team_abbrev: str, game_date: str = None) -> dict:
         """
         Calculate rest days and back-to-back status for a team.
 
@@ -1754,9 +1746,9 @@ class DataService:
                 try:
                     # Wait up to 180 seconds for features (allows for concurrent API rate limiting)
                     features = future.result(timeout=180)
-                    print(f"Background: Features generated successfully", flush=True)
+                    print("Background: Features generated successfully", flush=True)
                 except concurrent.futures.TimeoutError:
-                    print(f"Background: Feature generation timed out after 180s", flush=True)
+                    print("Background: Feature generation timed out after 180s", flush=True)
                 except Exception as e:
                     print(f"Background: Feature generation error: {e}", flush=True)
                     traceback.print_exc()
@@ -1803,7 +1795,7 @@ class DataService:
                         X = ml_features
 
                     # Get prediction and probability
-                    prediction = self._moneyline_model.predict(X)[0]
+                    self._moneyline_model.predict(X)[0]
                     proba = self._moneyline_model.predict_proba(X)[0] if hasattr(self._moneyline_model, 'predict_proba') else [0.5, 0.5]
 
                     # Format as expected by frontend
@@ -1857,11 +1849,11 @@ class DataService:
                 'spread': {"status": "unavailable", "reason": str(e)},
             }
 
-    def get_analysis_status(self, game_id: str) -> Dict:
+    def get_analysis_status(self, game_id: str) -> dict:
         """Check status of background analysis."""
         return self._analysis_status.get(game_id, {'status': 'not_started'})
 
-    def get_game_analysis(self, game_id: str) -> Dict:
+    def get_game_analysis(self, game_id: str) -> dict:
         """Get complete analysis for a game."""
         cache_key = f"analysis_{game_id}"
 
@@ -1879,10 +1871,9 @@ class DataService:
                 self.cache.set(cache_key, updated, "analysis")
                 print(f"[DATA_SERVICE] get_game_analysis({game_id}): Returning READY predictions", flush=True)
                 return updated
-            else:
-                # Still analyzing - return cached data as-is
-                print(f"[DATA_SERVICE] get_game_analysis({game_id}): Status={status.get('status')}, returning cached", flush=True)
-                return cached
+            # Still analyzing - return cached data as-is
+            print(f"[DATA_SERVICE] get_game_analysis({game_id}): Status={status.get('status')}, returning cached", flush=True)
+            return cached
 
         # Find game in today's games
         games = self.get_todays_games()
@@ -1933,7 +1924,7 @@ class DataService:
         self.cache.set(cache_key, result, "predictions")
         return result
 
-    def get_betting_odds(self, game_id: str = None) -> Dict:
+    def get_betting_odds(self, game_id: str = None) -> dict:
         """Get betting odds from sportsbooks."""
         cache_key = f"odds_{game_id}" if game_id else "odds_all"
 
@@ -1955,7 +1946,7 @@ class DataService:
 
         return odds_data
 
-    def _get_market_odds(self, game_id: str, home_abbrev: str, away_abbrev: str) -> Dict:
+    def _get_market_odds(self, game_id: str, home_abbrev: str, away_abbrev: str) -> dict:
         """
         Fetch real Vegas odds for a specific game from Balldontlie API.
 
@@ -1981,7 +1972,7 @@ class DataService:
             all_odds = self.balldontlie.get_todays_odds()
 
             if not all_odds:
-                print(f"No odds data available from Balldontlie API")
+                print("No odds data available from Balldontlie API")
                 return {}
 
             # Filter odds for this specific game
@@ -2063,7 +2054,7 @@ class DataService:
             return {}
 
     def get_player_props(self, team_abbrev: str, opponent_abbrev: str,
-                         prop_types: List[str] = None) -> List[Dict]:
+                         prop_types: list[str] = None) -> list[dict]:
         """Get player prop predictions for a team.
 
         Returns cached props if available, otherwise empty list.
@@ -2106,7 +2097,7 @@ class DataService:
 
         return False
 
-    def _get_game_info(self, game_id: str, home_abbrev: str, away_abbrev: str) -> Optional[Dict]:
+    def _get_game_info(self, game_id: str, home_abbrev: str, away_abbrev: str) -> dict | None:
         """Get game info including status from cache or API."""
         # Try cache first
         games = self.cache.get('games')
@@ -2137,7 +2128,7 @@ class DataService:
         return None
 
     def start_player_props_fetch(self, game_id: str, home_abbrev: str,
-                                 away_abbrev: str, selected_props: List[str] = None):
+                                 away_abbrev: str, selected_props: list[str] = None):
         """Start background thread to fetch player props.
 
         IMPORTANT: Predictions are LOCKED once a game has started to ensure
@@ -2153,16 +2144,15 @@ class DataService:
                     # Keep existing predictions, just mark as locked
                     existing['locked'] = True
                     return
-                else:
-                    # No predictions available - mark as locked with error
-                    self._prop_fetch_status[game_id] = {
-                        'status': 'locked',
-                        'error': 'Game has started - predictions locked for betting integrity',
-                        'home': [],
-                        'away': [],
-                        'locked': True
-                    }
-                    return
+                # No predictions available - mark as locked with error
+                self._prop_fetch_status[game_id] = {
+                    'status': 'locked',
+                    'error': 'Game has started - predictions locked for betting integrity',
+                    'home': [],
+                    'away': [],
+                    'locked': True
+                }
+                return
 
         with self._prop_status_lock:
             if game_id in self._fetch_threads and self._fetch_threads[game_id].is_alive():
@@ -2193,7 +2183,7 @@ class DataService:
             print(f"Started background fetch for game {game_id}")
 
     def _fetch_props_background(self, game_id: str, home_abbrev: str,
-                                away_abbrev: str, selected_props: List[str]):
+                                away_abbrev: str, selected_props: list[str]):
         """Background thread task to fetch player props using FAST Balldontlie API.
 
         BUG 11 FIX: Replaced slow NBA API calls (2 calls per player × 0.4s rate limiting)
@@ -2201,11 +2191,11 @@ class DataService:
         This reduces prop loading from 120+ seconds to under 15 seconds.
         """
         try:
-            print(f"Background: Starting FAST props fetch via Balldontlie API...", flush=True)
+            print("Background: Starting FAST props fetch via Balldontlie API...", flush=True)
 
             # Get today's games from Balldontlie to get team rosters
             if not self.balldontlie:
-                print(f"Background: ERROR - Balldontlie API not available", flush=True)
+                print("Background: ERROR - Balldontlie API not available", flush=True)
                 with self._prop_status_lock:
                     if game_id in self._prop_fetch_status:
                         self._prop_fetch_status[game_id]['status'] = 'error'
@@ -2213,7 +2203,7 @@ class DataService:
                 return
 
             # Step 1: Get today's games to find Balldontlie game ID and team info
-            print(f"Background: [1/4] Getting today's games...", flush=True)
+            print("Background: [1/4] Getting today's games...", flush=True)
             bdl_games = self.balldontlie.get_todays_games()
             target_game = None
             for g in bdl_games:
@@ -2228,12 +2218,12 @@ class DataService:
                 # Fall back to getting players from leaders endpoint
                 target_game = {'home_team': {'id': None}, 'visitor_team': {'id': None}}
 
-            home_team_bdl_id = target_game.get('home_team', {}).get('id')
-            away_team_bdl_id = target_game.get('visitor_team', {}).get('id')
+            target_game.get('home_team', {}).get('id')
+            target_game.get('visitor_team', {}).get('id')
 
             # Step 2: Get players DIRECTLY from DraftKings props (ensures ID consistency)
             # This fixes the bug where get_active_players() returns different IDs than get_player_props()
-            print(f"Background: [2/4] Getting players from DraftKings props...", flush=True)
+            print("Background: [2/4] Getting players from DraftKings props...", flush=True)
 
             # Get team mappings first
             teams = self.balldontlie.get_teams()
@@ -2262,12 +2252,12 @@ class DataService:
             print(f"Background: Found {len(home_player_ids)} {home_abbrev} players, {len(away_player_ids)} {away_abbrev} players", flush=True)
 
             # Step 3: Batch fetch season averages for ALL players at once (ONE API call!)
-            print(f"Background: [3/4] Fetching season averages for all players (single API call)...", flush=True)
+            print("Background: [3/4] Fetching season averages for all players (single API call)...", flush=True)
             all_player_ids = home_player_ids[:12] + away_player_ids[:12]  # Top 12 per team
 
             if not all_player_ids:
                 # Build detailed error message for debugging
-                teams_found = set(p['team_abbrev'] for p in all_players.values())
+                teams_found = {p['team_abbrev'] for p in all_players.values()}
                 error_msg = f"No players found for {home_abbrev} vs {away_abbrev}. Found teams: {sorted(teams_found)}"
                 print(f"Background: {error_msg}", flush=True)
                 with self._prop_status_lock:
@@ -2288,7 +2278,7 @@ class DataService:
             print(f"Background: Got season averages for {len(stats_by_player)} players", flush=True)
 
             # Step 4: Generate predictions for each team
-            print(f"Background: [4/4] Generating predictions...", flush=True)
+            print("Background: [4/4] Generating predictions...", flush=True)
 
             # Get injury manager for this game (for opponent injury adjustments)
             injury_manager = None
@@ -2454,14 +2444,14 @@ class DataService:
                     self._prop_fetch_status[game_id]['status'] = 'error'
                     self._prop_fetch_status[game_id]['error'] = str(e)
 
-    def get_props_fetch_status(self, game_id: str) -> Dict:
+    def get_props_fetch_status(self, game_id: str) -> dict:
         """Check if player props have finished fetching (thread-safe)."""
         with self._prop_status_lock:
             status = self._prop_fetch_status.get(game_id, {'status': 'not_started', 'home': [], 'away': []})
             # Return a copy to prevent race conditions
             return status.copy()
 
-    def get_live_player_stats(self, game_id: str) -> Dict[int, Dict]:
+    def get_live_player_stats(self, game_id: str) -> dict[int, dict]:
         """Fetch live player stats for an in-progress game.
 
         Uses Balldontlie's live box scores endpoint (GOAT tier) to get
@@ -2512,7 +2502,7 @@ class DataService:
             print(f"Error fetching live stats for game {game_id}: {e}")
             return {}
 
-    def get_game_final_stats(self, game_id: str) -> Dict[int, Dict]:
+    def get_game_final_stats(self, game_id: str) -> dict[int, dict]:
         """Fetch final player stats for a completed game.
 
         Uses Balldontlie's box score endpoint (GOAT tier) to get
@@ -2562,7 +2552,7 @@ class DataService:
 
     # _get_key_players method removed - replaced by Balldontlie API in _fetch_props_background()
 
-    def _get_players_from_props(self, game_id: int) -> Dict[int, Dict]:
+    def _get_players_from_props(self, game_id: int) -> dict[int, dict]:
         """Get player info for all players with DraftKings props.
 
         This ensures player IDs match between the props cache and player lookups,
@@ -2591,18 +2581,16 @@ class DataService:
                 # Check both sportsbook and vendor fields for DraftKings
                 sportsbook = prop.get('sportsbook', {})
                 if isinstance(sportsbook, dict):
-                    book_name = sportsbook.get('name', '').lower()
+                    sportsbook.get('name', '').lower()
                 else:
-                    book_name = str(sportsbook).lower()
+                    str(sportsbook).lower()
 
-                vendor = prop.get('vendor', '').lower()
+                prop.get('vendor', '').lower()
 
                 # Accept props from major sportsbooks (relaxed filter - was DraftKings only)
-                valid_books = ['draftkings', 'fanduel', 'betmgm', 'caesars', 'rebet', 'bovada', 'pointsbet']
-                book_source = book_name                # Skip if neither field contains 'draftkings'
                 # if 'draftkings' not in book_name and 'draftkings' not in vendor:
                 #     continue
-                
+
                 # UPDATE V5: Accept ALL vendors (Rebet, FanDuel, etc.) to ensure data flow
                 pass
 
@@ -2643,7 +2631,7 @@ class DataService:
 
         return players
 
-    def _get_real_prop_line(self, game_id: str, player_id: int, prop_type: str) -> Optional[float]:
+    def _get_real_prop_line(self, game_id: str, player_id: int, prop_type: str) -> float | None:
         """Get real prop line from FanDuel ONLY for a player/prop.
 
         Args:
@@ -2681,12 +2669,12 @@ class DataService:
                         # Check sportsbook source
                         sportsbook = prop.get('sportsbook', {})
                         if isinstance(sportsbook, dict):
-                            book_name = sportsbook.get('name', '').lower()
+                            sportsbook.get('name', '').lower()
                         else:
-                            book_name = str(sportsbook).lower()
+                            str(sportsbook).lower()
 
                         # Also check vendor field as fallback
-                        vendor = prop.get('vendor', '').lower()
+                        prop.get('vendor', '').lower()
 
                         # V5 FIX: Accept ALL sportsbooks (removed filter entirely)
                         # Previously filtered to valid_books list, but this blocked Rebet data
@@ -2746,7 +2734,7 @@ class DataService:
         player_lines = game_lines.get(player_id, {})
         return player_lines.get(prop_type.lower())
 
-    def _get_baker_projection(self, player_name: str, game_date: str, prop_type: str) -> Optional[float]:
+    def _get_baker_projection(self, player_name: str, game_date: str, prop_type: str) -> float | None:
         """Get BAKER engine projection for a player prop (Phase 6).
 
         Args:
@@ -2825,7 +2813,7 @@ class DataService:
 
     def _calculate_prop_confidence(self, prediction: float, line: float,
                                     season_avg: float, recent_avg: float,
-                                    games_played: int, features: Dict = None,
+                                    games_played: int, features: dict = None,
                                     player_name: str = None) -> float:
         """Calculate confidence score for prop prediction (0-100).
 
@@ -2924,7 +2912,7 @@ class DataService:
         # Factor 9: Hit Rate Boost (player beats the line consistently)
         # Use last_10_hit_rate if available, otherwise estimate from consistency
         if features:
-            hit_rate = features.get("last_10_hit_rate", None)
+            hit_rate = features.get("last_10_hit_rate")
             if hit_rate is not None and hit_rate > 0.6:
                 confidence += 5  # Proven winner - beats line >60% of time
 
@@ -2932,9 +2920,8 @@ class DataService:
         # With improved training (OT normalization, blowout weighting, regression-to-mean)
         # the model should be more accurate and can express higher confidence
         # Quantile models provide even more honest uncertainty when available
-        confidence = max(50.0, min(85.0, confidence))
+        return max(50.0, min(85.0, confidence))
 
-        return confidence
 
     def _load_bias_corrections(self):
         """Load bias corrections and direction calibration from PropTracker.
@@ -2983,15 +2970,13 @@ class DataService:
 
         # Normalize prop type name
         prop_key = prop_type.lower().replace(" ", "")
-        if prop_key == "3pm":
-            prop_key = "3pm"
-        elif prop_key == "threes":
+        if prop_key == "3pm" or prop_key == "threes":
             prop_key = "3pm"
 
         return self._bias_corrections.get(prop_key, 0.0)
 
-    def _calculate_quantile_confidence(self, prop_type: str, features: Dict,
-                                        line: float, prediction: float) -> Optional[Dict]:
+    def _calculate_quantile_confidence(self, prop_type: str, features: dict,
+                                        line: float, prediction: float) -> dict | None:
         """Calculate confidence using quantile model uncertainty.
 
         Uses the prediction interval from quantile regression to determine
@@ -3026,9 +3011,9 @@ class DataService:
 
             # Extract key quantiles
             q10 = distribution.get(0.10, prediction - 5)
-            q25 = distribution.get(0.25, prediction - 2)
+            distribution.get(0.25, prediction - 2)
             q50 = distribution.get(0.50, prediction)  # Median
-            q75 = distribution.get(0.75, prediction + 2)
+            distribution.get(0.75, prediction + 2)
             q90 = distribution.get(0.90, prediction + 5)
 
             # Calculate 80% interval width (10th to 90th percentile)
@@ -3107,9 +3092,7 @@ class DataService:
 
         # Normalize prop type name
         prop_key = prop_type.lower().replace(" ", "")
-        if prop_key == "3pm":
-            prop_key = "3pm"
-        elif prop_key == "threes":
+        if prop_key == "3pm" or prop_key == "threes":
             prop_key = "3pm"
 
         prop_cal = self._direction_calibration.get(prop_key, {})
@@ -3161,10 +3144,10 @@ class DataService:
                 if prop_type in ["Points", "PRA"]:
                     # Missing star means more shots for others
                     return min(abs(impact.points_impact) * 2, 3.0)  # Cap at 3 pts
-                elif prop_type == "Assists":
+                if prop_type == "Assists":
                     # More ball movement when playmaker is out
                     return min(abs(impact.assists_impact) * 0.5, 1.0)
-                elif prop_type == "Rebounds":
+                if prop_type == "Rebounds":
                     # Slightly more rebounds for remaining bigs
                     return min(abs(impact.rebounds_impact) * 0.3, 0.5)
 
@@ -3200,8 +3183,8 @@ class DataService:
         except Exception:
             return 1.0
 
-    def _predict_with_ml_model(self, prop_type: str, player_stats: Dict,
-                                opp_stats: Dict, is_home: bool) -> Optional[float]:
+    def _predict_with_ml_model(self, prop_type: str, player_stats: dict,
+                                opp_stats: dict, is_home: bool) -> float | None:
         """Use trained ML model to predict player prop value.
 
         Args:
@@ -3299,7 +3282,7 @@ class DataService:
             fgm = season_avg.get("fgm_avg", 0) or season_avg.get("fgm", 0) or 0
             fga = season_avg.get("fga_avg", 0) or season_avg.get("fga", 0) or 0
             fg3a = season_avg.get("fg3a_avg", 0) or season_avg.get("fg3a", 0) or 0
-            ftm = season_avg.get("ftm_avg", 0) or season_avg.get("ftm", 0) or 0
+            season_avg.get("ftm_avg", 0) or season_avg.get("ftm", 0) or 0
             fta = season_avg.get("fta_avg", 0) or season_avg.get("fta", 0) or 0
             tov = season_avg.get("turnover_avg", 0) or season_avg.get("turnover", 0) or 0
             stl_avg = season_avg.get("stl_avg", 0) or season_avg.get("stl", 0) or 1.0  # Default 1 stl
@@ -3531,7 +3514,7 @@ class DataService:
             traceback.print_exc()
             return None
 
-    def _project_player_minutes(self, player: Dict, game_context: Dict = None) -> float:
+    def _project_player_minutes(self, player: dict, game_context: dict = None) -> float:
         """Project minutes for a player with game-context adjustments.
 
         CRITICAL: Minutes drive all stat predictions. A player who plays 20 min
@@ -3582,7 +3565,7 @@ class DataService:
         # Clamp to reasonable range
         return max(8.0, min(42.0, base_minutes))
 
-    def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None, threshold: float = 5.0) -> Tuple[str, float]:
+    def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None, threshold: float = 5.0) -> tuple[str, float]:
         """Determine OVER/UNDER pick based on ML model prediction vs Vegas line.
 
         The ML model's prediction is compared directly to the Vegas line.
@@ -3609,15 +3592,14 @@ class DataService:
 
         if edge_pct >= threshold:
             return "OVER", round(edge_pct, 1)
-        elif edge_pct <= -threshold:
+        if edge_pct <= -threshold:
             return "UNDER", round(abs(edge_pct), 1)
-        else:
-            return "-", round(abs(edge_pct), 1)
+        return "-", round(abs(edge_pct), 1)
 
-    def _get_player_predictions(self, player: Dict, opponent_abbrev: str,
-                                 prop_types: List[str],
+    def _get_player_predictions(self, player: dict, opponent_abbrev: str,
+                                 prop_types: list[str],
                                  injury_manager=None,
-                                 skip_slow_features=False) -> Optional[Dict]:
+                                 skip_slow_features=False) -> dict | None:
         """Get prop predictions for a single player using full feature engineering.
 
         Args:
@@ -3653,7 +3635,6 @@ class DataService:
 
         player_name = player.get("player_name", "")
         is_blacklisted = False  # No hardcoded blacklist - use dynamic only
-        is_tier1 = False  # No hardcoded tier1 - model earns confidence
 
         # Check dynamic blacklist from prop_tracker (based on recent performance)
         if player_id and self._prop_tracker:
@@ -3901,8 +3882,8 @@ class DataService:
                     # Calculate opponent's injury impact
                     opp_injury_impact = injury_manager.calculate_injury_impact(opponent_team_id)
                     defensive_impact = opp_injury_impact.get('defensive_impact', 0)
-                    total_impact = opp_injury_impact.get('total_impact', 0)
-                    injured_count = opp_injury_impact.get('injured_player_count', 0)
+                    opp_injury_impact.get('total_impact', 0)
+                    opp_injury_impact.get('injured_player_count', 0)
                     star_player_out = opp_injury_impact.get('star_player_out', False)
 
                     # Opponent missing defenders = boost our player's projection
@@ -3921,7 +3902,7 @@ class DataService:
                     if injury_adjustment != 1.0:
                         pred_value *= injury_adjustment
 
-                except Exception as e:
+                except Exception:
                     # Silently continue if injury calculation fails
                     pass
 
@@ -3998,7 +3979,7 @@ class DataService:
                             )
                             pred_value *= matchup_adjustment
 
-                except Exception as e:
+                except Exception:
                     # Silently continue if matchup calculation fails
                     pass
 

@@ -261,7 +261,7 @@ def test_send_alert_slack(mock_post, temp_project_dir, monkeypatch):
     # Verify Slack webhook was called
     mock_post.assert_called_once()
     call_args = mock_post.call_args
-    assert 'https://hooks.slack.com/test' == call_args[0][0]
+    assert call_args[0][0] == 'https://hooks.slack.com/test'
     assert ':warning:' in call_args[1]['json']['text']
 
 
@@ -494,7 +494,7 @@ def test_save_and_remove_pid(temp_project_dir):
 
     assert sr.PID_FILE.exists()
 
-    with open(sr.PID_FILE, 'r') as f:
+    with open(sr.PID_FILE) as f:
         pid = int(f.read().strip())
 
     assert pid == os.getpid()

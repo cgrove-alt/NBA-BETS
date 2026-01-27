@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from enum import Enum
 
 import numpy as np
@@ -88,24 +88,24 @@ class Play:
     away_score: int
 
     # Player info
-    player_id: Optional[int] = None
-    player_name: Optional[str] = None
-    team_id: Optional[int] = None
+    player_id: int | None = None
+    player_name: str | None = None
+    team_id: int | None = None
 
     # Play details
     description: str = ""
     action_type: str = ""
 
     # Shot-specific
-    shot_type: Optional[str] = None  # "2PT", "3PT"
-    shot_made: Optional[bool] = None
-    shot_distance: Optional[int] = None
-    shot_x: Optional[float] = None
-    shot_y: Optional[float] = None
+    shot_type: str | None = None  # "2PT", "3PT"
+    shot_made: bool | None = None
+    shot_distance: int | None = None
+    shot_x: float | None = None
+    shot_y: float | None = None
 
     # Assist/rebound info
-    assist_player_id: Optional[int] = None
-    assist_player_name: Optional[str] = None
+    assist_player_id: int | None = None
+    assist_player_name: str | None = None
 
     @property
     def seconds_remaining(self) -> float:
@@ -146,12 +146,12 @@ class Possession:
     outcome: str = ""  # "made_2pt", "made_3pt", "missed", "turnover", "foul"
 
     # Plays in this possession
-    plays: List[Play] = field(default_factory=list)
+    plays: list[Play] = field(default_factory=list)
 
     # Key players
-    shooter_id: Optional[int] = None
-    shooter_name: Optional[str] = None
-    assist_player_id: Optional[int] = None
+    shooter_id: int | None = None
+    shooter_name: str | None = None
+    assist_player_id: int | None = None
 
     @property
     def duration(self) -> float:
@@ -200,7 +200,7 @@ class PlayerZoneStats:
     player_name: str
 
     # Zone -> (made, attempted) mapping
-    zone_stats: Dict[str, Tuple[int, int]] = field(default_factory=dict)
+    zone_stats: dict[str, tuple[int, int]] = field(default_factory=dict)
 
     def add_shot(self, zone_key: str, made: bool):
         """Add a shot to zone stats."""
@@ -227,7 +227,7 @@ class PlayerZoneStats:
 # HISTORICAL FETCHERS (Deep, for training)
 # =============================================================================
 
-def fetch_pbp_historical(game_id: str, use_cache: bool = True, max_retries: int = 3) -> List[Play]:
+def fetch_pbp_historical(game_id: str, use_cache: bool = True, max_retries: int = 3) -> list[Play]:
     """
     Fetch detailed play-by-play data for a historical game.
 
@@ -248,7 +248,7 @@ def fetch_pbp_historical(game_id: str, use_cache: bool = True, max_retries: int 
     cache_file = CACHE_DIR / f"pbp_{game_id}.json"
     if use_cache and cache_file.exists():
         try:
-            with open(cache_file, 'r') as f:
+            with open(cache_file) as f:
                 cached_data = json.load(f)
             # Try CDN format first, then stats.nba.com format
             if 'game' in cached_data:
@@ -266,7 +266,7 @@ def fetch_pbp_historical(game_id: str, use_cache: bool = True, max_retries: int 
     return _fetch_pbp_from_stats(game_id, use_cache, cache_file, max_retries)
 
 
-def _fetch_pbp_from_cdn(game_id: str, use_cache: bool, cache_file: Path) -> List[Play]:
+def _fetch_pbp_from_cdn(game_id: str, use_cache: bool, cache_file: Path) -> list[Play]:
     """Fetch PBP from NBA CDN (nba.com/game endpoint data source)."""
     # CDN URL format: https://cdn.nba.com/static/json/liveData/playbyplay/playbyplay_{game_id}.json
     cdn_url = f"https://cdn.nba.com/static/json/liveData/playbyplay/playbyplay_{game_id}.json"
@@ -290,12 +290,12 @@ def _fetch_pbp_from_cdn(game_id: str, use_cache: bool, cache_file: Path) -> List
 
         return _parse_pbp_cdn(data, game_id)
 
-    except Exception as e:
+    except Exception:
         # CDN may not have all games, fall through to stats API
         return []
 
 
-def _fetch_pbp_from_stats(game_id: str, use_cache: bool, cache_file: Path, max_retries: int) -> List[Play]:
+def _fetch_pbp_from_stats(game_id: str, use_cache: bool, cache_file: Path, max_retries: int) -> list[Play]:
     """Fetch PBP from stats.nba.com API."""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
@@ -338,7 +338,7 @@ def _fetch_pbp_from_stats(game_id: str, use_cache: bool, cache_file: Path, max_r
     return []
 
 
-def _parse_pbp_cdn(data: Dict, game_id: str) -> List[Play]:
+def _parse_pbp_cdn(data: dict, game_id: str) -> list[Play]:
     """Parse NBA CDN play-by-play format (richer structure)."""
     plays = []
 
@@ -394,30 +394,30 @@ def _map_cdn_action_type(action_type: str) -> PlayType:
     if '2pt' in action_type or '3pt' in action_type:
         # Check if made or missed from the full action
         return PlayType.FIELD_GOAL_MADE  # Will be refined by shot_made field
-    elif 'freethrow' in action_type:
+    if 'freethrow' in action_type:
         return PlayType.FREE_THROW
-    elif 'rebound' in action_type:
+    if 'rebound' in action_type:
         return PlayType.REBOUND
-    elif 'turnover' in action_type:
+    if 'turnover' in action_type:
         return PlayType.TURNOVER
-    elif 'foul' in action_type:
+    if 'foul' in action_type:
         return PlayType.FOUL
-    elif 'substitution' in action_type:
+    if 'substitution' in action_type:
         return PlayType.SUBSTITUTION
-    elif 'timeout' in action_type:
+    if 'timeout' in action_type:
         return PlayType.TIMEOUT
-    elif 'jumpball' in action_type:
+    if 'jumpball' in action_type:
         return PlayType.JUMP_BALL
-    elif 'period' in action_type:
+    if 'period' in action_type:
         if 'start' in action_type:
             return PlayType.PERIOD_BEGIN
-        elif 'end' in action_type:
+        if 'end' in action_type:
             return PlayType.PERIOD_END
 
     return PlayType.UNKNOWN
 
 
-def _parse_pbp_response(data: Dict, game_id: str) -> List[Play]:
+def _parse_pbp_response(data: dict, game_id: str) -> list[Play]:
     """Parse NBA API play-by-play response into Play objects."""
     plays = []
 
@@ -469,13 +469,13 @@ def _parse_pbp_response(data: Dict, game_id: str) -> List[Play]:
 
             plays.append(play)
 
-        except (IndexError, KeyError, TypeError) as e:
+        except (IndexError, KeyError, TypeError):
             continue  # Skip malformed rows
 
     return plays
 
 
-def _parse_pbp_from_cache(data: Dict, game_id: str) -> List[Play]:
+def _parse_pbp_from_cache(data: dict, game_id: str) -> list[Play]:
     """Parse cached PBP data."""
     return _parse_pbp_response(data, game_id)
 
@@ -504,7 +504,7 @@ def _map_event_type(event_code: int) -> PlayType:
 # LIVE FETCHERS (Fast, for inference)
 # =============================================================================
 
-def fetch_pbp_live(game_id: str) -> List[Play]:
+def fetch_pbp_live(game_id: str) -> list[Play]:
     """
     Fetch lightweight play-by-play for live game inference.
 
@@ -538,7 +538,7 @@ def fetch_pbp_live(game_id: str) -> List[Play]:
         return []
 
 
-def _parse_pbp_live(data: Dict, game_id: str) -> List[Play]:
+def _parse_pbp_live(data: dict, game_id: str) -> list[Play]:
     """Fast parse for live PBP - minimal fields."""
     plays = []
 
@@ -579,7 +579,7 @@ def _parse_pbp_live(data: Dict, game_id: str) -> List[Play]:
 # SHOT CHART FETCHER
 # =============================================================================
 
-def fetch_shot_chart(game_id: str, use_cache: bool = True) -> List[ShotLocation]:
+def fetch_shot_chart(game_id: str, use_cache: bool = True) -> list[ShotLocation]:
     """
     Fetch shot chart data with court locations.
 
@@ -600,7 +600,7 @@ def fetch_shot_chart(game_id: str, use_cache: bool = True) -> List[ShotLocation]
     cache_file = CACHE_DIR / f"shots_{game_id}.json"
     if use_cache and cache_file.exists():
         try:
-            with open(cache_file, 'r') as f:
+            with open(cache_file) as f:
                 cached_data = json.load(f)
             return _parse_shot_chart_from_cache(cached_data, game_id)
         except (json.JSONDecodeError, KeyError):
@@ -630,7 +630,7 @@ def fetch_shot_chart(game_id: str, use_cache: bool = True) -> List[ShotLocation]
         return []
 
 
-def _parse_shot_chart_response(data: Dict, game_id: str) -> List[ShotLocation]:
+def _parse_shot_chart_response(data: dict, game_id: str) -> list[ShotLocation]:
     """Parse NBA API shot chart response."""
     shots = []
 
@@ -665,13 +665,13 @@ def _parse_shot_chart_response(data: Dict, game_id: str) -> List[ShotLocation]:
             )
             shots.append(shot)
 
-        except (IndexError, KeyError, TypeError) as e:
+        except (IndexError, KeyError, TypeError):
             continue
 
     return shots
 
 
-def _parse_shot_chart_from_cache(data: Dict, game_id: str) -> List[ShotLocation]:
+def _parse_shot_chart_from_cache(data: dict, game_id: str) -> list[ShotLocation]:
     """Parse cached shot chart data."""
     return _parse_shot_chart_response(data, game_id)
 
@@ -680,7 +680,7 @@ def _parse_shot_chart_from_cache(data: Dict, game_id: str) -> List[ShotLocation]
 # BATCH HISTORICAL FETCHER
 # =============================================================================
 
-def fetch_season_games(season: str = "2024-25", team_id: Optional[int] = None) -> List[str]:
+def fetch_season_games(season: str = "2024-25", team_id: int | None = None) -> list[str]:
     """
     Get list of game IDs for a season.
 
@@ -720,7 +720,7 @@ def fetch_season_games(season: str = "2024-25", team_id: Optional[int] = None) -
             game_id = row[h['GAME_ID']]
             game_ids.add(game_id)
 
-        return sorted(list(game_ids))
+        return sorted(game_ids)
 
     except Exception as e:
         print(f"Error fetching season games: {e}")
@@ -728,10 +728,10 @@ def fetch_season_games(season: str = "2024-25", team_id: Optional[int] = None) -
 
 
 def fetch_pbp_batch(
-    game_ids: List[str],
+    game_ids: list[str],
     max_games: int = 100,
-    progress_callback: Optional[callable] = None
-) -> Dict[str, List[Play]]:
+    progress_callback: callable | None = None
+) -> dict[str, list[Play]]:
     """
     Fetch PBP for multiple games (with rate limiting).
 
@@ -761,10 +761,10 @@ def fetch_pbp_batch(
 
 
 def fetch_shot_charts_batch(
-    game_ids: List[str],
+    game_ids: list[str],
     max_games: int = 100,
-    progress_callback: Optional[callable] = None
-) -> Dict[str, List[ShotLocation]]:
+    progress_callback: callable | None = None
+) -> dict[str, list[ShotLocation]]:
     """
     Fetch shot charts for multiple games.
 
@@ -825,11 +825,11 @@ class PBPParser:
     }
 
     def __init__(self):
-        self.possessions: List[Possession] = []
-        self._current_possession: Optional[Dict] = None
+        self.possessions: list[Possession] = []
+        self._current_possession: dict | None = None
         self._possession_count = 0
 
-    def parse_game(self, plays: List[Play]) -> List[Possession]:
+    def parse_game(self, plays: list[Play]) -> list[Possession]:
         """
         Parse all plays from a game into possessions.
 
@@ -883,7 +883,7 @@ class PBPParser:
             'plays': [],
         }
 
-    def _end_possession(self, final_play: Optional[Play]):
+    def _end_possession(self, final_play: Play | None):
         """End the current possession and create Possession object."""
         if not self._current_possession:
             return
@@ -920,7 +920,7 @@ class PBPParser:
         self.possessions.append(possession)
         self._current_possession = None
 
-    def _is_possession_end(self, play: Play, all_plays: List[Play], idx: int) -> bool:
+    def _is_possession_end(self, play: Play, all_plays: list[Play], idx: int) -> bool:
         """Determine if this play ends the current possession."""
         # Definite possession enders
         if play.event_type in self.POSSESSION_ENDING_EVENTS:
@@ -964,7 +964,7 @@ class PBPParser:
 
         return False
 
-    def _analyze_outcome(self, plays: List[Play]) -> Tuple[str, int, Optional[int], Optional[str], Optional[int]]:
+    def _analyze_outcome(self, plays: list[Play]) -> tuple[str, int, int | None, str | None, int | None]:
         """
         Analyze plays to determine possession outcome.
 
@@ -1013,7 +1013,7 @@ class PBPParser:
 
         return outcome, points, shooter_id, shooter_name, assist_id
 
-    def get_possession_stats(self) -> Dict[str, Any]:
+    def get_possession_stats(self) -> dict[str, Any]:
         """Get summary statistics for parsed possessions."""
         if not self.possessions:
             return {}
@@ -1077,15 +1077,15 @@ class ShotAtlas:
 
     def __init__(self):
         # player_id -> zone -> (made, attempted)
-        self.player_zones: Dict[int, Dict[str, Tuple[int, int]]] = {}
+        self.player_zones: dict[int, dict[str, tuple[int, int]]] = {}
         # player_id -> player_name
-        self.player_names: Dict[int, str] = {}
+        self.player_names: dict[int, str] = {}
         # team_id -> zone -> (made, attempted)
-        self.team_zones: Dict[int, Dict[str, Tuple[int, int]]] = {}
+        self.team_zones: dict[int, dict[str, tuple[int, int]]] = {}
         # League averages by zone
-        self.league_zones: Dict[str, Tuple[int, int]] = {}
+        self.league_zones: dict[str, tuple[int, int]] = {}
 
-    def add_shots(self, shots: List[ShotLocation]):
+    def add_shots(self, shots: list[ShotLocation]):
         """
         Add shot chart data to the atlas.
 
@@ -1135,7 +1135,7 @@ class ShotAtlas:
         player_id: int,
         min_attempts: int = 3,
         use_league_fallback: bool = True
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Get shooting efficiency by zone for a player.
 
@@ -1164,7 +1164,7 @@ class ShotAtlas:
 
         return result
 
-    def get_player_shot_distribution(self, player_id: int) -> Dict[str, float]:
+    def get_player_shot_distribution(self, player_id: int) -> dict[str, float]:
         """
         Get shot distribution by zone for a player (where they shoot from).
 
@@ -1185,7 +1185,7 @@ class ShotAtlas:
             for zone, (_, attempted) in player_data.items()
         }
 
-    def get_team_zone_efficiency(self, team_id: int) -> Dict[str, float]:
+    def get_team_zone_efficiency(self, team_id: int) -> dict[str, float]:
         """Get team shooting efficiency by zone."""
         team_data = self.team_zones.get(team_id, {})
         return {
@@ -1193,14 +1193,14 @@ class ShotAtlas:
             for zone, (made, attempted) in team_data.items()
         }
 
-    def get_league_averages(self) -> Dict[str, float]:
+    def get_league_averages(self) -> dict[str, float]:
         """Get league average shooting by zone."""
         return {
             zone: made / attempted if attempted > 0 else 0.0
             for zone, (made, attempted) in self.league_zones.items()
         }
 
-    def get_hot_zones(self, player_id: int, threshold: float = 0.05) -> List[str]:
+    def get_hot_zones(self, player_id: int, threshold: float = 0.05) -> list[str]:
         """
         Get zones where player shoots above league average.
 
@@ -1222,7 +1222,7 @@ class ShotAtlas:
 
         return hot_zones
 
-    def get_cold_zones(self, player_id: int, threshold: float = 0.05) -> List[str]:
+    def get_cold_zones(self, player_id: int, threshold: float = 0.05) -> list[str]:
         """Get zones where player shoots below league average."""
         player_eff = self.get_player_zone_efficiency(player_id, use_league_fallback=False)
         league_eff = self.get_league_averages()
@@ -1235,7 +1235,7 @@ class ShotAtlas:
 
         return cold_zones
 
-    def to_simulation_input(self, player_id: int) -> Dict[str, Any]:
+    def to_simulation_input(self, player_id: int) -> dict[str, Any]:
         """
         Convert zone data to simulation engine input format.
 
@@ -1256,7 +1256,7 @@ class ShotAtlas:
 class LineupSpell:
     """A continuous period with the same 5 players on court."""
     team_id: int
-    player_ids: Tuple[int, ...]  # Sorted tuple of 5 player IDs
+    player_ids: tuple[int, ...]  # Sorted tuple of 5 player IDs
     period: int
     start_time: float  # seconds remaining
     end_time: float
@@ -1290,21 +1290,21 @@ class RotationTracker:
 
     def __init__(self):
         # team_id -> list of LineupSpell
-        self.lineup_spells: Dict[int, List[LineupSpell]] = {}
+        self.lineup_spells: dict[int, list[LineupSpell]] = {}
         # team_id -> set of starter player_ids
-        self.starters: Dict[int, set] = {}
+        self.starters: dict[int, set] = {}
         # player_id -> total minutes
-        self.player_minutes: Dict[int, float] = {}
+        self.player_minutes: dict[int, float] = {}
         # (player_id, player_id) -> minutes together
-        self.player_pairs: Dict[Tuple[int, int], float] = {}
+        self.player_pairs: dict[tuple[int, int], float] = {}
         # team_id -> current lineup (set of player_ids)
-        self._current_lineups: Dict[int, set] = {}
+        self._current_lineups: dict[int, set] = {}
         # team_id -> when current lineup started
-        self._lineup_start: Dict[int, Tuple[int, float]] = {}  # (period, time)
+        self._lineup_start: dict[int, tuple[int, float]] = {}  # (period, time)
 
     def process_game(
         self,
-        plays: List[Play],
+        plays: list[Play],
         home_team_id: int,
         away_team_id: int
     ):
@@ -1321,12 +1321,10 @@ class RotationTracker:
         self._current_lineups = {home_team_id: set(), away_team_id: set()}
         self._lineup_start = {}
 
-        current_period = 0
 
         for play in plays:
             # Track period changes
             if play.event_type == PlayType.PERIOD_BEGIN:
-                current_period = play.period
                 # Reset lineups at period start (starters may change)
                 for team_id in [home_team_id, away_team_id]:
                     if self._current_lineups[team_id]:
@@ -1423,7 +1421,7 @@ class RotationTracker:
         """Calculate total minutes for each player."""
         self.player_minutes = {}
 
-        for team_id, spells in self.lineup_spells.items():
+        for _team_id, spells in self.lineup_spells.items():
             for spell in spells:
                 for player_id in spell.player_ids:
                     if player_id not in self.player_minutes:
@@ -1434,7 +1432,7 @@ class RotationTracker:
         """Calculate minutes each pair of players played together."""
         self.player_pairs = {}
 
-        for team_id, spells in self.lineup_spells.items():
+        for _team_id, spells in self.lineup_spells.items():
             for spell in spells:
                 # Generate all pairs from the 5-player lineup
                 players = list(spell.player_ids)
@@ -1445,11 +1443,11 @@ class RotationTracker:
                             self.player_pairs[pair] = 0.0
                         self.player_pairs[pair] += spell.minutes
 
-    def get_lineups(self, team_id: int) -> List[LineupSpell]:
+    def get_lineups(self, team_id: int) -> list[LineupSpell]:
         """Get all lineup spells for a team."""
         return self.lineup_spells.get(team_id, [])
 
-    def get_lineup_minutes(self, team_id: int) -> Dict[Tuple[int, ...], float]:
+    def get_lineup_minutes(self, team_id: int) -> dict[tuple[int, ...], float]:
         """
         Get total minutes for each unique lineup.
 
@@ -1465,7 +1463,7 @@ class RotationTracker:
 
         return lineup_mins
 
-    def get_most_used_lineups(self, team_id: int, n: int = 5) -> List[Tuple[Tuple[int, ...], float]]:
+    def get_most_used_lineups(self, team_id: int, n: int = 5) -> list[tuple[tuple[int, ...], float]]:
         """Get the N most-used lineups by minutes."""
         lineup_mins = self.get_lineup_minutes(team_id)
         sorted_lineups = sorted(lineup_mins.items(), key=lambda x: -x[1])
@@ -1484,7 +1482,7 @@ class RotationTracker:
         """Get identified starters for a team."""
         return self.starters.get(team_id, set())
 
-    def to_simulation_input(self, team_id: int) -> Dict[str, Any]:
+    def to_simulation_input(self, team_id: int) -> dict[str, Any]:
         """
         Convert rotation data to simulation engine input format.
         """
@@ -1502,7 +1500,7 @@ class RotationTracker:
             'starters': list(self.starters.get(team_id, set())),
             'player_minutes': {
                 pid: mins for pid, mins in self.player_minutes.items()
-                if pid in set().union(*[set(l) for l in lineup_mins.keys()])
+                if pid in set().union(*[set(l) for l in lineup_mins])
             },
         }
 
@@ -1511,7 +1509,7 @@ class RotationTracker:
 # UTILITY FUNCTIONS
 # =============================================================================
 
-def build_player_zone_stats(shots: List[ShotLocation]) -> Dict[int, PlayerZoneStats]:
+def build_player_zone_stats(shots: list[ShotLocation]) -> dict[int, PlayerZoneStats]:
     """
     Build zone shooting stats from shot chart data.
 
@@ -1538,7 +1536,7 @@ def build_player_zone_stats(shots: List[ShotLocation]) -> Dict[int, PlayerZoneSt
 def get_zone_efficiency_matrix(
     player_zone_stats: PlayerZoneStats,
     min_attempts: int = 5
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Get efficiency by zone for a player.
 

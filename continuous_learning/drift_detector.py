@@ -10,8 +10,7 @@ Monitors model performance and detects drift by:
 
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import datetime
 from dataclasses import dataclass
 
 # Add parent for imports
@@ -35,7 +34,7 @@ class DriftAlert:
         if self.detected_at is None:
             self.detected_at = datetime.now().isoformat()
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             'type': self.alert_type,
             'severity': self.severity,
@@ -63,8 +62,8 @@ class DriftDetector:
     }
 
     def __init__(self, prop_tracker: PropTracker = None,
-                 baseline_metrics: Dict = None,
-                 thresholds: Dict = None):
+                 baseline_metrics: dict = None,
+                 thresholds: dict = None):
         """Initialize drift detector.
 
         Args:
@@ -81,7 +80,7 @@ class DriftDetector:
         self.thresholds = {**self.DEFAULT_THRESHOLDS, **(thresholds or {})}
         self._alert_history = []
 
-    def check_drift(self, lookback_days: int = 7) -> Dict:
+    def check_drift(self, lookback_days: int = 7) -> dict:
         """Check for performance drift.
 
         Args:
@@ -190,7 +189,7 @@ class DriftDetector:
             'analysis_timestamp': datetime.now().isoformat(),
         }
 
-    def _calculate_ece(self, calibration_data: List[Dict]) -> float:
+    def _calculate_ece(self, calibration_data: list[dict]) -> float:
         """Calculate Expected Calibration Error.
 
         ECE measures how well-calibrated the confidence scores are.
@@ -219,7 +218,7 @@ class DriftDetector:
 
         return ece
 
-    def _calculate_drift_score(self, alerts: List[DriftAlert]) -> float:
+    def _calculate_drift_score(self, alerts: list[DriftAlert]) -> float:
         """Calculate overall drift score from alerts.
 
         Args:
@@ -239,7 +238,7 @@ class DriftDetector:
         return min(100, score)
 
     def get_trend(self, metric: str = 'win_rate', periods: int = 4,
-                  period_days: int = 7) -> Dict:
+                  period_days: int = 7) -> dict:
         """Get trend data for a specific metric over time.
 
         Args:
@@ -254,7 +253,7 @@ class DriftDetector:
 
         for i in range(periods):
             # Calculate date range for this period
-            end_days = i * period_days
+            i * period_days
             start_days = (i + 1) * period_days
 
             # Get summary for this period
@@ -275,10 +274,7 @@ class DriftDetector:
             recent = trend_data[0].get('value', 0)
             older = trend_data[-1].get('value', 0)
 
-            if older > 0:
-                change_pct = ((recent - older) / older) * 100
-            else:
-                change_pct = 0
+            change_pct = (recent - older) / older * 100 if older > 0 else 0
 
             direction = 'improving' if change_pct > 5 else ('declining' if change_pct < -5 else 'stable')
         else:
@@ -292,7 +288,7 @@ class DriftDetector:
             'direction': direction,
         }
 
-    def get_alert_history(self, limit: int = 20) -> List[Dict]:
+    def get_alert_history(self, limit: int = 20) -> list[dict]:
         """Get recent alert history.
 
         Args:
@@ -303,7 +299,7 @@ class DriftDetector:
         """
         return self._alert_history[-limit:]
 
-    def should_retrain(self, lookback_days: int = 7) -> Dict:
+    def should_retrain(self, lookback_days: int = 7) -> dict:
         """Determine if model retraining is recommended.
 
         Args:
@@ -332,7 +328,7 @@ class DriftDetector:
             'drift_score': drift_result.get('drift_score', 0),
         }
 
-    def update_baseline(self, new_baseline: Dict):
+    def update_baseline(self, new_baseline: dict):
         """Update baseline metrics.
 
         Args:

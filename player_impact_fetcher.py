@@ -11,12 +11,10 @@ Usage:
     team_rating = fetcher.calculate_team_rating(team_players, injuries)
 """
 
-import os
 import json
 import time
 import requests
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from bs4 import BeautifulSoup
 import re
@@ -57,10 +55,10 @@ class PlayerImpactFetcher:
     """
 
     def __init__(self):
-        self.darko_cache: Dict[str, Dict] = {}
-        self.epm_cache: Dict[str, Dict] = {}
-        self.raptor_cache: Dict[str, Dict] = {}
-        self.basic_stats_cache: Dict[str, Dict] = {}
+        self.darko_cache: dict[str, dict] = {}
+        self.epm_cache: dict[str, dict] = {}
+        self.raptor_cache: dict[str, dict] = {}
+        self.basic_stats_cache: dict[str, dict] = {}
         self._load_cache()
 
     def _load_cache(self):
@@ -74,7 +72,7 @@ class PlayerImpactFetcher:
         for source, cache_file in cache_files.items():
             if cache_file.exists():
                 try:
-                    with open(cache_file, 'r') as f:
+                    with open(cache_file) as f:
                         data = json.load(f)
                         # Check if cache is still valid
                         cache_time = datetime.fromisoformat(data.get('timestamp', '2000-01-01'))
@@ -133,21 +131,20 @@ class PlayerImpactFetcher:
         if metric_type == 'darko':
             # DARKO already close to our scale, cap at ±10
             return max(-10, min(10, value * 1.25))
-        elif metric_type == 'epm':
+        if metric_type == 'epm':
             # EPM scale: expand slightly
             return max(-10, min(10, value * 1.4))
-        elif metric_type == 'raptor':
+        if metric_type == 'raptor':
             # RAPTOR scale: Real values range from ~-8 to +15
             # Scale down to fit -10 to +10 range
             # Elite player (RAPTOR=15) → 10, Average (RAPTOR=0) → 0
             return max(-10, min(10, value * 0.67))
-        elif metric_type == 'plus_minus':
+        if metric_type == 'plus_minus':
             # Plus/minus per 36 already roughly on scale
             return max(-10, min(10, value))
-        else:
-            return 0.0
+        return 0.0
 
-    def fetch_darko_dpm(self, season: str = "2024-25") -> Dict[str, Dict]:
+    def fetch_darko_dpm(self, season: str = "2024-25") -> dict[str, dict]:
         """
         Fetch DARKO DPM (Daily Plus-Minus) from APAnalytics Shiny app.
 
@@ -236,7 +233,7 @@ class PlayerImpactFetcher:
                             'season': season
                         }
 
-                    except (ValueError, IndexError) as e:
+                    except (ValueError, IndexError):
                         continue
 
             if players_dict:
@@ -244,15 +241,14 @@ class PlayerImpactFetcher:
                 self.darko_cache = players_dict
                 self._save_cache('darko')
                 return players_dict
-            else:
-                print("DARKO: Could not parse data from page")
-                return {}
+            print("DARKO: Could not parse data from page")
+            return {}
 
         except Exception as e:
             print(f"Error fetching DARKO: {e}")
             return {}
 
-    def fetch_espn_epm(self, season: int = 2025) -> Dict[str, Dict]:
+    def fetch_espn_epm(self, season: int = 2025) -> dict[str, dict]:
         """
         Fetch ESPN EPM (Estimated Plus-Minus) data.
 
@@ -284,7 +280,6 @@ class PlayerImpactFetcher:
                 return {}
 
             soup = BeautifulSoup(response.content, 'html.parser')
-            players_dict = {}
 
             # ESPN uses complex table structures
             # Look for player stats tables
@@ -307,7 +302,7 @@ class PlayerImpactFetcher:
             print(f"Error fetching ESPN EPM: {e}")
             return {}
 
-    def fetch_fivethirtyeight_raptor(self, season: str = "2024-25", use_latest_available: bool = True) -> Dict[str, Dict]:
+    def fetch_fivethirtyeight_raptor(self, season: str = "2024-25", use_latest_available: bool = True) -> dict[str, dict]:
         """
         Fetch FiveThirtyEight RAPTOR ratings.
 
@@ -416,7 +411,7 @@ class PlayerImpactFetcher:
                             'player_id': player_id
                         }
 
-                except (ValueError, KeyError, TypeError) as e:
+                except (ValueError, KeyError, TypeError):
                     continue
 
             if players_dict:
@@ -429,9 +424,8 @@ class PlayerImpactFetcher:
                 self.raptor_cache = players_dict
                 self._save_cache('raptor')
                 return players_dict
-            else:
-                print("RAPTOR: Could not parse player data")
-                return {}
+            print("RAPTOR: Could not parse player data")
+            return {}
 
         except Exception as e:
             print(f"Error fetching RAPTOR: {e}")
@@ -459,7 +453,7 @@ class PlayerImpactFetcher:
         # This avoids expensive API calls (4685 players × 0.6s = 47 minutes!)
         return 'UNK'
 
-    def fetch_basic_stats_from_nba_api(self, season: str = "2024-25") -> Dict[str, Dict]:
+    def fetch_basic_stats_from_nba_api(self, season: str = "2024-25") -> dict[str, dict]:
         """
         Fetch basic player stats from nba_api as fallback.
 
@@ -519,7 +513,7 @@ class PlayerImpactFetcher:
             print(f"Error fetching from nba_api: {e}")
             return {}
 
-    def get_player_impact(self, player_name: str) -> Optional[Dict]:
+    def get_player_impact(self, player_name: str) -> dict | None:
         """
         Get impact metrics for a specific player.
 
@@ -589,11 +583,10 @@ class PlayerImpactFetcher:
         Returns:
             Estimated team net rating with player on court
         """
-        player_impact = self.get_player_impact_metric(player_name)
+        return self.get_player_impact_metric(player_name)
 
         # Team base rating (assuming average team is 0)
         # Add player's impact
-        return player_impact
 
     def get_opponent_defensive_impact_vs_position(
         self,
@@ -637,8 +630,8 @@ class PlayerImpactFetcher:
     def calculate_team_rating_adjustment(
         self,
         team_abbrev: str,
-        injured_players: List[str] = None,
-        resting_players: List[str] = None
+        injured_players: list[str] = None,
+        resting_players: list[str] = None
     ) -> float:
         """
         Calculate team rating adjustment based on player availability.
@@ -681,7 +674,7 @@ class PlayerImpactFetcher:
 
         return round(total_adjustment, 2)
 
-    def get_team_roster_impacts(self, team_abbrev: str) -> List[Dict]:
+    def get_team_roster_impacts(self, team_abbrev: str) -> list[dict]:
         """
         Get sorted list of players by impact for a team.
 
@@ -922,7 +915,7 @@ PROP_INJURY_BOOST = {
 }
 
 
-def get_player_role(player_name: str) -> Optional[Dict]:
+def get_player_role(player_name: str) -> dict | None:
     """Get complete role information for a player."""
     return PLAYER_DEFENSIVE_ROLES.get(player_name)
 
@@ -930,9 +923,9 @@ def get_player_role(player_name: str) -> Optional[Dict]:
 def calculate_prop_injury_boost(
     player_position: str,
     prop_type: str,
-    opponent_injured: List[str],
-    teammate_injured: List[str] = None
-) -> Dict:
+    opponent_injured: list[str],
+    teammate_injured: list[str] = None
+) -> dict:
     """
     Calculate prop prediction boost based on injuries.
 
@@ -1011,7 +1004,7 @@ def calculate_prop_injury_boost(
     }
 
 
-def calculate_injury_adjustment(injured_players: List[str]) -> float:
+def calculate_injury_adjustment(injured_players: list[str]) -> float:
     """
     Calculate spread adjustment based on injured players.
 

@@ -13,20 +13,17 @@ Usage:
     python3 train_stacking_model.py --incremental  # Retrain meta-learner only (fast)
 """
 
-import os
 import sys
 import json
 import pickle
 import warnings
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
 from collections import defaultdict
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split, TimeSeriesSplit
 from sklearn.metrics import accuracy_score, log_loss, mean_squared_error, r2_score
 
 warnings.filterwarnings('ignore')
@@ -34,7 +31,7 @@ warnings.filterwarnings('ignore')
 # Add models directory to path
 sys.path.insert(0, str(Path(__file__).parent / "models"))
 
-from models.stacking_model import StackingClassifier, StackingRegressor, create_stacking_model
+from models.stacking_model import StackingClassifier, StackingRegressor
 from stacking_meta_learner import StackingMetaLearner
 
 # Try importing Optuna
@@ -211,7 +208,7 @@ class TrainingDataLoader:
         self.player_stats = defaultdict(list)
         self.team_history = defaultdict(list)  # team_id -> [(date, game_data)]
 
-    def load_games(self) -> List[Dict]:
+    def load_games(self) -> list[dict]:
         """Load game data from multiple seasons."""
         all_games = []
 
@@ -277,7 +274,7 @@ class TrainingDataLoader:
                 'opponent_id': home_team_id,
             })
 
-    def _get_team_features(self, team_id: int, before_date: str, min_games: int = 5) -> Optional[Dict]:
+    def _get_team_features(self, team_id: int, before_date: str, min_games: int = 5) -> dict | None:
         """Calculate team features using only games BEFORE the given date."""
         if team_id not in self.team_history:
             return None
@@ -309,7 +306,7 @@ class TrainingDataLoader:
             'streak': self._calc_streak(recent),
         }
 
-    def _calc_streak(self, games: List[Dict]) -> int:
+    def _calc_streak(self, games: list[dict]) -> int:
         """Calculate current win/loss streak (positive=wins, negative=losses)."""
         if not games:
             return 0
@@ -322,7 +319,7 @@ class TrainingDataLoader:
                 break
         return streak
 
-    def _extract_context_features(self, game: Dict, home_feats: Dict, away_feats: Dict) -> Dict:
+    def _extract_context_features(self, game: dict, home_feats: dict, away_feats: dict) -> dict:
         """
         Extract context features for meta-learner (12 features total).
 
@@ -372,7 +369,7 @@ class TrainingDataLoader:
                         away_feats.get('recent_pts_avg', 110)) / 2
 
         # Context features (12 total)
-        context = {
+        return {
             'ctx_days_rest_diff': days_rest_home - days_rest_away,
             'ctx_pace_combined': pace_combined,
             'ctx_injury_count_home': 0,  # TODO: Will be populated in Phase 2
@@ -387,7 +384,6 @@ class TrainingDataLoader:
             'ctx_back_to_back_away': int(days_rest_away == 0),
         }
 
-        return context
 
     def load_player_stats(self):
         """Load player statistics."""
@@ -397,7 +393,7 @@ class TrainingDataLoader:
                 with open(batch_file) as f:
                     batch_data = json.load(f)
                 if isinstance(batch_data, dict):
-                    for game_id, stats in batch_data.items():
+                    for _game_id, stats in batch_data.items():
                         if isinstance(stats, list):
                             for stat in stats:
                                 player_id = stat.get('player', {}).get('id')
@@ -550,7 +546,7 @@ class TrainingDataLoader:
         target_key = target_map.get(prop_type, 'pts')
 
         records = []
-        for player_id, games in self.player_stats.items():
+        for _player_id, games in self.player_stats.items():
             if len(games) < 5:
                 continue
 
@@ -594,7 +590,7 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
     dates = data['game_date']
 
     # Calculate time-decay sample weights
-    print(f"  Calculating time-decay sample weights (180-day half-life)...")
+    print("  Calculating time-decay sample weights (180-day half-life)...")
     sample_weights = calculate_time_decay_weights(dates, half_life_days=180)
     print(f"    Weight range: {sample_weights.min():.3f} to {sample_weights.max():.3f}")
 
@@ -613,12 +609,12 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
         context_test = None
 
     # Build base models for stacking
-    print(f"  Building base models for stacking...")
+    print("  Building base models for stacking...")
     base_models = build_base_models_for_classification()
     print(f"    Created {len(base_models)} base models")
 
     # Initialize StackingMetaLearner with context feature support
-    print(f"  Initializing StackingMetaLearner with XGBoost meta-learner...")
+    print("  Initializing StackingMetaLearner with XGBoost meta-learner...")
     model = StackingMetaLearner(
         base_models=base_models,
         meta_learner_type='xgboost',
@@ -628,7 +624,7 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
     )
 
     # Train with context features and sample weights
-    print(f"  Training with context features and time-decay weights...")
+    print("  Training with context features and time-decay weights...")
     print(f"    X_train shape: {X_train.shape}")
     print(f"    Context features shape: {context_train.shape if context_train is not None else 'None'}")
     print(f"    Sample weights shape: {weights_train.shape}")
@@ -641,27 +637,27 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
     )
 
     # Evaluate
-    print(f"\n  Generating predictions on test set...")
+    print("\n  Generating predictions on test set...")
     y_pred_proba = model.predict(X_test.values, context_features=context_test)
     y_pred = (y_pred_proba > 0.5).astype(int)
 
     acc = accuracy_score(y_test, y_pred)
     ll = log_loss(y_test, y_pred_proba)
 
-    print(f"\n  Test Set Metrics:")
+    print("\n  Test Set Metrics:")
     print(f"    Accuracy:  {acc:.4f}")
     print(f"    Log Loss:  {ll:.4f}")
 
     # Log base model performance
     if hasattr(model, 'oof_scores'):
-        print(f"\n  Base Model OOF Performance:")
+        print("\n  Base Model OOF Performance:")
         for model_name, score in model.oof_scores.items():
             print(f"    {model_name}: RMSE={score:.3f}")
 
     # A/B Test: Compare with baseline (if exists)
     baseline_path = MODEL_DIR / "moneyline_stacking_baseline.pkl"
     if baseline_path.exists():
-        print(f"\n  A/B Test: Comparing with baseline...")
+        print("\n  A/B Test: Comparing with baseline...")
         try:
             with open(baseline_path, 'rb') as f:
                 baseline_model = pickle.load(f)
@@ -695,7 +691,7 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
                     pickle.dump(model, f)
                 print(f"  ✓ Model improved! Saved to {output_path}")
             else:
-                print(f"  ✗ Model did not improve. Keeping baseline.")
+                print("  ✗ Model did not improve. Keeping baseline.")
                 return baseline_model
         except Exception as e:
             print(f"  Warning: Could not load baseline: {e}")
@@ -712,7 +708,7 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
         with open(baseline_path, 'wb') as f:
             pickle.dump(model, f)
         print(f"  Saved to {output_path}")
-        print(f"  Also saved as baseline for future comparisons")
+        print("  Also saved as baseline for future comparisons")
 
     return model
 
@@ -733,7 +729,7 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
     dates = data['game_date']
 
     # Calculate time-decay sample weights
-    print(f"  Calculating time-decay sample weights (180-day half-life)...")
+    print("  Calculating time-decay sample weights (180-day half-life)...")
     sample_weights = calculate_time_decay_weights(dates, half_life_days=180)
     print(f"    Weight range: {sample_weights.min():.3f} to {sample_weights.max():.3f}")
 
@@ -752,12 +748,12 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
         context_test = None
 
     # Build base models for stacking
-    print(f"  Building base models for stacking...")
+    print("  Building base models for stacking...")
     base_models = build_base_models_for_regression()
     print(f"    Created {len(base_models)} base models")
 
     # Initialize StackingMetaLearner with context feature support
-    print(f"  Initializing StackingMetaLearner with XGBoost meta-learner...")
+    print("  Initializing StackingMetaLearner with XGBoost meta-learner...")
     model = StackingMetaLearner(
         base_models=base_models,
         meta_learner_type='xgboost',
@@ -767,7 +763,7 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
     )
 
     # Train with context features and sample weights
-    print(f"  Training with context features and time-decay weights...")
+    print("  Training with context features and time-decay weights...")
     print(f"    X_train shape: {X_train.shape}")
     print(f"    Context features shape: {context_train.shape if context_train is not None else 'None'}")
     print(f"    Sample weights shape: {weights_train.shape}")
@@ -780,25 +776,25 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
     )
 
     # Evaluate
-    print(f"\n  Generating predictions on test set...")
+    print("\n  Generating predictions on test set...")
     y_pred = model.predict(X_test.values, context_features=context_test)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     r2 = r2_score(y_test, y_pred)
 
-    print(f"\n  Test Set Metrics:")
+    print("\n  Test Set Metrics:")
     print(f"    RMSE: {rmse:.3f}")
     print(f"    R²:   {r2:.3f}")
 
     # Log base model performance
     if hasattr(model, 'oof_scores'):
-        print(f"\n  Base Model OOF Performance:")
+        print("\n  Base Model OOF Performance:")
         for model_name, score in model.oof_scores.items():
             print(f"    {model_name}: RMSE={score:.3f}")
 
     # A/B Test: Compare with baseline (if exists)
     baseline_path = MODEL_DIR / "spread_stacking_baseline.pkl"
     if baseline_path.exists():
-        print(f"\n  A/B Test: Comparing with baseline...")
+        print("\n  A/B Test: Comparing with baseline...")
         try:
             with open(baseline_path, 'rb') as f:
                 baseline_model = pickle.load(f)
@@ -826,7 +822,7 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
                     pickle.dump(model, f)
                 print(f"  ✓ Model improved! Saved to {output_path}")
             else:
-                print(f"  ✗ Model did not improve. Keeping baseline.")
+                print("  ✗ Model did not improve. Keeping baseline.")
                 return baseline_model
         except Exception as e:
             print(f"  Warning: Could not load baseline: {e}")
@@ -843,7 +839,7 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
         with open(baseline_path, 'wb') as f:
             pickle.dump(model, f)
         print(f"  Saved to {output_path}")
-        print(f"  Also saved as baseline for future comparisons")
+        print("  Also saved as baseline for future comparisons")
 
     return model
 
@@ -873,7 +869,7 @@ def train_props_model(data: pd.DataFrame, prop_type: str, tune: bool = False) ->
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     r2 = r2_score(y_test, y_pred)
 
-    print(f"\n  Test Set Metrics:")
+    print("\n  Test Set Metrics:")
     print(f"    RMSE: {rmse:.3f}")
     print(f"    R²:   {r2:.3f}")
 
@@ -1058,11 +1054,11 @@ def main():
 
         print("\n" + "=" * 60)
         if models_updated:
-            print(f"INCREMENTAL UPDATE COMPLETE")
+            print("INCREMENTAL UPDATE COMPLETE")
             print(f"Meta-learners updated: {', '.join(models_updated)}")
         else:
-            print(f"INCREMENTAL UPDATE FAILED")
-            print(f"No meta-learners were updated (check warnings above)")
+            print("INCREMENTAL UPDATE FAILED")
+            print("No meta-learners were updated (check warnings above)")
         print("=" * 60)
         return
 

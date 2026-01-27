@@ -35,7 +35,7 @@ def test_with_warmup():
             output = f.read()
             # Count "props analyzed" lines
             prop_count = output.count('props analyzed')
-            print(f"\n✅ Completed successfully")
+            print("\n✅ Completed successfully")
             print(f"   Games analyzed: {prop_count}")
             print(f"   Total time: {elapsed:.1f}s ({elapsed/60:.1f} minutes)")
             return elapsed
@@ -68,7 +68,7 @@ def test_without_warmup():
         with open('/tmp/predictions_no_warmup.txt') as f:
             output = f.read()
             prop_count = output.count('props analyzed')
-            print(f"\n✅ Completed successfully")
+            print("\n✅ Completed successfully")
             print(f"   Games analyzed: {prop_count}")
             print(f"   Total time: {elapsed:.1f}s ({elapsed/60:.1f} minutes)")
             return elapsed
@@ -126,15 +126,14 @@ def main():
         print("\n🎉 Performance target met!")
         print("✓ Production ready for real-time betting")
         return 0
-    else:
-        print(f"❌ FAIL: {time_optimized:.1f}s > {target_seconds}s target")
-        print(f"\n⚠️  Performance target NOT met")
-        print(f"   Exceeded by: {(time_optimized - target_seconds):.1f}s")
-        print("\n   Recommendations:")
-        print("   1. Increase worker count (max_workers=20)")
-        print("   2. Add more aggressive caching")
-        print("   3. Profile to find remaining bottlenecks")
-        return 1
+    print(f"❌ FAIL: {time_optimized:.1f}s > {target_seconds}s target")
+    print("\n⚠️  Performance target NOT met")
+    print(f"   Exceeded by: {(time_optimized - target_seconds):.1f}s")
+    print("\n   Recommendations:")
+    print("   1. Increase worker count (max_workers=20)")
+    print("   2. Add more aggressive caching")
+    print("   3. Profile to find remaining bottlenecks")
+    return 1
 
 
 if __name__ == "__main__":

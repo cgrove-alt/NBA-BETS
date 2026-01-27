@@ -12,10 +12,7 @@ This helps quantify uncertainty in backtesting results and set realistic expecta
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-from enum import Enum
-import warnings
 
 
 @dataclass
@@ -34,13 +31,13 @@ class MonteCarloResult:
     roi_mean: float
     roi_median: float
     roi_std: float
-    roi_95_ci: Tuple[float, float]
-    roi_99_ci: Tuple[float, float]
+    roi_95_ci: tuple[float, float]
+    roi_99_ci: tuple[float, float]
 
     # Bankroll metrics
     final_bankroll_mean: float
     final_bankroll_median: float
-    final_bankroll_95_ci: Tuple[float, float]
+    final_bankroll_95_ci: tuple[float, float]
 
     # Drawdown metrics
     max_drawdown_mean: float
@@ -54,8 +51,8 @@ class MonteCarloResult:
     probability_of_doubling: float  # P(final_bankroll > 2 * initial)
 
     # Time metrics
-    expected_bets_to_double: Optional[float]
-    expected_bets_to_ruin: Optional[float]
+    expected_bets_to_double: float | None
+    expected_bets_to_ruin: float | None
 
     # Distribution data for visualization
     roi_distribution: np.ndarray
@@ -82,7 +79,7 @@ class MonteCarloSimulator:
         initial_bankroll: float = 10000.0,
         ruin_threshold: float = 0.1,  # Ruin if bankroll falls to 10% of initial
         n_simulations: int = 10000,
-        random_seed: Optional[int] = None,
+        random_seed: int | None = None,
     ):
         """
         Initialize simulator.
@@ -102,9 +99,9 @@ class MonteCarloSimulator:
 
     def simulate_single_path(
         self,
-        bets: List[BetSimulation],
+        bets: list[BetSimulation],
         track_drawdown: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """
         Simulate a single betting path.
 
@@ -132,10 +129,7 @@ class MonteCarloSimulator:
             won = np.random.random() < bet.probability
 
             stake = bankroll * bet.stake_pct
-            if won:
-                profit = stake * (bet.odds - 1)
-            else:
-                profit = -stake
+            profit = stake * (bet.odds - 1) if won else -stake
 
             bankroll += profit
 
@@ -168,8 +162,8 @@ class MonteCarloSimulator:
 
     def run_simulation(
         self,
-        bets: List[BetSimulation],
-        n_bets_per_sim: Optional[int] = None,
+        bets: list[BetSimulation],
+        n_bets_per_sim: int | None = None,
         resample_bets: bool = True,
     ) -> MonteCarloResult:
         """
@@ -303,8 +297,8 @@ class MonteCarloSimulator:
 
     def simulate_from_backtest(
         self,
-        backtest_results: List[Dict],
-        n_bets_per_sim: Optional[int] = None,
+        backtest_results: list[dict],
+        n_bets_per_sim: int | None = None,
     ) -> MonteCarloResult:
         """
         Run simulation based on historical backtest results.
@@ -327,10 +321,7 @@ class MonteCarloSimulator:
 
             if odds < 1:
                 # Convert American to decimal if needed
-                if odds >= 100:
-                    odds = 1 + (odds / 100)
-                else:
-                    odds = 1 + (100 / abs(odds))
+                odds = 1 + odds / 100 if odds >= 100 else 1 + 100 / abs(odds)
 
             implied_prob = 1 / odds if odds > 0 else 0.5
             edge = prob - implied_prob
@@ -348,9 +339,9 @@ class MonteCarloSimulator:
         self,
         win_probability: float,
         odds: float,
-        kelly_fractions: List[float] = None,
+        kelly_fractions: list[float] = None,
         n_bets: int = 500,
-    ) -> Dict[str, MonteCarloResult]:
+    ) -> dict[str, MonteCarloResult]:
         """
         Analyze sensitivity of results to Kelly fraction.
 
@@ -393,9 +384,9 @@ class MonteCarloSimulator:
         base_probability: float,
         odds: float,
         stake_pct: float,
-        edge_adjustments: List[float] = None,
+        edge_adjustments: list[float] = None,
         n_bets: int = 500,
-    ) -> Dict[str, MonteCarloResult]:
+    ) -> dict[str, MonteCarloResult]:
         """
         Analyze sensitivity of results to edge estimation error.
 
@@ -444,7 +435,7 @@ class MonteCarloSimulator:
 def calculate_var_cvar(
     returns: np.ndarray,
     confidence: float = 0.95,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Calculate Value at Risk (VaR) and Conditional VaR (CVaR/Expected Shortfall).
 

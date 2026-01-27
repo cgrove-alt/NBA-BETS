@@ -78,7 +78,7 @@ def main():
     if improvements:
         avg_improvement = sum(improvements) / len(improvements)
         print(f"Average RMSE Improvement: {avg_improvement:+.2f}%")
-        print(f"Prop Types Tested: {len(set([p for p in ['points', 'rebounds', 'assists', 'threes', 'pra'] if p in new_props]))}")
+        print(f"Prop Types Tested: {len({p for p in ['points', 'rebounds', 'assists', 'threes', 'pra'] if p in new_props})}")
         print()
 
         if avg_improvement >= 5.0:

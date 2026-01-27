@@ -12,8 +12,6 @@ import os
 import sys
 import sqlite3
 import argparse
-from datetime import datetime
-from typing import Optional
 
 try:
     import psycopg2
@@ -107,7 +105,7 @@ def migrate_sqlite_to_postgres(sqlite_path: str, postgres_url: str, verbose: boo
     sqlite_conn.row_factory = sqlite3.Row
 
     if verbose:
-        print(f"Connecting to PostgreSQL...")
+        print("Connecting to PostgreSQL...")
     pg_conn = psycopg2.connect(postgres_url)
 
     try:

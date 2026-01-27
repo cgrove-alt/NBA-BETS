@@ -37,12 +37,9 @@ Usage:
 """
 
 import os
-import time
-import json
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
-from pathlib import Path
+from typing import Any
 import numpy as np
 from contextlib import contextmanager
 
@@ -204,7 +201,7 @@ class OddsHistoryDB:
             """, (game_id, home_team, away_team, commence_time))
 
     def insert_odds_snapshot(self, game_id: str, book_name: str, market: str,
-                            odds_data: Dict, is_opening: bool = False, is_closing: bool = False):
+                            odds_data: dict, is_opening: bool = False, is_closing: bool = False):
         """Insert an odds snapshot."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -230,7 +227,7 @@ class OddsHistoryDB:
                 is_opening, is_closing
             ))
 
-    def get_opening_line(self, game_id: str, market: str) -> Optional[Dict]:
+    def get_opening_line(self, game_id: str, market: str) -> dict | None:
         """Fetch opening line for a game/market."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -243,7 +240,7 @@ class OddsHistoryDB:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_closing_line(self, game_id: str, market: str) -> Optional[Dict]:
+    def get_closing_line(self, game_id: str, market: str) -> dict | None:
         """Fetch closing line for a game/market."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -257,7 +254,7 @@ class OddsHistoryDB:
             return dict(row) if row else None
 
     def get_odds_history(self, game_id: str, market: str,
-                         lookback_minutes: int = 60) -> List[Dict]:
+                         lookback_minutes: int = 60) -> list[dict]:
         """Get odds history for a game/market within lookback window."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -271,7 +268,7 @@ class OddsHistoryDB:
 
             return [dict(row) for row in cursor.fetchall()]
 
-    def upsert_line_movement(self, game_id: str, market: str, movement_data: Dict):
+    def upsert_line_movement(self, game_id: str, market: str, movement_data: dict):
         """Insert or update line movement summary."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -294,7 +291,7 @@ class OddsHistoryDB:
                 movement_data.get('steam_detected', False)
             ))
 
-    def get_line_movement(self, game_id: str, market: str) -> Optional[Dict]:
+    def get_line_movement(self, game_id: str, market: str) -> dict | None:
         """Get line movement summary for a game/market."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -322,7 +319,7 @@ class BettingMarketFeatures:
     - Generate features for ML models
     """
 
-    def __init__(self, api_key: Optional[str] = None, db_path: str = DEFAULT_ODDS_DB):
+    def __init__(self, api_key: str | None = None, db_path: str = DEFAULT_ODDS_DB):
         """
         Initialize betting market features tracker.
 
@@ -346,15 +343,15 @@ class BettingMarketFeatures:
                 print("Warning: No API key provided. Set THE_ODDS_API_KEY or pass api_key parameter.")
 
         # Cache for current odds
-        self._odds_cache: Dict[str, Dict] = {}
-        self._cache_timestamp: Optional[datetime] = None
+        self._odds_cache: dict[str, dict] = {}
+        self._cache_timestamp: datetime | None = None
         self._cache_ttl = timedelta(minutes=5)
 
     # =========================================================================
     # ODDS FETCHING AND STORAGE
     # =========================================================================
 
-    def fetch_current_odds(self, force_refresh: bool = False) -> List[Dict]:
+    def fetch_current_odds(self, force_refresh: bool = False) -> list[dict]:
         """
         Fetch current NBA odds from The Odds API.
 
@@ -490,7 +487,7 @@ class BettingMarketFeatures:
     # LINE MOVEMENT CALCULATIONS
     # =========================================================================
 
-    def calculate_line_movement(self, game_id: str, market: str) -> Optional[float]:
+    def calculate_line_movement(self, game_id: str, market: str) -> float | None:
         """
         Calculate line movement (closing - opening).
 
@@ -530,16 +527,15 @@ class BettingMarketFeatures:
                     open_prob = american_to_prob(open_odds)
                     close_prob = american_to_prob(close_odds)
                     return close_prob - open_prob
-                else:
-                    # Fallback probability calculation
-                    open_prob = self._american_to_prob(open_odds)
-                    close_prob = self._american_to_prob(close_odds)
-                    return close_prob - open_prob
+                # Fallback probability calculation
+                open_prob = self._american_to_prob(open_odds)
+                close_prob = self._american_to_prob(close_odds)
+                return close_prob - open_prob
 
         return None
 
     def detect_reverse_line_movement(self, game_id: str, market: str,
-                                     public_betting_pct: Optional[float] = None) -> bool:
+                                     public_betting_pct: float | None = None) -> bool:
         """
         Detect Reverse Line Movement (RLM).
 
@@ -663,7 +659,7 @@ class BettingMarketFeatures:
 
         return False
 
-    def calculate_consensus_odds(self, game_id: str, market: str) -> Optional[Dict]:
+    def calculate_consensus_odds(self, game_id: str, market: str) -> dict | None:
         """
         Calculate consensus (fair) odds across multiple sportsbooks.
 
@@ -726,7 +722,7 @@ class BettingMarketFeatures:
     # FEATURE GENERATION FOR ML MODELS
     # =========================================================================
 
-    def get_market_features(self, game_id: str, home_team: str, away_team: str) -> Dict[str, Any]:
+    def get_market_features(self, game_id: str, home_team: str, away_team: str) -> dict[str, Any]:
         """
         Generate all betting market features for a game.
 
@@ -792,8 +788,7 @@ class BettingMarketFeatures:
         """Convert American odds to implied probability (fallback method)."""
         if odds > 0:
             return 100 / (odds + 100)
-        else:
-            return abs(odds) / (abs(odds) + 100)
+        return abs(odds) / (abs(odds) + 100)
 
     @staticmethod
     def _prob_to_american(prob: float) -> int:
@@ -802,8 +797,7 @@ class BettingMarketFeatures:
             return -110
         if prob >= 0.5:
             return int(-100 * prob / (1 - prob))
-        else:
-            return int(100 * (1 - prob) / prob)
+        return int(100 * (1 - prob) / prob)
 
 
 # =============================================================================
@@ -819,7 +813,7 @@ class OddsTracker:
         tracker.fetch_and_store_odds()
     """
 
-    def __init__(self, api_key: Optional[str] = None,
+    def __init__(self, api_key: str | None = None,
                  update_interval_minutes: int = 5,
                  db_path: str = DEFAULT_ODDS_DB):
         """
@@ -832,7 +826,7 @@ class OddsTracker:
         """
         self.features = BettingMarketFeatures(api_key, db_path)
         self.update_interval = update_interval_minutes
-        self.last_update: Optional[datetime] = None
+        self.last_update: datetime | None = None
 
     def fetch_and_store_odds(self) -> int:
         """

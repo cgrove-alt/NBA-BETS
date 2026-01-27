@@ -7,12 +7,7 @@ and provides actionable insights for fixing it.
 
 import pickle
 import json
-import numpy as np
-import pandas as pd
 from pathlib import Path
-from collections import defaultdict
-import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 # Paths
 MODEL_DIR = Path("models")
@@ -30,7 +25,7 @@ def analyze_model_structure(model_data, model_name):
     print('='*60)
 
     if isinstance(model_data, dict):
-        print(f"Model Type: Dictionary-based")
+        print("Model Type: Dictionary-based")
         print(f"Keys: {list(model_data.keys())}")
 
         # Check for ensemble structure
@@ -45,7 +40,7 @@ def analyze_model_structure(model_data, model_name):
                 print(f"Meta Model: {type(meta).__name__ if meta else 'None (weighted average)'}")
 
             if 'model_weights' in model_data:
-                print(f"\nModel Weights:")
+                print("\nModel Weights:")
                 for name, weight in model_data.get('model_weights', {}).items():
                     print(f"  {name}: {weight:.4f}")
 

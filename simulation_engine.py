@@ -32,13 +32,10 @@ Output: Distribution of 10,000+ simulated games providing:
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Any
 from enum import Enum
 import random
 from collections import defaultdict
-import json
-from pathlib import Path
-from datetime import datetime
 
 # V3 tracking data imports (optional, for enhanced simulation)
 try:
@@ -130,16 +127,16 @@ class PlayerTrackingStats(PlayerStats):
     """
 
     # Zone shooting percentages (from ShotAtlas)
-    zone_fg_pct: Dict[str, float] = field(default_factory=dict)
+    zone_fg_pct: dict[str, float] = field(default_factory=dict)
 
     # Shot distribution by zone (where they shoot from)
-    zone_distribution: Dict[str, float] = field(default_factory=dict)
+    zone_distribution: dict[str, float] = field(default_factory=dict)
 
     # Hot zones (above league average)
-    hot_zones: List[str] = field(default_factory=list)
+    hot_zones: list[str] = field(default_factory=list)
 
     # Cold zones (below league average)
-    cold_zones: List[str] = field(default_factory=list)
+    cold_zones: list[str] = field(default_factory=list)
 
     # Lineup-specific usage adjustments
     lineup_usage_factor: float = 1.0  # Multiplied with usage_rate when in specific lineups
@@ -148,14 +145,14 @@ class PlayerTrackingStats(PlayerStats):
     expected_minutes: float = 0.0
 
     # Players they play well with (pair synergy)
-    synergy_partners: Dict[int, float] = field(default_factory=dict)  # player_id -> synergy boost
+    synergy_partners: dict[int, float] = field(default_factory=dict)  # player_id -> synergy boost
 
     @classmethod
     def from_player_stats(
         cls,
         player: PlayerStats,
-        shot_atlas: Optional[Any] = None,
-        rotation_tracker: Optional[Any] = None
+        shot_atlas: Any | None = None,
+        rotation_tracker: Any | None = None
     ) -> 'PlayerTrackingStats':
         """
         Create PlayerTrackingStats from base PlayerStats + tracking data.
@@ -220,12 +217,11 @@ class PlayerTrackingStats(PlayerStats):
         # Fallback based on zone type
         if 'Restricted' in zone:
             return self.fg_pct + 0.15  # Rim shots are higher %
-        elif '3' in zone or 'Corner' in zone:
+        if '3' in zone or 'Corner' in zone:
             return self.fg3_pct
-        elif 'Mid-Range' in zone:
+        if 'Mid-Range' in zone:
             return self.fg_pct - 0.03  # Mid-range slightly lower
-        else:
-            return league_avg
+        return league_avg
 
     def select_shot_zone(self) -> str:
         """
@@ -274,7 +270,7 @@ class TeamStats:
     tov_pct: float = 0.13  # Turnover %
 
     # Roster
-    players: List[PlayerStats] = field(default_factory=list)
+    players: list[PlayerStats] = field(default_factory=list)
 
 
 @dataclass
@@ -287,8 +283,8 @@ class GameState:
     possession_team: int = 0  # 0 = home, 1 = away
 
     # Player stats tracking
-    home_player_stats: Dict[int, Dict[str, int]] = field(default_factory=dict)
-    away_player_stats: Dict[int, Dict[str, int]] = field(default_factory=dict)
+    home_player_stats: dict[int, dict[str, int]] = field(default_factory=dict)
+    away_player_stats: dict[int, dict[str, int]] = field(default_factory=dict)
 
     def get_margin(self) -> int:
         """Home team margin (positive = home leading)."""
@@ -337,9 +333,9 @@ class GameSimulator:
         self.home_boost = 0.0 if neutral_site else self.HOME_ADVANTAGE / 100.0
 
         # Results storage
-        self.results: List[Dict] = []
+        self.results: list[dict] = []
 
-    def _init_player_stats(self, team: TeamStats) -> Dict[int, Dict[str, int]]:
+    def _init_player_stats(self, team: TeamStats) -> dict[int, dict[str, int]]:
         """Initialize stat tracking for all players."""
         return {
             i: {
@@ -387,7 +383,7 @@ class GameSimulator:
         shooter: PlayerStats,
         is_three: bool,
         defense_rating: float
-    ) -> Tuple[bool, int]:
+    ) -> tuple[bool, int]:
         """
         Simulate a shot attempt.
 
@@ -404,14 +400,13 @@ class GameSimulator:
             adjusted_pct = max(0.15, min(0.55, adjusted_pct))
             made = random.random() < adjusted_pct
             return (made, 3 if made else 0)
-        else:
-            # Two-point shot
-            two_pt_pct = shooter.fg_pct  # Simplified
-            variance = np.random.normal(0, 0.03)
-            adjusted_pct = two_pt_pct * (1.0 / def_factor) + variance
-            adjusted_pct = max(0.30, min(0.70, adjusted_pct))
-            made = random.random() < adjusted_pct
-            return (made, 2 if made else 0)
+        # Two-point shot
+        two_pt_pct = shooter.fg_pct  # Simplified
+        variance = np.random.normal(0, 0.03)
+        adjusted_pct = two_pt_pct * (1.0 / def_factor) + variance
+        adjusted_pct = max(0.30, min(0.70, adjusted_pct))
+        made = random.random() < adjusted_pct
+        return (made, 2 if made else 0)
 
     def _simulate_free_throws(self, shooter: PlayerStats, num_fts: int) -> int:
         """Simulate free throw attempts."""
@@ -430,7 +425,7 @@ class GameSimulator:
         defense: TeamStats,
         game_state: GameState,
         is_home_offense: bool
-    ) -> Tuple[int, Dict]:
+    ) -> tuple[int, dict]:
         """
         Simulate a single possession.
 
@@ -445,7 +440,7 @@ class GameSimulator:
         shooter = offense.players[shooter_idx]
 
         # Adjust ratings for home court
-        off_rating = offense.off_rating * (1 + self.home_boost if is_home_offense else 1)
+        offense.off_rating * (1 + self.home_boost if is_home_offense else 1)
         def_rating = defense.def_rating * (1 - self.home_boost * 0.5 if is_home_offense else 1)
 
         # Check for turnover
@@ -566,7 +561,7 @@ class GameSimulator:
         probs = [w / sum(weights) for w in weights]
         return np.random.choice(len(team.players), p=probs)
 
-    def _select_assister(self, team: TeamStats, shooter_idx: int) -> Optional[int]:
+    def _select_assister(self, team: TeamStats, shooter_idx: int) -> int | None:
         """Select who made the assist."""
         weights = []
         for i, player in enumerate(team.players):
@@ -584,7 +579,7 @@ class GameSimulator:
     def _apply_stat_updates(
         self,
         game_state: GameState,
-        stat_updates: Dict,
+        stat_updates: dict,
         is_home_offense: bool
     ):
         """Apply stat updates to game state."""
@@ -603,7 +598,7 @@ class GameSimulator:
             for stat, value in updates.items():
                 def_stats[player_idx][stat] = def_stats[player_idx].get(stat, 0) + value
 
-    def simulate_game(self) -> Dict:
+    def simulate_game(self) -> dict:
         """
         Simulate a single complete game.
 
@@ -674,7 +669,7 @@ class GameSimulator:
             'away_player_stats': dict(game_state.away_player_stats),
         }
 
-    def run_simulation(self, n_simulations: int = 10000) -> Dict:
+    def run_simulation(self, n_simulations: int = 10000) -> dict:
         """
         Run Monte Carlo simulation.
 
@@ -692,7 +687,7 @@ class GameSimulator:
 
         return self._analyze_results()
 
-    def _analyze_results(self) -> Dict:
+    def _analyze_results(self) -> dict:
         """Analyze simulation results."""
         if not self.results:
             return {}
@@ -745,7 +740,7 @@ class GameSimulator:
             'away_players': self._aggregate_player_stats('away_player_stats'),
         }
 
-    def _aggregate_player_stats(self, team_key: str) -> Dict:
+    def _aggregate_player_stats(self, team_key: str) -> dict:
         """Aggregate player stats across simulations."""
         if not self.results:
             return {}
@@ -776,7 +771,7 @@ class GameSimulator:
     # BETTING PROBABILITY CALCULATORS
     # =========================================================================
 
-    def calculate_spread_probability(self, spread: float) -> Dict:
+    def calculate_spread_probability(self, spread: float) -> dict:
         """
         Calculate probability of covering a spread.
 
@@ -804,7 +799,7 @@ class GameSimulator:
             'projected_margin': np.mean([r['margin'] for r in self.results]),
         }
 
-    def calculate_total_probability(self, total_line: float) -> Dict:
+    def calculate_total_probability(self, total_line: float) -> dict:
         """Calculate probability of over/under total."""
         if not self.results:
             return {'over_prob': 0.5, 'under_prob': 0.5}
@@ -822,7 +817,7 @@ class GameSimulator:
             'projected_total': np.mean(totals),
         }
 
-    def calculate_moneyline_probability(self) -> Dict:
+    def calculate_moneyline_probability(self) -> dict:
         """Calculate moneyline win probabilities."""
         if not self.results:
             return {'home_prob': 0.5, 'away_prob': 0.5}
@@ -841,7 +836,7 @@ class GameSimulator:
         stat: str,
         line: float,
         is_home: bool = True
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate probability of player prop hitting.
 
@@ -878,7 +873,7 @@ class GameSimulator:
             'line': line,
         }
 
-    def calculate_parlay_correlation(self, bet1: Dict, bet2: Dict) -> Dict:
+    def calculate_parlay_correlation(self, bet1: dict, bet2: dict) -> dict:
         """
         Calculate correlation between two bets for same-game parlay analysis.
 
@@ -897,7 +892,7 @@ class GameSimulator:
             outcomes2.append(1 if o2 else 0)
 
         n = len(outcomes1)
-        both_hit = sum(1 for o1, o2 in zip(outcomes1, outcomes2) if o1 and o2)
+        both_hit = sum(1 for o1, o2 in zip(outcomes1, outcomes2, strict=False) if o1 and o2)
         p1 = sum(outcomes1) / n
         p2 = sum(outcomes2) / n
 
@@ -914,7 +909,7 @@ class GameSimulator:
             'correlation_boost': (both_hit / n) / (p1 * p2) if p1 * p2 > 0 else 1.0,
         }
 
-    def _evaluate_bet(self, result: Dict, bet: Dict) -> bool:
+    def _evaluate_bet(self, result: dict, bet: dict) -> bool:
         """Evaluate if a bet wins in a simulated game."""
         bet_type = bet.get('type', 'prop')
 
@@ -922,20 +917,19 @@ class GameSimulator:
             side = bet.get('side', 'home')
             return result['home_win'] if side == 'home' else not result['home_win']
 
-        elif bet_type == 'spread':
+        if bet_type == 'spread':
             spread = bet.get('line', 0)
             side = bet.get('side', 'home')
             if side == 'home':
                 return result['margin'] > -spread
-            else:
-                return result['margin'] < -spread
+            return result['margin'] < -spread
 
-        elif bet_type == 'total':
+        if bet_type == 'total':
             line = bet.get('line', 220)
             side = bet.get('side', 'over')
             return result['total'] > line if side == 'over' else result['total'] < line
 
-        elif bet_type == 'prop':
+        if bet_type == 'prop':
             is_home = bet.get('is_home', True)
             team_key = 'home_player_stats' if is_home else 'away_player_stats'
             player_idx = bet.get('player_idx', 0)
@@ -999,24 +993,24 @@ class GameSimulatorV3(GameSimulator):
         super().__init__(home_team, away_team, neutral_site)
 
         # V3 tracking data
-        self.shot_atlas: Optional[Any] = None
-        self.rotation_tracker: Optional[Any] = None
+        self.shot_atlas: Any | None = None
+        self.rotation_tracker: Any | None = None
 
         # Current lineup tracking
-        self._home_current_lineup: Set[int] = set()
-        self._away_current_lineup: Set[int] = set()
+        self._home_current_lineup: set[int] = set()
+        self._away_current_lineup: set[int] = set()
 
         # Lineup-based probabilities
-        self._home_lineup_probs: Dict[Tuple[int, ...], float] = {}
-        self._away_lineup_probs: Dict[Tuple[int, ...], float] = {}
+        self._home_lineup_probs: dict[tuple[int, ...], float] = {}
+        self._away_lineup_probs: dict[tuple[int, ...], float] = {}
 
         # Flag for V3 mode
         self.use_tracking_data = False
 
     def load_tracking_data(
         self,
-        shot_atlas: Optional[Any] = None,
-        rotation_tracker: Optional[Any] = None
+        shot_atlas: Any | None = None,
+        rotation_tracker: Any | None = None
     ):
         """
         Load tracking data for enhanced simulation.
@@ -1086,7 +1080,7 @@ class GameSimulatorV3(GameSimulator):
         current_lineup = self._get_current_lineup(team)
 
         weights = []
-        for i, player in enumerate(team.players):
+        for _i, player in enumerate(team.players):
             if player.availability < 0.5:
                 weight = 0.0
             elif is_garbage_time and player.is_starter:
@@ -1113,7 +1107,7 @@ class GameSimulatorV3(GameSimulator):
         probs = [w / total for w in weights]
         return np.random.choice(len(team.players), p=probs)
 
-    def _get_current_lineup(self, team: TeamStats) -> Set[int]:
+    def _get_current_lineup(self, team: TeamStats) -> set[int]:
         """Get IDs of players currently on the court."""
         # Simplified: return starters + active bench
         lineup = set()
@@ -1129,7 +1123,7 @@ class GameSimulatorV3(GameSimulator):
         shooter: PlayerStats,
         is_three: bool,
         defense_rating: float
-    ) -> Tuple[bool, int]:
+    ) -> tuple[bool, int]:
         """
         V3: Simulate shot with zone-based probabilities.
 
@@ -1151,7 +1145,7 @@ class GameSimulatorV3(GameSimulator):
         self,
         shooter: PlayerTrackingStats,
         defense_rating: float
-    ) -> Tuple[bool, int]:
+    ) -> tuple[bool, int]:
         """
         V3 zone-based shot simulation.
         """
@@ -1193,7 +1187,7 @@ class GameSimulatorV3(GameSimulator):
         made = random.random() < adjusted_pct
         return (made, points if made else 0)
 
-    def get_zone_stats_summary(self) -> Dict:
+    def get_zone_stats_summary(self) -> dict:
         """
         Get summary of zone shooting stats used in simulation.
 
@@ -1231,7 +1225,7 @@ class GameSimulatorV3(GameSimulator):
 # FACTORY FUNCTIONS
 # =============================================================================
 
-def create_player_from_dict(data: Dict, team_id: int = 0) -> PlayerStats:
+def create_player_from_dict(data: dict, team_id: int = 0) -> PlayerStats:
     """Create PlayerStats from dictionary (e.g., from API response)."""
 
     # Normalize percentage values
@@ -1269,7 +1263,7 @@ def create_player_from_dict(data: Dict, team_id: int = 0) -> PlayerStats:
     )
 
 
-def create_team_from_dict(data: Dict, players: List[Dict]) -> TeamStats:
+def create_team_from_dict(data: dict, players: list[dict]) -> TeamStats:
     """Create TeamStats from dictionary."""
     player_objs = [create_player_from_dict(p, data.get('id', 0)) for p in players[:12]]
 
@@ -1401,24 +1395,24 @@ def demo_simulation():
     results = sim.run_simulation(n_simulations=5000)
 
     print(f"\nSimulations: {results['n_simulations']}")
-    print(f"\nWIN PROBABILITIES:")
+    print("\nWIN PROBABILITIES:")
     print(f"  Celtics (Home): {results['home_win_prob']:.1%}")
     print(f"  Lakers (Away):  {results['away_win_prob']:.1%}")
 
-    print(f"\nSCORE PROJECTIONS:")
+    print("\nSCORE PROJECTIONS:")
     print(f"  Celtics: {results['home_score_mean']:.1f} (+/- {results['home_score_std']:.1f})")
     print(f"  Lakers:  {results['away_score_mean']:.1f} (+/- {results['away_score_std']:.1f})")
 
-    print(f"\nSPREAD ANALYSIS:")
+    print("\nSPREAD ANALYSIS:")
     print(f"  Projected Margin: BOS {results['margin_mean']:+.1f}")
     print(f"  Margin Std Dev: {results['margin_std']:.1f}")
 
-    print(f"\nTOTAL ANALYSIS:")
+    print("\nTOTAL ANALYSIS:")
     print(f"  Projected Total: {results['total_mean']:.1f}")
     print(f"  Total Std Dev: {results['total_std']:.1f}")
 
     # Betting probabilities
-    print(f"\nBETTING PROBABILITIES:")
+    print("\nBETTING PROBABILITIES:")
 
     spread = sim.calculate_spread_probability(-6.5)  # Celtics -6.5
     print(f"  Celtics -6.5: {spread['home_cover_prob']:.1%}")
@@ -1427,7 +1421,7 @@ def demo_simulation():
     print(f"  Over 224.5: {total['over_prob']:.1%}")
 
     # Player props
-    print(f"\nPLAYER PROPS (from simulation):")
+    print("\nPLAYER PROPS (from simulation):")
 
     tatum_pts = sim.calculate_prop_probability(0, 'pts', 26.5, is_home=True)
     print(f"  Tatum Over 26.5 pts: {tatum_pts['over_prob']:.1%} (proj: {tatum_pts['mean']:.1f})")
@@ -1439,7 +1433,7 @@ def demo_simulation():
     print(f"  AD Over 11.5 reb: {ad_reb['over_prob']:.1%} (proj: {ad_reb['mean']:.1f})")
 
     # Parlay correlation
-    print(f"\nPARLAY CORRELATION:")
+    print("\nPARLAY CORRELATION:")
     bet1 = {'type': 'moneyline', 'side': 'home'}
     bet2 = {'type': 'prop', 'is_home': True, 'player_idx': 0, 'stat': 'pts', 'line': 26.5, 'side': 'over'}
     corr = sim.calculate_parlay_correlation(bet1, bet2)

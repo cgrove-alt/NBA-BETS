@@ -22,8 +22,6 @@ Usage:
 
 import numpy as np
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime
 
 
 class FourFactorsCalculator:
@@ -64,7 +62,7 @@ class FourFactorsCalculator:
         # Structure: team_id -> opponent_id -> [(game_date, stats_dict), ...]
         self.matchup_history = defaultdict(lambda: defaultdict(list))
 
-    def _estimate_possessions(self, team_stats: Dict, opp_stats: Dict = None) -> float:
+    def _estimate_possessions(self, team_stats: dict, opp_stats: dict = None) -> float:
         """
         Estimate possessions using the official NBA formula.
 
@@ -90,7 +88,7 @@ class FourFactorsCalculator:
 
         return max(poss, 1.0)  # Avoid division by zero
 
-    def calculate_efg_pct(self, stats: Dict) -> float:
+    def calculate_efg_pct(self, stats: dict) -> float:
         """
         Calculate Effective Field Goal Percentage.
 
@@ -107,7 +105,7 @@ class FourFactorsCalculator:
 
         return (fgm + 0.5 * fg3m) / fga
 
-    def calculate_tov_pct(self, stats: Dict) -> float:
+    def calculate_tov_pct(self, stats: dict) -> float:
         """
         Calculate Turnover Rate.
 
@@ -125,7 +123,7 @@ class FourFactorsCalculator:
 
         return tov / plays
 
-    def calculate_orb_pct(self, stats: Dict, opp_stats: Dict = None) -> float:
+    def calculate_orb_pct(self, stats: dict, opp_stats: dict = None) -> float:
         """
         Calculate Offensive Rebound Percentage.
 
@@ -148,7 +146,7 @@ class FourFactorsCalculator:
 
         return orb / total
 
-    def calculate_ft_rate(self, stats: Dict) -> float:
+    def calculate_ft_rate(self, stats: dict) -> float:
         """
         Calculate Free Throw Rate.
 
@@ -164,7 +162,7 @@ class FourFactorsCalculator:
 
         return fta / fga
 
-    def calculate_four_factors(self, stats: Dict, opp_stats: Dict = None) -> Dict[str, float]:
+    def calculate_four_factors(self, stats: dict, opp_stats: dict = None) -> dict[str, float]:
         """
         Calculate all Four Factors for a single game.
 
@@ -182,8 +180,8 @@ class FourFactorsCalculator:
             'ft_rate': round(self.calculate_ft_rate(stats), 4),
         }
 
-    def add_game(self, team_id: int, game_date: str, stats: Dict,
-                 opponent_id: int = None, opp_stats: Dict = None):
+    def add_game(self, team_id: int, game_date: str, stats: dict,
+                 opponent_id: int = None, opp_stats: dict = None):
         """
         Add a game's stats for a team.
 
@@ -227,7 +225,7 @@ class FourFactorsCalculator:
             self.matchup_history[team_id][opponent_id].sort(key=lambda x: x[0])
 
     def get_four_factors_before_date(self, team_id: int, game_date: str,
-                                      window: int = 10, min_games: int = 3) -> Optional[Dict]:
+                                      window: int = 10, min_games: int = 3) -> dict | None:
         """
         Get Four Factors features using only games BEFORE game_date.
 
@@ -311,7 +309,7 @@ class FourFactorsCalculator:
         return features
 
     def get_matchup_four_factors(self, team_id: int, opponent_id: int,
-                                  game_date: str, min_games: int = 1) -> Optional[Dict]:
+                                  game_date: str, min_games: int = 1) -> dict | None:
         """
         Get Four Factors for head-to-head matchup history.
 
@@ -352,7 +350,7 @@ class FourFactorsCalculator:
         home_id: int,
         away_id: int,
         game_date: str
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Calculate Four Factor differential between two teams.
 
@@ -448,11 +446,10 @@ class FourFactorsCalculator:
         if per_100:
             # Convert to per 100 possessions
             return round(stat_value / team_pace * 100, 2)
-        else:
-            # Adjust to league-average pace
-            return round(stat_value / team_pace * self.LEAGUE_AVG['pace'], 2)
+        # Adjust to league-average pace
+        return round(stat_value / team_pace * self.LEAGUE_AVG['pace'], 2)
 
-    def _get_default_features(self) -> Dict:
+    def _get_default_features(self) -> dict:
         """Return default features when insufficient data."""
         features = {}
 
@@ -491,7 +488,7 @@ class StyleClashCalculator:
     def __init__(self):
         self.team_styles = defaultdict(dict)
 
-    def calculate_team_style(self, team_id: int, games: List[Tuple[str, Dict]]) -> Dict:
+    def calculate_team_style(self, team_id: int, games: list[tuple[str, dict]]) -> dict:
         """
         Identify team's playing style from recent games.
 
@@ -536,7 +533,7 @@ class StyleClashCalculator:
 
         return style
 
-    def calculate_style_clash(self, home_style: Dict, away_style: Dict) -> Dict:
+    def calculate_style_clash(self, home_style: dict, away_style: dict) -> dict:
         """
         Calculate style clash features between two teams.
 
@@ -582,7 +579,7 @@ class StyleClashCalculator:
 
         return features
 
-    def _get_default_style(self) -> Dict:
+    def _get_default_style(self) -> dict:
         """Return default style when insufficient data."""
         return {
             'avg_pace': 100.0,
@@ -603,7 +600,7 @@ def generate_advanced_game_features(
     home_id: int,
     away_id: int,
     game_date: str
-) -> Dict:
+) -> dict:
     """
     Generate all advanced features for a game prediction.
 
@@ -660,7 +657,7 @@ def generate_advanced_game_features(
 
 
 # Utility function for quick integration
-def add_four_factors_to_features(existing_features: Dict, team_stats: Dict) -> Dict:
+def add_four_factors_to_features(existing_features: dict, team_stats: dict) -> dict:
     """
     Quick utility to add Four Factors to an existing feature dictionary.
 

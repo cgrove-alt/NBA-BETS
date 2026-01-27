@@ -138,30 +138,30 @@ def validate_integration_readiness():
 
     # Check 1: Can get standardized metrics
     try:
-        metric = fetcher._standardize_metric(7.0, 'darko')
+        fetcher._standardize_metric(7.0, 'darko')
         checks.append(("Metric standardization", True))
-    except Exception as e:
+    except Exception:
         checks.append(("Metric standardization", False))
 
     # Check 2: Can get player impact
     try:
         impact = fetcher.get_player_impact_metric("Test Player")
         checks.append(("Player impact lookup", True))
-    except Exception as e:
+    except Exception:
         checks.append(("Player impact lookup", False))
 
     # Check 3: Can calculate team adjustments
     try:
-        adjustment = fetcher.calculate_team_rating_adjustment("LAL", [])
+        fetcher.calculate_team_rating_adjustment("LAL", [])
         checks.append(("Team adjustment calculation", True))
-    except Exception as e:
+    except Exception:
         checks.append(("Team adjustment calculation", False))
 
     # Check 4: Cache system works
     try:
         fetcher._save_cache('darko')
         checks.append(("Cache save/load", True))
-    except Exception as e:
+    except Exception:
         checks.append(("Cache save/load", False))
 
     # Check 5: Priority order works
@@ -171,7 +171,7 @@ def validate_integration_readiness():
         impact = fetcher.get_player_impact("Test")
         is_darko = impact.get("impact_metric") == 8.0
         checks.append(("Priority order", is_darko))
-    except Exception as e:
+    except Exception:
         checks.append(("Priority order", False))
 
     print("Integration checks:")

@@ -9,15 +9,13 @@ Supports incremental model updates using:
 """
 
 import sys
-import pickle
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -74,7 +72,7 @@ class IncrementalTrainer:
         prop_type: str = None,
         min_samples: int = 100,
         max_days: int = 365
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         """Extract training data from settled predictions.
 
         Args:
@@ -143,8 +141,8 @@ class IncrementalTrainer:
     def prepare_features(
         self,
         df: pd.DataFrame,
-        feature_cols: List[str] = None
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        feature_cols: list[str] = None
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Prepare features for training.
 
         Args:
@@ -180,7 +178,7 @@ class IncrementalTrainer:
         new_data: pd.DataFrame,
         existing_model_path: str = None,
         n_estimators_boost: int = 50,
-    ) -> Tuple[Any, Dict]:
+    ) -> tuple[Any, dict]:
         """Incrementally train an XGBoost model.
 
         Args:
@@ -254,7 +252,7 @@ class IncrementalTrainer:
         new_data: pd.DataFrame,
         existing_model_path: str = None,
         num_boost_round: int = 50,
-    ) -> Tuple[Any, Dict]:
+    ) -> tuple[Any, dict]:
         """Incrementally train a LightGBM model.
 
         Args:
@@ -331,7 +329,7 @@ class IncrementalTrainer:
         prop_type: str,
         min_samples: int = 100,
         use_library: str = 'xgboost'
-    ) -> Optional[str]:
+    ) -> str | None:
         """Retrain a player prop model with new data.
 
         Args:
@@ -397,7 +395,7 @@ class IncrementalTrainer:
 
         return version_id
 
-    def retrain_all_prop_models(self, min_samples: int = 50) -> Dict[str, str]:
+    def retrain_all_prop_models(self, min_samples: int = 50) -> dict[str, str]:
         """Retrain all player prop models.
 
         Args:
@@ -432,7 +430,7 @@ class IncrementalTrainer:
         if not active_model:
             return True  # No model exists
 
-        last_training = active_model.get('training_date', '')
+        active_model.get('training_date', '')
         last_samples = active_model.get('training_samples', 0)
 
         # Get new settled predictions since last training
@@ -444,12 +442,9 @@ class IncrementalTrainer:
         new_count = len(new_data)
 
         # Retrain if we have significantly more data
-        if new_count >= last_samples + min_new_samples:
-            return True
+        return new_count >= last_samples + min_new_samples
 
-        return False
-
-    def get_training_status(self) -> Dict:
+    def get_training_status(self) -> dict:
         """Get status of training data availability.
 
         Returns:
@@ -480,8 +475,7 @@ def run_incremental_training():
     for prop_type, info in status.items():
         print(f"  {prop_type}: {info['samples']} samples, retrain: {info['should_retrain']}")
 
-    results = trainer.retrain_all_prop_models()
-    return results
+    return trainer.retrain_all_prop_models()
 
 
 if __name__ == "__main__":

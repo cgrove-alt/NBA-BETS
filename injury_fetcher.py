@@ -17,15 +17,11 @@ Injury Statuses (Official NBA):
 - GTD (Game Time Decision): Will be decided before tip-off
 """
 
-import requests
-import json
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-import re
-import time
 
 # Import Balldontlie API
 try:
@@ -87,14 +83,14 @@ class InjuryStatus(Enum):
 class InjuryReport:
     """Individual player injury report."""
     player_name: str
-    player_id: Optional[str] = None
+    player_id: str | None = None
     team: str = ""
-    team_id: Optional[str] = None
+    team_id: str | None = None
     status: InjuryStatus = InjuryStatus.UNKNOWN
     injury_type: str = ""  # e.g., "Knee", "Ankle", "Illness"
     injury_detail: str = ""  # e.g., "Left knee soreness"
-    report_date: Optional[datetime] = None
-    expected_return: Optional[str] = None  # e.g., "2-3 weeks"
+    report_date: datetime | None = None
+    expected_return: str | None = None  # e.g., "2-3 weeks"
     games_missed: int = 0
     source: str = ""
 
@@ -104,7 +100,7 @@ class InjuryReport:
     apg: float = 0.0  # Assists per game
     minutes: float = 0.0  # Minutes per game
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary."""
         d = asdict(self)
         d['status'] = self.status.value
@@ -120,7 +116,7 @@ class InjuryReport:
 class TeamInjuryImpact:
     """Calculated impact of injuries on a team."""
     team: str
-    team_id: Optional[str] = None
+    team_id: str | None = None
     total_players_out: int = 0
     total_players_questionable: int = 0
 
@@ -137,9 +133,9 @@ class TeamInjuryImpact:
     star_player_out: bool = False
     starting_pg_out: bool = False
 
-    injuries: List[InjuryReport] = field(default_factory=list)
+    injuries: list[InjuryReport] = field(default_factory=list)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
             "team": self.team,
@@ -215,7 +211,7 @@ class InjuryFetcher:
             cache_duration_minutes: How long to cache injury data (default 30 min)
         """
         self.cache_duration = timedelta(minutes=cache_duration_minutes)
-        self._cache: Dict[str, Tuple[datetime, Any]] = {}
+        self._cache: dict[str, tuple[datetime, Any]] = {}
         self._star_players = self._load_star_players()
 
         # Initialize Balldontlie API client
@@ -229,7 +225,7 @@ class InjuryFetcher:
             except Exception as e:
                 logger.warning(f"Failed to initialize Balldontlie API: {e}")
 
-    def _build_team_id_mapping(self) -> Dict[int, str]:
+    def _build_team_id_mapping(self) -> dict[int, str]:
         """Build a mapping of Balldontlie team IDs to abbreviations."""
         if not self._balldontlie_api:
             return {}
@@ -247,7 +243,7 @@ class InjuryFetcher:
             logger.warning(f"Failed to build team ID mapping: {e}")
             return {}
 
-    def _load_star_players(self) -> Dict[str, Dict]:
+    def _load_star_players(self) -> dict[str, dict]:
         """Load list of star players for impact calculations."""
         # Top 50 NBA players by impact (simplified list)
         # In production, this would come from a database
@@ -291,7 +287,7 @@ class InjuryFetcher:
         cached_time, _ = self._cache[cache_key]
         return datetime.now() - cached_time < self.cache_duration
 
-    def _get_cached(self, cache_key: str) -> Optional[Any]:
+    def _get_cached(self, cache_key: str) -> Any | None:
         """Get cached data if valid."""
         if self._is_cache_valid(cache_key):
             return self._cache[cache_key][1]
@@ -301,7 +297,7 @@ class InjuryFetcher:
         """Set cache data."""
         self._cache[cache_key] = (datetime.now(), data)
 
-    def fetch_balldontlie_injuries(self) -> List[InjuryReport]:
+    def fetch_balldontlie_injuries(self) -> list[InjuryReport]:
         """
         Fetch injury data from Balldontlie API.
 
@@ -392,7 +388,7 @@ class InjuryFetcher:
             return []
 
     # Keep ESPN as fallback (deprecated)
-    def fetch_espn_injuries(self) -> List[InjuryReport]:
+    def fetch_espn_injuries(self) -> list[InjuryReport]:
         """
         DEPRECATED: Use fetch_balldontlie_injuries() instead.
         Kept for backward compatibility.
@@ -400,7 +396,7 @@ class InjuryFetcher:
         logger.warning("fetch_espn_injuries() is deprecated, use fetch_balldontlie_injuries()")
         return self.fetch_balldontlie_injuries()
 
-    def fetch_all_injuries(self) -> List[InjuryReport]:
+    def fetch_all_injuries(self) -> list[InjuryReport]:
         """
         Fetch injuries from Balldontlie API.
 
@@ -421,7 +417,7 @@ class InjuryFetcher:
         logger.info(f"Total unique injuries: {len(all_injuries)}")
         return all_injuries
 
-    def get_team_injuries(self, team: str) -> List[InjuryReport]:
+    def get_team_injuries(self, team: str) -> list[InjuryReport]:
         """
         Get all injuries for a specific team.
 
@@ -441,9 +437,7 @@ class InjuryFetcher:
         team_injuries = []
         for injury in all_injuries:
             injury_team = injury.team.upper()
-            if (injury_team == team_upper or
-                injury_team == team_abbrev or
-                injury.team == team_full):
+            if (injury_team in (team_upper, team_abbrev) or injury.team == team_full):
                 team_injuries.append(injury)
 
         return team_injuries
@@ -523,7 +517,7 @@ class InjuryFetcher:
         self,
         home_team: str,
         away_team: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Get injury summary for a specific game matchup.
 
@@ -561,14 +555,13 @@ class InjuryFetcher:
 
         if home_impact.star_player_out and not away_impact.star_player_out:
             return f"STRONG FADE HOME: {home_impact.team} missing star player"
-        elif away_impact.star_player_out and not home_impact.star_player_out:
+        if away_impact.star_player_out and not home_impact.star_player_out:
             return f"STRONG LEAN HOME: {away_impact.team} missing star player"
-        elif advantage > 0.10:
+        if advantage > 0.10:
             return f"Lean HOME: {home_impact.team} has injury advantage"
-        elif advantage < -0.10:
+        if advantage < -0.10:
             return f"Lean AWAY: {away_impact.team} has injury advantage"
-        else:
-            return "NEUTRAL: No significant injury advantage"
+        return "NEUTRAL: No significant injury advantage"
 
     def get_spread_adjustment(
         self,
@@ -614,16 +607,13 @@ class InjuryFetcher:
         Returns:
             Formatted string report
         """
-        if team:
-            injuries = self.get_team_injuries(team)
-        else:
-            injuries = self.fetch_all_injuries()
+        injuries = self.get_team_injuries(team) if team else self.fetch_all_injuries()
 
         if not injuries:
             return "No injuries reported."
 
         # Group by team
-        by_team: Dict[str, List[InjuryReport]] = {}
+        by_team: dict[str, list[InjuryReport]] = {}
         for injury in injuries:
             team_key = injury.team
             if team_key not in by_team:
@@ -658,7 +648,7 @@ def create_default_fetcher() -> InjuryFetcher:
 
 
 # Convenience functions for integration
-def get_injuries_for_game(home_team: str, away_team: str) -> Dict[str, Any]:
+def get_injuries_for_game(home_team: str, away_team: str) -> dict[str, Any]:
     """
     Get injury summary for a game.
 

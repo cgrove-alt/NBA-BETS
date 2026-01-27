@@ -20,21 +20,19 @@ import json
 from pathlib import Path
 from collections import defaultdict
 import numpy as np
-from typing import Dict, List
 
-def load_backtest_results(results_file: str = "backtest_results_2025.json") -> Dict:
+def load_backtest_results(results_file: str = "backtest_results_2025.json") -> dict:
     """Load backtest results from JSON file."""
     path = Path(results_file)
     if not path.exists():
         raise FileNotFoundError(f"Results file not found: {results_file}")
 
-    with open(path, 'r') as f:
-        data = json.load(f)
-
-    return data
+    with open(path) as f:
+        return json.load(f)
 
 
-def calculate_bias_from_raw_predictions(predictions: List[Dict]) -> Dict:
+
+def calculate_bias_from_raw_predictions(predictions: list[dict]) -> dict:
     """
     Calculate prop-specific bias from raw predictions.
 
@@ -95,7 +93,7 @@ def check_if_raw_predictions_available(results_file: str = "backtest_results_202
     return 'raw_predictions' in data or 'predictions' in data
 
 
-def extract_raw_predictions(results_file: str = "backtest_results_2025.json") -> List[Dict]:
+def extract_raw_predictions(results_file: str = "backtest_results_2025.json") -> list[dict]:
     """Extract raw prediction data from backtest results."""
     data = load_backtest_results(results_file)
 
@@ -114,7 +112,7 @@ def extract_raw_predictions(results_file: str = "backtest_results_2025.json") ->
     return None
 
 
-def generate_bias_correction_code(corrections: Dict) -> str:
+def generate_bias_correction_code(corrections: dict) -> str:
     """Generate Python code for BIAS_CORRECTIONS dict."""
     lines = ["    BIAS_CORRECTIONS = {"]
 
@@ -181,14 +179,14 @@ def main():
     print("BIAS ANALYSIS RESULTS")
     print("="*60)
 
-    print(f"\nOVERALL:")
+    print("\nOVERALL:")
     overall = bias_analysis['overall']
     print(f"  Predictions: {overall['count']}")
     print(f"  Bias:        {overall['current_bias']:+.3f} {'✅ MET' if abs(overall['current_bias']) < 0.5 else '❌ NOT MET'} (target: <|0.5|)")
     print(f"  MAE:         {overall['mae']:.3f}")
     print(f"  RMSE:        {overall['rmse']:.3f}")
 
-    print(f"\nPER-PROP TYPE:")
+    print("\nPER-PROP TYPE:")
     for prop_type in ['points', 'rebounds', 'assists', 'threes', 'pra']:
         if prop_type not in bias_analysis:
             continue

@@ -22,7 +22,6 @@ import time
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 import traceback
 
 try:
@@ -68,7 +67,7 @@ class HistoricalDataCollector:
         self.db = DatabaseManager(Path(db_path))
         self.progress = self._load_progress()
 
-    def _load_progress(self) -> Dict:
+    def _load_progress(self) -> dict:
         """Load progress from file for resume capability."""
         if PROGRESS_FILE.exists():
             with open(PROGRESS_FILE) as f:
@@ -102,7 +101,7 @@ class HistoricalDataCollector:
                     raise
         return None
 
-    def fetch_season_games(self, season: str) -> List[Dict]:
+    def fetch_season_games(self, season: str) -> list[dict]:
         """
         Fetch all games for a season.
 
@@ -159,7 +158,7 @@ class HistoricalDataCollector:
         team_id: int,
         season: str,
         as_of_date: str
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Fetch team stats as of a specific date (point-in-time).
 
@@ -227,10 +226,10 @@ class HistoricalDataCollector:
 
     def process_game_pair(
         self,
-        home_game: Dict,
-        away_game: Dict,
+        home_game: dict,
+        away_game: dict,
         season_id: int
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Process a home/away game pair into a complete game record.
 
@@ -273,7 +272,7 @@ class HistoricalDataCollector:
             "away_nba_id": away_team_id,
         }
 
-    def collect_season(self, season_info: Dict) -> int:
+    def collect_season(self, season_info: dict) -> int:
         """
         Collect all data for a single season.
 
@@ -335,7 +334,7 @@ class HistoricalDataCollector:
 
         print(f"\nProcessing {total_games} games...")
 
-        for i, (game_id, game_pair) in enumerate(games_by_id.items()):
+        for _i, (game_id, game_pair) in enumerate(games_by_id.items()):
             home_game = game_pair["home"]
             away_game = game_pair["away"]
 
@@ -374,7 +373,7 @@ class HistoricalDataCollector:
 
         return games_collected
 
-    def collect_team_stats_snapshots(self, season: str, sample_dates: List[str] = None):
+    def collect_team_stats_snapshots(self, season: str, sample_dates: list[str] = None):
         """
         Collect team stats snapshots at regular intervals.
 
@@ -483,7 +482,7 @@ class HistoricalDataCollector:
                 continue
 
         print("\n" + "="*60)
-        print(f"Collection Complete!")
+        print("Collection Complete!")
         print(f"Total games collected: {total_games}")
         print(f"Database: {self.db.db_path}")
         print("="*60)
@@ -492,7 +491,7 @@ class HistoricalDataCollector:
         if PROGRESS_FILE.exists():
             PROGRESS_FILE.unlink()
 
-    def get_collection_stats(self) -> Dict:
+    def get_collection_stats(self) -> dict:
         """Get statistics about collected data."""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
@@ -526,7 +525,7 @@ class HistoricalDataCollector:
             }
 
 
-def generate_training_features_from_db(db: DatabaseManager) -> List[Dict]:
+def generate_training_features_from_db(db: DatabaseManager) -> list[dict]:
     """
     Generate training features from database games.
 

@@ -20,11 +20,11 @@ import numpy as np
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any, Callable
+from typing import Optional, Any
+from collections.abc import Callable
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from enum import Enum
-import warnings
 
 # Import edge quality scoring for dynamic Kelly
 try:
@@ -192,16 +192,15 @@ class BacktestSanityChecker:
                 "4. Verify walk-forward validation is implemented correctly\n"
                 "5. Run on a completely held-out dataset to validate"
             )
-        elif self.warnings:
+        if self.warnings:
             return (
                 "CAUTION: Some metrics are higher than typical. Double-check for subtle leakage "
                 "and consider running additional validation tests."
             )
-        else:
-            return (
-                "Results appear realistic. However, always verify on out-of-sample data "
-                "and track real betting performance against backtested expectations."
-            )
+        return (
+            "Results appear realistic. However, always verify on out-of-sample data "
+            "and track real betting performance against backtested expectations."
+        )
 
 
 class BetType(Enum):
@@ -233,12 +232,12 @@ class Bet:
     implied_probability: float  # Odds-implied probability
     edge: float  # predicted - implied
     placed_at: datetime
-    closing_odds: Optional[float] = None  # For CLV calculation
+    closing_odds: float | None = None  # For CLV calculation
     outcome: BetOutcome = BetOutcome.PENDING
     pnl: float = 0.0  # Profit/loss
-    actual_result: Optional[Any] = None  # Actual game/stat result
+    actual_result: Any | None = None  # Actual game/stat result
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         d = asdict(self)
         d['bet_type'] = self.bet_type.value
         d['outcome'] = self.outcome.value
@@ -250,16 +249,14 @@ class Bet:
         """Convert American odds to decimal odds."""
         if american_odds >= 100:
             return 1 + (american_odds / 100)
-        else:
-            return 1 + (100 / abs(american_odds))
+        return 1 + (100 / abs(american_odds))
 
     @staticmethod
     def american_to_implied_prob(american_odds: float) -> float:
         """Convert American odds to implied probability."""
         if american_odds >= 100:
             return 100 / (american_odds + 100)
-        else:
-            return abs(american_odds) / (abs(american_odds) + 100)
+        return abs(american_odds) / (abs(american_odds) + 100)
 
     def calculate_pnl(self, won: bool, pushed: bool = False) -> float:
         """Calculate profit/loss for this bet."""
@@ -275,7 +272,7 @@ class Bet:
             self.pnl = -self.stake
         return self.pnl
 
-    def closing_line_value(self) -> Optional[float]:
+    def closing_line_value(self) -> float | None:
         """
         Calculate Closing Line Value (CLV).
 
@@ -308,8 +305,8 @@ class BacktestPeriod:
     win_rate: float = 0.0
     avg_odds: float = 0.0
     avg_edge: float = 0.0
-    avg_clv: Optional[float] = None
-    bets: List[Bet] = field(default_factory=list)
+    avg_clv: float | None = None
+    bets: list[Bet] = field(default_factory=list)
 
     def calculate_metrics(self) -> None:
         """Calculate aggregate metrics from bets."""
@@ -333,7 +330,7 @@ class BacktestPeriod:
         clv_values = [b.closing_line_value() for b in self.bets if b.closing_line_value() is not None]
         self.avg_clv = np.mean(clv_values) if clv_values else None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
@@ -358,7 +355,7 @@ class BacktestResult:
     bet_type: BetType
     start_date: datetime
     end_date: datetime
-    periods: List[BacktestPeriod] = field(default_factory=list)
+    periods: list[BacktestPeriod] = field(default_factory=list)
 
     # Aggregate metrics
     total_bets: int = 0
@@ -376,17 +373,17 @@ class BacktestResult:
     profit_factor: float = 0.0
 
     # Quality metrics
-    avg_clv: Optional[float] = None
+    avg_clv: float | None = None
     periods_profitable: int = 0
     longest_winning_streak: int = 0
     longest_losing_streak: int = 0
 
     # Calibration & EV metrics
-    ece: Optional[float] = None  # Expected Calibration Error
-    avg_ev: Optional[float] = None  # Average Expected Value per bet
+    ece: float | None = None  # Expected Calibration Error
+    avg_ev: float | None = None  # Average Expected Value per bet
 
     # Sanity check results
-    sanity_check: Optional[dict] = None
+    sanity_check: dict | None = None
 
     def calculate_aggregate_metrics(self) -> None:
         """Calculate aggregate metrics from all periods."""
@@ -453,7 +450,7 @@ class BacktestResult:
             logger.warning(self.sanity_check["recommendation"])
             logger.warning("=" * 60)
 
-    def _calculate_drawdown(self, bets: List[Bet]) -> None:
+    def _calculate_drawdown(self, bets: list[Bet]) -> None:
         """Calculate maximum drawdown."""
         cumulative = 0.0
         peak = 0.0
@@ -470,10 +467,10 @@ class BacktestResult:
         self.max_drawdown = max_dd
         self.max_drawdown_pct = (max_dd / peak * 100) if peak > 0 else 0.0
 
-    def _calculate_sharpe(self, bets: List[Bet]) -> None:
+    def _calculate_sharpe(self, bets: list[Bet]) -> None:
         """Calculate Sharpe ratio using daily returns."""
         # Group by day
-        daily_pnl: Dict[str, float] = {}
+        daily_pnl: dict[str, float] = {}
         for bet in bets:
             day = bet.placed_at.strftime("%Y-%m-%d")
             daily_pnl[day] = daily_pnl.get(day, 0.0) + bet.pnl
@@ -492,7 +489,7 @@ class BacktestResult:
         else:
             self.sharpe_ratio = 0.0
 
-    def _calculate_streaks(self, bets: List[Bet]) -> None:
+    def _calculate_streaks(self, bets: list[Bet]) -> None:
         """Calculate longest winning and losing streaks."""
         current_win_streak = 0
         current_loss_streak = 0
@@ -512,7 +509,7 @@ class BacktestResult:
         self.longest_winning_streak = max_win_streak
         self.longest_losing_streak = max_loss_streak
 
-    def _calculate_calibration_metrics(self, bets: List[Bet]) -> None:
+    def _calculate_calibration_metrics(self, bets: list[Bet]) -> None:
         """
         Calculate Expected Calibration Error (ECE) and Average Expected Value.
 
@@ -626,7 +623,7 @@ class BacktestResult:
         lines.append("=" * 60)
         return "\n".join(lines)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "model_name": self.model_name,
             "bet_type": self.bet_type.value,
@@ -694,9 +691,9 @@ class WalkForwardValidator:
 
     def validate(
         self,
-        data: List[Dict],
+        data: list[dict],
         date_key: str = "date"
-    ) -> List[Tuple[Any, List[Dict], List[Dict], np.ndarray]]:
+    ) -> list[tuple[Any, list[dict], list[dict], np.ndarray]]:
         """
         Perform walk-forward validation.
 
@@ -719,10 +716,7 @@ class WalkForwardValidator:
 
         while train_end + self.test_size <= n:
             # Define train and test sets
-            if self.expanding:
-                train_start = 0
-            else:
-                train_start = max(0, train_end - self.min_train_size)
+            train_start = 0 if self.expanding else max(0, train_end - self.min_train_size)
 
             train_data = data[train_start:train_end]
             test_data = data[train_end:train_end + self.test_size]
@@ -773,8 +767,8 @@ class BettingSimulator:
         self.min_edge = min_edge
         self.max_stake_pct = max_stake_pct
 
-        self.bets: List[Bet] = []
-        self.bankroll_history: List[Tuple[datetime, float]] = [(datetime.now(), initial_bankroll)]
+        self.bets: list[Bet] = []
+        self.bankroll_history: list[tuple[datetime, float]] = [(datetime.now(), initial_bankroll)]
 
     def calculate_stake(
         self,
@@ -829,7 +823,7 @@ class BettingSimulator:
         predicted_prob: float,
         placed_at: datetime = None,
         closing_odds: float = None
-    ) -> Optional[Bet]:
+    ) -> Bet | None:
         """
         Place a bet if it meets criteria.
 
@@ -891,9 +885,9 @@ class BettingSimulator:
 
     def simulate_from_predictions(
         self,
-        predictions: List[Dict],
-        results: List[Dict]
-    ) -> List[Bet]:
+        predictions: list[dict],
+        results: list[dict]
+    ) -> list[Bet]:
         """
         Simulate betting from a list of predictions and results.
 
@@ -927,30 +921,28 @@ class BettingSimulator:
 
         return self.bets
 
-    def _determine_winner(self, bet: Bet, result: Dict) -> bool:
+    def _determine_winner(self, bet: Bet, result: dict) -> bool:
         """Determine if bet won based on result."""
         if bet.bet_type == BetType.MONEYLINE:
             return bet.selection == result.get("winner")
-        elif bet.bet_type == BetType.SPREAD:
+        if bet.bet_type == BetType.SPREAD:
             # For spread, selection should include the spread number
             # e.g., "LAL -5.5" or "BOS +3.5"
-            actual_diff = result.get("home_score", 0) - result.get("away_score", 0)
+            result.get("home_score", 0) - result.get("away_score", 0)
             # This is simplified - real implementation would parse the spread
             return bet.selection == result.get("spread_winner")
-        elif bet.bet_type == BetType.TOTAL:
+        if bet.bet_type == BetType.TOTAL:
             total = result.get("home_score", 0) + result.get("away_score", 0)
             total_line = result.get("total_line", 0)
             if "Over" in bet.selection:
                 return total > total_line
-            else:
-                return total < total_line
-        elif bet.bet_type == BetType.PLAYER_PROP:
+            return total < total_line
+        if bet.bet_type == BetType.PLAYER_PROP:
             actual_value = result.get("actual_value", 0)
             prop_line = result.get("prop_line", 0)
             if "Over" in bet.selection:
                 return actual_value > prop_line
-            else:
-                return actual_value < prop_line
+            return actual_value < prop_line
         return False
 
     def get_results(self, model_name: str, bet_type: BetType) -> BacktestResult:
@@ -1041,7 +1033,7 @@ class DynamicKellyBettingSimulator(BettingSimulator):
         # Tracking for dynamic adjustments
         self.peak_bankroll = initial_bankroll
         self.consecutive_losses = 0
-        self.recent_results: List[bool] = []  # Last 20 bets
+        self.recent_results: list[bool] = []  # Last 20 bets
 
     def get_current_drawdown(self) -> float:
         """Calculate current drawdown from peak."""
@@ -1138,10 +1130,10 @@ class DynamicKellyBettingSimulator(BettingSimulator):
         selection: str,
         odds: float,
         predicted_prob: float,
-        individual_model_probs: Optional[Dict[str, float]] = None,
-        raw_probability: Optional[float] = None,
-        opening_odds: Optional[float] = None,
-        public_betting_pct: Optional[float] = None,
+        individual_model_probs: dict[str, float] | None = None,
+        raw_probability: float | None = None,
+        opening_odds: float | None = None,
+        public_betting_pct: float | None = None,
         is_reverse_line_movement: bool = False,
         is_steam_move: bool = False,
         games_played: int = 30,
@@ -1150,7 +1142,7 @@ class DynamicKellyBettingSimulator(BettingSimulator):
         travel_fatigue: float = 0.0,
         placed_at: datetime = None,
         closing_odds: float = None,
-    ) -> Optional[Tuple[Bet, 'EdgeQualityResult']]:
+    ) -> tuple[Bet, 'EdgeQualityResult'] | None:
         """
         Place a bet with full edge quality evaluation.
 
@@ -1209,7 +1201,7 @@ class DynamicKellyBettingSimulator(BettingSimulator):
         self.bets.append(bet)
         return (bet, edge_quality)
 
-    def settle_bet(self, bet: Bet, result: Dict) -> bool:
+    def settle_bet(self, bet: Bet, result: dict) -> bool:
         """
         Settle bet and update tracking metrics.
 
@@ -1244,7 +1236,7 @@ class DynamicKellyBettingSimulator(BettingSimulator):
         self.bankroll_history.append((bet.placed_at, self.bankroll))
         return won
 
-    def get_dynamic_metrics(self) -> Dict:
+    def get_dynamic_metrics(self) -> dict:
         """Get metrics specific to dynamic Kelly."""
         base_metrics = {}
 
@@ -1316,7 +1308,7 @@ class ModelBacktester:
 
     def backtest_moneyline(
         self,
-        games: List[Dict],
+        games: list[dict],
         model_predict_fn: Callable,
         model_train_fn: Callable = None,
         walk_forward: bool = False
@@ -1394,7 +1386,7 @@ class ModelBacktester:
 
     def backtest_spread(
         self,
-        games: List[Dict],
+        games: list[dict],
         model_predict_fn: Callable
     ) -> BacktestResult:
         """
@@ -1462,8 +1454,8 @@ class ModelBacktester:
 
 # Convenience functions
 def quick_backtest(
-    predictions: List[Dict],
-    results: List[Dict],
+    predictions: list[dict],
+    results: list[dict],
     model_name: str = "model"
 ) -> BacktestResult:
     """
@@ -1604,7 +1596,7 @@ class WalkForwardPropBacktester:
         predicted_prob: float,
         actual_hit: bool,
         american_odds: float
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """
         Calculate profit/loss using real American odds.
 
@@ -1637,7 +1629,7 @@ class WalkForwardPropBacktester:
         predicted_prob: float,
         american_odds: float,
         selection: str = "over"
-    ) -> Tuple[bool, float]:
+    ) -> tuple[bool, float]:
         """
         Determine if we should place a bet based on edge.
 
@@ -1650,10 +1642,7 @@ class WalkForwardPropBacktester:
             Tuple of (should_bet, edge)
         """
         # Get probability for the selection we're considering
-        if selection == "over":
-            model_prob = predicted_prob
-        else:
-            model_prob = 1 - predicted_prob
+        model_prob = predicted_prob if selection == "over" else 1 - predicted_prob
 
         # Calculate implied probability from odds
         if american_odds > 0:
@@ -1674,11 +1663,11 @@ class WalkForwardPropBacktester:
 
     def backtest_props(
         self,
-        player_data: List[Dict],
+        player_data: list[dict],
         prop_type: str = "points",
         train_model_fn: Callable = None,
         predict_fn: Callable = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run walk-forward backtest on player prop data.
 
@@ -1830,7 +1819,7 @@ class WalkForwardPropBacktester:
 
         return results
 
-    def _calculate_metrics(self, results: Dict) -> Dict[str, Any]:
+    def _calculate_metrics(self, results: dict) -> dict[str, Any]:
         """Calculate comprehensive backtest metrics."""
         predictions = results["predictions"]
         bets = results["bets"]
@@ -1921,20 +1910,20 @@ class WalkForwardPropBacktester:
             "training_periods": len(results["training_periods"]),
         }
 
-    def _print_metrics(self, metrics: Dict):
+    def _print_metrics(self, metrics: dict):
         """Print formatted metrics."""
         print("\n" + "=" * 60)
         print("BACKTEST RESULTS")
         print("=" * 60)
 
-        print(f"\nPrediction Performance:")
+        print("\nPrediction Performance:")
         print(f"  Accuracy: {metrics['prediction_accuracy']:.1%}")
         print(f"  Total Predictions: {metrics['total_predictions']}")
         print(f"  Training Periods: {metrics['training_periods']}")
 
         if "betting" in metrics and metrics["betting"].get("total_bets", 0) > 0:
             b = metrics["betting"]
-            print(f"\nBetting Performance:")
+            print("\nBetting Performance:")
             print(f"  Total Bets: {b['total_bets']}")
             print(f"  Win Rate: {b['win_rate']:.1f}%")
             print(f"  ROI: {b['roi']:+.2f}%")
@@ -1960,9 +1949,9 @@ class WalkForwardPropBacktester:
 
 
 def calculate_real_odds_roi(
-    predictions: List[Dict],
+    predictions: list[dict],
     default_odds: float = -110
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate ROI using real market odds from predictions.
 
@@ -1984,10 +1973,7 @@ def calculate_real_odds_roi(
         actual_hit = pred.get("actual_hit", False)
 
         # Convert to decimal for payout calculation
-        if odds > 0:
-            decimal_odds = 1 + (odds / 100)
-        else:
-            decimal_odds = 1 + (100 / abs(odds))
+        decimal_odds = 1 + odds / 100 if odds > 0 else 1 + 100 / abs(odds)
 
         stake = 1.0  # Normalize to $1 bets
         total_staked += stake

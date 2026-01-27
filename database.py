@@ -23,7 +23,6 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
 from contextlib import contextmanager
 
 
@@ -303,7 +302,7 @@ class DatabaseManager:
     # Team Operations
     # =========================================================================
 
-    def upsert_team(self, team_data: Dict) -> int:
+    def upsert_team(self, team_data: dict) -> int:
         """Insert or update a team."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -326,7 +325,7 @@ class DatabaseManager:
             ))
             return cursor.lastrowid
 
-    def get_team_by_abbrev(self, abbreviation: str) -> Optional[Dict]:
+    def get_team_by_abbrev(self, abbreviation: str) -> dict | None:
         """Get team by abbreviation."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -337,7 +336,7 @@ class DatabaseManager:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_team_by_nba_id(self, nba_id: int) -> Optional[Dict]:
+    def get_team_by_nba_id(self, nba_id: int) -> dict | None:
         """Get team by NBA ID."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -349,7 +348,7 @@ class DatabaseManager:
     # Game Operations
     # =========================================================================
 
-    def upsert_game(self, game_data: Dict) -> int:
+    def upsert_game(self, game_data: dict) -> int:
         """Insert or update a game."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -380,7 +379,7 @@ class DatabaseManager:
             ))
             return cursor.lastrowid
 
-    def get_games_by_date(self, game_date: str) -> List[Dict]:
+    def get_games_by_date(self, game_date: str) -> list[dict]:
         """Get all games for a specific date."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -399,8 +398,8 @@ class DatabaseManager:
         self,
         start_date: str,
         end_date: str,
-        team_id: Optional[int] = None
-    ) -> List[Dict]:
+        team_id: int | None = None
+    ) -> list[dict]:
         """Get games between two dates, optionally filtered by team."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -435,7 +434,7 @@ class DatabaseManager:
     # Team Stats Operations (Point-in-Time)
     # =========================================================================
 
-    def upsert_team_stats(self, stats_data: Dict) -> int:
+    def upsert_team_stats(self, stats_data: dict) -> int:
         """Insert or update team statistics snapshot."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -493,8 +492,8 @@ class DatabaseManager:
         self,
         team_id: int,
         game_date: str,
-        season_id: Optional[int] = None
-    ) -> Optional[Dict]:
+        season_id: int | None = None
+    ) -> dict | None:
         """
         Get team stats as of the day BEFORE a game (point-in-time).
 
@@ -525,7 +524,7 @@ class DatabaseManager:
     # Betting Odds Operations
     # =========================================================================
 
-    def insert_odds(self, odds_data: Dict) -> int:
+    def insert_odds(self, odds_data: dict) -> int:
         """Insert betting odds snapshot."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -555,7 +554,7 @@ class DatabaseManager:
             ))
             return cursor.lastrowid
 
-    def get_latest_odds(self, game_id: int, sportsbook: Optional[str] = None) -> Optional[Dict]:
+    def get_latest_odds(self, game_id: int, sportsbook: str | None = None) -> dict | None:
         """Get the most recent odds for a game."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -578,7 +577,7 @@ class DatabaseManager:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_closing_odds(self, game_id: int) -> Optional[Dict]:
+    def get_closing_odds(self, game_id: int) -> dict | None:
         """Get closing odds for a game (for CLV calculation)."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -594,7 +593,7 @@ class DatabaseManager:
     # Injury Operations
     # =========================================================================
 
-    def upsert_injury(self, injury_data: Dict) -> int:
+    def upsert_injury(self, injury_data: dict) -> int:
         """Insert or update injury report."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -615,7 +614,7 @@ class DatabaseManager:
             ))
             return cursor.lastrowid
 
-    def get_injuries_for_game(self, game_id: int) -> List[Dict]:
+    def get_injuries_for_game(self, game_id: int) -> list[dict]:
         """Get all injuries reported for a specific game."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -632,7 +631,7 @@ class DatabaseManager:
     # Bet Tracking Operations
     # =========================================================================
 
-    def insert_bet(self, bet_data: Dict) -> int:
+    def insert_bet(self, bet_data: dict) -> int:
         """Record a new bet."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -657,7 +656,7 @@ class DatabaseManager:
             ))
             return cursor.lastrowid
 
-    def settle_bet(self, bet_id: int, won: bool, payout: float, closing_odds: Optional[int] = None):
+    def settle_bet(self, bet_id: int, won: bool, payout: float, closing_odds: int | None = None):
         """Settle a bet with outcome."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -675,7 +674,7 @@ class DatabaseManager:
                 bet_id,
             ))
 
-    def get_bet_performance(self, days: int = 30) -> Dict:
+    def get_bet_performance(self, days: int = 30) -> dict:
         """Get betting performance metrics for the last N days."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -722,7 +721,7 @@ class DatabaseManager:
     # Training Data Operations
     # =========================================================================
 
-    def save_training_features(self, game_id: int, feature_type: str, features: Dict, outcome: float):
+    def save_training_features(self, game_id: int, feature_type: str, features: dict, outcome: float):
         """Save pre-computed training features for a game."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -737,10 +736,10 @@ class DatabaseManager:
     def get_training_data(
         self,
         feature_type: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        limit: Optional[int] = None
-    ) -> List[Dict]:
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int | None = None
+    ) -> list[dict]:
         """Retrieve training data with features and outcomes."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -780,7 +779,7 @@ class DatabaseManager:
     # Model Prediction Operations
     # =========================================================================
 
-    def save_prediction(self, prediction_data: Dict) -> int:
+    def save_prediction(self, prediction_data: dict) -> int:
         """Save a model prediction for backtesting."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -806,7 +805,7 @@ class DatabaseManager:
         model_name: str,
         prediction_type: str,
         days: int = 30
-    ) -> Dict:
+    ) -> dict:
         """Calculate prediction accuracy for a model."""
         with self.get_connection() as conn:
             cursor = conn.cursor()

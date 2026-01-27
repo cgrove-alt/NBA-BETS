@@ -10,7 +10,6 @@ Automatically settles predictions with actual game results by:
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union
 
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -39,7 +38,7 @@ class SettlementService:
             except ImportError:
                 print("Warning: BalldontlieAPI not available. Settlement will fail.")
 
-    def settle_unsettled_predictions(self, game_date: str = None) -> Dict:
+    def settle_unsettled_predictions(self, game_date: str = None) -> dict:
         """Fetch actual results and settle pending predictions.
 
         Args:
@@ -72,7 +71,7 @@ class SettlementService:
         failed_games = []
         skipped_games = []
 
-        for game_id, predictions in games.items():
+        for game_id, _predictions in games.items():
             try:
                 # Try to get numeric game_id for API call
                 if game_id.isdigit():
@@ -124,7 +123,7 @@ class SettlementService:
             "skipped_games": skipped_games,
         }
 
-    def _fetch_box_score(self, game_id: int) -> Optional[List]:
+    def _fetch_box_score(self, game_id: int) -> list | None:
         """Fetch player stats for a game from Balldontlie API.
 
         Args:
@@ -147,7 +146,7 @@ class SettlementService:
             print(f"Error fetching player stats for game {game_id}: {e}")
             return None
 
-    def _extract_player_stats(self, stats_list: List) -> Dict[int, Dict]:
+    def _extract_player_stats(self, stats_list: list) -> dict[int, dict]:
         """Extract player stats from player stats API response.
 
         Args:
@@ -176,7 +175,7 @@ class SettlementService:
 
         return stats
 
-    def settle_all_pending(self, days_back: int = 7) -> Dict:
+    def settle_all_pending(self, days_back: int = 7) -> dict:
         """Settle all pending predictions from the last N days.
 
         Args:
@@ -209,7 +208,7 @@ class SettlementService:
 
         return results
 
-    def get_settlement_status(self) -> Dict:
+    def get_settlement_status(self) -> dict:
         """Get current settlement status.
 
         Returns:
@@ -252,9 +251,9 @@ if __name__ == "__main__":
 
     if args.status:
         status = service.get_settlement_status()
-        print(f"\nSettlement Status:")
+        print("\nSettlement Status:")
         print(f"  Total pending: {status['total_pending']}")
-        print(f"  By date:")
+        print("  By date:")
         for date, count in sorted(status['by_date'].items()):
             print(f"    {date}: {count} predictions")
     elif args.all:

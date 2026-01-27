@@ -77,7 +77,7 @@ def test_predictions_endpoint():
         print(f"Date: {data['date']}")
         print(f"Total Predictions: {data['count']}")
         if data['count'] > 0:
-            print(f"\nSample Prediction:")
+            print("\nSample Prediction:")
             sample = data['predictions'][0]
             for key, value in sample.items():
                 print(f"  {key}: {value}")
@@ -112,7 +112,7 @@ def test_injuries_endpoint():
         print(f"Last Updated: {data['last_updated']}")
 
         if data['count'] > 0:
-            print(f"\nSample Injury:")
+            print("\nSample Injury:")
             sample = data['injuries'][0]
             for key, value in sample.items():
                 print(f"  {key}: {value}")
@@ -149,13 +149,13 @@ def test_line_movement_endpoint():
         print(f"Odds History Count: {data['count']}")
 
         if data['count'] > 0:
-            print(f"\nSample Odds Snapshot:")
+            print("\nSample Odds Snapshot:")
             sample = data['odds_history'][0]
             for key, value in sample.items():
                 print(f"  {key}: {value}")
 
         if data.get('movement_analysis'):
-            print(f"\nMovement Analysis:")
+            print("\nMovement Analysis:")
             for key, value in data['movement_analysis'].items():
                 print(f"  {key}: {value}")
 
@@ -189,14 +189,14 @@ def test_backtest_endpoint():
         print(f"Games Analyzed: {data['latest_backtest']['games_analyzed']}")
         print(f"Total Predictions: {data['latest_backtest']['total_predictions']}")
 
-        print(f"\nOverall Metrics:")
+        print("\nOverall Metrics:")
         metrics = data['latest_backtest']['overall_metrics']
         for key, value in metrics.items():
             if value is not None:
                 print(f"  {key}: {value:.4f}")
 
         if data['latest_backtest'].get('betting_metrics'):
-            print(f"\nBetting Metrics:")
+            print("\nBetting Metrics:")
             betting = data['latest_backtest']['betting_metrics']
             print(f"  Total Bets: {betting['total_bets']}")
             print(f"  Win Rate: {betting['win_rate']:.2%}")

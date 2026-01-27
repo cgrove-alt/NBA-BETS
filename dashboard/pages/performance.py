@@ -7,7 +7,7 @@ Shows real data from bet tracker database.
 
 import sys
 from pathlib import Path
-from dash import html, dcc, register_page, callback, Input, Output
+from dash import html, dcc, register_page
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
@@ -113,7 +113,7 @@ def create_roi_chart(history: list) -> dcc.Graph:
             text="No data available",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
-            font=dict(size=16, color=COLORS["text_muted"])
+            font={"size": 16, "color": COLORS["text_muted"]}
         )
     else:
         # Calculate cumulative ROI from history
@@ -135,8 +135,8 @@ def create_roi_chart(history: list) -> dcc.Graph:
             y=cumulative_roi,
             mode='lines+markers',
             name='ROI',
-            line=dict(color=COLORS["accent_primary"], width=2),
-            marker=dict(size=4),
+            line={"color": COLORS["accent_primary"], "width": 2},
+            marker={"size": 4},
             fill='tozeroy',
             fillcolor='rgba(88, 166, 255, 0.1)',
         ))
@@ -150,10 +150,10 @@ def create_roi_chart(history: list) -> dcc.Graph:
         yaxis_title="ROI (%)",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=COLORS["text_primary"]),
-        xaxis=dict(gridcolor=COLORS["border_color"], showgrid=True),
-        yaxis=dict(gridcolor=COLORS["border_color"], showgrid=True, ticksuffix="%"),
-        margin=dict(l=40, r=20, t=50, b=40),
+        font={"color": COLORS["text_primary"]},
+        xaxis={"gridcolor": COLORS["border_color"], "showgrid": True},
+        yaxis={"gridcolor": COLORS["border_color"], "showgrid": True, "ticksuffix": "%"},
+        margin={"l": 40, "r": 20, "t": 50, "b": 40},
         showlegend=False,
         hovermode="x unified",
     )
@@ -169,7 +169,7 @@ def create_win_rate_chart(history: list) -> dcc.Graph:
             text="No data available",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
-            font=dict(size=16, color=COLORS["text_muted"])
+            font={"size": 16, "color": COLORS["text_muted"]}
         )
     else:
         # Calculate win rates by bet type
@@ -199,7 +199,7 @@ def create_win_rate_chart(history: list) -> dcc.Graph:
             marker_color=colors,
             text=[f"{wr:.1f}%" for wr in win_rates],
             textposition='outside',
-            textfont=dict(color=COLORS["text_primary"]),
+            textfont={"color": COLORS["text_primary"]},
         ))
 
         fig.add_hline(y=52.4, line_dash="dash", line_color=COLORS["accent_warning"],
@@ -211,10 +211,10 @@ def create_win_rate_chart(history: list) -> dcc.Graph:
         yaxis_title="Win Rate (%)",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=COLORS["text_primary"]),
-        xaxis=dict(gridcolor=COLORS["border_color"]),
-        yaxis=dict(gridcolor=COLORS["border_color"], range=[0, 70], ticksuffix="%"),
-        margin=dict(l=40, r=20, t=50, b=40),
+        font={"color": COLORS["text_primary"]},
+        xaxis={"gridcolor": COLORS["border_color"]},
+        yaxis={"gridcolor": COLORS["border_color"], "range": [0, 70], "ticksuffix": "%"},
+        margin={"l": 40, "r": 20, "t": 50, "b": 40},
         showlegend=False,
     )
 
@@ -229,7 +229,7 @@ def create_drawdown_chart(history: list) -> dcc.Graph:
             text="No data available",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
-            font=dict(size=16, color=COLORS["text_muted"])
+            font={"size": 16, "color": COLORS["text_muted"]}
         )
     else:
         # Calculate drawdown from history
@@ -251,7 +251,7 @@ def create_drawdown_chart(history: list) -> dcc.Graph:
             y=drawdowns,
             fill='tozeroy',
             fillcolor='rgba(248, 81, 73, 0.3)',
-            line=dict(color=COLORS["accent_danger"], width=1),
+            line={"color": COLORS["accent_danger"], "width": 1},
             name='Drawdown',
         ))
 
@@ -266,10 +266,10 @@ def create_drawdown_chart(history: list) -> dcc.Graph:
         yaxis_title="Drawdown (%)",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=COLORS["text_primary"]),
-        xaxis=dict(gridcolor=COLORS["border_color"]),
-        yaxis=dict(gridcolor=COLORS["border_color"], ticksuffix="%"),
-        margin=dict(l=40, r=20, t=50, b=40),
+        font={"color": COLORS["text_primary"]},
+        xaxis={"gridcolor": COLORS["border_color"]},
+        yaxis={"gridcolor": COLORS["border_color"], "ticksuffix": "%"},
+        margin={"l": 40, "r": 20, "t": 50, "b": 40},
         showlegend=False,
     )
 
@@ -325,7 +325,7 @@ def layout():
         ])
 
     # Extract metrics
-    metrics = data.get("metrics", {})
+    data.get("metrics", {})
     history = data.get("history", [])
 
     total_bets = len(history)

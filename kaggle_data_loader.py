@@ -13,10 +13,7 @@ Usage:
 """
 
 import pandas as pd
-import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -43,7 +40,7 @@ def normalize_team_abbrev(abbrev: str) -> str:
 
 def load_raw_game_data(
     include_playoffs: bool = False,
-    data_dir: Optional[Path] = None,
+    data_dir: Path | None = None,
 ) -> pd.DataFrame:
     """
     Load raw game data from CSV files.
@@ -116,7 +113,7 @@ def process_games_to_matchups(df: pd.DataFrame) -> pd.DataFrame:
     def extract_opponent(matchup: str) -> str:
         if "@" in matchup:
             return matchup.split("@")[1].strip()
-        elif "vs." in matchup:
+        if "vs." in matchup:
             return matchup.split("vs.")[1].strip()
         return ""
 
@@ -133,8 +130,8 @@ def process_games_to_matchups(df: pd.DataFrame) -> pd.DataFrame:
         if len(game_rows) != 2:
             continue
 
-        home_row = game_rows[game_rows["IS_HOME"] == True]
-        away_row = game_rows[game_rows["IS_HOME"] == False]
+        home_row = game_rows[game_rows["IS_HOME"]]
+        away_row = game_rows[not game_rows["IS_HOME"]]
 
         if len(home_row) != 1 or len(away_row) != 1:
             continue
@@ -262,7 +259,7 @@ def calculate_rolling_stats(
     return games_df
 
 
-def generate_training_features(games_df: pd.DataFrame) -> List[Dict]:
+def generate_training_features(games_df: pd.DataFrame) -> list[dict]:
     """
     Generate training features from processed games data.
 
@@ -354,11 +351,11 @@ def generate_training_features(games_df: pd.DataFrame) -> List[Dict]:
 
 
 def load_training_data_from_csv(
-    seasons: Optional[List[str]] = None,
+    seasons: list[str] | None = None,
     include_playoffs: bool = False,
     window: int = 10,
-    data_dir: Optional[Path] = None,
-) -> List[Dict]:
+    data_dir: Path | None = None,
+) -> list[dict]:
     """
     Main function to load training data from CSV files.
 
@@ -407,19 +404,18 @@ def load_training_data_from_csv(
     if seasons:
         print(f"Seasons: {', '.join(seasons)}")
     else:
-        print(f"Seasons: All available (2010-2024)")
+        print("Seasons: All available (2010-2024)")
 
     return training_data
 
 
-def get_available_seasons(data_dir: Optional[Path] = None) -> List[str]:
+def get_available_seasons(data_dir: Path | None = None) -> list[str]:
     """Get list of available seasons in the dataset."""
     if data_dir is None:
         data_dir = DATA_DIR
 
     df = pd.read_csv(data_dir / "regular_season_totals_2010_2024.csv", usecols=["SEASON_YEAR"])
-    seasons = sorted(df["SEASON_YEAR"].unique())
-    return seasons
+    return sorted(df["SEASON_YEAR"].unique())
 
 
 def load_live_season_data() -> pd.DataFrame:
@@ -456,11 +452,11 @@ def load_live_season_data() -> pd.DataFrame:
 
 
 def load_training_data_with_live(
-    csv_seasons: Optional[List[str]] = None,
-    live_seasons: Optional[List[str]] = None,
+    csv_seasons: list[str] | None = None,
+    live_seasons: list[str] | None = None,
     include_playoffs: bool = False,
     window: int = 10,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Load training data from both CSV (historical) and live API data.
 
@@ -484,14 +480,14 @@ def load_training_data_with_live(
         csv_seasons = ["2023-24"]  # Most recent complete season in CSV data
 
     # Load historical CSV data
-    print(f"\n--- Loading Historical CSV Data ---")
+    print("\n--- Loading Historical CSV Data ---")
     print(f"Seasons: {csv_seasons}")
     csv_df = load_raw_game_data(include_playoffs=include_playoffs)
     csv_df = csv_df[csv_df["SEASON_YEAR"].isin(csv_seasons)]
     print(f"  Loaded {len(csv_df)} records from CSV")
 
     # Load live API data
-    print(f"\n--- Loading Live API Data ---")
+    print("\n--- Loading Live API Data ---")
     live_df = load_live_season_data()
 
     if live_df.empty:
@@ -512,7 +508,7 @@ def load_training_data_with_live(
         # Combine datasets
         combined_df = pd.concat([csv_df, live_df], ignore_index=True)
 
-    print(f"\n--- Combined Dataset ---")
+    print("\n--- Combined Dataset ---")
     print(f"Total records: {len(combined_df)}")
 
     # Process into game matchups
@@ -536,7 +532,7 @@ def load_training_data_with_live(
     print(f"Average point differential: {avg_diff:+.1f}")
 
     # Show season breakdown
-    seasons_in_data = set(g["season"] for g in training_data)
+    seasons_in_data = {g["season"] for g in training_data}
     print(f"Seasons included: {sorted(seasons_in_data)}")
 
     return training_data

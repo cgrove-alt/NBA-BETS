@@ -15,22 +15,21 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
 import math
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import plotly.express as px
-from jinja2 import Template, Environment, BaseLoader
+from jinja2 import Environment, BaseLoader
 
 
-def load_backtest_results(file_path: str) -> Dict[str, Any]:
+def load_backtest_results(file_path: str) -> dict[str, Any]:
     """Load backtest results from JSON file."""
-    with open(file_path, 'r') as f:
+    with open(file_path) as f:
         return json.load(f)
 
 
-def safe_get(data: Dict, key: str, default: Any = "N/A") -> Any:
+def safe_get(data: dict, key: str, default: Any = "N/A") -> Any:
     """Safely get value from dict, handling NaN and None."""
     value = data.get(key, default)
 
@@ -45,7 +44,7 @@ def safe_get(data: Dict, key: str, default: Any = "N/A") -> Any:
     return value
 
 
-def create_roi_curve(betting_data: Dict[str, Any]) -> go.Figure:
+def create_roi_curve(betting_data: dict[str, Any]) -> go.Figure:
     """
     Create cumulative ROI curve over time.
 
@@ -73,7 +72,7 @@ def create_roi_curve(betting_data: Dict[str, Any]) -> go.Figure:
             y=cumulative_roi,
             mode='lines',
             name='Cumulative ROI',
-            line=dict(color='green', width=2),
+            line={'color': 'green', 'width': 2},
             fill='tozeroy'
         ))
 
@@ -107,15 +106,15 @@ def create_roi_curve(betting_data: Dict[str, Any]) -> go.Figure:
     return fig
 
 
-def create_calibration_plot(predictions: List[Dict[str, Any]]) -> go.Figure:
+def create_calibration_plot(predictions: list[dict[str, Any]]) -> go.Figure:
     """
     Create calibration plot showing predicted vs actual accuracy.
 
     Bins predictions by confidence level and shows if model is calibrated.
     """
     # Bin predictions by confidence
-    bins = list(range(0, 101, 10))  # 0-10, 10-20, ..., 90-100
-    bin_labels = [f'{i}-{i+10}' for i in range(0, 100, 10)]
+    list(range(0, 101, 10))  # 0-10, 10-20, ..., 90-100
+    [f'{i}-{i+10}' for i in range(0, 100, 10)]
 
     bin_counts = [0] * 10
     bin_correct = [0] * 10
@@ -152,7 +151,7 @@ def create_calibration_plot(predictions: List[Dict[str, Any]]) -> go.Figure:
         y=[0, 100],
         mode='lines',
         name='Perfect Calibration',
-        line=dict(color='gray', dash='dash', width=2)
+        line={'color': 'gray', 'dash': 'dash', 'width': 2}
     ))
 
     # Actual calibration
@@ -161,8 +160,8 @@ def create_calibration_plot(predictions: List[Dict[str, Any]]) -> go.Figure:
         y=actual_accuracy,
         mode='markers+lines',
         name='Actual Calibration',
-        marker=dict(size=10, color='blue'),
-        line=dict(color='blue', width=2)
+        marker={'size': 10, 'color': 'blue'},
+        line={'color': 'blue', 'width': 2}
     ))
 
     fig.update_layout(
@@ -176,7 +175,7 @@ def create_calibration_plot(predictions: List[Dict[str, Any]]) -> go.Figure:
     return fig
 
 
-def create_tier_performance_chart(tier_data: Dict[str, Dict[str, Any]]) -> go.Figure:
+def create_tier_performance_chart(tier_data: dict[str, dict[str, Any]]) -> go.Figure:
     """Create bar chart comparing performance across confidence tiers."""
     tiers = []
     rmse_values = []
@@ -231,7 +230,7 @@ def create_tier_performance_chart(tier_data: Dict[str, Dict[str, Any]]) -> go.Fi
     return fig
 
 
-def create_prop_type_comparison(prop_data: Dict[str, Dict[str, Any]]) -> go.Figure:
+def create_prop_type_comparison(prop_data: dict[str, dict[str, Any]]) -> go.Figure:
     """Create comparison of performance across different prop types."""
     prop_types = []
     rmse_values = []
@@ -283,7 +282,7 @@ def create_prop_type_comparison(prop_data: Dict[str, Dict[str, Any]]) -> go.Figu
     return fig
 
 
-def create_worst_misses_table(predictions: List[Dict[str, Any]], top_n: int = 20) -> str:
+def create_worst_misses_table(predictions: list[dict[str, Any]], top_n: int = 20) -> str:
     """Create HTML table of worst prediction misses."""
     # Sort by absolute error
     sorted_preds = sorted(predictions, key=lambda x: abs(x.get('error', 0)), reverse=True)
@@ -333,7 +332,7 @@ def create_worst_misses_table(predictions: List[Dict[str, Any]], top_n: int = 20
     return html
 
 
-def generate_html_report(backtest_file: str, output_path: Optional[str] = None) -> str:
+def generate_html_report(backtest_file: str, output_path: str | None = None) -> str:
     """
     Generate comprehensive HTML backtest report with Plotly visualizations.
 
@@ -821,7 +820,7 @@ def generate_html_report(backtest_file: str, output_path: Optional[str] = None) 
     with open(output_path, 'w') as f:
         f.write(html_output)
 
-    print(f"\n✅ Report generated successfully!")
+    print("\n✅ Report generated successfully!")
     print(f"📊 Output: {output_path}")
     print(f"📈 Total Predictions: {safe_get(season_data, 'total_predictions', 0)}")
     print(f"💰 ROI: {safe_get(betting, 'roi', 0):.2f}%")
@@ -847,7 +846,7 @@ def main():
 
     try:
         report_path = generate_html_report(backtest_file, output_file)
-        print(f"\n🎉 Success! Open the report in your browser:")
+        print("\n🎉 Success! Open the report in your browser:")
         print(f"   file://{Path(report_path).absolute()}")
     except Exception as e:
         print(f"❌ Error generating report: {e}")

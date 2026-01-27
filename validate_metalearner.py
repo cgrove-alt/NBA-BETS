@@ -93,7 +93,7 @@ def main():
         print("Run comprehensive_backtest.py first to generate test data")
         sys.exit(1)
 
-    with open(backtest_file, 'r') as f:
+    with open(backtest_file) as f:
         backtest_data = json.load(f)
 
     if 'predictions' not in backtest_data or len(backtest_data['predictions']) == 0:
@@ -133,12 +133,12 @@ def main():
 
         # Print results
         print(f"  Sample size: {results['sample_size']}")
-        print(f"\n  Meta-Learner (Stacking):")
+        print("\n  Meta-Learner (Stacking):")
         print(f"    RMSE: {results['metrics']['meta_learner']['rmse']:.3f}")
         print(f"    MAE:  {results['metrics']['meta_learner']['mae']:.3f}")
         print(f"    R²:   {results['metrics']['meta_learner']['r2']:.3f}")
 
-        print(f"\n  Weighted Averaging (Baseline):")
+        print("\n  Weighted Averaging (Baseline):")
         print(f"    RMSE: {results['metrics']['weighted_avg']['rmse']:.3f}")
         print(f"    MAE:  {results['metrics']['weighted_avg']['mae']:.3f}")
         print(f"    R²:   {results['metrics']['weighted_avg']['r2']:.3f}")

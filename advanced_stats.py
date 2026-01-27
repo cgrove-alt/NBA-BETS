@@ -16,7 +16,6 @@ and are crucial for accurate betting predictions.
 """
 
 import numpy as np
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import logging
 
@@ -139,7 +138,7 @@ class AdvancedStatsCalculator:
     https://www.basketball-reference.com/about/glossary.html
     """
 
-    def __init__(self, league_averages: Dict[str, float] = None):
+    def __init__(self, league_averages: dict[str, float] = None):
         """
         Initialize calculator with league averages.
 
@@ -628,7 +627,7 @@ class AdvancedStatsCalculator:
     # CONVENIENCE METHODS
     # =========================================================================
 
-    def calculate_all_player_stats(self, stats: PlayerStats) -> Dict[str, float]:
+    def calculate_all_player_stats(self, stats: PlayerStats) -> dict[str, float]:
         """
         Calculate all advanced stats for a player.
 
@@ -663,7 +662,7 @@ class AdvancedStatsCalculator:
             "bpm": self.box_plus_minus(stats),
         }
 
-    def calculate_all_team_stats(self, stats: TeamStats) -> Dict[str, float]:
+    def calculate_all_team_stats(self, stats: TeamStats) -> dict[str, float]:
         """
         Calculate all advanced stats for a team.
 

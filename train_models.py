@@ -30,24 +30,20 @@ import argparse
 import json
 import time
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
 
 # Import our modules
 from data_fetcher import (
     fetch_historical_games as get_team_game_log,
-    fetch_player_stats,
-    fetch_team_roster,
-    get_team_id,
     API_DELAY,
 )
 from nba_api.stats.static import teams as nba_teams
-from feature_engineering import generate_game_features, generate_player_features
+from feature_engineering import generate_game_features
 from model_trainer import ModelTrainingPipeline
 
 # Fast data fetcher (no rate limiting)
-from fast_data_fetcher import generate_synthetic_training_data, fetch_training_data_fast
+from fast_data_fetcher import generate_synthetic_training_data
 
 # Database support
 try:
@@ -73,9 +69,9 @@ except ImportError:
 
 
 def load_recent_seasons_only(
-    seasons: Optional[List[str]] = None,
+    seasons: list[str] | None = None,
     window: int = 10,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Load training data from only recent seasons (2024-25, 2025-26).
 
@@ -112,7 +108,7 @@ def load_recent_seasons_only(
     # Filter to requested seasons
     live_df = live_df[live_df["SEASON_YEAR"].isin(seasons)]
 
-    print(f"\nLive data loaded:")
+    print("\nLive data loaded:")
     for season in seasons:
         season_df = live_df[live_df["SEASON_YEAR"] == season]
         games_count = len(season_df) // 2  # Each game has 2 records
@@ -153,7 +149,7 @@ def rate_limit():
 def fetch_historical_games(
     num_games: int = 100,
     season: str = "2025-26",
-) -> List[Dict]:
+) -> list[dict]:
     """
     Fetch historical game data with outcomes.
 
@@ -233,7 +229,7 @@ def fetch_historical_games(
                     away_abbrev = team_abbrev
 
                 # Get game outcome (keys may be upper or lowercase depending on API)
-                wl = game.get('WL', '') or game.get('wl', '')
+                game.get('WL', '') or game.get('wl', '')
                 pts = game.get('PTS', 0) or game.get('pts', 0) or 0
 
                 # Calculate actual point differential (home - away perspective)
@@ -277,7 +273,7 @@ def fetch_historical_games(
                         games_data.append(game_record)
                         print(f"    ✓ Added game: {away_abbrev} @ {home_abbrev} (diff: {int(point_diff):+d})")
                     else:
-                        print(f"    ✗ No features generated")
+                        print("    ✗ No features generated")
 
                 except Exception as e:
                     print(f"    ✗ Error: {e}")
@@ -298,7 +294,7 @@ def fetch_player_data(
     num_players: int = 50,
     games_per_player: int = 10,
     season: str = "2025-26",
-) -> List[Dict]:
+) -> list[dict]:
     """
     Fetch historical player game data with outcomes.
 
@@ -393,7 +389,7 @@ def fetch_player_data(
                                 }
                                 player_data.append(player_record)
 
-                        except Exception as e:
+                        except Exception:
                             continue
 
                     players_processed += 1
@@ -415,8 +411,8 @@ def fetch_player_data(
 
 
 def save_training_data(
-    games_data: List[Dict],
-    player_data: List[Dict],
+    games_data: list[dict],
+    player_data: list[dict],
     output_dir: str = "training_data",
 ):
     """Save training data to JSON files."""
@@ -440,20 +436,20 @@ def save_training_data(
 
 
 def load_training_data(
-    games_file: Optional[str] = None,
-    players_file: Optional[str] = None,
-) -> Tuple[List[Dict], List[Dict]]:
+    games_file: str | None = None,
+    players_file: str | None = None,
+) -> tuple[list[dict], list[dict]]:
     """Load training data from JSON files."""
     games_data = []
     player_data = []
 
     if games_file and Path(games_file).exists():
-        with open(games_file, 'r') as f:
+        with open(games_file) as f:
             games_data = json.load(f)
         print(f"Loaded {len(games_data)} games from {games_file}")
 
     if players_file and Path(players_file).exists():
-        with open(players_file, 'r') as f:
+        with open(players_file) as f:
             player_data = json.load(f)
         print(f"Loaded {len(player_data)} player records from {players_file}")
 
@@ -462,8 +458,8 @@ def load_training_data(
 
 def load_training_data_from_database(
     db_path: str = "nba_betting.db",
-    seasons: Optional[List[str]] = None,
-) -> List[Dict]:
+    seasons: list[str] | None = None,
+) -> list[dict]:
     """
     Load training data from SQLite database.
 
@@ -516,10 +512,10 @@ def load_training_data_from_database(
 
 
 def load_training_data_from_kaggle(
-    seasons: Optional[List[str]] = None,
+    seasons: list[str] | None = None,
     include_playoffs: bool = False,
-    data_dir: Optional[str] = None,
-) -> List[Dict]:
+    data_dir: str | None = None,
+) -> list[dict]:
     """
     Load training data from Kaggle/CSV files (NO RATE LIMITS!).
 
@@ -571,13 +567,13 @@ def load_training_data_from_kaggle(
 
 
 def train_models(
-    games_data: List[Dict],
-    player_data: Optional[List[Dict]] = None,
+    games_data: list[dict],
+    player_data: list[dict] | None = None,
     season: str = "2025-26",
     use_ensemble: bool = True,
     run_backtest: bool = False,
     backtest_min_games: int = 100,
-) -> Dict:
+) -> dict:
     """
     Train all models with the provided data.
 
@@ -618,7 +614,7 @@ def train_models(
     print(f"\n{'='*60}")
     print("TRAINING COMPLETE")
     print(f"{'='*60}")
-    print(f"Models trained and saved to 'models/' directory")
+    print("Models trained and saved to 'models/' directory")
 
     # Print summary
     print("\nModel Performance Summary:")
@@ -750,7 +746,7 @@ Examples:
         actual_games = min(args.games, MAX_API_GAMES)
         if args.games > MAX_API_GAMES:
             print(f"NOTE: Limiting API fetch to {MAX_API_GAMES} games (requested: {args.games})")
-            print(f"      Use --kaggle for full historical data\n")
+            print("      Use --kaggle for full historical data\n")
 
         # Fetch historical games
         games_data = fetch_historical_games(
@@ -774,7 +770,7 @@ Examples:
 
     # Train models
     if games_data:
-        results = train_models(
+        train_models(
             games_data=games_data,
             player_data=player_data,
             season=args.season,

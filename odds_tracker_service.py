@@ -36,7 +36,6 @@ import sys
 import logging
 import signal
 from datetime import datetime, timedelta
-from typing import Optional
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -131,7 +130,7 @@ class OddsTrackerService:
     """
 
     def __init__(self,
-                 api_key: Optional[str] = None,
+                 api_key: str | None = None,
                  update_interval: int = UPDATE_INTERVAL,
                  db_path: str = DEFAULT_DB_PATH,
                  log_file: str = LOG_FILE):
@@ -173,9 +172,9 @@ class OddsTrackerService:
         self.total_runs = 0
         self.successful_runs = 0
         self.failed_runs = 0
-        self.last_success: Optional[datetime] = None
-        self.last_failure: Optional[datetime] = None
-        self.service_start_time: Optional[datetime] = None
+        self.last_success: datetime | None = None
+        self.last_failure: datetime | None = None
+        self.service_start_time: datetime | None = None
 
         # Register event listeners
         self.scheduler.add_listener(self._job_executed_listener, EVENT_JOB_EXECUTED)
@@ -190,7 +189,7 @@ class OddsTrackerService:
             self.logger.error("No API key provided. Set THE_ODDS_API_KEY environment variable.")
             raise ValueError("Missing THE_ODDS_API_KEY")
 
-        self.logger.info(f"Odds Tracker Service initialized")
+        self.logger.info("Odds Tracker Service initialized")
         self.logger.info(f"Database: {self.db_path}")
         self.logger.info(f"Update interval: {self.update_interval} minutes")
         self.logger.info(f"Operating hours: {START_HOUR}:00 - {END_HOUR}:00 EST")
@@ -219,10 +218,7 @@ class OddsTrackerService:
             return False
 
         # Check time of day (8 AM - 11 PM)
-        if not (START_HOUR <= now.hour < END_HOUR):
-            return False
-
-        return True
+        return START_HOUR <= now.hour < END_HOUR
 
     def fetch_and_store_with_retry(self):
         """
@@ -238,7 +234,6 @@ class OddsTrackerService:
 
         self.total_runs += 1
         retry_count = 0
-        last_error = None
 
         while retry_count < MAX_RETRIES:
             try:
@@ -255,7 +250,6 @@ class OddsTrackerService:
                 return
 
             except Exception as e:
-                last_error = e
                 retry_count += 1
 
                 if retry_count < MAX_RETRIES:

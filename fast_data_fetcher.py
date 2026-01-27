@@ -11,7 +11,6 @@ This is much faster than nba_api which has aggressive rate limiting.
 import requests
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 import json
 
 # API Configuration
@@ -74,7 +73,7 @@ NBA_TEAMS = {
 TEAM_ID_TO_ABBREV = {v["id"]: k for k, v in NBA_TEAMS.items()}
 
 
-def get_all_teams() -> List[Dict]:
+def get_all_teams() -> list[dict]:
     """Get all NBA teams (no API call needed)."""
     return [
         {"abbreviation": abbrev, "id": data["id"], "name": data["name"], "conference": data["conference"]}
@@ -88,7 +87,7 @@ def fetch_games_fast(
     season: int = 2024,
     per_page: int = 100,
     max_pages: int = 10,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Fetch games quickly from balldontlie API.
 
@@ -117,7 +116,7 @@ def fetch_games_fast(
     if season:
         params["seasons[]"] = season
 
-    print(f"Fetching games from balldontlie API...")
+    print("Fetching games from balldontlie API...")
 
     for page in range(1, max_pages + 1):
         params["cursor"] = page
@@ -159,7 +158,7 @@ def fetch_games_fallback(
     start_date: str = None,
     end_date: str = None,
     season: int = 2024,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Fallback: Use free-nba API (no auth required).
     """
@@ -203,7 +202,7 @@ def fetch_games_fallback(
     return all_games
 
 
-def generate_synthetic_training_data(num_games: int = 1000) -> List[Dict]:
+def generate_synthetic_training_data(num_games: int = 1000) -> list[dict]:
     """
     Generate high-quality synthetic training data based on realistic NBA statistics.
 
@@ -451,7 +450,7 @@ def fetch_training_data_fast(
     num_games: int = 100,
     season: str = "2025-26",
     use_synthetic: bool = False,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Main entry point for fast training data collection.
 
@@ -520,7 +519,7 @@ if __name__ == "__main__":
     # Generate synthetic data (fastest)
     games = generate_synthetic_training_data(50)
 
-    print(f"\nSample game:")
+    print("\nSample game:")
     print(json.dumps(games[0], indent=2))
 
     # Show win distribution

@@ -25,7 +25,6 @@ USE FOR PARAMETER TESTING ONLY. VALIDATE ON REAL DATA BEFORE DEPLOYMENT.
 import json
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Tuple
 from dataclasses import dataclass
 
 @dataclass
@@ -63,7 +62,7 @@ def calculate_confidence(band_width: float, multiplier: float) -> float:
     return max(40.0, min(90.0, 90.0 - (band_width * multiplier)))
 
 
-def simulate_betting(predictions: List[Dict], multiplier: float,
+def simulate_betting(predictions: list[dict], multiplier: float,
                      confidence_threshold: float = 65.0,
                      bet_size: float = 100.0) -> BettingResults:
     """
@@ -188,12 +187,12 @@ def main():
         backtest_file = Path("backtest_results_2025_quick.json")
 
     if not backtest_file.exists():
-        print(f"ERROR: No backtest results found")
+        print("ERROR: No backtest results found")
         print("Run: python3 comprehensive_backtest.py")
         return
 
     print(f"\nLoading backtest data from {backtest_file}...")
-    with open(backtest_file, 'r') as f:
+    with open(backtest_file) as f:
         data = json.load(f)
 
     predictions = data.get('raw_predictions', [])
@@ -251,8 +250,8 @@ def main():
         print(best)
 
         print("\nIMPLEMENTATION:")
-        print(f"Update daily_predictions.py line ~1589:")
-        print(f"  OLD: confidence_score = max(40.0, min(90.0, 90.0 - (band_width * 6.25)))")
+        print("Update daily_predictions.py line ~1589:")
+        print("  OLD: confidence_score = max(40.0, min(90.0, 90.0 - (band_width * 6.25)))")
         print(f"  NEW: confidence_score = max(40.0, min(90.0, 90.0 - (band_width * {best.multiplier})))")
     else:
         print("\n⚠️  WARNING: No viable formulas found (need ≥50 bets and ≥52% win rate)")

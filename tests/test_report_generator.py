@@ -293,7 +293,7 @@ class TestGenerateHTMLReport:
             assert result_path == output_path
 
             # Read and verify HTML content
-            with open(result_path, 'r') as f:
+            with open(result_path) as f:
                 html = f.read()
 
             assert '<!DOCTYPE html>' in html
@@ -323,7 +323,7 @@ class TestGenerateHTMLReport:
         result_path = generate_html_report(sample_backtest_file)
         assert os.path.exists(result_path)
 
-        with open(result_path, 'r') as f:
+        with open(result_path) as f:
             html = f.read()
 
         assert 'Season 2025 26' in html  # Season key formatted

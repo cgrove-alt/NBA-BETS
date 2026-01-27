@@ -10,10 +10,9 @@ Coordinates the continuous learning pipeline:
 
 import sys
 import json
-import threading
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, Optional, Callable, List
+from datetime import datetime
+from collections.abc import Callable
 
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -54,7 +53,7 @@ class ContinuousLearningOrchestrator:
         drift_detector: DriftDetector = None,
         model_registry: ModelRegistry = None,
         incremental_trainer: IncrementalTrainer = None,
-        config: Dict = None
+        config: dict = None
     ):
         """Initialize the orchestrator.
 
@@ -87,7 +86,7 @@ class ContinuousLearningOrchestrator:
         self._event_history = []
 
         # Callbacks for alerting
-        self._alert_callbacks: List[Callable] = []
+        self._alert_callbacks: list[Callable] = []
 
     def start(self):
         """Start the continuous learning scheduler."""
@@ -141,7 +140,7 @@ class ContinuousLearningOrchestrator:
             self._log_event('stopped', 'Orchestrator stopped')
             print("Orchestrator stopped")
 
-    def run_settlement(self) -> Dict:
+    def run_settlement(self) -> dict:
         """Settle unsettled predictions.
 
         Returns:
@@ -162,7 +161,7 @@ class ContinuousLearningOrchestrator:
             self._log_event('settlement_error', str(e))
             return {'error': str(e)}
 
-    def run_drift_check(self) -> Dict:
+    def run_drift_check(self) -> dict:
         """Check for model drift and handle accordingly.
 
         Returns:
@@ -196,7 +195,7 @@ class ContinuousLearningOrchestrator:
             self._log_event('drift_check_error', str(e))
             return {'error': str(e)}
 
-    def run_retrain_check(self) -> Dict:
+    def run_retrain_check(self) -> dict:
         """Check if models should be retrained based on new data.
 
         Returns:
@@ -227,7 +226,7 @@ class ContinuousLearningOrchestrator:
             self._log_event('retrain_check_error', str(e))
             return {'error': str(e)}
 
-    def trigger_retraining(self, prop_types: List[str] = None) -> Dict:
+    def trigger_retraining(self, prop_types: list[str] = None) -> dict:
         """Trigger model retraining.
 
         Args:
@@ -270,7 +269,7 @@ class ContinuousLearningOrchestrator:
             self._log_event('retraining_error', str(e))
             return {'error': str(e)}
 
-    def _handle_alert(self, alert: Dict):
+    def _handle_alert(self, alert: dict):
         """Handle a drift alert.
 
         Args:
@@ -313,7 +312,7 @@ class ContinuousLearningOrchestrator:
 
         print(f"[{event['timestamp']}] {event_type}: {message}")
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Get current status of the continuous learning system.
 
         Returns:
@@ -345,7 +344,7 @@ class ContinuousLearningOrchestrator:
             'recent_events': self._event_history[-10:],
         }
 
-    def get_event_history(self, limit: int = 50) -> List[Dict]:
+    def get_event_history(self, limit: int = 50) -> list[dict]:
         """Get recent event history.
 
         Args:
@@ -356,7 +355,7 @@ class ContinuousLearningOrchestrator:
         """
         return self._event_history[-limit:]
 
-    def run_full_cycle(self) -> Dict:
+    def run_full_cycle(self) -> dict:
         """Run a complete cycle manually (useful for testing).
 
         Returns:
@@ -381,17 +380,17 @@ class ContinuousLearningOrchestrator:
         status = self.get_status()
 
         print(f"\n{'='*60}")
-        print(f"CONTINUOUS LEARNING SYSTEM STATUS")
+        print("CONTINUOUS LEARNING SYSTEM STATUS")
         print(f"{'='*60}")
 
         orch = status['orchestrator']
-        print(f"\nOrchestrator:")
+        print("\nOrchestrator:")
         print(f"  Running: {'Yes' if orch['is_running'] else 'No'}")
         print(f"  Last Settlement: {orch['last_settlement'] or 'Never'}")
         print(f"  Last Drift Check: {orch['last_drift_check'] or 'Never'}")
         print(f"  Last Retrain: {orch['last_retrain'] or 'Never'}")
 
-        print(f"\nSettlement:")
+        print("\nSettlement:")
         print(f"  Pending: {status['settlement']['total_pending']} predictions")
         by_date = status['settlement'].get('by_date', {})
         if by_date:
@@ -399,18 +398,18 @@ class ContinuousLearningOrchestrator:
                 print(f"    {date}: {count}")
 
         drift = status['drift']
-        print(f"\nDrift Detection:")
+        print("\nDrift Detection:")
         print(f"  Has Drift: {'Yes' if drift['has_drift'] else 'No'}")
         print(f"  Drift Score: {drift['drift_score']}/100")
         print(f"  Calibration Error: {drift['calibration_error']:.3f}")
         print(f"  Active Alerts: {drift['alerts_count']}")
 
-        print(f"\nTraining Status:")
+        print("\nTraining Status:")
         for prop_type, info in status['training'].items():
             retrain = 'Yes' if info['should_retrain'] else 'No'
             print(f"  {prop_type}: {info['samples']} samples (retrain: {retrain})")
 
-        print(f"\nRecent Events:")
+        print("\nRecent Events:")
         for event in status['recent_events'][-5:]:
             print(f"  [{event['timestamp']}] {event['type']}: {event['message'][:50]}")
 

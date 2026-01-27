@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 Scheduled Model Retraining Script for NBA Player Props Model
 
 This script can be run manually or scheduled via cron/launchd to:
@@ -20,14 +20,12 @@ Schedule with launchd (macOS):
     See the generated .plist file in this directory
 """
 
-import os
 import sys
 import json
 import subprocess
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-import pickle
 
 # Configuration
 PROJECT_DIR = Path(__file__).parent
@@ -68,7 +66,7 @@ def get_model_age_days() -> float:
 def get_last_retrain_info() -> dict:
     """Get info about the last retrain."""
     if RETRAIN_LOG.exists():
-        with open(RETRAIN_LOG, 'r') as f:
+        with open(RETRAIN_LOG) as f:
             history = json.load(f)
             if history:
                 return history[-1]
@@ -81,7 +79,7 @@ def count_cached_games() -> int:
     total = 0
     for f in game_files:
         try:
-            with open(f, 'r') as fp:
+            with open(f) as fp:
                 data = json.load(fp)
                 if isinstance(data, list):
                     total += len(data)
@@ -95,7 +93,7 @@ def count_cached_games() -> int:
 def get_current_backtest_r2() -> float:
     """Get the current overall R2 from backtest results."""
     if BACKTEST_RESULTS.exists():
-        with open(BACKTEST_RESULTS, 'r') as f:
+        with open(BACKTEST_RESULTS) as f:
             results = json.load(f)
             return results.get('overall', {}).get('r2', 0)
     return 0
@@ -204,11 +202,10 @@ def run_training():
                 if line.strip():
                     log(f"  {line}")
             return True
-        else:
-            log(f"Training may have failed. Return code: {result.returncode}")
-            if result.stderr:
-                log(f"Errors: {result.stderr[:500]}")
-            return False
+        log(f"Training may have failed. Return code: {result.returncode}")
+        if result.stderr:
+            log(f"Errors: {result.stderr[:500]}")
+        return False
 
     except subprocess.TimeoutExpired:
         log("ERROR: Training timed out after 30 minutes")
@@ -228,7 +225,7 @@ def run_backtest():
         return None
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             [sys.executable, str(backtest_script)],
             cwd=PROJECT_DIR,
             capture_output=True,
@@ -238,7 +235,7 @@ def run_backtest():
 
         # Read results
         if BACKTEST_RESULTS.exists():
-            with open(BACKTEST_RESULTS, 'r') as f:
+            with open(BACKTEST_RESULTS) as f:
                 results = json.load(f)
                 r2 = results.get('overall', {}).get('r2', 0)
                 log(f"Backtest complete. Overall R2: {r2:.3f}")
@@ -268,7 +265,7 @@ def save_retrain_record(success: bool, backtest_results: dict = None):
     # Load existing history
     history = []
     if RETRAIN_LOG.exists():
-        with open(RETRAIN_LOG, 'r') as f:
+        with open(RETRAIN_LOG) as f:
             history = json.load(f)
 
     # Append and save (keep last 50 records)

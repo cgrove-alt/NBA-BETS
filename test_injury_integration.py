@@ -84,7 +84,7 @@ def test_injury_integration():
         available, status = is_player_available(test_player_id, target_date_dt)
         print(f"  - Player {test_player_id}: available={available}, status={status.value if status else None}")
         if not available:
-            print(f"✓ Correctly identified player as unavailable")
+            print("✓ Correctly identified player as unavailable")
         else:
             print(f"⚠️  Warning: Player marked as {status.value if status else 'Unknown'} but is_player_available returned True")
 
@@ -94,11 +94,10 @@ def test_injury_integration():
         available, status = is_player_available(test_player_id, target_date_dt)
         print(f"  - Player {test_player_id}: available={available}, status={status.value if status else None}")
         if available and status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
-            print(f"✓ Correctly identified questionable player (available but uncertain)")
+            print("✓ Correctly identified questionable player (available but uncertain)")
 
     # Test 5: Simulate the prediction logic
     print("\n[Test 5] Simulating prediction loop with injury checks...")
-    total_props = 100  # Simulate 100 player props
     skipped_in_loop = 0
     flagged_in_loop = 0
     normal_props = 0
@@ -122,14 +121,14 @@ def test_injury_integration():
     print(f"    * {skipped_in_loop} would be SKIPPED (OUT/DOUBTFUL)")
     print(f"    * {flagged_in_loop} would be FLAGGED (QUESTIONABLE/GTD)")
     print(f"    * {normal_props} would proceed NORMALLY")
-    print(f"✓ Prediction loop logic working correctly")
+    print("✓ Prediction loop logic working correctly")
 
     # Test 6: Verify zero DNP errors (conceptual)
     print("\n[Test 6] DNP Error Prevention...")
-    print(f"  - Before integration: ~161 DNP errors (from plan)")
+    print("  - Before integration: ~161 DNP errors (from plan)")
     print(f"  - After integration: {skipped_count} players would be skipped")
-    print(f"  - Expected DNP errors: 0 (assuming detection rate > 95%)")
-    print(f"✓ Integration should eliminate DNP errors")
+    print("  - Expected DNP errors: 0 (assuming detection rate > 95%)")
+    print("✓ Integration should eliminate DNP errors")
 
     # Summary
     print("\n" + "=" * 70)
@@ -138,9 +137,9 @@ def test_injury_integration():
     print(f"✓ Test 1: Injury fetching - PASSED ({len(current_injuries)} injuries fetched)")
     print(f"✓ Test 2: Skip OUT/DOUBTFUL - PASSED ({skipped_count} would be skipped)")
     print(f"✓ Test 3: Flag QUESTIONABLE/GTD - PASSED ({flagged_count} would be flagged)")
-    print(f"✓ Test 4: is_player_available() - PASSED")
-    print(f"✓ Test 5: Prediction loop simulation - PASSED")
-    print(f"✓ Test 6: DNP error prevention - PASSED (conceptual)")
+    print("✓ Test 4: is_player_available() - PASSED")
+    print("✓ Test 5: Prediction loop simulation - PASSED")
+    print("✓ Test 6: DNP error prevention - PASSED (conceptual)")
     print("\n✓ Task 1.4 integration is COMPLETE and WORKING!")
     print("=" * 70)
 

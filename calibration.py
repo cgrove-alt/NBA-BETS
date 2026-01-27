@@ -23,15 +23,14 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Union
 from dataclasses import dataclass, asdict
 from abc import ABC, abstractmethod
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.calibration import calibration_curve
 from sklearn.linear_model import LogisticRegression
 from sklearn.isotonic import IsotonicRegression
 from scipy.optimize import minimize
 from scipy.special import expit, logit
-import warnings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,9 +43,9 @@ class CalibrationMetrics:
     mce: float  # Maximum Calibration Error
     brier_score: float  # Brier score (lower is better)
     log_loss: float  # Log loss / cross-entropy
-    reliability_diagram: Dict[str, List[float]]  # For plotting
+    reliability_diagram: dict[str, list[float]]  # For plotting
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
     def summary(self) -> str:
@@ -158,7 +157,7 @@ class PlattScaling(BaseCalibrator):
 
     def load(self, path: str) -> "PlattScaling":
         """Load from disk."""
-        with open(path, 'r') as f:
+        with open(path) as f:
             data = json.load(f)
         self.A = data["A"]
         self.B = data["B"]
@@ -292,7 +291,7 @@ class TemperatureScaling(BaseCalibrator):
 
     def load(self, path: str) -> "TemperatureScaling":
         """Load from disk."""
-        with open(path, 'r') as f:
+        with open(path) as f:
             data = json.load(f)
         self.temperature = data["temperature"]
         self._fitted = data["fitted"]
@@ -374,7 +373,7 @@ class BetaCalibration(BaseCalibrator):
 
     def load(self, path: str) -> "BetaCalibration":
         """Load from disk."""
-        with open(path, 'r') as f:
+        with open(path) as f:
             data = json.load(f)
         self.a = data["a"]
         self.b = data["b"]
@@ -465,14 +464,13 @@ class FavoriteLongshotCalibrator(BaseCalibrator):
         """Create a new instance of the base calibrator."""
         if self.base_method == "platt":
             return PlattScaling()
-        elif self.base_method == "isotonic":
+        if self.base_method == "isotonic":
             return IsotonicCalibration()
-        elif self.base_method == "temperature":
+        if self.base_method == "temperature":
             return TemperatureScaling()
-        elif self.base_method == "beta":
+        if self.base_method == "beta":
             return BetaCalibration()
-        else:
-            raise ValueError(f"Unknown base method: {self.base_method}")
+        raise ValueError(f"Unknown base method: {self.base_method}")
 
     def fit(self, y_prob: np.ndarray, y_true: np.ndarray,
             is_favorite: np.ndarray = None) -> "FavoriteLongshotCalibrator":
@@ -598,7 +596,7 @@ class FavoriteLongshotCalibrator(BaseCalibrator):
         base_path = Path(path).with_suffix('')
 
         # Load metadata
-        with open(f"{base_path}_metadata.json", 'r') as f:
+        with open(f"{base_path}_metadata.json") as f:
             data = json.load(f)
 
         self.base_method = data["base_method"]
@@ -650,14 +648,13 @@ class ShrinkagePlusCalibrator(BaseCalibrator):
         """Create a new instance of the base calibrator."""
         if self.base_method == "platt":
             return PlattScaling()
-        elif self.base_method == "isotonic":
+        if self.base_method == "isotonic":
             return IsotonicCalibration()
-        elif self.base_method == "temperature":
+        if self.base_method == "temperature":
             return TemperatureScaling()
-        elif self.base_method == "beta":
+        if self.base_method == "beta":
             return BetaCalibration()
-        else:
-            raise ValueError(f"Unknown base method: {self.base_method}")
+        raise ValueError(f"Unknown base method: {self.base_method}")
 
     def fit(self, y_prob: np.ndarray, y_true: np.ndarray) -> "ShrinkagePlusCalibrator":
         """
@@ -728,7 +725,7 @@ class ShrinkagePlusCalibrator(BaseCalibrator):
         """Load from disk."""
         base_path = Path(path).with_suffix('')
 
-        with open(f"{base_path}_metadata.json", 'r') as f:
+        with open(f"{base_path}_metadata.json") as f:
             data = json.load(f)
 
         self.shrinkage = data["shrinkage"]
@@ -763,8 +760,8 @@ class CalibrationMonitor:
         """
         self.ece_threshold = ece_threshold
         self.window_size = window_size
-        self.prediction_history: List[float] = []
-        self.outcome_history: List[int] = []
+        self.prediction_history: list[float] = []
+        self.outcome_history: list[int] = []
         self.alert_triggered = False
         self.last_check_ece: float = 0.0
 
@@ -810,7 +807,7 @@ class CalibrationMonitor:
         """Reset alert after recalibration."""
         self.alert_triggered = False
 
-    def get_diagnostics(self) -> Dict:
+    def get_diagnostics(self) -> dict:
         """Get calibration monitoring diagnostics."""
         return {
             "total_predictions": len(self.prediction_history),
@@ -921,7 +918,7 @@ class CalibrationEvaluator:
         y_prob: np.ndarray,
         y_true: np.ndarray,
         n_bins: int = 10
-    ) -> Dict[str, List[float]]:
+    ) -> dict[str, list[float]]:
         """
         Generate data for reliability diagram (calibration curve).
 
@@ -1000,7 +997,7 @@ class ModelCalibrator:
                             (shrinkage, favorite-longshot split)
         """
         self.model_name = model_name
-        self.calibrators: Dict[str, BaseCalibrator] = {
+        self.calibrators: dict[str, BaseCalibrator] = {
             "platt": PlattScaling(),
             "isotonic": IsotonicCalibration(),
             "temperature": TemperatureScaling(),
@@ -1014,7 +1011,7 @@ class ModelCalibrator:
             self.calibrators["favorite_longshot"] = FavoriteLongshotCalibrator(base_method="beta")
 
         self.best_method: str = "platt"
-        self.metrics: Dict[str, CalibrationMetrics] = {}
+        self.metrics: dict[str, CalibrationMetrics] = {}
 
     def fit(
         self,
@@ -1170,7 +1167,7 @@ class ModelCalibrator:
             return float(calibrated[0])
         return calibrated
 
-    def get_metrics(self, method: str = None) -> Optional[CalibrationMetrics]:
+    def get_metrics(self, method: str = None) -> CalibrationMetrics | None:
         """Get calibration metrics for a method."""
         method = method or self.best_method
         return self.metrics.get(method)
@@ -1206,7 +1203,7 @@ class ModelCalibrator:
         # Load metadata
         metadata_path = path / f"{self.model_name}_metadata.json"
         if metadata_path.exists():
-            with open(metadata_path, 'r') as f:
+            with open(metadata_path) as f:
                 metadata = json.load(f)
             self.best_method = metadata.get("best_method", "platt")
 
@@ -1295,7 +1292,7 @@ def evaluate_calibration(
 
     if print_results:
         print(metrics.summary())
-        print(f"\nInterpretation:")
+        print("\nInterpretation:")
         if metrics.ece < 0.05:
             print("  - ECE < 0.05: Well calibrated!")
         elif metrics.ece < 0.10:
@@ -1442,10 +1439,10 @@ class StatTypeCalibrator:
     STAT_TYPES = ['points', 'rebounds', 'assists', 'threes', 'pra']
 
     def __init__(self):
-        self.calibrators: Dict[str, PropEdgeCalibrator] = {}
+        self.calibrators: dict[str, PropEdgeCalibrator] = {}
         self._global_fallback = None  # Used when stat-specific not available
 
-    def fit(self, prop_data: Dict[str, Dict[str, np.ndarray]]) -> "StatTypeCalibrator":
+    def fit(self, prop_data: dict[str, dict[str, np.ndarray]]) -> "StatTypeCalibrator":
         """
         Fit calibrators for each stat type.
 

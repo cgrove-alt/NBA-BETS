@@ -23,7 +23,7 @@ Expected Impact:
 
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Tuple, Optional, Union, Any
+from typing import Union, Any
 from sklearn.base import clone
 from sklearn.model_selection import TimeSeriesSplit, KFold
 from sklearn.linear_model import Ridge
@@ -52,7 +52,7 @@ class StackingMetaLearner:
 
     def __init__(
         self,
-        base_models: List[Any],
+        base_models: list[Any],
         meta_learner_type: str = 'xgboost',
         cv_folds: int = 5,
         time_series_split: bool = True,
@@ -171,7 +171,7 @@ class StackingMetaLearner:
         self,
         X: np.ndarray,
         y: np.ndarray,
-        sample_weights: Optional[np.ndarray] = None
+        sample_weights: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Generate out-of-fold predictions from base models.
@@ -223,10 +223,7 @@ class StackingMetaLearner:
                 y_train, y_val = y[train_idx], y[val_idx]
 
                 # Handle sample weights if provided
-                if sample_weights is not None:
-                    weights_train = sample_weights[train_idx]
-                else:
-                    weights_train = None
+                weights_train = sample_weights[train_idx] if sample_weights is not None else None
 
                 # CRITICAL: Clone the base model to prevent data leakage
                 # Each fold must train on ONLY the training data for that fold
@@ -303,8 +300,8 @@ class StackingMetaLearner:
         self,
         X: np.ndarray,
         y: np.ndarray,
-        context_features: Optional[np.ndarray] = None,
-        sample_weights: Optional[np.ndarray] = None
+        context_features: np.ndarray | None = None,
+        sample_weights: np.ndarray | None = None
     ):
         """
         Fit the stacking meta-learner.
@@ -410,7 +407,7 @@ class StackingMetaLearner:
     def predict(
         self,
         X: np.ndarray,
-        context_features: Optional[np.ndarray] = None
+        context_features: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Generate predictions using the stacking ensemble.
@@ -454,15 +451,14 @@ class StackingMetaLearner:
             meta_features_scaled = self.poly_features.transform(meta_features_scaled)
 
         # Step 5: Generate final predictions
-        predictions = self.meta_learner.predict(meta_features_scaled)
+        return self.meta_learner.predict(meta_features_scaled)
 
-        return predictions
 
     def predict_with_uncertainty(
         self,
         X: np.ndarray,
-        context_features: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        context_features: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Generate predictions with uncertainty estimates.
 
@@ -540,11 +536,11 @@ class StackingMetaLearner:
         self.base_model_weights = weights
 
         logger.info("\nBase Model Performance (OOF):")
-        for idx, (model, weight, rmse) in enumerate(zip(self.base_models, weights, rmse_scores)):
+        for idx, (model, weight, rmse) in enumerate(zip(self.base_models, weights, rmse_scores, strict=False)):
             model_name = model.__class__.__name__
             logger.info(f"  {model_name}: RMSE={rmse:.4f}, Weight={weight:.4f}")
 
-    def get_base_model_weights(self) -> Dict[str, float]:
+    def get_base_model_weights(self) -> dict[str, float]:
         """
         Get the effective weights of base models.
 
@@ -563,7 +559,7 @@ class StackingMetaLearner:
 
         return weights
 
-    def get_feature_importance(self) -> Optional[Dict[str, float]]:
+    def get_feature_importance(self) -> dict[str, float] | None:
         """
         Get feature importance from meta-learner (if supported).
 
@@ -583,17 +579,15 @@ class StackingMetaLearner:
             if self.context_feature_names is not None:
                 feature_names.extend(self.context_feature_names)
 
-            importance = dict(zip(feature_names, importance_scores))
-            return importance
-        else:
-            logger.warning(f"Feature importance not available for {self.meta_learner_type}")
-            return None
+            return dict(zip(feature_names, importance_scores, strict=False))
+        logger.warning(f"Feature importance not available for {self.meta_learner_type}")
+        return None
 
 
 def calculate_time_decay_weights(
-    dates: Union[List[datetime], np.ndarray],
+    dates: Union[list[datetime], np.ndarray],
     half_life_days: int = 180,
-    reference_date: Optional[datetime] = None
+    reference_date: datetime | None = None
 ) -> np.ndarray:
     """
     Calculate time-decay sample weights for training.
@@ -640,9 +634,8 @@ def calculate_time_decay_weights(
     weights = 0.5 ** (days_ago / half_life_days)
 
     # Normalize to sum to 1
-    weights = weights / np.sum(weights) * len(weights)
+    return weights / np.sum(weights) * len(weights)
 
-    return weights
 
 
 # Example usage and testing

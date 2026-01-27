@@ -11,7 +11,6 @@ Key adjustments:
 """
 
 import math
-from typing import Dict, Optional, Tuple
 
 
 # NBA game constants
@@ -95,9 +94,8 @@ def get_time_factor(minutes_elapsed: float, total_minutes: float = REGULATION_MI
     # At 50% of game: ~30% weight on pre-game
     # At 75% of game: ~15% weight on pre-game
     # At 100%: 0% weight on pre-game (fully trust actual result)
-    time_factor = (1 - progress) ** 1.5
+    return (1 - progress) ** 1.5
 
-    return time_factor
 
 
 def adjust_spread_prediction(
@@ -107,7 +105,7 @@ def adjust_spread_prediction(
     period: int,
     time_remaining: str,
     home_team_perspective: bool = True
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Adjust spread prediction based on live game state.
 
@@ -162,7 +160,7 @@ def adjust_moneyline_probability(
     period: int,
     time_remaining: str,
     for_home_team: bool = True
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Adjust win probability based on live game state.
 
@@ -238,7 +236,7 @@ def adjust_player_prop(
     minutes_played: float,
     expected_minutes: float = 32.0,
     prop_type: str = "points"
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Adjust player prop prediction using pace projection.
 
@@ -322,10 +320,10 @@ def adjust_player_prop(
 
 
 def adjust_game_predictions(
-    game_predictions: Dict,
-    live_score: Dict,
-    player_stats: Optional[Dict] = None
-) -> Dict:
+    game_predictions: dict,
+    live_score: dict,
+    player_stats: dict | None = None
+) -> dict:
     """
     Adjust all predictions for a game based on live state.
 

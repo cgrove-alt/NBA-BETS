@@ -19,10 +19,9 @@ import json
 import numpy as np
 from pathlib import Path
 from collections import defaultdict
-from typing import Dict, List
 
 
-def load_phase2_results() -> Dict:
+def load_phase2_results() -> dict:
     """Load Phase 2 backtest results."""
     results_file = Path("backtest_results/phase2_backtest.json")
 
@@ -33,7 +32,7 @@ def load_phase2_results() -> Dict:
         return json.load(f)
 
 
-def calculate_prop_specific_bias(predictions: List[Dict]) -> Dict:
+def calculate_prop_specific_bias(predictions: list[dict]) -> dict:
     """
     Calculate bias for each prop type.
 
@@ -65,7 +64,7 @@ def calculate_prop_specific_bias(predictions: List[Dict]) -> Dict:
     return bias_corrections
 
 
-def generate_bias_correction_code(corrections: Dict) -> str:
+def generate_bias_correction_code(corrections: dict) -> str:
     """Generate Python code for BIAS_CORRECTIONS dict."""
     code = "BIAS_CORRECTIONS = {\n"
 
@@ -79,7 +78,7 @@ def generate_bias_correction_code(corrections: Dict) -> str:
     return code
 
 
-def update_comprehensive_backtest(corrections: Dict):
+def update_comprehensive_backtest(corrections: dict):
     """Update BIAS_CORRECTIONS in comprehensive_backtest.py."""
     backtest_file = Path("comprehensive_backtest.py")
 
@@ -131,7 +130,7 @@ def update_comprehensive_backtest(corrections: Dict):
     return True
 
 
-def simulate_corrected_predictions(predictions: List[Dict], corrections: Dict) -> List[Dict]:
+def simulate_corrected_predictions(predictions: list[dict], corrections: dict) -> list[dict]:
     """Simulate what predictions would look like with bias correction."""
     corrected = []
 
@@ -159,7 +158,7 @@ def simulate_corrected_predictions(predictions: List[Dict], corrections: Dict) -
     return corrected
 
 
-def compare_before_after(original: List[Dict], corrected: List[Dict]) -> Dict:
+def compare_before_after(original: list[dict], corrected: list[dict]) -> dict:
     """Compare metrics before and after bias correction."""
 
     def calc_metrics(preds):
@@ -180,7 +179,7 @@ def compare_before_after(original: List[Dict], corrected: List[Dict]) -> Dict:
 
     # By prop type
     prop_comparison = {}
-    for prop_type in set(p['prop_type'] for p in original):
+    for prop_type in {p['prop_type'] for p in original}:
         orig_prop = [p for p in original if p['prop_type'] == prop_type]
         corr_prop = [p for p in corrected if p['prop_type'] == prop_type]
 
@@ -251,7 +250,7 @@ def main():
     print("\n6. Comparing before vs after bias correction...")
     comparison = compare_before_after(predictions, corrected_predictions)
 
-    print(f"\n   OVERALL METRICS:")
+    print("\n   OVERALL METRICS:")
     print(f"   {'Metric':<12} {'Before':>10} {'After':>10} {'Change':>10}")
     print("   " + "-"*46)
 

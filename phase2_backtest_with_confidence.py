@@ -11,15 +11,10 @@ Usage:
     python3 phase2_backtest_with_confidence.py
 """
 
-import os
-import sys
 import json
-import pickle
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -34,7 +29,6 @@ from comprehensive_backtest import (
 )
 
 # Import confidence tier thresholds
-from edge_quality import EdgeTier
 
 
 @dataclass
@@ -49,16 +43,16 @@ class ConfidencePropPrediction(PropPrediction):
 @dataclass
 class Phase2BacktestResults(BacktestResults):
     """Extended results with confidence-based filtering."""
-    confidence_predictions: List[ConfidencePropPrediction] = field(default_factory=list)
+    confidence_predictions: list[ConfidencePropPrediction] = field(default_factory=list)
 
     def add_confidence(self, pred: ConfidencePropPrediction):
         self.confidence_predictions.append(pred)
 
-    def get_by_tier(self, tier: str) -> List[ConfidencePropPrediction]:
+    def get_by_tier(self, tier: str) -> list[ConfidencePropPrediction]:
         """Get predictions filtered by confidence tier."""
         return [p for p in self.confidence_predictions if p.tier == tier]
 
-    def get_elite_and_strong(self) -> List[ConfidencePropPrediction]:
+    def get_elite_and_strong(self) -> list[ConfidencePropPrediction]:
         """Get Elite + Strong tier predictions only."""
         return [p for p in self.confidence_predictions if p.tier in ['elite', 'strong']]
 
@@ -70,8 +64,8 @@ class Phase2Backtester(SeasonBacktester):
         super().__init__(season)
         self.confidence_enabled = False
 
-    def predict_with_confidence(self, prop_type: str, features: Dict,
-                                 predicted_minutes: Optional[float] = None) -> Optional[Dict]:
+    def predict_with_confidence(self, prop_type: str, features: dict,
+                                 predicted_minutes: float | None = None) -> dict | None:
         """
         Make prediction with confidence score.
 
@@ -120,7 +114,7 @@ class Phase2Backtester(SeasonBacktester):
 
         # Get base model predictions
         base_preds = []
-        for name, model in base_models.items():
+        for _name, model in base_models.items():
             pred = model.predict(X_scaled)[0]
             base_preds.append(pred)
 
@@ -259,7 +253,7 @@ class Phase2Backtester(SeasonBacktester):
 
             # Process position defense
             player_stats_list = []
-            for pid, stats in box_scores.items():
+            for _pid, stats in box_scores.items():
                 player_stats_list.append({
                     'player': stats.get('player', {}),
                     'team_id': stats.get('team_id'),
@@ -361,10 +355,10 @@ class Phase2Backtester(SeasonBacktester):
         return results
 
     def generate_phase2_report(self, results: Phase2BacktestResults,
-                               phase1_results: Optional[Dict] = None):
+                               phase1_results: dict | None = None):
         """Generate comprehensive Phase 2 report with confidence filtering."""
         print("\n" + "="*60)
-        print(f"PHASE 2 BACKTEST RESULTS (WITH CONFIDENCE FILTERING)")
+        print("PHASE 2 BACKTEST RESULTS (WITH CONFIDENCE FILTERING)")
         print("="*60)
         print(f"Games Analyzed: {results.games_processed}")
         print(f"Date Range: {results.start_date} to {results.end_date}")
@@ -480,7 +474,7 @@ class Phase2Backtester(SeasonBacktester):
             print("\n--- PHASE 2 vs PHASE 1 COMPARISON ---")
             phase1_overall = phase1_results.get('summary', {}).get('overall_performance', {})
 
-            print(f"\nOverall RMSE:")
+            print("\nOverall RMSE:")
             print(f"  Phase 1: {phase1_overall.get('overall_rmse', 'N/A'):.3f}")
             print(f"  Phase 2 (All): {overall.get('rmse', 'N/A'):.3f}")
             print(f"  Phase 2 (Elite+Strong): {es_metrics.get('rmse', 'N/A'):.3f}")
@@ -491,13 +485,13 @@ class Phase2Backtester(SeasonBacktester):
             print(f"  Improvement (Elite+Strong): {rmse_es_improvement:.3f} ({rmse_es_improvement / phase1_overall.get('overall_rmse', 1) * 100:.1f}%)")
 
             # Target check
-            print(f"\n--- PHASE 2 TARGET STATUS ---")
-            print(f"Target: Overall RMSE < 5.0")
+            print("\n--- PHASE 2 TARGET STATUS ---")
+            print("Target: Overall RMSE < 5.0")
             print(f"Current (All): {overall.get('rmse', 'N/A'):.3f} - {'✓ MET' if overall.get('rmse', 999) < 5.0 else '✗ NOT MET'}")
             print(f"Current (Elite+Strong): {es_metrics.get('rmse', 'N/A'):.3f} - {'✓ MET' if es_metrics.get('rmse', 999) < 5.0 else '✗ NOT MET'}")
 
-            print(f"\nTarget: ROI (Elite tier) > 5% (simulated)")
-            print(f"Note: CLV and actual ROI calculation requires betting odds data")
+            print("\nTarget: ROI (Elite tier) > 5% (simulated)")
+            print("Note: CLV and actual ROI calculation requires betting odds data")
 
         # Confidence calibration
         print("\n--- CONFIDENCE CALIBRATION ---")
@@ -514,7 +508,7 @@ class Phase2Backtester(SeasonBacktester):
 
         print("\n" + "="*60)
 
-    def _calculate_metrics_from_props(self, preds: List[PropPrediction]) -> Dict:
+    def _calculate_metrics_from_props(self, preds: list[PropPrediction]) -> dict:
         """Helper to calculate metrics from PropPrediction list."""
         if not preds:
             return {}

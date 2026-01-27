@@ -19,15 +19,12 @@ import os
 import sys
 import json
 import time
-import pickle
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 
 import numpy as np
-import pandas as pd
 
 # Load environment variables
 def _load_env():
@@ -56,7 +53,7 @@ class BalldontlieDataCollector:
     for model training purposes.
     """
 
-    def __init__(self, api_key: Optional[str] = None, tier: str = "goat"):
+    def __init__(self, api_key: str | None = None, tier: str = "goat"):
         """
         Initialize the data collector.
 
@@ -74,7 +71,7 @@ class BalldontlieDataCollector:
         self.cache_dir = Path("data/balldontlie_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def get_all_teams(self) -> List[Dict]:
+    def get_all_teams(self) -> list[dict]:
         """Fetch and cache all NBA teams."""
         if not self.teams_cache:
             teams = self.api.get_teams()
@@ -82,9 +79,9 @@ class BalldontlieDataCollector:
                 self.teams_cache[team['id']] = team
                 # Also index by abbreviation
                 self.teams_cache[team.get('abbreviation', '')] = team
-        return list(t for t in self.teams_cache.values() if isinstance(t.get('id'), int))
+        return [t for t in self.teams_cache.values() if isinstance(t.get('id'), int)]
 
-    def get_team_by_id(self, team_id: int) -> Optional[Dict]:
+    def get_team_by_id(self, team_id: int) -> dict | None:
         """Get team info by ID."""
         if not self.teams_cache:
             self.get_all_teams()
@@ -95,7 +92,7 @@ class BalldontlieDataCollector:
         season: int,
         per_page: int = 100,
         max_pages: int = 50,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Fetch all games for a season.
 
@@ -171,7 +168,7 @@ class BalldontlieDataCollector:
         self,
         start_date: str,
         end_date: str,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Fetch games within a date range.
 
@@ -204,7 +201,7 @@ class BalldontlieDataCollector:
 
         return all_games
 
-    def fetch_player_stats_for_game(self, game_id: int) -> List[Dict]:
+    def fetch_player_stats_for_game(self, game_id: int) -> list[dict]:
         """
         Fetch player statistics for a specific game.
 
@@ -239,7 +236,7 @@ class TeamStatsCalculator:
         self.window = window
         self.team_games = defaultdict(list)  # team_id -> list of (date, game_stats)
 
-    def add_game(self, game: Dict):
+    def add_game(self, game: dict):
         """
         Add a game to the historical record.
 
@@ -288,7 +285,7 @@ class TeamStatsCalculator:
         team_id: int,
         date: str,
         min_games: int = 5,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Get team statistics before a specific date (point-in-time).
 
@@ -394,7 +391,7 @@ class FeatureGenerator:
         home_team_id: int,
         away_team_id: int,
         game_date: str,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Generate moneyline prediction features for a matchup.
 
@@ -412,7 +409,7 @@ class FeatureGenerator:
         if not home_stats or not away_stats:
             return None
 
-        features = {
+        return {
             # Win percentage differentials
             'season_win_pct_diff': home_stats['season_win_pct'] - away_stats['season_win_pct'],
             'recent_win_pct_diff': home_stats['recent_win_pct'] - away_stats['recent_win_pct'],
@@ -454,14 +451,13 @@ class FeatureGenerator:
             'away_games_played': away_stats['season_games'],
         }
 
-        return features
 
     def generate_spread_features(
         self,
         home_team_id: int,
         away_team_id: int,
         game_date: str,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Generate spread prediction features for a matchup.
 
@@ -506,10 +502,10 @@ class FeatureGenerator:
 
 
 def process_games_to_training_data(
-    games: List[Dict],
+    games: list[dict],
     min_games_for_stats: int = 10,
     window: int = 10,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Process raw games into training data with features.
 
@@ -600,11 +596,11 @@ def process_games_to_training_data(
 
 
 def fetch_and_prepare_training_data(
-    seasons: List[int],
-    api_key: Optional[str] = None,
+    seasons: list[int],
+    api_key: str | None = None,
     min_games: int = 100,
-    cache_file: Optional[str] = None,
-) -> List[Dict]:
+    cache_file: str | None = None,
+) -> list[dict]:
     """
     Fetch data from Balldontlie API and prepare for training.
 
@@ -667,10 +663,10 @@ def fetch_and_prepare_training_data(
 
 
 def train_models_with_data(
-    training_data: List[Dict],
+    training_data: list[dict],
     season: str = "2025-26",
     use_ensemble: bool = True,
-) -> Dict:
+) -> dict:
     """
     Train all models with the prepared training data.
 
@@ -692,7 +688,7 @@ def train_models_with_data(
     home_wins = sum(1 for t in training_data if t.get('home_win', False))
     avg_diff = np.mean([t.get('point_differential', 0) for t in training_data])
 
-    print(f"\nData Statistics:")
+    print("\nData Statistics:")
     print(f"  Home win rate: {home_wins / len(training_data):.1%}")
     print(f"  Average point differential: {avg_diff:+.1f}")
 
@@ -700,14 +696,13 @@ def train_models_with_data(
     pipeline = ModelTrainingPipeline(season=season)
 
     # Train all models
-    results = pipeline.train_all_models(
+    return pipeline.train_all_models(
         games_data=training_data,
         player_data=None,  # No player props for now
         save_models=True,
         use_ensemble=use_ensemble,
     )
 
-    return results
 
 
 def main():

@@ -11,7 +11,7 @@ Usage:
 import re
 
 # Read the current API file
-with open('backend/api.py', 'r') as f:
+with open('backend/api.py') as f:
     content = f.read()
 
 # New implementation that reads from database

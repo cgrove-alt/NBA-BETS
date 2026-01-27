@@ -16,6 +16,6 @@ if __name__ == "__main__":
     # Import main test logic
     import test_props
     import asyncio
-    
+
     print("RUNNING WITH UNLOCKED GAMES PATCH")
     asyncio.run(test_props.test_props_generation())

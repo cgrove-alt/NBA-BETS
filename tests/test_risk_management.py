@@ -468,7 +468,7 @@ class TestBankrollManager:
 
         # Simulate 8 consecutive losses (should trigger halt at -8 streak)
         # 8 × $110 = $880 = 8.8% of $10k (below 20% daily limit)
-        for i in range(8):
+        for _i in range(8):
             manager.update_bankroll(pnl=-110.0, bet_won=False)
 
         # After 8 losses, streak should be -8, which triggers halt

@@ -46,7 +46,8 @@ import functools
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, TypeVar, Union
+from typing import Any, TypeVar
+from collections.abc import Callable
 
 # Type variable for generic return types
 T = TypeVar('T')
@@ -68,7 +69,7 @@ try:
     )
     from nba_api.stats.static import teams, players
     HAS_CLUTCH_ENDPOINTS = True
-except ImportError as e:
+except ImportError:
     # Some endpoints may not be available in older nba_api versions
     try:
         from nba_api.stats.endpoints import (
@@ -115,7 +116,7 @@ def _get_cache_path(cache_key: str) -> Path:
     return CACHE_DIR / f"{key_hash}.json"
 
 
-def _read_from_cache(cache_key: str) -> Optional[Any]:
+def _read_from_cache(cache_key: str) -> Any | None:
     """Read data from disk cache if it exists and hasn't expired."""
     if not CACHE_ENABLED:
         return None
@@ -125,7 +126,7 @@ def _read_from_cache(cache_key: str) -> Optional[Any]:
         return None
 
     try:
-        with open(cache_path, "r") as f:
+        with open(cache_path) as f:
             cached = json.load(f)
 
         # Check TTL
@@ -136,7 +137,7 @@ def _read_from_cache(cache_key: str) -> Optional[Any]:
             return None
 
         return cached.get("data")
-    except (json.JSONDecodeError, IOError, KeyError):
+    except (OSError, json.JSONDecodeError, KeyError):
         return None
 
 
@@ -153,7 +154,7 @@ def _write_to_cache(cache_key: str, data: Any) -> None:
                 "cache_key": cache_key,
                 "data": data,
             }, f)
-    except (IOError, TypeError):
+    except (OSError, TypeError):
         pass  # Fail silently - caching is best-effort
 
 
@@ -177,18 +178,18 @@ def clear_cache(older_than_hours: float = 0) -> int:
     for cache_file in CACHE_DIR.glob("*.json"):
         try:
             if older_than_hours > 0:
-                with open(cache_file, "r") as f:
+                with open(cache_file) as f:
                     cached = json.load(f)
                     if cached.get("cached_at", 0) > cutoff_time:
                         continue  # Not old enough to remove
 
             cache_file.unlink()
             removed += 1
-        except (IOError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError):
             try:
                 cache_file.unlink()
                 removed += 1
-            except IOError:
+            except OSError:
                 pass
 
     return removed
@@ -293,7 +294,7 @@ def _get_balldontlie_api():
     return _balldontlie_api if _balldontlie_api else None
 
 
-def with_fallback(fallback_fn: Optional[Callable] = None):
+def with_fallback(fallback_fn: Callable | None = None):
     """
     Decorator that provides fallback to Balldontlie API on failure.
 
@@ -524,7 +525,7 @@ def get_team_id(team_name_or_abbrev):
     return None
 
 
-def get_team_abbrev(team_id: int) -> Optional[str]:
+def get_team_abbrev(team_id: int) -> str | None:
     """Get team abbreviation from NBA team ID."""
     nba_teams = teams.get_teams()
     for team in nba_teams:
@@ -2039,7 +2040,7 @@ def fetch_player_stats_before_date_auto(
 # Clutch = last 5 minutes of 4th quarter or OT, score within 5 points
 # =============================================================================
 
-def fetch_team_clutch_stats(team_id: int, season: str = "2025-26") -> Dict[str, Any]:
+def fetch_team_clutch_stats(team_id: int, season: str = "2025-26") -> dict[str, Any]:
     """
     Fetch team clutch performance statistics.
 
@@ -2106,7 +2107,7 @@ def fetch_team_clutch_stats(team_id: int, season: str = "2025-26") -> Dict[str, 
         return _get_default_clutch_stats()
 
 
-def fetch_player_clutch_stats(player_id: int, season: str = "2025-26") -> Dict[str, Any]:
+def fetch_player_clutch_stats(player_id: int, season: str = "2025-26") -> dict[str, Any]:
     """
     Fetch player clutch performance statistics.
 
@@ -2165,7 +2166,7 @@ def fetch_player_clutch_stats(player_id: int, season: str = "2025-26") -> Dict[s
         return _get_default_player_clutch_stats()
 
 
-def _get_default_clutch_stats() -> Dict[str, Any]:
+def _get_default_clutch_stats() -> dict[str, Any]:
     """Return default/neutral clutch stats when data is unavailable."""
     return {
         "clutch_net_rating": 0.0,
@@ -2178,7 +2179,7 @@ def _get_default_clutch_stats() -> Dict[str, Any]:
     }
 
 
-def _get_default_player_clutch_stats() -> Dict[str, Any]:
+def _get_default_player_clutch_stats() -> dict[str, Any]:
     """Return default/neutral player clutch stats when data is unavailable."""
     return {
         "player_clutch_pts": 0.0,
@@ -2194,7 +2195,7 @@ def fetch_team_clutch_differential(
     home_team_id: int,
     away_team_id: int,
     season: str = "2025-26"
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate clutch performance differential between two teams.
 

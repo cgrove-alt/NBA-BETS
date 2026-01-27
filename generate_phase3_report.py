@@ -19,16 +19,14 @@ Usage:
 """
 
 import json
-import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
 
 RESULTS_DIR = Path("backtest_results")
 RESULTS_DIR.mkdir(exist_ok=True)
 
 
-def load_phase2_results() -> Dict:
+def load_phase2_results() -> dict:
     """Load existing Phase 2 backtest results."""
     phase2_file = RESULTS_DIR / "phase2_backtest.json"
 
@@ -36,11 +34,11 @@ def load_phase2_results() -> Dict:
         print(f"WARNING: Phase 2 results not found at {phase2_file}")
         return {}
 
-    with open(phase2_file, 'r') as f:
+    with open(phase2_file) as f:
         return json.load(f)
 
 
-def analyze_quantile_models() -> Dict:
+def analyze_quantile_models() -> dict:
     """Analyze available quantile models."""
     from pathlib import Path
 
@@ -54,7 +52,7 @@ def analyze_quantile_models() -> Dict:
     }
 
 
-def validate_kelly_sizing() -> Dict:
+def validate_kelly_sizing() -> dict:
     """Validate Kelly bet sizing implementation."""
     try:
         from risk_management import calculate_kelly_bet_size, get_kelly_multiplier_for_tier
@@ -115,11 +113,11 @@ def validate_kelly_sizing() -> Dict:
         }
 
 
-def evaluate_phase3_targets(phase2_results: Dict) -> Dict:
+def evaluate_phase3_targets(phase2_results: dict) -> dict:
     """Evaluate Phase 3 targets using Phase 2 results."""
 
     overall = phase2_results.get('summary', {}).get('overall_performance', {})
-    elite_strong = phase2_results.get('summary', {}).get('elite_strong_performance', {})
+    phase2_results.get('summary', {}).get('elite_strong_performance', {})
     by_prop = phase2_results.get('summary', {}).get('by_prop_type_filtered', {})
 
     targets = {
@@ -185,14 +183,14 @@ def evaluate_phase3_targets(phase2_results: Dict) -> Dict:
     }
 
 
-def generate_recommendations(phase2_results: Dict, phase3_analysis: Dict) -> Dict:
+def generate_recommendations(phase2_results: dict, phase3_analysis: dict) -> dict:
     """Generate go-live recommendations."""
 
     overall_rmse = phase2_results.get('summary', {}).get('overall_performance', {}).get('rmse', 999)
     elite_strong_rmse = phase2_results.get('summary', {}).get('elite_strong_performance', {}).get('rmse', 999)
     elite_strong_pct = phase2_results.get('summary', {}).get('elite_strong_percentage', 0)
 
-    recommendations = {
+    return {
         'overall_readiness': 'CONDITIONAL_GO',
         'strengths': [
             f"Elite+Strong tier achieves excellent RMSE of {elite_strong_rmse:.3f}",
@@ -225,7 +223,6 @@ def generate_recommendations(phase2_results: Dict, phase3_analysis: Dict) -> Dic
         ],
     }
 
-    return recommendations
 
 
 def generate_comprehensive_report():
@@ -310,19 +307,19 @@ def generate_comprehensive_report():
     print("PHASE 3 COMPREHENSIVE REPORT SUMMARY")
     print("="*80)
 
-    print(f"\nPhase 2 Performance:")
+    print("\nPhase 2 Performance:")
     print(f"  Total Predictions: {report['phase2_summary']['total_predictions']:,}")
     print(f"  Overall RMSE: {report['phase2_summary']['overall_rmse']:.3f}")
     print(f"  Elite+Strong RMSE: {report['phase2_summary']['elite_strong_rmse']:.3f}")
     print(f"  Elite+Strong %: {report['phase2_summary']['elite_strong_percentage']:.1f}%")
 
-    print(f"\nPhase 3 Enhancements:")
+    print("\nPhase 3 Enhancements:")
     print(f"  ✓ Quantile Models: {quantile_analysis['total_quantile_models']} prop types")
     print(f"  ✓ Kelly Bet Sizing: {kelly_validation.get('validation', 'UNKNOWN')}")
-    print(f"  ✓ Prediction Bands: Implemented")
-    print(f"  ✓ Portfolio Management: Implemented")
+    print("  ✓ Prediction Bands: Implemented")
+    print("  ✓ Portfolio Management: Implemented")
 
-    print(f"\nPhase 3 Targets:")
+    print("\nPhase 3 Targets:")
     targets = targets_evaluation['targets']
     for target_name, target_data in targets.items():
         status = "✓" if target_data.get('phase2_met', False) else "⚠"
@@ -334,7 +331,7 @@ def generate_comprehensive_report():
 
     print(f"\nOverall Readiness: {recommendations['overall_readiness']}")
 
-    print(f"\nKey Recommendations:")
+    print("\nKey Recommendations:")
     for rec in recommendations['recommendations'][:5]:
         print(f"  {rec}")
 

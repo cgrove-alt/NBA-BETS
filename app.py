@@ -13,7 +13,7 @@ import json
 import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Optional, Any
 from dataclasses import dataclass, field, asdict
 
 # Import scipy for proper probability calculations
@@ -51,15 +51,14 @@ def spread_edge_to_cover_probability(spread_edge: float, volatility: float = NBA
     """
     if HAS_SCIPY:
         return float(norm.cdf(spread_edge / volatility))
-    else:
-        # Approximate using logistic function if scipy not available
-        return 1.0 / (1.0 + math.exp(-spread_edge / (volatility * 0.6)))
+    # Approximate using logistic function if scipy not available
+    return 1.0 / (1.0 + math.exp(-spread_edge / (volatility * 0.6)))
 
 
 def determine_spread_bet_side(
     model_spread: float,
     market_spread: float,
-) -> Tuple[str, float, float]:
+) -> tuple[str, float, float]:
     """
     Determine which side to bet based on model vs market spread.
 
@@ -117,7 +116,7 @@ def determine_spread_bet_side(
     return side, edge_points, cover_prob
 
 
-def validate_features(features: Dict, feature_type: str = "game") -> Tuple[bool, str]:
+def validate_features(features: dict, feature_type: str = "game") -> tuple[bool, str]:
     """
     Validate that features were actually generated (not all zeros/defaults).
 
@@ -163,25 +162,16 @@ def validate_features(features: Dict, feature_type: str = "game") -> Tuple[bool,
 from data_fetcher import (
     fetch_todays_schedule,
     parse_game_details,
-    fetch_team_roster,
-    get_team_id,
-    get_player_id,
 )
 from feature_engineering import (
     generate_game_features,
     generate_player_features,
     create_injury_report,
     InjuryReportManager,
-    MatchupFeatureGenerator,
-    PlayerPropFeatureGenerator,
 )
 from model_trainer import (
     ModelTrainingPipeline,
-    MoneylineModel,
-    SpreadModel,
     SpreadCoverClassifier,
-    PlayerPropModel,
-    ParlayCalculator,
 )
 
 # Import real odds and injury integrations
@@ -231,23 +221,23 @@ class BetRecommendation:
     bet_type: str  # "moneyline", "spread", "total", "prop", "parlay"
     description: str
     selection: str
-    line: Optional[float] = None
+    line: float | None = None
     probability: float = 0.0
     confidence: str = "low"  # "low", "medium", "high"
     edge: float = 0.0
     expected_value: float = 0.0
     recommended_stake: float = 0.0
     reasoning: str = ""
-    game_info: Dict = field(default_factory=dict)
+    game_info: dict = field(default_factory=dict)
     # Real odds fields
     odds: float = -110  # American odds
     implied_probability: float = 0.524  # Implied from odds
     sportsbook: str = ""  # Where to place the bet
-    closing_line_value: Optional[float] = None  # CLV if available
+    closing_line_value: float | None = None  # CLV if available
     # Edge quality scoring
-    edge_quality_score: Optional[float] = None  # 0-100 score
-    edge_quality_tier: Optional[str] = None  # "elite", "strong", "moderate", "weak", "avoid"
-    edge_quality_factors: List[str] = field(default_factory=list)  # Key factors
+    edge_quality_score: float | None = None  # 0-100 score
+    edge_quality_tier: str | None = None  # "elite", "strong", "moderate", "weak", "avoid"
+    edge_quality_factors: list[str] = field(default_factory=list)  # Key factors
 
 
 @dataclass
@@ -257,17 +247,17 @@ class GameAnalysis:
     home_team: str
     away_team: str
     game_time: str
-    features: Dict = field(default_factory=dict)
+    features: dict = field(default_factory=dict)
     features_valid: bool = False  # Whether features were successfully generated
-    moneyline_prediction: Dict = field(default_factory=dict)
-    spread_prediction: Dict = field(default_factory=dict)
-    total_prediction: Dict = field(default_factory=dict)
-    player_props: List[Dict] = field(default_factory=list)
-    recommendations: List[BetRecommendation] = field(default_factory=list)
+    moneyline_prediction: dict = field(default_factory=dict)
+    spread_prediction: dict = field(default_factory=dict)
+    total_prediction: dict = field(default_factory=dict)
+    player_props: list[dict] = field(default_factory=list)
+    recommendations: list[BetRecommendation] = field(default_factory=list)
     # Real market data
-    market_odds: Dict = field(default_factory=dict)  # Real odds from sportsbooks
-    injury_impact: Dict = field(default_factory=dict)  # Injury adjustments
-    best_odds: Dict = field(default_factory=dict)  # Best available odds by market
+    market_odds: dict = field(default_factory=dict)  # Real odds from sportsbooks
+    injury_impact: dict = field(default_factory=dict)  # Injury adjustments
+    best_odds: dict = field(default_factory=dict)  # Best available odds by market
 
 
 @dataclass
@@ -277,10 +267,10 @@ class DailyBetSlip:
     generated_at: str
     games_analyzed: int
     total_recommendations: int
-    top_picks: List[BetRecommendation] = field(default_factory=list)
-    game_analyses: List[GameAnalysis] = field(default_factory=list)
-    parlay_recommendations: List[Dict] = field(default_factory=list)
-    bankroll_allocation: Dict = field(default_factory=dict)
+    top_picks: list[BetRecommendation] = field(default_factory=list)
+    game_analyses: list[GameAnalysis] = field(default_factory=list)
+    parlay_recommendations: list[dict] = field(default_factory=list)
+    bankroll_allocation: dict = field(default_factory=dict)
 
 
 class BettingStrategy:
@@ -365,10 +355,7 @@ class BettingStrategy:
             Recommended stake amount
         """
         # Convert American odds to decimal
-        if odds > 0:
-            decimal_odds = (odds / 100) + 1
-        else:
-            decimal_odds = (100 / abs(odds)) + 1
+        decimal_odds = odds / 100 + 1 if odds > 0 else 100 / abs(odds) + 1
 
         # Kelly formula: (bp - q) / b
         # where b = decimal odds - 1, p = win probability, q = 1 - p
@@ -395,7 +382,7 @@ class BettingStrategy:
         probability: float,
         implied_probability: float,
         bet_type: str = "moneyline",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Evaluate a potential bet.
 
@@ -444,9 +431,9 @@ class BettingStrategy:
 
     def generate_parlay_strategy(
         self,
-        legs: List[Dict],
+        legs: list[dict],
         max_legs: int = 4,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Generate optimal parlay combinations from available bets.
 
@@ -505,8 +492,8 @@ class BettingStrategy:
 
     def allocate_bankroll(
         self,
-        recommendations: List[BetRecommendation],
-    ) -> Dict[str, Any]:
+        recommendations: list[BetRecommendation],
+    ) -> dict[str, Any]:
         """
         Allocate bankroll across recommendations.
 
@@ -676,7 +663,7 @@ class Orchestrator:
 
             if self.models_loaded:
                 print(f"Loaded {len(self.pipeline.models)} models:")
-                for name in self.pipeline.models.keys():
+                for name in self.pipeline.models:
                     print(f"  - {name}")
             else:
                 print("No trained models found. Using feature-based predictions.")
@@ -706,7 +693,7 @@ class Orchestrator:
                     print(f"  - moneyline calibrator ({self.moneyline_calibrator.best_method})")
                 except Exception as e:
                     logging.warning(f"Moneyline calibrator not loaded: {e}")
-                    print(f"  - moneyline calibrator not available (using uncalibrated)")
+                    print("  - moneyline calibrator not available (using uncalibrated)")
                     self.moneyline_calibrator = None
 
                 # Load spread calibrator
@@ -716,7 +703,7 @@ class Orchestrator:
                     print(f"  - spread calibrator ({self.spread_calibrator.best_method})")
                 except Exception as e:
                     logging.warning(f"Spread calibrator not loaded: {e}")
-                    print(f"  - spread calibrator not available (using uncalibrated)")
+                    print("  - spread calibrator not available (using uncalibrated)")
                     self.spread_calibrator = None
 
                 # Load prop calibrators (per type)
@@ -733,7 +720,7 @@ class Orchestrator:
                         # Don't print for each missing prop calibrator to reduce noise
 
                 if not self.prop_calibrators:
-                    print(f"  - prop calibrators not available (using uncalibrated)")
+                    print("  - prop calibrators not available (using uncalibrated)")
             else:
                 logging.warning("No calibrators found (models/calibration/ not present)")
                 print("  No calibrators found (models/calibration/ not present)")
@@ -747,7 +734,7 @@ class Orchestrator:
             print(f"  Error loading calibrators: {e}")
             self.prop_calibrators = {}
 
-    def _calibrate_moneyline(self, prediction: Dict) -> Dict:
+    def _calibrate_moneyline(self, prediction: dict) -> dict:
         """
         Apply calibration to moneyline probability prediction.
 
@@ -779,7 +766,7 @@ class Orchestrator:
 
         return prediction
 
-    def _calibrate_spread(self, prediction: Dict) -> Dict:
+    def _calibrate_spread(self, prediction: dict) -> dict:
         """
         Apply calibration to spread prediction.
 
@@ -818,7 +805,7 @@ class Orchestrator:
 
         return prediction
 
-    def set_injuries(self, injury_data: List[Dict]):
+    def set_injuries(self, injury_data: list[dict]):
         """
         Set injury report data.
 
@@ -828,7 +815,7 @@ class Orchestrator:
         self.injury_manager = create_injury_report(injury_data, self.season)
         print(f"Injury report set for {len(injury_data)} teams")
 
-    def fetch_schedule(self) -> List[Dict]:
+    def fetch_schedule(self) -> list[dict]:
         """
         Fetch today's NBA schedule.
 
@@ -844,7 +831,7 @@ class Orchestrator:
             print(f"Error fetching schedule: {e}")
             return []
 
-    def fetch_real_odds(self) -> Dict[str, Any]:
+    def fetch_real_odds(self) -> dict[str, Any]:
         """
         Fetch real betting odds from sportsbooks.
 
@@ -894,7 +881,7 @@ class Orchestrator:
             print(f"Error fetching odds: {e}")
             return {}
 
-    def _estimate_spread_odds(self, spread_line: float) -> Tuple[int, int]:
+    def _estimate_spread_odds(self, spread_line: float) -> tuple[int, int]:
         """
         Estimate realistic spread odds when real odds unavailable.
 
@@ -912,15 +899,14 @@ class Orchestrator:
         if abs_spread <= 3.0:
             # Close games: standard -110 / -110
             return -110, -110
-        elif abs_spread <= 6.0:
+        if abs_spread <= 6.0:
             # Medium spreads: slight adjustment
             return -115, -105
-        elif abs_spread <= 10.0:
+        if abs_spread <= 10.0:
             # Large spreads: bigger adjustment
             return -120, 100
-        else:
-            # Very large spreads: heavy adjustment
-            return -130, 110
+        # Very large spreads: heavy adjustment
+        return -130, 110
 
     def _evaluate_edge_quality(
         self,
@@ -929,7 +915,7 @@ class Orchestrator:
         bet_type: str,
         home_away: str = "home",
         analysis: Optional['GameAnalysis'] = None,
-        line_movement: Optional[Dict] = None,
+        line_movement: dict | None = None,
     ) -> Optional['EdgeQualityResult']:
         """
         Evaluate edge quality for a bet using the EdgeQualityScorer.
@@ -969,7 +955,7 @@ class Orchestrator:
                 current_odds = spread_move.get("current")
 
         try:
-            result = self.edge_quality_scorer.evaluate_edge(
+            return self.edge_quality_scorer.evaluate_edge(
                 model_probability=model_probability,
                 implied_probability=implied_probability,
                 opening_odds=opening_odds,
@@ -981,12 +967,11 @@ class Orchestrator:
                 training_data_age_days=30.0,  # Default - could be computed from model metadata
                 last_game_days_ago=2.0,       # Default
             )
-            return result
         except Exception as e:
             print(f"Edge quality evaluation failed: {e}")
             return None
 
-    def get_game_odds(self, home_abbrev: str, away_abbrev: str) -> Dict[str, Any]:
+    def get_game_odds(self, home_abbrev: str, away_abbrev: str) -> dict[str, Any]:
         """
         Get real odds for a specific game.
 
@@ -1028,10 +1013,10 @@ class Orchestrator:
 
     def _format_odds_for_tracker(
         self,
-        game_odds: Dict,
+        game_odds: dict,
         home_abbrev: str,
         away_abbrev: str
-    ) -> Dict:
+    ) -> dict:
         """
         Format odds data for LineMovementTracker.
 
@@ -1069,7 +1054,7 @@ class Orchestrator:
             },
         }
 
-    def fetch_balldontlie_odds(self, date: str = None) -> Dict[str, Any]:
+    def fetch_balldontlie_odds(self, date: str = None) -> dict[str, Any]:
         """
         Fetch betting odds from Balldontlie API (GOAT tier required).
 
@@ -1156,7 +1141,7 @@ class Orchestrator:
             result["error"] = str(e)
             return result
 
-    def fetch_balldontlie_injuries(self) -> List[Dict]:
+    def fetch_balldontlie_injuries(self) -> list[dict]:
         """
         Fetch current injury data from Balldontlie API (All-Star tier required).
 
@@ -1187,7 +1172,7 @@ class Orchestrator:
             print(f"Error fetching Balldontlie injuries: {e}")
             return []
 
-    def fetch_balldontlie_live_scores(self) -> List[Dict]:
+    def fetch_balldontlie_live_scores(self) -> list[dict]:
         """
         Fetch live box scores from Balldontlie API (GOAT tier required).
 
@@ -1207,7 +1192,7 @@ class Orchestrator:
             print(f"Error fetching live scores: {e}")
             return []
 
-    def fetch_all_premium_data(self, date: str = None) -> Dict[str, Any]:
+    def fetch_all_premium_data(self, date: str = None) -> dict[str, Any]:
         """
         Fetch all premium data from available sources.
 
@@ -1254,13 +1239,13 @@ class Orchestrator:
                 result["odds_source"] = "TheOddsAPI"
 
         # Summary
-        print(f"\nPremium data summary:")
+        print("\nPremium data summary:")
         print(f"  Odds source: {result['odds_source'] or 'None (using defaults)'}")
         print(f"  Injuries source: {result['injuries_source'] or 'ESPN (free)'}")
 
         return result
 
-    def get_injury_adjustment(self, home_abbrev: str, away_abbrev: str) -> Dict[str, Any]:
+    def get_injury_adjustment(self, home_abbrev: str, away_abbrev: str) -> dict[str, Any]:
         """
         Get injury-based spread adjustment for a game.
 
@@ -1295,10 +1280,9 @@ class Orchestrator:
         """Convert American odds to implied probability."""
         if odds >= 100:
             return 100 / (odds + 100)
-        else:
-            return abs(odds) / (abs(odds) + 100)
+        return abs(odds) / (abs(odds) + 100)
 
-    def analyze_game(self, game: Dict) -> GameAnalysis:
+    def analyze_game(self, game: dict) -> GameAnalysis:
         """
         Perform complete analysis on a single game.
 
@@ -1320,7 +1304,7 @@ class Orchestrator:
         features = {}
         features_valid = False
         try:
-            print(f"  Fetching team data and generating features...")
+            print("  Fetching team data and generating features...")
             features = generate_game_features(
                 home_abbrev,
                 away_abbrev,
@@ -1334,15 +1318,15 @@ class Orchestrator:
             is_valid, validation_msg = validate_features(moneyline_features, "game")
 
             if is_valid:
-                print(f"  Features generated and validated successfully.")
+                print("  Features generated and validated successfully.")
                 features_valid = True
             else:
                 print(f"  WARNING: Feature validation failed: {validation_msg}")
-                print(f"  This game will have limited predictions due to incomplete data.")
+                print("  This game will have limited predictions due to incomplete data.")
 
         except Exception as e:
             print(f"  ERROR generating features: {e}")
-            print(f"  This game will be skipped or have very limited predictions.")
+            print("  This game will be skipped or have very limited predictions.")
 
         # Initialize analysis with feature validation status
         analysis = GameAnalysis(
@@ -1409,7 +1393,7 @@ class Orchestrator:
 
         return analysis
 
-    def _feature_based_moneyline(self, features: Dict) -> Dict:
+    def _feature_based_moneyline(self, features: dict) -> dict:
         """Generate moneyline prediction from features without ML model."""
         # Use net rating differential as primary indicator
         net_rating_diff = features.get("net_rating_diff", 0)
@@ -1438,7 +1422,7 @@ class Orchestrator:
             "confidence": max(home_prob, 1 - home_prob),
         }
 
-    def _feature_based_spread(self, features: Dict) -> Dict:
+    def _feature_based_spread(self, features: dict) -> dict:
         """Generate spread prediction from features without ML model."""
         # Base prediction from expected point differential
         expected_diff = features.get("expected_point_diff", 0)
@@ -1468,7 +1452,7 @@ class Orchestrator:
         analysis: GameAnalysis,
         home_abbrev: str,
         away_abbrev: str,
-    ) -> List[BetRecommendation]:
+    ) -> list[BetRecommendation]:
         """Generate betting recommendations for a game using REAL ODDS."""
         recommendations = []
 
@@ -1830,8 +1814,8 @@ class Orchestrator:
         self,
         player_name: str,
         opponent_team: str,
-        prop_lines: Dict[str, float],
-    ) -> List[BetRecommendation]:
+        prop_lines: dict[str, float],
+    ) -> list[BetRecommendation]:
         """
         Analyze player props for a specific player.
 
@@ -1971,7 +1955,7 @@ class Orchestrator:
 
         return None
 
-    def _feature_based_prop(self, features: Dict, prop_type: str) -> float:
+    def _feature_based_prop(self, features: dict, prop_type: str) -> float:
         """Generate prop prediction from features without ML model."""
         # Use weighted average of season and recent
         season_key = f"season_{prop_type[:3]}_avg"
@@ -1985,13 +1969,12 @@ class Orchestrator:
         # Weight: 40% season, 40% recent, 20% vs team (if available)
         if vs_team_avg > 0:
             return season_avg * 0.35 + recent_avg * 0.45 + vs_team_avg * 0.20
-        else:
-            return season_avg * 0.45 + recent_avg * 0.55
+        return season_avg * 0.45 + recent_avg * 0.55
 
     def generate_daily_bet_slip(
         self,
         include_props: bool = False,
-        player_props: Optional[Dict[str, Dict[str, float]]] = None,
+        player_props: dict[str, dict[str, float]] | None = None,
     ) -> DailyBetSlip:
         """
         Generate comprehensive daily bet slip.
@@ -2018,7 +2001,7 @@ class Orchestrator:
 
         # Fetch premium data (odds, injuries) from best available source
         # Balldontlie > SportsDataIO > The Odds API > ESPN (free)
-        premium_data = self.fetch_all_premium_data()
+        self.fetch_all_premium_data()
 
         # Record opening odds for CLV tracking
         if self.line_tracker and self.current_odds:
@@ -2054,10 +2037,10 @@ class Orchestrator:
             home_team = game.get("home_team")
             away_team = game.get("visitor_team")
             if not home_team or not away_team:
-                print(f"  Skipping game with missing team data")
+                print("  Skipping game with missing team data")
                 continue
             if not home_team.get("abbreviation") or not away_team.get("abbreviation"):
-                print(f"  Skipping game with missing team abbreviation")
+                print("  Skipping game with missing team abbreviation")
                 continue
 
             analysis = self.analyze_game(game)
@@ -2173,7 +2156,7 @@ class Orchestrator:
         bankroll_allocation = self.strategy.allocate_bankroll(all_recommendations)
 
         # Create bet slip
-        bet_slip = DailyBetSlip(
+        return DailyBetSlip(
             date=datetime.now().strftime("%Y-%m-%d"),
             generated_at=datetime.now().isoformat(),
             games_analyzed=len(self.game_analyses),
@@ -2184,9 +2167,8 @@ class Orchestrator:
             bankroll_allocation=bankroll_allocation,
         )
 
-        return bet_slip
 
-    def _find_player_opponent(self, player_name: str) -> Optional[str]:
+    def _find_player_opponent(self, player_name: str) -> str | None:
         """Find a player's opponent from today's schedule."""
         try:
             if not HAS_BALLDONTLIE or not self.balldontlie:
@@ -2203,9 +2185,8 @@ class Orchestrator:
                 players = self.balldontlie.get_players(search=name_parts[0])
 
             # If no results or too many, try last name
-            if not players or len(players) > 50:
-                if len(name_parts) > 1:
-                    players = self.balldontlie.get_players(search=name_parts[-1])
+            if (not players or len(players) > 50) and len(name_parts) > 1:
+                players = self.balldontlie.get_players(search=name_parts[-1])
 
             if not players:
                 return None
@@ -2236,7 +2217,7 @@ class Orchestrator:
 
                 if player_team == home:
                     return away
-                elif player_team == away:
+                if player_team == away:
                     return home
 
             return None  # Player's team not playing today
@@ -2286,7 +2267,7 @@ class Orchestrator:
 
         print("\n" + "=" * 70)
 
-    def save_bet_slip(self, bet_slip: DailyBetSlip, filepath: Optional[Path] = None):
+    def save_bet_slip(self, bet_slip: DailyBetSlip, filepath: Path | None = None):
         """Save bet slip to JSON file."""
         if filepath is None:
             filepath = Path(f"bet_slip_{bet_slip.date}.json")

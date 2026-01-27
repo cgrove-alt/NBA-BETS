@@ -21,7 +21,6 @@ import os
 import time
 import requests
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
 import json
 
 # The Odds API Configuration
@@ -61,7 +60,7 @@ class OddsFetcher:
     - Odds from 40+ bookmakers
     """
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         """
         Initialize odds fetcher.
 
@@ -77,7 +76,7 @@ class OddsFetcher:
             print("Warning: No API key provided. Set THE_ODDS_API_KEY environment variable.")
             print("Get a free key at: https://the-odds-api.com/")
 
-    def _make_request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
+    def _make_request(self, endpoint: str, params: dict = None) -> dict | None:
         """Make API request with rate limiting and error handling."""
         if not self.api_key:
             return None
@@ -98,10 +97,10 @@ class OddsFetcher:
             if response.status_code == 401:
                 print("Error: Invalid API key")
                 return None
-            elif response.status_code == 429:
+            if response.status_code == 429:
                 print("Error: Rate limit exceeded")
                 return None
-            elif response.status_code != 200:
+            if response.status_code != 200:
                 print(f"Error: API returned status {response.status_code}")
                 return None
 
@@ -114,7 +113,7 @@ class OddsFetcher:
             print(f"Error: Request failed - {e}")
             return None
 
-    def get_api_usage(self) -> Dict:
+    def get_api_usage(self) -> dict:
         """Get current API usage statistics."""
         return {
             "remaining_requests": self.remaining_requests,
@@ -123,10 +122,10 @@ class OddsFetcher:
 
     def get_nba_odds(
         self,
-        markets: List[str] = None,
-        bookmakers: List[str] = None,
+        markets: list[str] = None,
+        bookmakers: list[str] = None,
         regions: str = "us",
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get current NBA odds for all games.
 
@@ -158,7 +157,7 @@ class OddsFetcher:
 
         return self._parse_odds_response(data)
 
-    def _parse_odds_response(self, data: List[Dict]) -> List[Dict]:
+    def _parse_odds_response(self, data: list[dict]) -> list[dict]:
         """Parse API response into structured odds data."""
         parsed_games = []
 
@@ -204,7 +203,7 @@ class OddsFetcher:
 
         return parsed_games
 
-    def _parse_moneyline(self, outcomes: List[Dict], home_team: str) -> Dict:
+    def _parse_moneyline(self, outcomes: list[dict], home_team: str) -> dict:
         """Parse moneyline outcomes."""
         result = {"home": None, "away": None}
 
@@ -219,7 +218,7 @@ class OddsFetcher:
 
         return result
 
-    def _parse_spread(self, outcomes: List[Dict], home_team: str) -> Dict:
+    def _parse_spread(self, outcomes: list[dict], home_team: str) -> dict:
         """Parse spread outcomes."""
         result = {"home": None, "away": None, "home_line": None, "away_line": None}
 
@@ -237,7 +236,7 @@ class OddsFetcher:
 
         return result
 
-    def _parse_totals(self, outcomes: List[Dict]) -> Dict:
+    def _parse_totals(self, outcomes: list[dict]) -> dict:
         """Parse totals (over/under) outcomes."""
         result = {"line": None, "over": None, "under": None}
 
@@ -258,10 +257,10 @@ class OddsFetcher:
 
     def get_best_odds(
         self,
-        game_odds: Dict,
+        game_odds: dict,
         market: str,
         selection: str,
-    ) -> Dict:
+    ) -> dict:
         """
         Find the best available odds across all sportsbooks.
 
@@ -279,10 +278,7 @@ class OddsFetcher:
         for bookmaker in game_odds.get("bookmakers", []):
             market_data = bookmaker.get("markets", {}).get(market, {})
 
-            if market == "totals":
-                odds = market_data.get(selection)
-            else:
-                odds = market_data.get(selection)
+            odds = market_data.get(selection) if market == "totals" else market_data.get(selection)
 
             if odds is not None:
                 # For American odds, higher is better for positive, less negative is better for negative
@@ -328,7 +324,7 @@ class OddsFetcher:
             "away_team": game_odds.get("away_team"),
         }
 
-    def compare_odds(self, game_odds: Dict, market: str, selection: str) -> List[Dict]:
+    def compare_odds(self, game_odds: dict, market: str, selection: str) -> list[dict]:
         """
         Compare odds across all sportsbooks for a specific bet.
 
@@ -377,8 +373,7 @@ class OddsFetcher:
 
         if american_odds > 0:
             return 100 / (american_odds + 100)
-        else:
-            return abs(american_odds) / (abs(american_odds) + 100)
+        return abs(american_odds) / (abs(american_odds) + 100)
 
     @staticmethod
     def probability_to_odds(probability: float) -> int:
@@ -388,8 +383,7 @@ class OddsFetcher:
 
         if probability >= 0.5:
             return int(-100 * probability / (1 - probability))
-        else:
-            return int(100 * (1 - probability) / probability)
+        return int(100 * (1 - probability) / probability)
 
     @staticmethod
     def calculate_edge(model_prob: float, implied_prob: float) -> float:
@@ -414,8 +408,7 @@ class OddsFetcher:
         else:
             profit = stake * (100 / abs(american_odds))
 
-        ev = (model_prob * profit) - ((1 - model_prob) * stake)
-        return ev
+        return (model_prob * profit) - ((1 - model_prob) * stake)
 
 
 class LineMovementTracker:
@@ -440,9 +433,9 @@ class LineMovementTracker:
         """
         self.storage_dir = storage_dir
         self._ensure_storage_dir()
-        self.odds_history: Dict[str, List[Dict]] = {}  # game_id -> list of snapshots
-        self.opening_odds: Dict[str, Dict] = {}  # game_id -> opening odds
-        self.closing_odds: Dict[str, Dict] = {}  # game_id -> closing odds
+        self.odds_history: dict[str, list[dict]] = {}  # game_id -> list of snapshots
+        self.opening_odds: dict[str, dict] = {}  # game_id -> opening odds
+        self.closing_odds: dict[str, dict] = {}  # game_id -> closing odds
 
     def _ensure_storage_dir(self):
         """Create storage directory if it doesn't exist."""
@@ -454,10 +447,10 @@ class LineMovementTracker:
         game_id: str,
         home_team: str,
         away_team: str,
-        odds_data: Dict,
+        odds_data: dict,
         is_opening: bool = False,
         is_closing: bool = False
-    ) -> Dict:
+    ) -> dict:
         """
         Record an odds snapshot for a game.
 
@@ -536,15 +529,15 @@ class LineMovementTracker:
 
         return snapshot
 
-    def get_opening_odds(self, game_id: str) -> Optional[Dict]:
+    def get_opening_odds(self, game_id: str) -> dict | None:
         """Get stored opening odds for a game."""
         return self.opening_odds.get(game_id)
 
-    def get_closing_odds(self, game_id: str) -> Optional[Dict]:
+    def get_closing_odds(self, game_id: str) -> dict | None:
         """Get stored closing odds for a game."""
         return self.closing_odds.get(game_id)
 
-    def calculate_line_movement(self, game_id: str) -> Optional[Dict]:
+    def calculate_line_movement(self, game_id: str) -> dict | None:
         """
         Calculate line movement from opening to current/closing.
 
@@ -656,7 +649,7 @@ class LineMovementTracker:
         bet_type: str,
         bet_odds: int,
         bet_selection: str
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Calculate Closing Line Value (CLV).
 
@@ -701,9 +694,8 @@ class LineMovementTracker:
 
         # CLV = closing implied - our implied
         # Positive means we got better value than closing line
-        clv = closing_implied - our_implied
+        return closing_implied - our_implied
 
-        return clv
 
     def save_history(self, game_id: str = None):
         """Save odds history to disk."""
@@ -722,11 +714,11 @@ class LineMovementTracker:
                     "history": history
                 }, f, indent=2)
 
-    def load_history(self, game_id: str) -> Optional[List[Dict]]:
+    def load_history(self, game_id: str) -> list[dict] | None:
         """Load odds history from disk."""
         filepath = f"{self.storage_dir}/{game_id}_odds.json"
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath) as f:
                 data = json.load(f)
                 self.odds_history[game_id] = data.get("history", [])
                 if data.get("opening"):
@@ -752,7 +744,7 @@ class CLVTracker:
         """
         self.odds_fetcher = odds_fetcher or OddsFetcher()
         self.line_tracker = LineMovementTracker()
-        self.pending_bets: Dict[str, Dict] = {}  # bet_id -> bet details
+        self.pending_bets: dict[str, dict] = {}  # bet_id -> bet details
 
     def record_bet_placement(
         self,
@@ -763,8 +755,8 @@ class CLVTracker:
         bet_type: str,
         bet_selection: str,
         bet_odds: int,
-        current_odds_data: Dict = None
-    ) -> Dict:
+        current_odds_data: dict = None
+    ) -> dict:
         """
         Record a bet placement with current odds (for later CLV calculation).
 
@@ -808,7 +800,7 @@ class CLVTracker:
         game_id: str,
         home_team: str,
         away_team: str
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Fetch current odds and record as closing odds.
 
@@ -839,7 +831,7 @@ class CLVTracker:
         )
 
         # Update pending bets with CLV
-        for bet_id, bet in self.pending_bets.items():
+        for _bet_id, bet in self.pending_bets.items():
             if bet["game_id"] == game_id and bet["clv"] is None:
                 clv = self.line_tracker.calculate_clv(
                     game_id,
@@ -853,14 +845,14 @@ class CLVTracker:
         self.line_tracker.save_history(game_id)
         return snapshot
 
-    def get_bet_clv(self, bet_id: str) -> Optional[float]:
+    def get_bet_clv(self, bet_id: str) -> float | None:
         """Get CLV for a specific bet."""
         bet = self.pending_bets.get(bet_id)
         if not bet:
             return None
         return bet.get("clv")
 
-    def get_clv_summary(self) -> Dict:
+    def get_clv_summary(self) -> dict:
         """Get summary of CLV across all tracked bets."""
         clvs = [b["clv"] for b in self.pending_bets.values() if b["clv"] is not None]
 
@@ -884,7 +876,7 @@ class CLVTracker:
         }
 
 
-def get_odds_for_games(api_key: Optional[str] = None) -> Dict[str, Dict]:
+def get_odds_for_games(api_key: str | None = None) -> dict[str, dict]:
     """
     Convenience function to get current NBA odds indexed by matchup.
 
@@ -903,10 +895,10 @@ def get_odds_for_games(api_key: Optional[str] = None) -> Dict[str, Dict]:
 
 
 def find_value_bets(
-    model_predictions: List[Dict],
-    api_key: Optional[str] = None,
+    model_predictions: list[dict],
+    api_key: str | None = None,
     min_edge: float = 0.03,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Find value bets by comparing model predictions to market odds.
 
@@ -1025,9 +1017,9 @@ def find_value_bets(
 
 import threading
 import queue
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
 import numpy as np
 
 
@@ -1040,15 +1032,15 @@ class OddsSnapshot:
     away_team: str
 
     # Consensus odds across books
-    moneyline_home: Optional[int] = None
-    moneyline_away: Optional[int] = None
-    spread_line: Optional[float] = None
-    spread_home_odds: Optional[int] = None
-    total_line: Optional[float] = None
-    total_over_odds: Optional[int] = None
+    moneyline_home: int | None = None
+    moneyline_away: int | None = None
+    spread_line: float | None = None
+    spread_home_odds: int | None = None
+    total_line: float | None = None
+    total_over_odds: int | None = None
 
     # Book-specific odds for arbitrage detection
-    book_odds: Dict[str, Dict] = field(default_factory=dict)
+    book_odds: dict[str, dict] = field(default_factory=dict)
 
     def get_implied_prob(self, selection: str) -> float:
         """Get implied probability for a selection."""
@@ -1119,7 +1111,7 @@ class OddsMonitorV3:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         poll_interval: float = None,
         max_threads: int = None
     ):
@@ -1137,23 +1129,23 @@ class OddsMonitorV3:
 
         # Thread-safe data structures
         self._lock = threading.RLock()
-        self._snapshots: Dict[str, List[OddsSnapshot]] = {}  # game_id -> history
-        self._latest: Dict[str, OddsSnapshot] = {}  # game_id -> latest snapshot
+        self._snapshots: dict[str, list[OddsSnapshot]] = {}  # game_id -> history
+        self._latest: dict[str, OddsSnapshot] = {}  # game_id -> latest snapshot
         self._alert_queue: queue.Queue = queue.Queue()
 
         # Callbacks
-        self._steam_callbacks: List[Callable[[SteamAlert], None]] = []
-        self._odds_callbacks: List[Callable[[OddsSnapshot], None]] = []
+        self._steam_callbacks: list[Callable[[SteamAlert], None]] = []
+        self._odds_callbacks: list[Callable[[OddsSnapshot], None]] = []
 
         # Threading
         self._running = False
-        self._poll_thread: Optional[threading.Thread] = None
-        self._heartbeat_thread: Optional[threading.Thread] = None
-        self._executor: Optional[ThreadPoolExecutor] = None
+        self._poll_thread: threading.Thread | None = None
+        self._heartbeat_thread: threading.Thread | None = None
+        self._executor: ThreadPoolExecutor | None = None
 
         # Monitoring state
-        self._game_ids: List[str] = []
-        self._last_poll_time: Dict[str, datetime] = {}
+        self._game_ids: list[str] = []
+        self._last_poll_time: dict[str, datetime] = {}
 
         # Statistics
         self._stats = {
@@ -1171,7 +1163,7 @@ class OddsMonitorV3:
         """Register a callback for odds updates."""
         self._odds_callbacks.append(callback)
 
-    def start_monitoring(self, game_ids: List[str] = None):
+    def start_monitoring(self, game_ids: list[str] = None):
         """
         Start monitoring odds for specified games.
 
@@ -1279,7 +1271,7 @@ class OddsMonitorV3:
         except Exception as e:
             print(f"Fetch error: {e}")
 
-    def _create_snapshot(self, game_data: Dict) -> Optional[OddsSnapshot]:
+    def _create_snapshot(self, game_data: dict) -> OddsSnapshot | None:
         """Create OddsSnapshot from API response."""
         try:
             game_id = game_data.get("game_id")
@@ -1480,18 +1472,18 @@ class OddsMonitorV3:
             self._stats['latency_samples'] = self._stats['latency_samples'][-100:]
         self._stats['avg_latency_ms'] = np.mean(self._stats['latency_samples'])
 
-    def get_latest_odds(self, game_id: str) -> Optional[OddsSnapshot]:
+    def get_latest_odds(self, game_id: str) -> OddsSnapshot | None:
         """Get latest odds snapshot for a game."""
         with self._lock:
             return self._latest.get(game_id)
 
-    def get_odds_history(self, game_id: str, limit: int = 50) -> List[OddsSnapshot]:
+    def get_odds_history(self, game_id: str, limit: int = 50) -> list[OddsSnapshot]:
         """Get odds history for a game."""
         with self._lock:
             history = self._snapshots.get(game_id, [])
             return history[-limit:] if limit else history
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get monitoring statistics."""
         return {
             'polls': self._stats['polls'],
@@ -1501,7 +1493,7 @@ class OddsMonitorV3:
             'running': self._running,
         }
 
-    def get_all_current_odds(self) -> Dict[str, OddsSnapshot]:
+    def get_all_current_odds(self) -> dict[str, OddsSnapshot]:
         """Get all current odds snapshots."""
         with self._lock:
             return dict(self._latest)

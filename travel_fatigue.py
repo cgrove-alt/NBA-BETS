@@ -28,8 +28,7 @@ Usage:
     )
 """
 
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from datetime import datetime
 from math import radians, cos, sin, asin, sqrt
 
 
@@ -84,7 +83,7 @@ TEAM_ID_TO_ABBREV = {
 }
 
 
-def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
     """
     Calculate great-circle distance between two points using Haversine formula.
 
@@ -116,7 +115,7 @@ class TravelFatigueCalculator:
         self.arena_data = NBA_ARENA_DATA
         self.team_id_map = TEAM_ID_TO_ABBREV
 
-    def _get_team_abbrev(self, team_id: int) -> Optional[str]:
+    def _get_team_abbrev(self, team_id: int) -> str | None:
         """Convert team ID to abbreviation."""
         return self.team_id_map.get(team_id)
 
@@ -139,7 +138,7 @@ class TravelFatigueCalculator:
 
         return haversine_distance(from_arena['coords'], to_arena['coords'])
 
-    def get_days_rest(self, team_games: List[Dict], game_date: str) -> int:
+    def get_days_rest(self, team_games: list[dict], game_date: str) -> int:
         """
         Calculate days since team's last game.
 
@@ -161,7 +160,7 @@ class TravelFatigueCalculator:
         except:
             return 3
 
-    def detect_schedule_density(self, team_games: List[Dict], game_date: str) -> Dict[str, int]:
+    def detect_schedule_density(self, team_games: list[dict], game_date: str) -> dict[str, int]:
         """
         Detect compressed schedules (3-in-4 nights, 4-in-5 nights, etc.).
 
@@ -217,7 +216,7 @@ class TravelFatigueCalculator:
             if len(games_5_days) >= 3:
                 result['is_4_in_5'] = 1
 
-        except Exception as e:
+        except Exception:
             pass
 
         return result
@@ -248,10 +247,9 @@ class TravelFatigueCalculator:
         # High altitude cities (above 4000 ft)
         if altitude >= 5000:  # Denver
             return 1.5 if is_home else -1.5
-        elif altitude >= 4000:  # Utah
+        if altitude >= 4000:  # Utah
             return 1.0 if is_home else -1.0
-        else:
-            return 0.0
+        return 0.0
 
     def calculate_timezone_crossings(self, from_team: str, to_team: str) -> int:
         """
@@ -278,9 +276,9 @@ class TravelFatigueCalculator:
         game_date: str,
         opponent_id: int,
         is_home: bool,
-        team_games: List[Dict],
-        opponent_games: List[Dict] = None
-    ) -> Dict[str, float]:
+        team_games: list[dict],
+        opponent_games: list[dict] = None
+    ) -> dict[str, float]:
         """
         Generate comprehensive travel fatigue features.
 
@@ -380,7 +378,7 @@ class TravelFatigueCalculator:
             'rest_advantage': 0,  # Placeholder for differential vs opponent
         }
 
-    def _get_game_location(self, game: Dict, team_id: int) -> str:
+    def _get_game_location(self, game: dict, team_id: int) -> str:
         """Determine which team's arena the game was played at."""
         # Assume game dict has 'home_team_id' or we infer from team_id
         if 'home_team_id' in game:
@@ -391,7 +389,7 @@ class TravelFatigueCalculator:
 
         return self._get_team_abbrev(location_id) or 'UNK'
 
-    def _get_default_features(self) -> Dict[str, float]:
+    def _get_default_features(self) -> dict[str, float]:
         """Return default features when data is unavailable."""
         return {
             'days_rest': 1,
@@ -422,13 +420,13 @@ def calculate_travel_distance(from_team: str, to_team: str) -> float:
     return calc.calculate_travel_distance(from_team, to_team)
 
 
-def get_days_rest(team_id: int, game_date: str, team_games: List[Dict]) -> int:
+def get_days_rest(team_id: int, game_date: str, team_games: list[dict]) -> int:
     """Get days rest for a team."""
     calc = TravelFatigueCalculator()
     return calc.get_days_rest(team_games, game_date)
 
 
-def detect_schedule_density(team_id: int, game_date: str, team_games: List[Dict]) -> Dict:
+def detect_schedule_density(team_id: int, game_date: str, team_games: list[dict]) -> dict:
     """Detect compressed schedules."""
     calc = TravelFatigueCalculator()
     return calc.detect_schedule_density(team_games, game_date)

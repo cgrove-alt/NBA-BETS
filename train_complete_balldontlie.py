@@ -20,7 +20,6 @@ import warnings
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional
 from collections import defaultdict
 
 import numpy as np
@@ -31,12 +30,10 @@ from sklearn.ensemble import (
     RandomForestRegressor,
     GradientBoostingClassifier,
     GradientBoostingRegressor,
-    StackingClassifier,
-    VotingClassifier,
 )
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score,
@@ -85,7 +82,7 @@ except ImportError:
     HAS_OPTUNA = False
     print("Note: Optuna not installed. Install with: pip install optuna")
 
-from sklearn.model_selection import TimeSeriesSplit, cross_val_score
+from sklearn.model_selection import TimeSeriesSplit
 import argparse
 
 # Import travel fatigue calculator for Phase 2 features
@@ -196,11 +193,11 @@ class DynamicLeagueAverages:
     """
 
     def __init__(self):
-        self.daily_averages: Dict[str, Dict[str, float]] = {}  # date -> {stat: value}
+        self.daily_averages: dict[str, dict[str, float]] = {}  # date -> {stat: value}
         self.rolling_window = 7  # days
         self.min_games_for_average = 5  # Minimum games to compute average
 
-    def update_from_games(self, games: List[Dict]):
+    def update_from_games(self, games: list[dict]):
         """
         Build daily league averages from historical games.
 
@@ -244,7 +241,7 @@ class DynamicLeagueAverages:
 
         print(f"  [DynamicLeagueAverages] Built averages for {len(self.daily_averages)} dates")
 
-    def get_rolling_average(self, target_date: str, stat: str) -> Optional[float]:
+    def get_rolling_average(self, target_date: str, stat: str) -> float | None:
         """
         Get rolling 7-day average for a stat as of target_date.
 
@@ -368,9 +365,7 @@ def smart_fillna(df: pd.DataFrame, game_date: str = None) -> pd.DataFrame:
                     default_value = 0.0
                 elif 'rating' in col_lower:
                     default_value = 114.0
-                elif 'win_pct' in col_lower or 'winpct' in col_lower:
-                    default_value = 0.5
-                elif 'pct' in col_lower or 'percentage' in col_lower:
+                elif 'win_pct' in col_lower or 'winpct' in col_lower or 'pct' in col_lower or 'percentage' in col_lower:
                     default_value = 0.5
                 elif '_diff' in col_lower or 'diff_' in col_lower:
                     default_value = 0.0
@@ -386,7 +381,7 @@ def smart_fillna(df: pd.DataFrame, game_date: str = None) -> pd.DataFrame:
     return result
 
 
-def initialize_league_averages(games: List[Dict]):
+def initialize_league_averages(games: list[dict]):
     """
     Initialize the global league average tracker with historical games.
 
@@ -628,7 +623,7 @@ def betting_roi_scorer(y_true, y_proba, vegas_implied_probs, min_edge=0.05):
     total_wagered = 0
     total_profit = 0
 
-    for actual, model_prob, vegas_prob in zip(y_true, y_proba, vegas_implied_probs):
+    for actual, model_prob, vegas_prob in zip(y_true, y_proba, vegas_implied_probs, strict=False):
         # Skip if vegas_prob is invalid
         if vegas_prob is None or vegas_prob <= 0 or vegas_prob >= 1:
             continue
@@ -752,7 +747,7 @@ class PositionDefenseCalculator:
         return 'F'  # Default
 
     def process_game(self, game_id: int, game_date: str, home_team_id: int,
-                     away_team_id: int, player_stats: List[Dict]):
+                     away_team_id: int, player_stats: list[dict]):
         """
         Process a game's player stats to update position defense data.
 
@@ -805,7 +800,7 @@ class PositionDefenseCalculator:
 
     def get_position_defense_before_date(self, team_id: int, game_date: str,
                                           player_position: str,
-                                          min_games: int = 5) -> Dict:
+                                          min_games: int = 5) -> dict:
         """
         Get team's defensive stats vs a position BEFORE a specific date.
 
@@ -927,7 +922,7 @@ class ComprehensiveDataCollector:
         self.teams_cache = {}
         self.players_cache = {}
 
-    def get_all_teams(self) -> Dict[int, Dict]:
+    def get_all_teams(self) -> dict[int, dict]:
         """Fetch and cache all NBA teams."""
         if not self.teams_cache:
             teams = self.api.get_teams()
@@ -935,7 +930,7 @@ class ComprehensiveDataCollector:
                 self.teams_cache[team['id']] = team
         return self.teams_cache
 
-    def fetch_season_games(self, season: int) -> List[Dict]:
+    def fetch_season_games(self, season: int) -> list[dict]:
         """
         Fetch all completed games for a season.
 
@@ -1007,9 +1002,9 @@ class ComprehensiveDataCollector:
 
     def fetch_player_stats_for_games(
         self,
-        game_ids: List[int],
+        game_ids: list[int],
         batch_size: int = 25,
-    ) -> Dict[int, List[Dict]]:
+    ) -> dict[int, list[dict]]:
         """
         Fetch player statistics for multiple games with per-game caching.
 
@@ -1039,7 +1034,7 @@ class ComprehensiveDataCollector:
                         if cached:
                             all_stats[game_id] = cached
                             continue
-                except (json.JSONDecodeError, IOError):
+                except (OSError, json.JSONDecodeError):
                     pass
 
             # Try box_score cache (has player stats embedded)
@@ -1077,7 +1072,7 @@ class ComprehensiveDataCollector:
                             if player_list:
                                 all_stats[game_id] = player_list
                                 continue
-                except (json.JSONDecodeError, IOError):
+                except (OSError, json.JSONDecodeError):
                     pass
 
             # Need to fetch this game
@@ -1124,7 +1119,7 @@ class ComprehensiveDataCollector:
         print(f"  Total games with player stats: {len(all_stats)}")
         return all_stats
 
-    def fetch_season_averages(self, season: int, player_ids: List[int]) -> Dict[int, Dict]:
+    def fetch_season_averages(self, season: int, player_ids: list[int]) -> dict[int, dict]:
         """
         Fetch season averages for players.
 
@@ -1182,7 +1177,7 @@ class TeamStatsCalculator:
         self.window = window
         self.team_games = defaultdict(list)
 
-    def add_game(self, game: Dict):
+    def add_game(self, game: dict):
         """Add a game to the historical record."""
         game_date = game.get('date', '')
         if isinstance(game_date, str) and 'T' in game_date:
@@ -1222,7 +1217,7 @@ class TeamStatsCalculator:
             'point_diff': away_score - home_score,
         }))
 
-    def get_team_stats_before_date(self, team_id: int, date: str, min_games: int = 5) -> Optional[Dict]:
+    def get_team_stats_before_date(self, team_id: int, date: str, min_games: int = 5) -> dict | None:
         """Get team statistics before a specific date with enhanced defensive metrics."""
         if team_id not in self.team_games:
             return None
@@ -1277,7 +1272,7 @@ class TeamStatsCalculator:
             'away_def_rating': np.mean([g['pts_allowed'] for _, g in all_games if not g['is_home']]) if any(not g['is_home'] for _, g in all_games) else 114,
         }
 
-    def get_last_game_info(self, team_id: int, before_date: str) -> Optional[Dict]:
+    def get_last_game_info(self, team_id: int, before_date: str) -> dict | None:
         """
         Get information about a team's last game before a specific date.
         Used for travel/fatigue calculations.
@@ -1313,7 +1308,7 @@ class TeamStatsCalculator:
             'is_back_to_back': days_rest <= 1,
         }
 
-    def get_recent_games_before_date(self, team_id: int, before_date: str, limit: int = 10) -> List[Dict]:
+    def get_recent_games_before_date(self, team_id: int, before_date: str, limit: int = 10) -> list[dict]:
         """
         Get recent games for a team before a specific date.
         Used for comprehensive travel/fatigue/schedule analysis.
@@ -1469,8 +1464,7 @@ class EloRatingSystem:
         elo_diff = (home_rating + self.home_advantage) - away_rating
 
         # Convert to spread: ~100 Elo = 3 points
-        spread = elo_diff * 0.03
-        return spread
+        return elo_diff * 0.03
 
 
 # =============================================================================
@@ -1530,7 +1524,7 @@ TEAM_ABBREV_MAP = {
 }
 
 
-def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
     """
     Calculate great-circle distance between two points in miles.
 
@@ -1559,7 +1553,7 @@ def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float])
 
 
 def calc_travel_fatigue_features(last_game_team_abbrev: str, current_game_team_abbrev: str,
-                                  days_rest: int, is_back_to_back: bool) -> Dict[str, float]:
+                                  days_rest: int, is_back_to_back: bool) -> dict[str, float]:
     """
     TIER 2.1: Calculate travel-related fatigue features.
 
@@ -1641,7 +1635,7 @@ def calc_travel_fatigue_features(last_game_team_abbrev: str, current_game_team_a
 ELITE_TEAMS = {'BOS', 'DEN', 'MIL', 'PHX', 'LAL', 'GSW', 'MIA', 'PHI', 'CLE', 'OKC', 'MIN', 'NYK'}
 
 
-def _get_opponent_from_game(game: Dict, team_id: int) -> str:
+def _get_opponent_from_game(game: dict, team_id: int) -> str:
     """Extract opponent abbreviation from a game dict."""
     home_team = game.get('home_team', {})
     away_team = game.get('visitor_team', {})
@@ -1650,8 +1644,7 @@ def _get_opponent_from_game(game: Dict, team_id: int) -> str:
     if isinstance(home_team, dict):
         if home_team.get('id') == team_id:
             return away_team.get('abbreviation', '')
-        else:
-            return home_team.get('abbreviation', '')
+        return home_team.get('abbreviation', '')
     return ''
 
 
@@ -1676,8 +1669,8 @@ def analyze_schedule_spots(
     opponent_abbrev: str,
     team_calc: 'TeamStatsCalculator',
     is_home: bool,
-    future_games: List[Dict] = None
-) -> Dict[str, int]:
+    future_games: list[dict] = None
+) -> dict[str, int]:
     """
     Analyze schedule-based situational spots that affect team performance.
 
@@ -1870,16 +1863,7 @@ def analyze_schedule_spots(
         from datetime import datetime as dt
         gd = dt.strptime(game_date, '%Y-%m-%d')
         # Christmas (Dec 25)
-        if gd.month == 12 and gd.day == 25:
-            spots['is_holiday_game'] = 1
-        # MLK Day (3rd Monday of January)
-        elif gd.month == 1 and gd.weekday() == 0 and 15 <= gd.day <= 21:
-            spots['is_holiday_game'] = 1
-        # Thanksgiving (4th Thursday of November)
-        elif gd.month == 11 and gd.weekday() == 3 and 22 <= gd.day <= 28:
-            spots['is_holiday_game'] = 1
-        # New Year's Day
-        elif gd.month == 1 and gd.day == 1:
+        if gd.month == 12 and gd.day == 25 or gd.month == 1 and gd.weekday() == 0 and 15 <= gd.day <= 21 or gd.month == 11 and gd.weekday() == 3 and 22 <= gd.day <= 28 or gd.month == 1 and gd.day == 1:
             spots['is_holiday_game'] = 1
     except (ValueError, TypeError):
         pass
@@ -1907,13 +1891,13 @@ def analyze_schedule_spots(
 
 
 def calculate_line_movement_features(
-    opening_spread: Optional[float] = None,
-    current_spread: Optional[float] = None,
-    opening_total: Optional[float] = None,
-    current_total: Optional[float] = None,
-    model_spread: Optional[float] = None,
-    model_win_prob: Optional[float] = None,
-) -> Dict[str, float]:
+    opening_spread: float | None = None,
+    current_spread: float | None = None,
+    opening_total: float | None = None,
+    current_total: float | None = None,
+    model_spread: float | None = None,
+    model_win_prob: float | None = None,
+) -> dict[str, float]:
     """
     Calculate betting line movement features for live predictions.
 
@@ -2023,13 +2007,13 @@ class PlayerStatsCalculator:
         # Handle edge cases
         if 'G' in position:
             return 'G'
-        elif 'F' in position:
+        if 'F' in position:
             return 'F'
-        elif 'C' in position:
+        if 'C' in position:
             return 'C'
         return 'G'  # Default
 
-    def _encode_position(self, position: str) -> Dict[str, int]:
+    def _encode_position(self, position: str) -> dict[str, int]:
         """Encode position as binary features."""
         pos_group = self._get_position_group(position)
         return {
@@ -2038,7 +2022,7 @@ class PlayerStatsCalculator:
             'is_center': 1 if pos_group == 'C' else 0,
         }
 
-    def add_game_stats(self, player_id: int, game_date: str, stats: Dict, player_info: Dict = None):
+    def add_game_stats(self, player_id: int, game_date: str, stats: dict, player_info: dict = None):
         """Add player game stats to the historical record."""
         if player_info:
             self.player_info[player_id] = player_info
@@ -2082,7 +2066,7 @@ class PlayerStatsCalculator:
         except:
             return 0.0
 
-    def get_player_stats_before_date(self, player_id: int, date: str, min_games: int = 3) -> Optional[Dict]:
+    def get_player_stats_before_date(self, player_id: int, date: str, min_games: int = 3) -> dict | None:
         """Get player statistics before a specific date with enhanced features."""
         if player_id not in self.player_games:
             return None
@@ -2287,7 +2271,7 @@ class PlayerStatsCalculator:
 
         return features
 
-    def _calc_ts_pct(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_ts_pct(self, games: list[tuple[str, dict]]) -> float:
         """Calculate True Shooting % from game list."""
         total_pts = sum(g['pts'] for _, g in games)
         total_fga = sum(g['fga'] for _, g in games)
@@ -2297,7 +2281,7 @@ class PlayerStatsCalculator:
             return round(total_pts / tsa, 3)
         return 0.55  # League average default
 
-    def _calc_efg_pct(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_efg_pct(self, games: list[tuple[str, dict]]) -> float:
         """Calculate Effective FG% from game list."""
         total_fgm = sum(g['fgm'] for _, g in games)
         total_fg3m = sum(g['fg3m'] for _, g in games)
@@ -2306,7 +2290,7 @@ class PlayerStatsCalculator:
             return round((total_fgm + 0.5 * total_fg3m) / total_fga, 3)
         return 0.50  # League average default
 
-    def _calc_usage_rate(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_usage_rate(self, games: list[tuple[str, dict]]) -> float:
         """Calculate simplified usage rate approximation."""
         total_fga = sum(g['fga'] for _, g in games)
         total_fta = sum(g.get('fta', 0) for _, g in games)
@@ -2320,7 +2304,7 @@ class PlayerStatsCalculator:
             return round(min(0.45, max(0.10, usage)), 3)
         return 0.22  # League average default
 
-    def _calc_fg3_rate(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_fg3_rate(self, games: list[tuple[str, dict]]) -> float:
         """Calculate 3-point attempt rate (3PA/FGA)."""
         total_fg3a = sum(g.get('fg3a', 0) for _, g in games)
         total_fga = sum(g['fga'] for _, g in games)
@@ -2328,7 +2312,7 @@ class PlayerStatsCalculator:
             return round(total_fg3a / total_fga, 3)
         return 0.35  # League average default
 
-    def _calc_fta_rate(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_fta_rate(self, games: list[tuple[str, dict]]) -> float:
         """Calculate free throw attempt rate (FTA/FGA)."""
         total_fta = sum(g.get('fta', 0) for _, g in games)
         total_fga = sum(g['fga'] for _, g in games)
@@ -2336,7 +2320,7 @@ class PlayerStatsCalculator:
             return round(total_fta / total_fga, 3)
         return 0.25  # League average default
 
-    def _calc_fg3_pct(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_fg3_pct(self, games: list[tuple[str, dict]]) -> float:
         """Calculate 3-point shooting percentage (FG3M/FG3A)."""
         total_fg3m = sum(g.get('fg3m', 0) for _, g in games)
         total_fg3a = sum(g.get('fg3a', 0) for _, g in games)
@@ -2344,7 +2328,7 @@ class PlayerStatsCalculator:
             return round(total_fg3m / total_fg3a, 3)
         return 0.36  # League average default
 
-    def _calc_tov_pct(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_tov_pct(self, games: list[tuple[str, dict]]) -> float:
         """
         Calculate Turnover Percentage (Dean Oliver's Four Factors).
         TOV% = TOV / (FGA + 0.44*FTA + TOV)
@@ -2358,7 +2342,7 @@ class PlayerStatsCalculator:
             return round(total_tov / possessions, 3)
         return 0.125  # League average default
 
-    def _calc_orb_pct(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_orb_pct(self, games: list[tuple[str, dict]]) -> float:
         """
         Calculate Offensive Rebound Percentage (Dean Oliver's Four Factors).
         ORB% = ORB / (ORB + Team DRB opportunities)
@@ -2376,7 +2360,7 @@ class PlayerStatsCalculator:
             return round(orb_per36 / 10.0, 3)  # Scale to 0.05-0.30 range
         return 0.15  # League average default
 
-    def _calc_ft_rate(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_ft_rate(self, games: list[tuple[str, dict]]) -> float:
         """
         Calculate Free Throw Rate (Dean Oliver's Four Factors).
         FT Rate = FTM / FGA
@@ -2388,7 +2372,7 @@ class PlayerStatsCalculator:
             return round(total_ftm / total_fga, 3)
         return 0.195  # League average default
 
-    def _calc_fg3_streak_features(self, games: List[Tuple[str, Dict]]) -> Dict[str, float]:
+    def _calc_fg3_streak_features(self, games: list[tuple[str, dict]]) -> dict[str, float]:
         """Detect hot/cold shooting streaks for 3-pointers."""
         if len(games) < 3:
             return {'fg3_hot_streak': 0, 'fg3_cold_streak': 0, 'fg3_momentum': 0.0}
@@ -2421,7 +2405,7 @@ class PlayerStatsCalculator:
             'fg3_momentum': round(float(momentum), 4),
         }
 
-    def _calc_fg3_variance(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_fg3_variance(self, games: list[tuple[str, dict]]) -> float:
         """Calculate variance in 3-point shooting percentage (consistency indicator)."""
         game_fg3_pcts = []
         for _, g in games:
@@ -2433,9 +2417,9 @@ class PlayerStatsCalculator:
             return round(float(np.var(game_fg3_pcts)), 4)
         return 0.1  # Default variance
 
-    def _calc_three_pm_specialized_features(self, recent: List[Tuple[str, Dict]],
-                                            all_games: List[Tuple[str, Dict]],
-                                            mins: List[float]) -> Dict[str, float]:
+    def _calc_three_pm_specialized_features(self, recent: list[tuple[str, dict]],
+                                            all_games: list[tuple[str, dict]],
+                                            mins: list[float]) -> dict[str, float]:
         """
         Calculate specialized features for 3PM prediction.
 
@@ -2471,7 +2455,7 @@ class PlayerStatsCalculator:
 
         fg3a_avg = np.mean(fg3a_values) if fg3a_values else 0
         fg3a_std = np.std(fg3a_values) if len(fg3a_values) > 1 else 2.0
-        fg3m_avg = np.mean(fg3m_values) if fg3m_values else 0
+        np.mean(fg3m_values) if fg3m_values else 0
         fg3m_std = np.std(fg3m_values) if len(fg3m_values) > 1 else 1.0
 
         # FG3A per minute (normalizes for playing time)
@@ -2522,7 +2506,7 @@ class PlayerStatsCalculator:
             'shooting_confidence': round(shooting_confidence, 3),
         }
 
-    def _calc_simplified_bpm(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_simplified_bpm(self, games: list[tuple[str, dict]]) -> float:
         """
         Calculate simplified Box Plus/Minus (BPM) approximation.
         BPM estimates a player's contribution per 100 possessions.
@@ -2573,7 +2557,7 @@ class PlayerStatsCalculator:
         # Clamp to realistic range (-10 to +15)
         return round(max(-10, min(15, bpm)), 2)
 
-    def _get_player_impact_features(self, player_id: int, date: str) -> Dict[str, float]:
+    def _get_player_impact_features(self, player_id: int, date: str) -> dict[str, float]:
         """
         Get player impact metrics (DARKO/EPM/RAPTOR).
 
@@ -2606,14 +2590,13 @@ class PlayerStatsCalculator:
                     'impact_percentile': impact_data.get('percentile', 50.0),
                     'has_impact_data': 1,
                 }
-            else:
-                return default_features
+            return default_features
 
-        except Exception as e:
+        except Exception:
             # Silently return defaults if fetch fails
             return default_features
 
-    def _calc_assist_rate(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_assist_rate(self, games: list[tuple[str, dict]]) -> float:
         """
         Calculate assist rate (assists per 36 minutes).
         Normalizes assists to playing time for fair comparison.
@@ -2629,7 +2612,7 @@ class PlayerStatsCalculator:
             return round(ast_per36, 2)
         return 4.0  # League average default
 
-    def _calc_rebound_rate(self, games: List[Tuple[str, Dict]]) -> float:
+    def _calc_rebound_rate(self, games: list[tuple[str, dict]]) -> float:
         """
         Calculate rebound rate (rebounds per 36 minutes).
         Normalizes rebounds to playing time for fair comparison.
@@ -2645,7 +2628,7 @@ class PlayerStatsCalculator:
             return round(reb_per36, 2)
         return 7.0  # League average default
 
-    def get_player_vs_opponent_history(self, player_id: int, opponent_id: int, date: str, min_games: int = 2) -> Optional[Dict]:
+    def get_player_vs_opponent_history(self, player_id: int, opponent_id: int, date: str, min_games: int = 2) -> dict | None:
         """
         Get player's historical performance against a specific opponent.
 
@@ -2683,7 +2666,7 @@ class PlayerStatsCalculator:
 # NEW FEATURE HELPER FUNCTIONS
 # =============================================================================
 
-def calculate_blowout_risk_features(home_stats: Dict, away_stats: Dict, vegas_spread: float = None) -> Dict:
+def calculate_blowout_risk_features(home_stats: dict, away_stats: dict, vegas_spread: float = None) -> dict:
     """
     Calculate blowout risk features that predict when starters may get pulled early.
 
@@ -2731,8 +2714,8 @@ def calculate_blowout_risk_features(home_stats: Dict, away_stats: Dict, vegas_sp
     }
 
 
-def calculate_pace_adjusted_features(player_features: Dict, team_pace: float,
-                                      opp_pace: float, league_avg_pace: float = 100.0) -> Dict:
+def calculate_pace_adjusted_features(player_features: dict, team_pace: float,
+                                      opp_pace: float, league_avg_pace: float = 100.0) -> dict:
     """
     Calculate pace-adjusted per-100-possession stats.
 
@@ -2789,7 +2772,7 @@ def calculate_pace_adjusted_features(player_features: Dict, team_pace: float,
     }
 
 
-def detect_outlier_game(game_stats: Dict, player_avg: Dict, threshold: float = 2.5) -> Dict:
+def detect_outlier_game(game_stats: dict, player_avg: dict, threshold: float = 2.5) -> dict:
     """
     Detect if a game is an outlier based on player performance vs their averages.
 
@@ -2832,15 +2815,9 @@ def detect_outlier_game(game_stats: Dict, player_avg: Dict, threshold: float = 2
     min_std = player_avg.get('recent_min_avg', expected_min * 0.15) or (expected_min * 0.15)
 
     # Calculate z-scores
-    if pts_std > 0:
-        z_score_pts = (actual_pts - expected_pts) / pts_std
-    else:
-        z_score_pts = 0
+    z_score_pts = (actual_pts - expected_pts) / pts_std if pts_std > 0 else 0
 
-    if min_std > 0:
-        z_score_min = (actual_min - expected_min) / max(min_std, 3)
-    else:
-        z_score_min = 0
+    z_score_min = (actual_min - expected_min) / max(min_std, 3) if min_std > 0 else 0
 
     outlier_flags['z_score_pts'] = round(z_score_pts, 2)
     outlier_flags['z_score_min'] = round(z_score_min, 2)
@@ -2869,8 +2846,8 @@ def detect_outlier_game(game_stats: Dict, player_avg: Dict, threshold: float = 2
     return outlier_flags
 
 
-def calculate_vegas_total_features(vegas_total: float, player_features: Dict,
-                                    league_avg_total: float = 225.0) -> Dict:
+def calculate_vegas_total_features(vegas_total: float, player_features: dict,
+                                    league_avg_total: float = 225.0) -> dict:
     """
     Use Vegas game total to improve individual prop predictions.
 
@@ -2918,7 +2895,7 @@ def calculate_vegas_total_features(vegas_total: float, player_features: Dict,
     }
 
 
-def calculate_regression_adjustment_features(player_features: Dict, games_played: int) -> Dict:
+def calculate_regression_adjustment_features(player_features: dict, games_played: int) -> dict:
     """
     Calculate regression-to-mean adjustment features.
 
@@ -2972,7 +2949,7 @@ def calculate_regression_adjustment_features(player_features: Dict, games_played
 # DATA PROCESSING
 # =============================================================================
 
-def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int, List[Dict]]) -> Tuple[List[Dict], List[Dict]]:
+def process_games_for_training(games: list[dict], player_stats_by_game: dict[int, list[dict]]) -> tuple[list[dict], list[dict]]:
     """
     Process games into training data for both team and player models.
 
@@ -3025,8 +3002,8 @@ def process_games_for_training(games: List[Dict], player_stats_by_game: Dict[int
         home_team_abbrev = home_team.get('abbreviation', '')
         away_team_abbrev = away_team.get('abbreviation', '')
 
-        home_last_game = team_calc.get_last_game_info(home_team_id, game_date)
-        away_last_game = team_calc.get_last_game_info(away_team_id, game_date)
+        team_calc.get_last_game_info(home_team_id, game_date)
+        team_calc.get_last_game_info(away_team_id, game_date)
 
         # PHASE 2: Get comprehensive travel/fatigue/schedule features using new module
         home_recent_games = team_calc.get_recent_games_before_date(home_team_id, game_date, limit=7)
@@ -3467,7 +3444,7 @@ class PropModel:
         self.cv_scores = {}
 
     def train(self, X: pd.DataFrame, y: np.ndarray, sample_weights: np.ndarray = None,
-              test_size: float = 0.2, n_cv_folds: int = 5, use_time_series_cv: bool = True) -> Dict:
+              test_size: float = 0.2, n_cv_folds: int = 5, use_time_series_cv: bool = True) -> dict:
         """Train the prop model with K-Fold cross-validation (Phase 5).
 
         Args:
@@ -3501,7 +3478,7 @@ class PropModel:
         cv_r2 = []
 
         print(f"    Running {cv_name} with {n_cv_folds} folds...")
-        for fold_idx, (train_idx, val_idx) in enumerate(cv.split(X_filled)):
+        for _fold_idx, (train_idx, val_idx) in enumerate(cv.split(X_filled)):
             X_cv_train, X_cv_val = X_filled[train_idx], X_filled[val_idx]
             y_cv_train, y_cv_val = y_arr[train_idx], y_arr[val_idx]
 
@@ -3567,10 +3544,7 @@ class PropModel:
         y_train = y_arr[:split_idx]
         y_test = y_arr[split_idx:]
 
-        if sample_weights is not None:
-            w_train = sample_weights[:split_idx]
-        else:
-            w_train = None
+        w_train = sample_weights[:split_idx] if sample_weights is not None else None
 
         # Fit final scaler and model
         self.scaler.fit(X_train)
@@ -3636,7 +3610,7 @@ class PropModel:
         'pra': -0.82,        # Historical: Model slightly overpredicted
     }
 
-    def predict(self, features: Dict, prop_line: float = None, apply_bias_correction: bool = True) -> Dict:
+    def predict(self, features: dict, prop_line: float = None, apply_bias_correction: bool = True) -> dict:
         """Make a prediction."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -3728,7 +3702,7 @@ class MinutesPredictionModel:
         ]
 
     def train(self, X: pd.DataFrame, y_minutes: np.ndarray,
-              sample_weights: Optional[np.ndarray] = None) -> Dict:
+              sample_weights: np.ndarray | None = None) -> dict:
         """
         Train both stages of the minutes prediction model.
 
@@ -3737,7 +3711,7 @@ class MinutesPredictionModel:
             y_minutes: Actual minutes played
             sample_weights: Optional sample weights for time decay
         """
-        print(f"  Training MinutesPredictionModel (TIER 2.3)...")
+        print("  Training MinutesPredictionModel (TIER 2.3)...")
 
         # Store feature names
         self.feature_names = list(X.columns)
@@ -3750,7 +3724,7 @@ class MinutesPredictionModel:
         # Define "playing" as >5 minutes (to filter out garbage time cameos)
         y_will_play = (y_minutes >= 5).astype(int)
 
-        print(f"    Stage 1: Will-Play Classifier")
+        print("    Stage 1: Will-Play Classifier")
         n_played = y_will_play.sum()
         n_dnp = len(y_will_play) - n_played
         print(f"      Players who played (>5 min): {n_played} ({100*y_will_play.mean():.1f}%)")
@@ -3762,8 +3736,8 @@ class MinutesPredictionModel:
         if n_dnp < 10:
             # Not enough DNP samples to train classifier
             # We'll use minutes regressor alone with a threshold
-            print(f"      [SKIP] Not enough DNP samples to train classifier")
-            print(f"      Will use minutes threshold (5 min) instead")
+            print("      [SKIP] Not enough DNP samples to train classifier")
+            print("      Will use minutes threshold (5 min) instead")
             self.will_play_classifier = None
             self.classifier_skipped = True
         else:
@@ -3802,14 +3776,14 @@ class MinutesPredictionModel:
 
             if sample_weights is not None:
                 sw_train = sample_weights[:split_idx]
-                sw_test = sample_weights[split_idx:]
+                sample_weights[split_idx:]
                 self.will_play_classifier.fit(X_train_c, y_train_c, sample_weight=sw_train)
             else:
                 self.will_play_classifier.fit(X_train_c, y_train_c)
 
             # Evaluate classifier
             y_pred_c = self.will_play_classifier.predict(X_test_c)
-            y_prob_c = self.will_play_classifier.predict_proba(X_test_c)[:, 1]
+            self.will_play_classifier.predict_proba(X_test_c)[:, 1]
 
             clf_accuracy = accuracy_score(y_test_c, y_pred_c)
             clf_precision = precision_score(y_test_c, y_pred_c, zero_division=0)
@@ -3822,17 +3796,14 @@ class MinutesPredictionModel:
             print(f"      F1 Score: {clf_f1:.4f}")
 
         # Stage 2: Regression for actual minutes (only for players who played)
-        print(f"    Stage 2: Minutes Regressor (players with >5 min)")
+        print("    Stage 2: Minutes Regressor (players with >5 min)")
 
         # Filter to only players who played
         played_mask = y_minutes >= 5
         X_played = X_scaled[played_mask]
         y_played = y_minutes[played_mask]
 
-        if sample_weights is not None:
-            sw_played = sample_weights[played_mask]
-        else:
-            sw_played = None
+        sw_played = sample_weights[played_mask] if sample_weights is not None else None
 
         print(f"      Training samples: {len(y_played)}")
         print(f"      Minutes range: {y_played.min():.1f} - {y_played.max():.1f}")
@@ -3905,7 +3876,7 @@ class MinutesPredictionModel:
         self.is_fitted = True
         return self.training_metrics
 
-    def predict(self, X: np.ndarray) -> Tuple[float, float]:
+    def predict(self, X: np.ndarray) -> tuple[float, float]:
         """
         Predict minutes for a player.
 
@@ -3940,7 +3911,7 @@ class MinutesPredictionModel:
 
         return predicted_minutes, play_prob
 
-    def predict_batch(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def predict_batch(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Predict minutes for multiple players."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -4012,7 +3983,7 @@ class PropEnsembleModel:
     Also provides over/under probability estimates for betting.
     """
 
-    def __init__(self, prop_type: str, optimized_params: Optional[Dict[str, Dict]] = None):
+    def __init__(self, prop_type: str, optimized_params: dict[str, dict] | None = None):
         self.prop_type = prop_type
         self.models = {}
         self.scaler = StandardScaler()
@@ -4027,7 +3998,7 @@ class PropEnsembleModel:
         # Initialize base models with optimized params if provided
         self._init_base_models(optimized_params)
 
-    def _init_base_models(self, optimized_params: Optional[Dict[str, Dict]] = None):
+    def _init_base_models(self, optimized_params: dict[str, dict] | None = None):
         """Initialize the ensemble of base models with optional optimized parameters."""
 
         # Default parameters
@@ -4098,10 +4069,10 @@ class PropEnsembleModel:
 
         print(f"    Initialized ensemble with {len(self.models)} models: {list(self.models.keys())}")
         if optimized_params:
-            print(f"    Using Optuna-optimized hyperparameters")
+            print("    Using Optuna-optimized hyperparameters")
 
-    def train(self, X: pd.DataFrame, y: np.ndarray, dates: List[str] = None,
-              sample_weights: np.ndarray = None, test_size: float = 0.2) -> Dict:
+    def train(self, X: pd.DataFrame, y: np.ndarray, dates: list[str] = None,
+              sample_weights: np.ndarray = None, test_size: float = 0.2) -> dict:
         """
         Train the ensemble model.
 
@@ -4115,7 +4086,6 @@ class PropEnsembleModel:
         Returns:
             Training metrics dictionary
         """
-        from sklearn.model_selection import TimeSeriesSplit
 
         self.feature_names = list(X.columns)
         X_filled = smart_fillna(X).values
@@ -4126,10 +4096,7 @@ class PropEnsembleModel:
         X_train, X_test = X_filled[:split_idx], X_filled[split_idx:]
         y_train, y_test = y_arr[:split_idx], y_arr[split_idx:]
 
-        if sample_weights is not None:
-            w_train = sample_weights[:split_idx]
-        else:
-            w_train = None
+        w_train = sample_weights[:split_idx] if sample_weights is not None else None
 
         # Fit scaler
         self.scaler.fit(X_train)
@@ -4170,7 +4137,7 @@ class PropEnsembleModel:
 
         # Create stacked features (base model predictions)
         stacked_train = np.column_stack(base_predictions_train)
-        stacked_test = np.column_stack(base_predictions_test)
+        np.column_stack(base_predictions_test)
 
         # Use inverse-RMSE weighted average instead of meta-learner
         # This avoids the issue of meta-learner overfitting to training predictions
@@ -4242,7 +4209,7 @@ class PropEnsembleModel:
 
         # Get ensemble predictions on training data
         base_preds_train = []
-        for name, model in self.models.items():
+        for _name, model in self.models.items():
             try:
                 pred = model.predict(X_train)
                 base_preds_train.append(pred)
@@ -4273,7 +4240,7 @@ class PropEnsembleModel:
         except Exception as e:
             print(f"      Warning: Could not train over/under classifier: {e}")
 
-    def predict(self, features: Dict, prop_line: float = None) -> Dict:
+    def predict(self, features: dict, prop_line: float = None) -> dict:
         """Make a prediction with the ensemble."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -4405,7 +4372,7 @@ class QuantilePropModel:
         self.training_metrics = {}
 
     def train(self, X: pd.DataFrame, y: np.ndarray,
-              sample_weights: np.ndarray = None, test_size: float = 0.2) -> Dict:
+              sample_weights: np.ndarray = None, test_size: float = 0.2) -> dict:
         """
         Train quantile regression models at each percentile.
 
@@ -4490,7 +4457,7 @@ class QuantilePropModel:
         errors = y_true - y_pred
         return float(np.mean(np.where(errors >= 0, q * errors, (q - 1) * errors)))
 
-    def predict_distribution(self, features: Dict) -> Dict[float, float]:
+    def predict_distribution(self, features: dict) -> dict[float, float]:
         """
         Predict the full distribution of outcomes.
 
@@ -4510,7 +4477,7 @@ class QuantilePropModel:
         return {q: float(model.predict(X_scaled)[0])
                 for q, model in self.quantile_models.items()}
 
-    def predict_over_probability(self, features: Dict, line: float) -> float:
+    def predict_over_probability(self, features: dict, line: float) -> float:
         """
         Estimate probability of actual value being OVER the line.
 
@@ -4561,7 +4528,7 @@ class QuantilePropModel:
 
         return 0.50  # Default to 50% if something goes wrong
 
-    def predict(self, features: Dict, prop_line: float = None) -> Dict:
+    def predict(self, features: dict, prop_line: float = None) -> dict:
         """
         Make a prediction with uncertainty estimates.
 
@@ -4648,17 +4615,16 @@ class PositionAwarePropEnsemble:
         self.is_fitted = False
         self.training_metrics = {}
 
-    def _get_position_group(self, features: Dict) -> str:
+    def _get_position_group(self, features: dict) -> str:
         """Determine position group from features."""
         if features.get('is_center', 0) == 1:
             return 'centers'
-        elif features.get('is_forward', 0) == 1:
+        if features.get('is_forward', 0) == 1:
             return 'forwards'
-        else:
-            return 'guards'  # Default to guards
+        return 'guards'  # Default to guards
 
-    def train(self, X: pd.DataFrame, y: np.ndarray, player_data: List[Dict],
-              sample_weights: np.ndarray = None) -> Dict:
+    def train(self, X: pd.DataFrame, y: np.ndarray, player_data: list[dict],
+              sample_weights: np.ndarray = None) -> dict:
         """
         Train position-specific models.
 
@@ -4701,7 +4667,7 @@ class PositionAwarePropEnsemble:
 
             if n_samples >= self.MIN_SAMPLES_PER_POSITION:
                 # Train position-specific model
-                print(f"        Training position-specific model...")
+                print("        Training position-specific model...")
                 model = PropEnsembleModel(f"{self.prop_type}_{position}")
 
                 weights = data['weights'] if len(data['weights']) > 0 else None
@@ -4717,10 +4683,10 @@ class PositionAwarePropEnsemble:
 
                 print(f"        {position.capitalize()} R²: {metrics['ensemble_r2']:.4f}")
             else:
-                print(f"        Insufficient samples, will use general model")
+                print("        Insufficient samples, will use general model")
 
         # Train general model as fallback
-        print(f"      Training general fallback model...")
+        print("      Training general fallback model...")
         self.general_model = PropEnsembleModel(self.prop_type)
         general_metrics = self.general_model.train(X, y, sample_weights=sample_weights)
         all_metrics['general'] = general_metrics
@@ -4765,7 +4731,7 @@ class PositionAwarePropEnsemble:
 
         return self.training_metrics
 
-    def predict(self, features: Dict, prop_line: float = None) -> Dict:
+    def predict(self, features: dict, prop_line: float = None) -> dict:
         """Make prediction using position-appropriate model."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -4915,7 +4881,7 @@ class OptunaHyperparameterTuner:
         model = Ridge(alpha=alpha, random_state=self.random_state)
         return self._manual_cv_score(model, X, y)
 
-    def tune_all_models(self, X: np.ndarray, y: np.ndarray, prop_type: str) -> Dict[str, Dict]:
+    def tune_all_models(self, X: np.ndarray, y: np.ndarray, prop_type: str) -> dict[str, dict]:
         """
         Run Optuna optimization for all models in the ensemble.
 
@@ -4981,7 +4947,7 @@ class OptunaHyperparameterTuner:
 # PLAYER STATS COVERAGE UTILITIES
 # =============================================================================
 
-def check_player_stats_coverage(cache_dir: Path) -> Tuple[int, int, List[int]]:
+def check_player_stats_coverage(cache_dir: Path) -> tuple[int, int, list[int]]:
     """
     Check player stats coverage and return missing game IDs.
 
@@ -5011,20 +4977,17 @@ def check_player_stats_coverage(cache_dir: Path) -> Tuple[int, int, List[int]]:
         season_file = cache_dir / pattern
         if season_file.exists():
             try:
-                with open(season_file, 'r') as f:
+                with open(season_file) as f:
                     data = json.load(f)
                     # Handle both formats: dict with 'games' key or direct list
-                    if isinstance(data, dict):
-                        games = data.get('games', [])
-                    else:
-                        games = data
+                    games = data.get('games', []) if isinstance(data, dict) else data
                     for game in games:
                         if isinstance(game, dict):
                             game_id = game.get('id')
                             if game_id and game_id not in game_ids_seen:
                                 all_games.append(game)
                                 game_ids_seen.add(game_id)
-            except (json.JSONDecodeError, IOError) as e:
+            except (OSError, json.JSONDecodeError) as e:
                 print(f"  Warning: Could not read {pattern}: {e}")
 
     total_games = len(all_games)
@@ -5039,7 +5002,7 @@ def check_player_stats_coverage(cache_dir: Path) -> Tuple[int, int, List[int]]:
         cache_path = cache_dir / f"player_stats_{game_id}.json"
         if cache_path.exists():
             try:
-                with open(cache_path, 'r') as f:
+                with open(cache_path) as f:
                     stats = json.load(f)
                     if stats:  # Non-empty stats
                         games_with_stats += 1
@@ -5056,7 +5019,7 @@ def check_player_stats_coverage(cache_dir: Path) -> Tuple[int, int, List[int]]:
 def fetch_missing_player_stats(
     api,
     cache_dir: Path,
-    missing_game_ids: List[int],
+    missing_game_ids: list[int],
     max_retries: int = 3,
     base_delay: float = 2.0,
 ) -> int:
@@ -5089,7 +5052,6 @@ def fetch_missing_player_stats(
             print(f"  Progress: {i + 1}/{total} ({(i + 1) / total * 100:.1f}%) - fetched: {fetched}, failed: {failed}", flush=True)
 
         # Retry logic with exponential backoff
-        success = False
         for attempt in range(max_retries):
             try:
                 stats = api.get_player_stats(game_ids=[game_id])
@@ -5099,10 +5061,9 @@ def fetch_missing_player_stats(
                     json.dump(stats, f)
 
                 fetched += 1
-                success = True
                 break  # Success, exit retry loop
 
-            except Exception as e:
+            except Exception:
                 delay = base_delay * (2 ** attempt)
                 if attempt < max_retries - 1:
                     time.sleep(delay)
@@ -5120,7 +5081,7 @@ def fetch_missing_player_stats(
 
 
 def calculate_time_decay_weights(
-    dates: List[str],
+    dates: list[str],
     half_life_days: int = 180,
     min_weight: float = 0.1
 ) -> np.ndarray:
@@ -5165,8 +5126,8 @@ def calculate_time_decay_weights(
 
 
 def train_all_models(
-    team_data: List[Dict],
-    player_data: List[Dict],
+    team_data: list[dict],
+    player_data: list[dict],
     use_time_decay: bool = True,
     time_decay_half_life: int = 180,
     use_ensemble_props: bool = True,  # Use ensemble models for props
@@ -5174,7 +5135,7 @@ def train_all_models(
     optuna_trials: int = 50,  # Number of Optuna trials per model
     tune_team_models: bool = False,  # NEW: Use Optuna for team model tuning
     team_tune_trials: int = 50,  # Number of Optuna trials for team models
-) -> Dict:
+) -> dict:
     """
     Train all models with the prepared data.
 
@@ -5448,10 +5409,10 @@ def train_all_models(
         y_pred_ensemble = y_pred_stacked
         use_stacking = True
         # Get meta-learner coefficients (shows model importance)
-        coefs = dict(zip(models.keys(), meta_learner.coef_[0]))
+        coefs = dict(zip(models.keys(), meta_learner.coef_[0], strict=False))
         print(f"    Meta-learner coefficients: {', '.join([f'{k}={v:.2f}' for k, v in coefs.items()])}")
     else:
-        print(f"    Using WEIGHTED average (stacking didn't improve)")
+        print("    Using WEIGHTED average (stacking didn't improve)")
         y_proba_ensemble = y_proba_weighted
         y_pred_ensemble = (y_proba_weighted > 0.5).astype(int)
         use_stacking = False
@@ -5484,7 +5445,7 @@ def train_all_models(
         print(f"    Improvement: {(brier_uncalibrated - brier_calibrated) / brier_uncalibrated * 100:.1f}%")
         use_calibration = True
     else:
-        print(f"    Calibration didn't improve Brier score, using uncalibrated predictions")
+        print("    Calibration didn't improve Brier score, using uncalibrated predictions")
         use_calibration = False
         isotonic_calibrator = None
 
@@ -5507,7 +5468,7 @@ def train_all_models(
         'model_weights': model_weights,
         'n_models': len(models),
     }
-    print(f"\n  Ensemble Results:")
+    print("\n  Ensemble Results:")
     print(f"    Accuracy: {ml_metrics['accuracy']:.4f}")
     print(f"    Brier Score: {ml_metrics['brier_score']:.4f} (lower is better)")
     print(f"    Log Loss: {ml_metrics['log_loss']:.4f}")
@@ -5528,7 +5489,7 @@ def train_all_models(
             ml_metrics['betting_n_bets'] = n_bets
             print(f"    Betting ROI (5% edge): {roi:+.1%} on {n_bets} hypothetical bets")
     else:
-        print(f"    Betting ROI: N/A (no Vegas odds in training data)")
+        print("    Betting ROI: N/A (no Vegas odds in training data)")
 
     results['moneyline'] = ml_metrics
 
@@ -5709,7 +5670,7 @@ def train_all_models(
         'model_weights': spread_weights,
         'n_models': len(spread_models),
     }
-    print(f"\n  Ensemble Results:")
+    print("\n  Ensemble Results:")
     print(f"    RMSE: {sp_metrics['rmse']:.2f} points")
     print(f"    MAE: {sp_metrics['mae']:.2f} points")
     print(f"    R²: {sp_metrics['r2']:.4f}")
@@ -5823,7 +5784,7 @@ def train_all_models(
         time_weights = calculate_time_decay_weights(player_dates, time_decay_half_life)
         # Combine time decay with outlier weights
         player_sample_weights = outlier_weights * time_weights
-        print(f"\n[Player Sample Weighting]")
+        print("\n[Player Sample Weighting]")
         print(f"  Time-decay range: {time_weights.min():.3f} - {time_weights.max():.3f}")
         print(f"  Outlier weight range: {outlier_weights.min():.3f} - {outlier_weights.max():.3f}")
         print(f"  Combined weight range: {player_sample_weights.min():.3f} - {player_sample_weights.max():.3f}")
@@ -5833,7 +5794,7 @@ def train_all_models(
         print(f"  Samples down-weighted (OT/blowout): {downweighted} ({downweighted/len(outlier_weights)*100:.1f}%)")
     else:
         player_sample_weights = outlier_weights
-        print(f"\n[Player Outlier Weighting Only]")
+        print("\n[Player Outlier Weighting Only]")
         print(f"  Weight range: {player_sample_weights.min():.3f} - {player_sample_weights.max():.3f}")
 
     # ==========================================================================
@@ -5849,7 +5810,7 @@ def train_all_models(
 
     # Save minutes model
     minutes_model.save(MODEL_DIR / 'player_minutes_model.pkl')
-    print(f"  Saved: models/player_minutes_model.pkl")
+    print("  Saved: models/player_minutes_model.pkl")
 
     results['minutes_model'] = {
         'classifier_accuracy': min_metrics['classifier']['accuracy'],
@@ -5881,7 +5842,7 @@ def train_all_models(
             use_position_aware = prop_name in POSITION_AWARE_PROPS
 
             if use_position_aware:
-                print(f"  Using PositionAwarePropEnsemble (TIER 1.4)")
+                print("  Using PositionAwarePropEnsemble (TIER 1.4)")
 
                 prop_model = PositionAwarePropEnsemble(prop_name)
                 metrics = prop_model.train(
@@ -5897,7 +5858,7 @@ def train_all_models(
                 print(f"  Saved: models/player_{prop_name}_position_aware.pkl")
 
                 # Also save regular ensemble for backward compatibility
-                print(f"  Also training general ensemble for backward compatibility...")
+                print("  Also training general ensemble for backward compatibility...")
                 general_model = PropEnsembleModel(prop_name)
                 general_metrics = general_model.train(X_player, y, sample_weights=player_sample_weights)
                 general_model.save(MODEL_DIR / f'player_{prop_name}_ensemble.pkl')
@@ -5914,7 +5875,7 @@ def train_all_models(
                 }
             else:
                 # Use standard ensemble model for other props
-                print(f"  Using PropEnsembleModel (stacked ensemble)")
+                print("  Using PropEnsembleModel (stacked ensemble)")
 
                 # Optuna hyperparameter optimization if enabled
                 optimized_params = None
@@ -6017,7 +5978,7 @@ def main():
     print("COMPLETE NBA MODEL TRAINING WITH BALLDONTLIE.IO")
     print("="*60)
     print(f"Current Date: {datetime.now().strftime('%Y-%m-%d')}")
-    print(f"Current Season: 2025-26")
+    print("Current Season: 2025-26")
     print()
 
     collector = ComprehensiveDataCollector()

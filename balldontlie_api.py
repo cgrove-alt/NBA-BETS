@@ -31,7 +31,7 @@ import requests
 import time
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Any
 from pathlib import Path
 import json
 
@@ -51,7 +51,7 @@ CACHE_TTL = {
 }
 
 
-def _get_cache_key(endpoint: str, params: Dict = None) -> str:
+def _get_cache_key(endpoint: str, params: dict = None) -> str:
     """Generate a unique cache key for an API request."""
     params_str = json.dumps(params or {}, sort_keys=True)
     key = f"{endpoint}:{params_str}"
@@ -64,7 +64,7 @@ def _get_cache_path(cache_key: str) -> Path:
     return CACHE_DIR / f"{cache_key}.json"
 
 
-def _read_cache(endpoint: str, params: Dict = None, ttl_type: str = "stats") -> Optional[Any]:
+def _read_cache(endpoint: str, params: dict = None, ttl_type: str = "stats") -> Any | None:
     """Read data from cache if valid."""
     cache_key = _get_cache_key(endpoint, params)
     cache_path = _get_cache_path(cache_key)
@@ -73,7 +73,7 @@ def _read_cache(endpoint: str, params: Dict = None, ttl_type: str = "stats") -> 
         return None
 
     try:
-        with open(cache_path, "r") as f:
+        with open(cache_path) as f:
             cached = json.load(f)
 
         # Check TTL
@@ -84,11 +84,11 @@ def _read_cache(endpoint: str, params: Dict = None, ttl_type: str = "stats") -> 
             return None
 
         return cached.get("data")
-    except (json.JSONDecodeError, IOError, KeyError):
+    except (OSError, json.JSONDecodeError, KeyError):
         return None
 
 
-def _write_cache(endpoint: str, params: Dict, data: Any) -> None:
+def _write_cache(endpoint: str, params: dict, data: Any) -> None:
     """Write data to cache."""
     if not data:
         return
@@ -103,7 +103,7 @@ def _write_cache(endpoint: str, params: Dict, data: Any) -> None:
                 "endpoint": endpoint,
                 "data": data,
             }, f)
-    except (IOError, TypeError):
+    except (OSError, TypeError):
         pass
 
 
@@ -126,17 +126,17 @@ def clear_bdl_cache(older_than_hours: float = 0) -> int:
     for cache_file in CACHE_DIR.glob("*.json"):
         try:
             if older_than_hours > 0:
-                with open(cache_file, "r") as f:
+                with open(cache_file) as f:
                     cached = json.load(f)
                     if cached.get("cached_at", 0) > cutoff:
                         continue
             cache_file.unlink()
             removed += 1
-        except (IOError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError):
             try:
                 cache_file.unlink()
                 removed += 1
-            except IOError:
+            except OSError:
                 pass
 
     return removed
@@ -178,7 +178,7 @@ class BalldontlieAPI:
         "goat": 600,    # 600 requests per minute
     }
 
-    def __init__(self, api_key: Optional[str] = None, tier: str = "goat"):
+    def __init__(self, api_key: str | None = None, tier: str = "goat"):
         """
         Initialize the Balldontlie client.
 
@@ -213,7 +213,7 @@ class BalldontlieAPI:
             time.sleep(self.min_delay - elapsed)
         self._last_request = time.time()
 
-    def _get(self, endpoint: str, params: Dict = None, version: int = 1, cache_ttl: str = None) -> Any:
+    def _get(self, endpoint: str, params: dict = None, version: int = 1, cache_ttl: str = None) -> Any:
         """
         Make a GET request to the API with optional caching.
 
@@ -247,13 +247,13 @@ class BalldontlieAPI:
 
             if response.status_code == 401:
                 raise ValueError("Invalid API key or insufficient permissions")
-            elif response.status_code == 403:
-                raise ValueError(f"This endpoint requires a higher tier subscription")
-            elif response.status_code == 429:
+            if response.status_code == 403:
+                raise ValueError("This endpoint requires a higher tier subscription")
+            if response.status_code == 429:
                 print("Rate limited - waiting 60 seconds...")
                 time.sleep(60)
                 return self._get(endpoint, params, version, cache_ttl)
-            elif response.status_code != 200:
+            if response.status_code != 200:
                 print(f"API error {response.status_code}: {response.text[:200]}")
                 return None
 
@@ -271,17 +271,17 @@ class BalldontlieAPI:
 
     # ==================== FREE TIER ====================
 
-    def get_teams(self) -> List[Dict]:
+    def get_teams(self) -> list[dict]:
         """Get all NBA teams (cached for 1 week)."""
         data = self._get("teams", cache_ttl="static")
         return data.get("data", []) if data else []
 
-    def get_team(self, team_id: int) -> Dict:
+    def get_team(self, team_id: int) -> dict:
         """Get a specific team by ID (cached for 1 week)."""
         data = self._get(f"teams/{team_id}", cache_ttl="static")
         return data.get("data", {}) if data else {}
 
-    def get_players(self, search: str = None, per_page: int = 100) -> List[Dict]:
+    def get_players(self, search: str = None, per_page: int = 100) -> list[dict]:
         """
         Get players.
 
@@ -299,18 +299,18 @@ class BalldontlieAPI:
         data = self._get("players", params)
         return data.get("data", []) if data else []
 
-    def get_player(self, player_id: int) -> Dict:
+    def get_player(self, player_id: int) -> dict:
         """Get a specific player by ID."""
         data = self._get(f"players/{player_id}")
         return data.get("data", {}) if data else {}
 
     def get_games(
         self,
-        dates: List[str] = None,
-        seasons: List[int] = None,
-        team_ids: List[int] = None,
+        dates: list[str] = None,
+        seasons: list[int] = None,
+        team_ids: list[int] = None,
         per_page: int = 100,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get games.
 
@@ -335,7 +335,7 @@ class BalldontlieAPI:
         data = self._get("games", params)
         return data.get("data", []) if data else []
 
-    def get_todays_games(self) -> List[Dict]:
+    def get_todays_games(self) -> list[dict]:
         """Get all games scheduled for today."""
         today = datetime.now().strftime("%Y-%m-%d")
         return self.get_games(dates=[today])
@@ -345,7 +345,7 @@ class BalldontlieAPI:
         team_id: int,
         from_date: str = None,
         days_ahead: int = 7
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get upcoming games for a specific team.
 
@@ -388,23 +388,22 @@ class BalldontlieAPI:
         all_games = self.get_games(dates=dates, team_ids=[team_id])
 
         # Sort by date
-        sorted_games = sorted(
+        return sorted(
             all_games,
             key=lambda g: g.get('date', '') or g.get('datetime', '') or ''
         )
 
-        return sorted_games
 
     # ==================== ALL-STAR TIER ($9.99) ====================
 
     def get_player_stats(
         self,
-        player_ids: List[int] = None,
-        game_ids: List[int] = None,
-        dates: List[str] = None,
-        seasons: List[int] = None,
+        player_ids: list[int] = None,
+        game_ids: list[int] = None,
+        dates: list[str] = None,
+        seasons: list[int] = None,
         per_page: int = 100,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get player game statistics.
 
@@ -439,7 +438,7 @@ class BalldontlieAPI:
         player_id: int,
         season: int = None,
         max_pages: int = 10,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Fetch ALL player game stats with pagination.
 
@@ -495,7 +494,7 @@ class BalldontlieAPI:
         before_date: str,
         season: int = None,
         last_n_games: int = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Fetch player stats for games BEFORE a specific date.
 
@@ -549,9 +548,9 @@ class BalldontlieAPI:
     def get_players_paginated(
         self,
         search: str = None,
-        team_ids: List[int] = None,
+        team_ids: list[int] = None,
         max_pages: int = 20,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Fetch ALL players with pagination.
 
@@ -596,7 +595,7 @@ class BalldontlieAPI:
 
         return all_players
 
-    def get_all_active_players(self) -> List[Dict]:
+    def get_all_active_players(self) -> list[dict]:
         """
         Fetch ALL active NBA players with pagination.
 
@@ -631,7 +630,7 @@ class BalldontlieAPI:
 
         return all_players
 
-    def get_active_players(self) -> List[Dict]:
+    def get_active_players(self) -> list[dict]:
         """
         Get all active NBA players.
 
@@ -640,7 +639,7 @@ class BalldontlieAPI:
         data = self._get("players/active")
         return data.get("data", []) if data else []
 
-    def get_injuries(self, team_ids: List[int] = None, player_ids: List[int] = None) -> List[Dict]:
+    def get_injuries(self, team_ids: list[int] = None, player_ids: list[int] = None) -> list[dict]:
         """
         Get current player injuries.
 
@@ -667,8 +666,8 @@ class BalldontlieAPI:
     def get_betting_odds(
         self,
         date: str = None,
-        game_ids: List[int] = None,
-    ) -> List[Dict]:
+        game_ids: list[int] = None,
+    ) -> list[dict]:
         """
         Get betting odds from multiple sportsbooks.
 
@@ -697,12 +696,12 @@ class BalldontlieAPI:
         data = self._get("odds", params, version=2)
         return data.get("data", []) if data else []
 
-    def get_todays_odds(self) -> List[Dict]:
+    def get_todays_odds(self) -> list[dict]:
         """Get betting odds for today's games."""
         today = datetime.now().strftime("%Y-%m-%d")
         return self.get_betting_odds(date=today)
 
-    def get_live_box_scores(self) -> List[Dict]:
+    def get_live_box_scores(self) -> list[dict]:
         """
         Get live box scores for today's games.
 
@@ -713,7 +712,7 @@ class BalldontlieAPI:
         data = self._get("box_scores/live")
         return data.get("data", []) if data else []
 
-    def get_box_score(self, game_id: int) -> Dict:
+    def get_box_score(self, game_id: int) -> dict:
         """
         Get box score for a specific game.
 
@@ -731,8 +730,8 @@ class BalldontlieAPI:
     def get_season_averages(
         self,
         season: int = None,
-        player_ids: List[int] = None,
-    ) -> List[Dict]:
+        player_ids: list[int] = None,
+    ) -> list[dict]:
         """
         Get season averages for players.
 
@@ -764,7 +763,7 @@ class BalldontlieAPI:
 
         return results
 
-    def get_standings(self, season: int = None) -> List[Dict]:
+    def get_standings(self, season: int = None) -> list[dict]:
         """
         Get current team standings.
 
@@ -779,7 +778,7 @@ class BalldontlieAPI:
         if season is None:
             season = datetime.now().year if datetime.now().month > 9 else datetime.now().year - 1
 
-        data = self._get(f"standings", {"season": season})
+        data = self._get("standings", {"season": season})
         return data.get("data", []) if data else []
 
     def get_leaders(
@@ -787,7 +786,7 @@ class BalldontlieAPI:
         stat: str = "pts",
         season: int = None,
         per_page: int = 25,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get league leaders for a specific stat.
 
@@ -808,7 +807,7 @@ class BalldontlieAPI:
         data = self._get("leaders", params)
         return data.get("data", []) if data else []
 
-    def get_player_props(self, game_id: int) -> List[Dict]:
+    def get_player_props(self, game_id: int) -> list[dict]:
         """
         Get player prop bets for a game.
 
@@ -827,7 +826,7 @@ class BalldontlieAPI:
         self,
         game_id: int = None,
         player_id: int = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get advanced statistics.
 
@@ -852,19 +851,19 @@ class BalldontlieAPI:
 
 # ==================== CONVENIENCE FUNCTIONS ====================
 
-def get_todays_nba_odds(api_key: Optional[str] = None) -> List[Dict]:
+def get_todays_nba_odds(api_key: str | None = None) -> list[dict]:
     """Quick function to get today's NBA betting odds."""
     api = BalldontlieAPI(api_key)
     return api.get_todays_odds()
 
 
-def get_live_scores(api_key: Optional[str] = None) -> List[Dict]:
+def get_live_scores(api_key: str | None = None) -> list[dict]:
     """Quick function to get live NBA scores."""
     api = BalldontlieAPI(api_key)
     return api.get_live_box_scores()
 
 
-def get_nba_injuries(api_key: Optional[str] = None) -> List[Dict]:
+def get_nba_injuries(api_key: str | None = None) -> list[dict]:
     """Quick function to get current NBA injuries."""
     api = BalldontlieAPI(api_key)
     return api.get_injuries()
@@ -872,7 +871,7 @@ def get_nba_injuries(api_key: Optional[str] = None) -> List[Dict]:
 
 # ==================== ODDS FORMATTING ====================
 
-def format_odds_for_model(raw_odds: List[Dict]) -> Dict[str, Dict]:
+def format_odds_for_model(raw_odds: list[dict]) -> dict[str, dict]:
     """
     Format Balldontlie odds into our standard format.
 

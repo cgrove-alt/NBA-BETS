@@ -43,18 +43,17 @@ PLAYER PROP FEATURES (NEW - temporal-safe):
 =============================================================================
 """
 
+from __future__ import annotations
+
 import numpy as np
-import requests
+import pandas as pd
 import concurrent.futures
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Tuple
 
 from data_fetcher import (
     fetch_team_statistics,
     fetch_team_statistics_before_date,
     fetch_historical_games,
-    fetch_player_stats,
-    fetch_player_stats_before_date,  # NBA API temporal-safe
     fetch_league_team_stats,
     fetch_team_roster,
     fetch_head_to_head,
@@ -62,11 +61,8 @@ from data_fetcher import (
     get_team_id,
     get_player_id,
     # NEW: Balldontlie API primary data layer (faster, 600 req/min)
-    fetch_player_stats_bdl,
-    fetch_player_stats_before_date_bdl,
     fetch_player_stats_auto,
     fetch_player_stats_before_date_auto,
-    fetch_season_averages_bdl,
     fetch_injuries_bdl,
     get_player_injury_status,
 )
@@ -158,7 +154,7 @@ NBA_ARENA_DATA = {
 TEAM_ABBREV_MAP = {'NJN': 'BKN', 'SEA': 'OKC', 'VAN': 'MEM', 'NOH': 'NOP', 'NOK': 'NOP'}
 
 
-def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
     """Calculate great-circle distance between two points in miles."""
     from math import radians, cos, sin, asin, sqrt
     lat1, lon1 = radians(coord1[0]), radians(coord1[1])
@@ -168,7 +164,7 @@ def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float])
     return 2 * 3956 * asin(sqrt(a))  # 3956 = Earth's radius in miles
 
 
-def calculate_travel_fatigue(last_venue: str, current_venue: str, days_rest: int) -> Dict:
+def calculate_travel_fatigue(last_venue: str, current_venue: str, days_rest: int) -> dict:
     """
     TIER 1.2: Calculate travel-related fatigue for predictions.
 
@@ -293,19 +289,18 @@ def calculate_motivation_score(
             # Playoff race! Maximum motivation
             motivation = 0.8 + (0.2 * (1 - games_back_playoff / 2))
             return round(min(motivation, 1.0), 3)
-        elif games_back_playoff > 8:
+        if games_back_playoff > 8:
             # Too far back, transitioning to tank mode
             tank_factor = min(1.0, (games_back_playoff - 8) / 10)
             return round(-0.5 - (0.5 * tank_factor), 3)
-        else:
-            # Fighting but not quite in it
-            return round(0.3 * (1 - (games_back_playoff - 2) / 6), 3)
+        # Fighting but not quite in it
+        return round(0.3 * (1 - (games_back_playoff - 2) / 6), 3)
 
     # Mid-season motivation
     if games_back_playoff <= 4:
         # In the playoff picture
         return round(0.3 + (0.3 * (1 - games_back_playoff / 4)), 3)
-    elif games_back_playoff > 10:
+    if games_back_playoff > 10:
         # Clearly out of it early
         return round(-0.3 * min(1.0, (games_back_playoff - 10) / 10), 3)
 
@@ -448,7 +443,7 @@ def validate_and_clip_feature(value: float, feature_name: str, warn: bool = True
     return float(value)
 
 
-def validate_features_dict(features: Dict, prefix: str = "", warn: bool = True) -> Dict:
+def validate_features_dict(features: dict, prefix: str = "", warn: bool = True) -> dict:
     """
     Validate and clip all numeric features in a dictionary.
 
@@ -532,7 +527,7 @@ class InjuryReportManager:
         self._injury_cache = {}
         self._all_injuries_fetched = False
 
-    def fetch_all_injuries(self) -> List[Dict]:
+    def fetch_all_injuries(self) -> list[dict]:
         """
         Fetch all current NBA injuries from Balldontlie API.
 
@@ -570,12 +565,12 @@ class InjuryReportManager:
 
                 self._all_injuries_fetched = True
                 return injuries
-        except Exception as e:
+        except Exception:
             pass
 
         return []
 
-    def fetch_team_injuries(self, team_abbrev: str) -> List[Dict]:
+    def fetch_team_injuries(self, team_abbrev: str) -> list[dict]:
         """
         Fetch injuries for a specific team from Balldontlie API.
 
@@ -608,7 +603,7 @@ class InjuryReportManager:
 
         return []
 
-    def is_player_injured(self, player_name: str) -> Optional[Dict]:
+    def is_player_injured(self, player_name: str) -> dict | None:
         """
         Check if a specific player is injured.
 
@@ -620,7 +615,7 @@ class InjuryReportManager:
         """
         return get_player_injury_status(player_name)
 
-    def set_injury_report(self, team_id: int, injuries: List[Dict]):
+    def set_injury_report(self, team_id: int, injuries: list[dict]):
         """
         Set injury report for a team manually.
 
@@ -634,7 +629,7 @@ class InjuryReportManager:
         """
         self._injury_cache[team_id] = injuries
 
-    def get_injury_report(self, team_id: int) -> List[Dict]:
+    def get_injury_report(self, team_id: int) -> list[dict]:
         """Get cached injury report for a team."""
         return self._injury_cache.get(team_id, [])
 
@@ -664,7 +659,7 @@ class InjuryReportManager:
 
         return out_players
 
-    def calculate_player_value(self, player_stats: Dict, position: str) -> float:
+    def calculate_player_value(self, player_stats: dict, position: str) -> float:
         """
         Calculate a player's value score based on their stats.
 
@@ -690,7 +685,7 @@ class InjuryReportManager:
 
         return base_value * minutes_factor
 
-    def calculate_injury_impact(self, team_id: int) -> Dict:
+    def calculate_injury_impact(self, team_id: int) -> dict:
         """
         Calculate the overall impact of injuries on team performance.
 
@@ -793,7 +788,7 @@ class HeadToHeadAnalyzer:
     def __init__(self, season="2025-26"):
         self.season = season
 
-    def analyze_h2h(self, team1_id: int, team2_id: int, include_previous_season: bool = True, before_date: str = None) -> Dict:
+    def analyze_h2h(self, team1_id: int, team2_id: int, include_previous_season: bool = True, before_date: str = None) -> dict:
         """
         Analyze head-to-head history between two teams.
 
@@ -872,7 +867,7 @@ class PositionalAnalyzer:
                 return group
         return "G"  # Default to guard
 
-    def analyze_team_positional_strength(self, team_id: int) -> Dict:
+    def analyze_team_positional_strength(self, team_id: int) -> dict:
         """
         Analyze team's strength at each position group.
 
@@ -955,7 +950,7 @@ class PositionalAnalyzer:
 
         return strengths
 
-    def calculate_positional_matchup(self, team1_id: int, team2_id: int) -> Dict:
+    def calculate_positional_matchup(self, team1_id: int, team2_id: int) -> dict:
         """
         Calculate positional advantages in a matchup.
 
@@ -1358,7 +1353,7 @@ class TeamFeatureGenerator:
             games_back_playoff=games_back_estimate,
         )
 
-        features = {
+        return {
             # Basic stats
             "team_id": team_id,
             "is_home": 1 if is_home else 0,
@@ -1417,13 +1412,12 @@ class TeamFeatureGenerator:
             "motivation_score": motivation,
         }
 
-        return features
 
 
 class MatchupFeatureGenerator:
     """Generate features for matchup predictions with comprehensive analysis."""
 
-    def __init__(self, season="2025-26", injury_manager: Optional[InjuryReportManager] = None):
+    def __init__(self, season="2025-26", injury_manager: InjuryReportManager | None = None):
         self.season = season
         self.team_generator = TeamFeatureGenerator(season)
         self.h2h_analyzer = HeadToHeadAnalyzer(season)
@@ -1441,7 +1435,7 @@ class MatchupFeatureGenerator:
         self._h2h_cache = None
         self._positional_cache = None
 
-    def _get_team_features(self, team_id: int, is_home: bool, last_n_games: int = 10, game_date: str = None, current_venue: str = None) -> Dict:
+    def _get_team_features(self, team_id: int, is_home: bool, last_n_games: int = 10, game_date: str = None, current_venue: str = None) -> dict:
         """Get team features with caching to avoid duplicate API calls.
 
         TIER 1.2: Now accepts current_venue for travel fatigue calculations.
@@ -1453,7 +1447,7 @@ class MatchupFeatureGenerator:
             )
         return self._team_features_cache[cache_key]
 
-    def analyze_head_to_head(self, home_team_id: int, away_team_id: int, game_date: str = None) -> Dict:
+    def analyze_head_to_head(self, home_team_id: int, away_team_id: int, game_date: str = None) -> dict:
         """
         Analyze head-to-head history for matchup features.
 
@@ -1485,7 +1479,7 @@ class MatchupFeatureGenerator:
             "h2h_home_court_factor": h2h.get("home_team_advantage", 0.5),
         }
 
-    def analyze_positional_matchup(self, home_team_id: int, away_team_id: int) -> Dict:
+    def analyze_positional_matchup(self, home_team_id: int, away_team_id: int) -> dict:
         """
         Analyze positional strengths/weaknesses for matchup features.
 
@@ -1514,7 +1508,7 @@ class MatchupFeatureGenerator:
             "weakest_position": pos_matchup.get("weakest_position", "C"),
         }
 
-    def analyze_injury_impact(self, home_team_id: int, away_team_id: int) -> Dict:
+    def analyze_injury_impact(self, home_team_id: int, away_team_id: int) -> dict:
         """
         Analyze injury impact for both teams.
 
@@ -1704,7 +1698,7 @@ class MatchupFeatureGenerator:
                         "injury_count_home": home_injury_count,
                         "injury_count_away": away_injury_count,
                     })
-                except Exception as e:
+                except Exception:
                     # Fallback to defaults if injury_tracker_v3 unavailable
                     features.update({
                         "star_player_out_home": 0,
@@ -1746,7 +1740,7 @@ class MatchupFeatureGenerator:
                         "consensus_odds": market_features.get('consensus_odds', -110),
                         "steam_move_flag": int(market_features.get('steam_move_flag', False)),
                     })
-                except Exception as e:
+                except Exception:
                     # Fallback to defaults if betting market data unavailable
                     features.update({
                         "opening_line": 0.0,
@@ -1768,8 +1762,7 @@ class MatchupFeatureGenerator:
                 })
 
         # CRITICAL: Validate and clip all features to realistic ranges
-        features = validate_features_dict(features, warn=True)
-        return features
+        return validate_features_dict(features, warn=True)
 
     def generate_spread_features(self, home_team_id, away_team_id, last_n_games=10, include_advanced=True, game_date=None, venue=None):
         """
@@ -1836,8 +1829,7 @@ class MatchupFeatureGenerator:
         features.update(spread_features)
 
         # CRITICAL: Validate and clip all features to realistic ranges
-        features = validate_features_dict(features, warn=True)
-        return features
+        return validate_features_dict(features, warn=True)
 
     def generate_total_points_features(self, home_team_id, away_team_id, last_n_games=10, game_date=None):
         """
@@ -1857,7 +1849,7 @@ class MatchupFeatureGenerator:
         home_features = self._get_team_features(home_team_id, True, last_n_games, game_date)
         away_features = self._get_team_features(away_team_id, False, last_n_games, game_date)
 
-        features = {
+        return {
             "home_team_id": home_team_id,
             "away_team_id": away_team_id,
 
@@ -1888,7 +1880,6 @@ class MatchupFeatureGenerator:
             "away_location_pts": away_features["location_pts_avg"],
         }
 
-        return features
 
 
 class PlayerPropFeatureGenerator:
@@ -1908,7 +1899,7 @@ class PlayerPropFeatureGenerator:
                 self._balldontlie_api = None
         return self._balldontlie_api
 
-    def _calculate_dynamic_usage(self, game_log: List[Dict], last_n: int = 10) -> float:
+    def _calculate_dynamic_usage(self, game_log: list[dict], last_n: int = 10) -> float:
         """
         Calculate usage rate from recent game logs.
 
@@ -1941,7 +1932,7 @@ class PlayerPropFeatureGenerator:
 
         return round(usage_rate, 3)
 
-    def get_position_defense_features(self, opponent_team_id: int, player_position: str, game_date: str = None) -> Dict:
+    def get_position_defense_features(self, opponent_team_id: int, player_position: str, game_date: str = None) -> dict:
         """
         Get opponent's defensive stats against a specific position.
 
@@ -2005,7 +1996,7 @@ class PlayerPropFeatureGenerator:
         except Exception:
             return {}
 
-    def get_player_season_averages_balldontlie(self, player_id: int) -> Dict:
+    def get_player_season_averages_balldontlie(self, player_id: int) -> dict:
         """
         Fetch player season averages from Balldontlie API.
 
@@ -2041,7 +2032,7 @@ class PlayerPropFeatureGenerator:
             pass
         return {}
 
-    def calculate_opponent_defensive_context(self, opponent_team_id: int, player_position: str = None, game_date: str = None) -> Dict:
+    def calculate_opponent_defensive_context(self, opponent_team_id: int, player_position: str = None, game_date: str = None) -> dict:
         """
         Calculate opponent's defensive context for player prop predictions.
 
@@ -2105,7 +2096,7 @@ class PlayerPropFeatureGenerator:
             "pace_factor": pace / 100,  # Higher pace = more opportunities
         }
 
-    def analyze_player_vs_team_history(self, player_id: int, opponent_team_id: int, game_date: str = None) -> Dict:
+    def analyze_player_vs_team_history(self, player_id: int, opponent_team_id: int, game_date: str = None) -> dict:
         """
         Analyze player's historical performance against a specific team.
 
@@ -2171,11 +2162,11 @@ class PlayerPropFeatureGenerator:
             "vs_team_fg3_avg": np.mean(fg3) if fg3 else 0,
             "vs_team_min_avg": np.mean(mins) if mins else 0,
             "vs_team_plus_minus_avg": np.mean(plus_minus) if plus_minus else 0,
-            "vs_team_pra_avg": np.mean([p + r + a for p, r, a in zip(pts, reb, ast)]) if pts else 0,
+            "vs_team_pra_avg": np.mean([p + r + a for p, r, a in zip(pts, reb, ast, strict=False)]) if pts else 0,
         }
 
     def calculate_regression_to_mean(self, season_avg: float, recent_avg: float,
-                                      sample_size: int = 5, stat_type: str = "points") -> Dict:
+                                      sample_size: int = 5, stat_type: str = "points") -> dict:
         """
         Calculate regression-to-mean adjustment for player props.
 
@@ -2237,7 +2228,7 @@ class PlayerPropFeatureGenerator:
         }
 
     def calculate_shot_distribution_trends(self, player_game_logs: list,
-                                            last_n: int = 5) -> Dict:
+                                            last_n: int = 5) -> dict:
         """
         Calculate shot attempt distribution trends to predict 3PM props.
 
@@ -2356,7 +2347,7 @@ class PlayerPropFeatureGenerator:
             "fg3a_std": np.std(fg3_att),   # 3PA consistency
             "min_avg": np.mean(mins),
             "min_std": np.std(mins),
-            "pts_plus_reb_plus_ast_avg": np.mean([p + r + a for p, r, a in zip(pts, reb, ast)]),
+            "pts_plus_reb_plus_ast_avg": np.mean([p + r + a for p, r, a in zip(pts, reb, ast, strict=False)]),
         }
 
     def generate_points_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None, player_position: str = None):
@@ -2524,7 +2515,7 @@ class PlayerPropFeatureGenerator:
                     # Player name not found - default to 0
                     features["player_impact_metric"] = 0.0
                     features["opponent_def_impact"] = 0.0
-            except Exception as e:
+            except Exception:
                 # Silently handle any errors - don't break feature generation
                 features["player_impact_metric"] = 0.0
                 features["opponent_def_impact"] = 0.0
@@ -2887,7 +2878,7 @@ def generate_game_features(
     season="2025-26",
     last_n_games=10,
     include_advanced=True,
-    injury_manager: Optional[InjuryReportManager] = None,
+    injury_manager: InjuryReportManager | None = None,
     game_date=None,
 ):
     """
@@ -2976,7 +2967,7 @@ def generate_player_features(player_name, opponent_team=None, season="2025-26", 
     return features
 
 
-def create_injury_report(injuries_data: List[Dict], season="2025-26") -> InjuryReportManager:
+def create_injury_report(injuries_data: list[dict], season="2025-26") -> InjuryReportManager:
     """
     Create an InjuryReportManager with injury data.
 
@@ -2998,10 +2989,7 @@ def create_injury_report(injuries_data: List[Dict], season="2025-26") -> InjuryR
 
     for team_data in injuries_data:
         team = team_data.get("team")
-        if isinstance(team, str):
-            team_id = get_team_id(team)
-        else:
-            team_id = team
+        team_id = get_team_id(team) if isinstance(team, str) else team
 
         if team_id:
             manager.set_injury_report(team_id, team_data.get("injuries", []))
@@ -3090,10 +3078,10 @@ class LineupImpactCalculator:
 
     def calculate_missing_player_impact(
         self,
-        missing_players: List[str],
+        missing_players: list[str],
         team_abbrev: str,
-        status_probabilities: Dict[str, float] = None
-    ) -> Dict:
+        status_probabilities: dict[str, float] = None
+    ) -> dict:
         """
         Calculate the aggregate impact of missing players on team performance.
 
@@ -3107,7 +3095,7 @@ class LineupImpactCalculator:
             Dictionary with impact metrics
         """
         if status_probabilities is None:
-            status_probabilities = {p: 1.0 for p in missing_players}
+            status_probabilities = dict.fromkeys(missing_players, 1.0)
 
         impact = {
             "team": team_abbrev,
@@ -3192,10 +3180,10 @@ class LineupImpactCalculator:
 
     def calculate_usage_redistribution(
         self,
-        missing_players: List[str],
+        missing_players: list[str],
         team_abbrev: str,
-        remaining_players: List[str] = None
-    ) -> Dict:
+        remaining_players: list[str] = None
+    ) -> dict:
         """
         Calculate how usage will be redistributed when players are out.
 
@@ -3252,7 +3240,7 @@ class LineupImpactCalculator:
                 })
 
                 # Secondary beneficiaries
-                for player, usage in remaining_usages[1:3]:
+                for player, _usage in remaining_usages[1:3]:
                     boost = total_usage_void * 0.15
                     redistribution["projected_boosts"].append({
                         "player": player,
@@ -3265,11 +3253,11 @@ class LineupImpactCalculator:
     def generate_lineup_features(
         self,
         team_abbrev: str,
-        missing_players: List[str],
-        opponent_missing: List[str] = None,
-        status_probs: Dict[str, float] = None,
-        opponent_status_probs: Dict[str, float] = None
-    ) -> Dict:
+        missing_players: list[str],
+        opponent_missing: list[str] = None,
+        status_probs: dict[str, float] = None,
+        opponent_status_probs: dict[str, float] = None
+    ) -> dict:
         """
         Generate features for model training based on lineup situation.
 
@@ -3331,7 +3319,7 @@ class LineupImpactCalculator:
 
         return features
 
-    def get_rotation_depth(self, team_abbrev: str, available_players: List[str]) -> Dict:
+    def get_rotation_depth(self, team_abbrev: str, available_players: list[str]) -> dict:
         """
         Assess team's rotation depth given available players.
 
@@ -3404,7 +3392,7 @@ class LineMovementFeatureGenerator:
         public_over_pct: float = None,
         model_spread_prediction: float = None,
         time_to_game_hours: float = None
-    ) -> Dict:
+    ) -> dict:
         """
         Generate features from line movements.
 
@@ -3445,8 +3433,7 @@ class LineMovementFeatureGenerator:
             def ml_to_prob(ml):
                 if ml > 0:
                     return 100 / (ml + 100)
-                else:
-                    return abs(ml) / (abs(ml) + 100)
+                return abs(ml) / (abs(ml) + 100)
 
             opening_prob = ml_to_prob(opening_ml_home)
             current_prob = ml_to_prob(current_ml_home)
@@ -3602,7 +3589,7 @@ class LineMovementFeatureGenerator:
         closing_ml: int,
         bet_total: float,
         closing_total: float
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate CLV-related features for bet evaluation.
 
@@ -3631,8 +3618,7 @@ class LineMovementFeatureGenerator:
                 return 0.5
             if ml > 0:
                 return 100 / (ml + 100)
-            else:
-                return abs(ml) / (abs(ml) + 100)
+            return abs(ml) / (abs(ml) + 100)
 
         bet_prob = ml_to_prob(bet_ml)
         closing_prob = ml_to_prob(closing_ml)
@@ -3756,7 +3742,7 @@ class TravelFatigueFeatureGenerator:
         games_in_last_14_days: int = None,
         is_back_to_back: bool = False,
         road_trip_game_number: int = None
-    ) -> Dict:
+    ) -> dict:
         """
         Generate travel and fatigue related features.
 
@@ -3994,7 +3980,7 @@ class FourFactorsCalculator:
         tov: float,
         orb: float,
         opp_drb: float,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Calculate all Four Factors from box score stats.
 
@@ -4009,8 +3995,8 @@ class FourFactorsCalculator:
 
     def calculate_four_factors_score(
         self,
-        team_factors: Dict[str, float],
-        opp_factors: Dict[str, float] = None,
+        team_factors: dict[str, float],
+        opp_factors: dict[str, float] = None,
     ) -> float:
         """
         Calculate composite Four Factors score.
@@ -4049,10 +4035,10 @@ class FourFactorsCalculator:
 
     def generate_four_factors_features(
         self,
-        team_stats: Dict[str, float],
-        opp_stats: Dict[str, float] = None,
+        team_stats: dict[str, float],
+        opp_stats: dict[str, float] = None,
         prefix: str = "",
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Generate Four Factors features from team stats.
 
@@ -4155,7 +4141,7 @@ class ClutchPerformanceCalculator:
         clutch_ftm: float,
         clutch_fta: float,
         clutch_tov: float,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Calculate clutch performance metrics.
 
@@ -4202,11 +4188,11 @@ class ClutchPerformanceCalculator:
 
     def generate_clutch_features(
         self,
-        team_clutch_stats: Dict[str, float],
-        team_regular_stats: Dict[str, float],
-        record_in_close_games: Tuple[int, int] = None,
-        games_decided_by_margin: Dict[str, Tuple[int, int]] = None,
-    ) -> Dict[str, float]:
+        team_clutch_stats: dict[str, float],
+        team_regular_stats: dict[str, float],
+        record_in_close_games: tuple[int, int] = None,
+        games_decided_by_margin: dict[str, tuple[int, int]] = None,
+    ) -> dict[str, float]:
         """
         Generate comprehensive clutch features.
 
@@ -4314,7 +4300,7 @@ class MomentumCalculator:
 
     def calculate_momentum_score(
         self,
-        recent_values: List[float],
+        recent_values: list[float],
         season_average: float,
         lookback: int = 5,
     ) -> float:
@@ -4341,7 +4327,7 @@ class MomentumCalculator:
 
     def calculate_trend(
         self,
-        values: List[float],
+        values: list[float],
         lookback: int = 5,
     ) -> float:
         """
@@ -4377,8 +4363,8 @@ class MomentumCalculator:
 
     def calculate_streak(
         self,
-        results: List[bool],
-    ) -> Tuple[str, int]:
+        results: list[bool],
+    ) -> tuple[str, int]:
         """
         Calculate current win/loss streak.
 
@@ -4406,15 +4392,15 @@ class MomentumCalculator:
 
     def generate_momentum_features(
         self,
-        recent_pts_for: List[float],
-        recent_pts_against: List[float],
-        recent_results: List[bool],  # True = win
+        recent_pts_for: list[float],
+        recent_pts_against: list[float],
+        recent_results: list[bool],  # True = win
         season_ppg: float,
         season_oppg: float,
-        season_record: Tuple[int, int],
-        recent_ats_results: List[bool] = None,
-        recent_margins: List[float] = None,
-    ) -> Dict[str, float]:
+        season_record: tuple[int, int],
+        recent_ats_results: list[bool] = None,
+        recent_margins: list[float] = None,
+    ) -> dict[str, float]:
         """
         Generate comprehensive momentum features.
 
@@ -4448,7 +4434,7 @@ class MomentumCalculator:
 
         # Net rating momentum
         if recent_pts_for and recent_pts_against:
-            recent_net = [pf - pa for pf, pa in zip(recent_pts_for[-5:], recent_pts_against[-5:])]
+            recent_net = [pf - pa for pf, pa in zip(recent_pts_for[-5:], recent_pts_against[-5:], strict=False)]
             season_net = season_ppg - season_oppg
             if season_net != 0:
                 features['net_rating_momentum'] = (sum(recent_net) / len(recent_net) - season_net) / max(abs(season_net), 1)
@@ -4562,9 +4548,9 @@ class FeatureSelector:
         """
         self.min_features = min_features
         self.cv_folds = cv_folds
-        self.selected_features: List[str] = []
-        self.feature_importances: Dict[str, float] = {}
-        self.elimination_history: List[Dict] = []
+        self.selected_features: list[str] = []
+        self.feature_importances: dict[str, float] = {}
+        self.elimination_history: list[dict] = []
         self.is_fitted = False
 
     def fit(self, X: 'pd.DataFrame', y: 'np.ndarray', model_type: str = 'classification') -> 'FeatureSelector':
@@ -4632,7 +4618,7 @@ class FeatureSelector:
             selector.fit(X_clean, y)
         except Exception as e:
             print(f"  [FeatureSelector] RFECV failed: {e}")
-            print(f"  [FeatureSelector] Falling back to all features")
+            print("  [FeatureSelector] Falling back to all features")
             self.selected_features = list(X.columns)
             self.is_fitted = True
             return self
@@ -4646,15 +4632,15 @@ class FeatureSelector:
             importances = selector.estimator_.feature_importances_
             # Map importances to selected features only
             self.feature_importances = {}
-            for feat, imp in zip(self.selected_features, importances):
+            for feat, imp in zip(self.selected_features, importances, strict=False):
                 self.feature_importances[feat] = float(imp)
 
         # Track elimination history
         self.elimination_history = []
         if hasattr(selector, 'cv_results_'):
-            for i, (n_feat, mean_score) in enumerate(zip(
+            for _i, (n_feat, mean_score) in enumerate(zip(
                 range(len(X.columns), self.min_features - 1, -1),
-                selector.cv_results_['mean_test_score']
+                selector.cv_results_['mean_test_score'], strict=False
             )):
                 self.elimination_history.append({
                     'n_features': n_feat,
@@ -4675,7 +4661,7 @@ class FeatureSelector:
                 key=lambda x: x[1],
                 reverse=True
             )[:10]
-            print(f"  [FeatureSelector] Top 10 features:")
+            print("  [FeatureSelector] Top 10 features:")
             for feat, imp in sorted_features:
                 print(f"    - {feat}: {imp:.4f}")
 
@@ -4745,7 +4731,7 @@ class FeatureSelector:
         """
         import json
 
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             data = json.load(f)
 
         self.selected_features = data.get('selected_features', [])
@@ -4756,7 +4742,7 @@ class FeatureSelector:
         print(f"  [FeatureSelector] Loaded {len(self.selected_features)} features from {filepath}")
         return self
 
-    def get_zero_importance_features(self, threshold: float = 0.0001) -> List[str]:
+    def get_zero_importance_features(self, threshold: float = 0.0001) -> list[str]:
         """
         Get features with importance below threshold.
 
@@ -4776,10 +4762,10 @@ class FeatureSelector:
 
 
 # Global feature selector instance
-_feature_selector: Optional[FeatureSelector] = None
+_feature_selector: FeatureSelector | None = None
 
 
-def get_feature_selector() -> Optional[FeatureSelector]:
+def get_feature_selector() -> FeatureSelector | None:
     """Get the global feature selector instance."""
     return _feature_selector
 
@@ -4849,10 +4835,10 @@ print(f"RLM Detected: {lm_features['is_rlm']}")''')
 # =============================================================================
 
 def calculate_clv_metrics(
-    bet_odds: List[float],
-    closing_odds: List[float],
-    outcomes: List[int] = None
-) -> Dict:
+    bet_odds: list[float],
+    closing_odds: list[float],
+    outcomes: list[int] = None
+) -> dict:
     """
     Calculate Closing Line Value metrics for a series of bets.
 
@@ -4878,11 +4864,10 @@ def calculate_clv_metrics(
         """Convert American odds to implied probability."""
         if odds > 0:
             return 100 / (odds + 100)
-        else:
-            return abs(odds) / (abs(odds) + 100)
+        return abs(odds) / (abs(odds) + 100)
 
     clv_values = []
-    for bet, closing in zip(bet_odds, closing_odds):
+    for bet, closing in zip(bet_odds, closing_odds, strict=False):
         bet_prob = american_to_prob(bet)
         closing_prob = american_to_prob(closing)
         # CLV = closing implied - bet implied (positive = beat the line)
@@ -4911,7 +4896,7 @@ def calculate_clv_metrics(
     return metrics
 
 
-def calculate_clv_from_bets(bets: List[Dict]) -> Dict:
+def calculate_clv_from_bets(bets: list[dict]) -> dict:
     """
     Calculate CLV from a list of bet records.
 

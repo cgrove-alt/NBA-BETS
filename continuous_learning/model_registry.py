@@ -14,7 +14,7 @@ import pickle
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any
 from dataclasses import dataclass, asdict
 
 # Add parent for imports
@@ -59,15 +59,15 @@ class ModelVersion:
     version_id: str
     model_type: str
     model_path: str
-    metrics: Dict
+    metrics: dict
     training_date: str
     is_active: bool
-    feature_names: List[str] = None
-    hyperparameters: Dict = None
+    feature_names: list[str] = None
+    hyperparameters: dict = None
     training_samples: int = 0
     notes: str = ""
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 
@@ -92,17 +92,17 @@ class ModelRegistry:
         self.base_path.mkdir(exist_ok=True)
         (self.base_path / "versions").mkdir(exist_ok=True)
 
-    def _load_registry(self) -> Dict:
+    def _load_registry(self) -> dict:
         """Load registry from JSON file."""
         if self.registry_file.exists():
             try:
                 return json.loads(self.registry_file.read_text())
             except json.JSONDecodeError:
-                print(f"Warning: Registry file corrupted, starting fresh")
+                print("Warning: Registry file corrupted, starting fresh")
                 return {}
         return {}
 
-    def _save_registry(self, registry: Dict):
+    def _save_registry(self, registry: dict):
         """Save registry to JSON file."""
         self.registry_file.write_text(json.dumps(registry, indent=2, default=str))
 
@@ -110,10 +110,10 @@ class ModelRegistry:
         self,
         model_type: str,
         model_path: str,
-        metrics: Dict,
+        metrics: dict,
         training_date: str = None,
-        feature_names: List[str] = None,
-        hyperparameters: Dict = None,
+        feature_names: list[str] = None,
+        hyperparameters: dict = None,
         training_samples: int = 0,
         notes: str = "",
         make_active: bool = True,
@@ -180,7 +180,7 @@ class ModelRegistry:
         print(f"Registered model {model_type} version {version_id}")
         return version_id
 
-    def get_active_model(self, model_type: str) -> Optional[Dict]:
+    def get_active_model(self, model_type: str) -> dict | None:
         """Get currently active model for a type.
 
         Args:
@@ -202,7 +202,7 @@ class ModelRegistry:
 
         return None
 
-    def get_all_versions(self, model_type: str) -> List[Dict]:
+    def get_all_versions(self, model_type: str) -> list[dict]:
         """Get all versions for a model type.
 
         Args:
@@ -214,7 +214,7 @@ class ModelRegistry:
         registry = self._load_registry()
         return registry.get(model_type, [])
 
-    def get_version(self, model_type: str, version_id: str) -> Optional[Dict]:
+    def get_version(self, model_type: str, version_id: str) -> dict | None:
         """Get a specific model version.
 
         Args:
@@ -305,7 +305,7 @@ class ModelRegistry:
         model_type: str,
         version_a: str,
         version_b: str
-    ) -> Dict:
+    ) -> dict:
         """Compare metrics between two versions.
 
         Args:
@@ -354,7 +354,7 @@ class ModelRegistry:
             'version_b_samples': b_data.get('training_samples', 0),
         }
 
-    def load_model(self, model_type: str, version_id: str = None) -> Optional[Any]:
+    def load_model(self, model_type: str, version_id: str = None) -> Any | None:
         """Load a model from the registry.
 
         Args:
@@ -384,7 +384,7 @@ class ModelRegistry:
             print(f"Error loading model: {e}")
             return None
 
-    def get_model_types(self) -> List[str]:
+    def get_model_types(self) -> list[str]:
         """Get all model types in the registry.
 
         Returns:
@@ -436,7 +436,7 @@ class ModelRegistry:
         registry = self._load_registry()
 
         print(f"\n{'='*60}")
-        print(f"MODEL REGISTRY STATUS")
+        print("MODEL REGISTRY STATUS")
         print(f"{'='*60}")
         print(f"Location: {self.base_path}")
         print(f"Model Types: {len(registry)}")

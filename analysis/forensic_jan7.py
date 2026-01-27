@@ -13,19 +13,14 @@ Usage:
     python3 analysis/forensic_jan7.py
 """
 
-import os
 import sys
 import json
-import pickle
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
-from collections import defaultdict
 from dataclasses import dataclass, field
 
 import numpy as np
-import pandas as pd
 
 warnings.filterwarnings('ignore')
 
@@ -52,14 +47,14 @@ class GameForensics:
     actual_away_score: int
 
     # Predictions
-    predicted_spread: Optional[float] = None
+    predicted_spread: float | None = None
     actual_spread: int = 0
 
     # Data quality
-    home_injuries_known: List[str] = field(default_factory=list)
-    away_injuries_known: List[str] = field(default_factory=list)
-    home_injuries_missed: List[str] = field(default_factory=list)
-    away_injuries_missed: List[str] = field(default_factory=list)
+    home_injuries_known: list[str] = field(default_factory=list)
+    away_injuries_known: list[str] = field(default_factory=list)
+    home_injuries_missed: list[str] = field(default_factory=list)
+    away_injuries_missed: list[str] = field(default_factory=list)
 
     # Features
     home_off_rating: float = 114.0
@@ -72,7 +67,7 @@ class GameForensics:
     # Analysis
     prediction_error: float = 0.0
     error_category: str = "unknown"  # data, features, variance, model
-    key_factors: List[str] = field(default_factory=list)
+    key_factors: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -93,8 +88,8 @@ class PropForensics:
     minutes_played: float = 0.0
     expected_minutes: float = 30.0
     was_injured: bool = False
-    teammate_injured: List[str] = field(default_factory=list)
-    opponent_key_player_out: List[str] = field(default_factory=list)
+    teammate_injured: list[str] = field(default_factory=list)
+    opponent_key_player_out: list[str] = field(default_factory=list)
 
     # Root cause
     root_cause: str = "unknown"  # minutes, matchup, variance, model, injury
@@ -146,7 +141,7 @@ class ForensicAnalyzer:
         self.backtester.load_models()
         self.backtester.load_historical_player_stats()
 
-    def fetch_jan7_games(self) -> List[Dict]:
+    def fetch_jan7_games(self) -> list[dict]:
         """Fetch all games from January 7th, 2026."""
         print(f"\nFetching games for {self.TARGET_DATE}...")
 
@@ -163,7 +158,7 @@ class ForensicAnalyzer:
             print(f"  Error fetching games: {e}")
             return []
 
-    def analyze_game(self, game: Dict) -> GameForensics:
+    def analyze_game(self, game: dict) -> GameForensics:
         """Perform forensic analysis on a single game."""
         game_id = game['id']
         home_team = game.get('home_team', {})
@@ -213,7 +208,7 @@ class ForensicAnalyzer:
 
         return forensics
 
-    def analyze_prop_prediction(self, pred: PropPrediction, game: Dict) -> PropForensics:
+    def analyze_prop_prediction(self, pred: PropPrediction, game: dict) -> PropForensics:
         """Analyze a single prop prediction failure."""
         forensics = PropForensics(
             player_name=pred.player_name,
@@ -243,7 +238,7 @@ class ForensicAnalyzer:
 
         return forensics
 
-    def run_forensic_analysis(self) -> Dict:
+    def run_forensic_analysis(self) -> dict:
         """Run the complete forensic analysis."""
         print("\n" + "=" * 60)
         print("FORENSIC ANALYSIS: JANUARY 7, 2026")
@@ -375,7 +370,7 @@ class ForensicAnalyzer:
 
         return results
 
-    def _generate_summary(self, results: BacktestResults) -> Dict:
+    def _generate_summary(self, results: BacktestResults) -> dict:
         """Generate forensic analysis summary."""
         summary = {
             'date': self.TARGET_DATE,
@@ -449,7 +444,7 @@ class ForensicAnalyzer:
 
         return summary
 
-    def print_report(self, summary: Dict):
+    def print_report(self, summary: dict):
         """Print formatted forensic report."""
         print("\n" + "=" * 60)
         print("FORENSIC ANALYSIS REPORT")
@@ -461,38 +456,38 @@ class ForensicAnalyzer:
 
         # Overall metrics
         metrics = summary.get('overall_metrics', {})
-        print(f"\n--- OVERALL ACCURACY ---")
+        print("\n--- OVERALL ACCURACY ---")
         print(f"RMSE: {metrics.get('rmse', 'N/A')}")
         print(f"MAE: {metrics.get('mae', 'N/A')}")
         print(f"Bias: {metrics.get('bias', 'N/A')}")
 
         # Error breakdown
-        print(f"\n--- ERROR CATEGORIZATION ---")
+        print("\n--- ERROR CATEGORIZATION ---")
         for category, data in summary.get('error_breakdown', {}).items():
             print(f"\n{category.upper()} ({data['count']} errors, avg={data['avg_error']:.1f}):")
             for example in data.get('examples', []):
                 print(f"  - {example}")
 
         # Worst predictions
-        print(f"\n--- TOP 10 WORST PREDICTIONS ---")
+        print("\n--- TOP 10 WORST PREDICTIONS ---")
         for i, pred in enumerate(summary.get('worst_predictions', [])[:10], 1):
             print(f"{i:2}. {pred['player']:<20} {pred['prop_type']:<10} "
                   f"Pred={pred['predicted']:>6.1f} Actual={pred['actual']:>6.1f} "
                   f"Error={pred['error']:>+7.1f}")
 
         # Key findings
-        print(f"\n--- KEY FINDINGS ---")
+        print("\n--- KEY FINDINGS ---")
         for finding in summary.get('key_findings', []):
             print(f"  * {finding}")
 
         # Recommendations
-        print(f"\n--- RECOMMENDATIONS ---")
+        print("\n--- RECOMMENDATIONS ---")
         for rec in summary.get('recommendations', []):
             print(f"  -> {rec}")
 
         print("\n" + "=" * 60)
 
-    def save_report(self, summary: Dict):
+    def save_report(self, summary: dict):
         """Save forensic report to file."""
         OUTPUT_DIR.mkdir(exist_ok=True)
 

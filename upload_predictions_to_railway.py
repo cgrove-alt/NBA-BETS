@@ -58,15 +58,12 @@ def upload_predictions_to_db(csv_path: str, database_url: str = None):
         # Extract from filename: predictions_2026-01-21.csv
         import re
         match = re.search(r'(\d{4}-\d{2}-\d{2})', csv_path)
-        if match:
-            prediction_date = match.group(1)
-        else:
-            prediction_date = datetime.now().strftime('%Y-%m-%d')
+        prediction_date = match.group(1) if match else datetime.now().strftime('%Y-%m-%d')
 
     print(f"📅 Prediction date: {prediction_date}")
 
     # Connect to PostgreSQL
-    print(f"\n🔌 Connecting to PostgreSQL...")
+    print("\n🔌 Connecting to PostgreSQL...")
     try:
         conn = psycopg2.connect(database_url)
         cursor = conn.cursor()
@@ -221,10 +218,10 @@ def upload_predictions_to_db(csv_path: str, database_url: str = None):
     conn.close()
 
     print("\n✅ UPLOAD COMPLETE!")
-    print(f"\n🔗 Test API endpoint:")
+    print("\n🔗 Test API endpoint:")
     print(f"   https://web-production-7b482.up.railway.app/api/predictions/{prediction_date}")
-    print(f"\n🌐 Check Vercel frontend:")
-    print(f"   https://your-vercel-site.vercel.app")
+    print("\n🌐 Check Vercel frontend:")
+    print("   https://your-vercel-site.vercel.app")
 
 
 def main():

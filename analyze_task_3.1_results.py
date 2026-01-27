@@ -13,12 +13,12 @@ Success Criteria:
 import json
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 
-def load_json_results(filepath: str) -> Dict[str, Any]:
+def load_json_results(filepath: str) -> dict[str, Any]:
     """Load backtest results from JSON file."""
-    with open(filepath, 'r') as f:
+    with open(filepath) as f:
         return json.load(f)
 
 
@@ -29,7 +29,7 @@ def calculate_improvement(baseline: float, new: float) -> float:
     return ((baseline - new) / baseline) * 100
 
 
-def analyze_prop_type(prop_name: str, baseline_data: Dict, new_data: Dict) -> Dict[str, Any]:
+def analyze_prop_type(prop_name: str, baseline_data: dict, new_data: dict) -> dict[str, Any]:
     """Analyze improvements for a specific prop type."""
     results = {
         'prop_type': prop_name,
@@ -59,7 +59,7 @@ def analyze_prop_type(prop_name: str, baseline_data: Dict, new_data: Dict) -> Di
     return results
 
 
-def format_results_table(analysis_results: Dict[str, Any]) -> str:
+def format_results_table(analysis_results: dict[str, Any]) -> str:
     """Format analysis results as a markdown table."""
     lines = []
     lines.append("## Backtest Results Comparison")
@@ -88,7 +88,7 @@ def format_results_table(analysis_results: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def generate_summary(analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+def generate_summary(analysis_results: dict[str, Any]) -> dict[str, Any]:
     """Generate overall summary of improvements."""
     rmse_improvements = []
     mae_improvements = []
@@ -121,7 +121,7 @@ def generate_summary(analysis_results: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def generate_markdown_report(analysis_results: Dict[str, Any], summary: Dict[str, Any]) -> str:
+def generate_markdown_report(analysis_results: dict[str, Any], summary: dict[str, Any]) -> str:
     """Generate complete markdown report."""
     lines = []
 
@@ -234,7 +234,7 @@ def main():
         print(f"Error: New results file not found: {new_file}")
         return
 
-    print(f"Analyzing backtest results:")
+    print("Analyzing backtest results:")
     print(f"  Baseline: {baseline_file}")
     print(f"  New:      {new_file}")
     print()
@@ -243,7 +243,7 @@ def main():
     try:
         baseline_data = load_json_results(baseline_file)
     except FileNotFoundError:
-        print(f"Warning: Baseline file not found, will compare to zero baseline")
+        print("Warning: Baseline file not found, will compare to zero baseline")
         baseline_data = {}
 
     new_data = load_json_results(new_file)
@@ -274,7 +274,7 @@ def main():
     with open(report_file, 'w') as f:
         f.write(report)
 
-    print(f"✓ Analysis complete!")
+    print("✓ Analysis complete!")
     print(f"  Report saved to: {report_file}")
     print()
     print("=" * 60)

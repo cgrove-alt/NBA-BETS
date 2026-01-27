@@ -31,7 +31,6 @@ New Endpoints (Task 4.4):
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,7 +79,7 @@ from backend.schemas import (
 )
 
 # Singleton data service instance
-_data_service: Optional[DataService] = None
+_data_service: DataService | None = None
 
 # Cache for game team mappings (game_id -> {"home": abbrev, "away": abbrev})
 _game_teams_cache: dict = {}
@@ -162,7 +161,7 @@ def health_check():
 
 @app.get("/api/games", response_model=GamesResponse)
 def get_games(
-    date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format (defaults to today Eastern)"),
+    date: str | None = Query(None, description="Date in YYYY-MM-DD format (defaults to today Eastern)"),
     force_refresh: bool = Query(False, description="Force refresh from API"),
     auto_generate_props: bool = Query(True, description="Automatically generate props for all games")
 ):
@@ -230,7 +229,7 @@ def get_games(
 
 # ============== PROPS ENDPOINTS ==============
 
-def _build_prop_prediction(player_data: dict, prop_key: str) -> Optional[PropPrediction]:
+def _build_prop_prediction(player_data: dict, prop_key: str) -> PropPrediction | None:
     """Build PropPrediction from flattened player data keys.
 
     DataService returns flattened keys like:
@@ -360,7 +359,7 @@ def start_props_fetch(
     game_id: str,
     home_abbrev: str = Query(..., description="Home team abbreviation"),
     away_abbrev: str = Query(..., description="Away team abbreviation"),
-    request: Optional[StartPropsRequest] = None,
+    request: StartPropsRequest | None = None,
 ):
     """Start background fetch of player props for a game."""
     global _game_teams_cache
@@ -584,7 +583,7 @@ def get_game_results(game_id: str):
         from prop_tracker import PropTracker
         tracker = PropTracker()
         predictions = tracker.get_predictions_for_game(game_id)
-    except Exception as e:
+    except Exception:
         predictions = []
 
     # FALLBACK 1: If no stored predictions, try props cache (DataService)
@@ -674,10 +673,7 @@ def get_game_results(game_id: str):
         hit = None
         if pick and pick != "-" and line is not None:
             total_picks += 1
-            if pick == "OVER" and actual > line:
-                hit = True
-                total_hits += 1
-            elif pick == "UNDER" and actual < line:
+            if pick == "OVER" and actual > line or pick == "UNDER" and actual < line:
                 hit = True
                 total_hits += 1
             else:
@@ -796,8 +792,8 @@ def get_game_odds(game_id: str):
 def get_best_bets(
     min_confidence: float = Query(55.0, ge=0, le=100, description="Minimum confidence threshold (model outputs 50-70%)"),
     min_edge: float = Query(4.0, ge=0, description="Minimum edge threshold (percentage)"),
-    prop_types: Optional[str] = Query(None, description="Comma-separated prop types to filter"),
-    pick_type: Optional[str] = Query(None, description="Filter by OVER or UNDER"),
+    prop_types: str | None = Query(None, description="Comma-separated prop types to filter"),
+    pick_type: str | None = Query(None, description="Filter by OVER or UNDER"),
     sort_by: str = Query("quality", description="Sort order: quality, confidence, or edge"),
 ):
     """Get best bets across all games based on confidence and edge thresholds.
@@ -937,7 +933,7 @@ def get_retrain_status():
                 retrain_history = json.load(f)
                 if retrain_history:
                     last_retrain = retrain_history[-1]
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             pass
 
     # Calculate model age (days since last successful retrain)
@@ -1031,10 +1027,7 @@ def get_daily_predictions(date: str):
     for _, row in df.iterrows():
         # Handle NaN values for string fields - pandas reads empty cells as NaN
         team = row.get('team', '')
-        if pd.notna(team) and team != '':
-            team = str(team)
-        else:
-            team = ''
+        team = str(team) if pd.notna(team) and team != '' else ''
 
         uncertainty_flag = row.get('uncertainty_flag')
         if pd.notna(uncertainty_flag) and uncertainty_flag != '':
@@ -1043,22 +1036,13 @@ def get_daily_predictions(date: str):
             uncertainty_flag = None
 
         pick = row.get('pick')
-        if pd.notna(pick) and pick != '':
-            pick = str(pick)
-        else:
-            pick = None
+        pick = str(pick) if pd.notna(pick) and pick != '' else None
 
         edge_quality_tier = row.get('edge_quality_tier')
-        if pd.notna(edge_quality_tier):
-            edge_quality_tier = str(edge_quality_tier)
-        else:
-            edge_quality_tier = None
+        edge_quality_tier = str(edge_quality_tier) if pd.notna(edge_quality_tier) else None
 
         bet_recommendation = row.get('bet_recommendation')
-        if pd.notna(bet_recommendation):
-            bet_recommendation = str(bet_recommendation)
-        else:
-            bet_recommendation = None
+        bet_recommendation = str(bet_recommendation) if pd.notna(bet_recommendation) else None
 
         predictions.append(DailyPrediction(
             player_name=row.get('player_name', 'Unknown'),
@@ -1283,7 +1267,7 @@ def get_latest_backtest():
     latest_file = backtest_files[0]
 
     try:
-        with open(latest_file, 'r') as f:
+        with open(latest_file) as f:
             data = json.load(f)
     except Exception as e:
         raise HTTPException(

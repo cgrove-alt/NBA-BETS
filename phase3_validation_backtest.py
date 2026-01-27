@@ -14,10 +14,7 @@ Usage:
     python3 phase3_validation_backtest.py
 """
 
-import sys
 import json
-from pathlib import Path
-from datetime import datetime
 
 # Use the existing comprehensive backtest infrastructure
 from phase3_comprehensive_backtest import Phase3Backtester, RESULTS_DIR
@@ -71,7 +68,7 @@ def main():
 
     # Check Phase 3 targets
     targets = results.get('phase3_targets', {})
-    print(f"\nPHASE 3 TARGETS (on validation data):")
+    print("\nPHASE 3 TARGETS (on validation data):")
     targets_met = 0
     total_targets = 0
     for target_name, target_data in targets.items():

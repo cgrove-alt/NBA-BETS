@@ -16,11 +16,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy.stats import pearsonr
-from typing import Dict, List, Tuple
 from collections import defaultdict
 
 
-def load_phase2_results() -> Dict:
+def load_phase2_results() -> dict:
     """Load Phase 2 backtest results."""
     results_file = Path("backtest_results/phase2_backtest.json")
 
@@ -31,7 +30,7 @@ def load_phase2_results() -> Dict:
         return json.load(f)
 
 
-def calculate_confidence_correlation(predictions: List[Dict]) -> Dict:
+def calculate_confidence_correlation(predictions: list[dict]) -> dict:
     """
     Calculate Pearson correlation between confidence and accuracy.
 
@@ -87,7 +86,7 @@ def calculate_confidence_correlation(predictions: List[Dict]) -> Dict:
     }
 
 
-def calculate_calibration_curve(predictions: List[Dict], n_bins: int = 10) -> Dict:
+def calculate_calibration_curve(predictions: list[dict], n_bins: int = 10) -> dict:
     """
     Calculate calibration curve: predicted confidence vs actual accuracy.
 
@@ -95,7 +94,7 @@ def calculate_calibration_curve(predictions: List[Dict], n_bins: int = 10) -> Di
     """
     # Create confidence bins
     confidences = [p['confidence'] for p in predictions]
-    errors = [abs(p['error']) for p in predictions]
+    [abs(p['error']) for p in predictions]
 
     min_conf = min(confidences)
     max_conf = max(confidences)
@@ -117,7 +116,7 @@ def calculate_calibration_curve(predictions: List[Dict], n_bins: int = 10) -> Di
 
         bin_confidences = [p['confidence'] for p in bin_preds]
         bin_errors = [abs(p['error']) for p in bin_preds]
-        bin_actuals = [p['actual'] for p in bin_preds]
+        [p['actual'] for p in bin_preds]
 
         # Calculate accuracy (inverse of normalized error)
         # Normalize errors by actual value to get percentage
@@ -171,7 +170,7 @@ def calculate_calibration_curve(predictions: List[Dict], n_bins: int = 10) -> Di
     }
 
 
-def analyze_by_tier(predictions: List[Dict]) -> Dict:
+def analyze_by_tier(predictions: list[dict]) -> dict:
     """Analyze error distribution by confidence tier."""
     tiers = defaultdict(list)
 
@@ -200,7 +199,7 @@ def analyze_by_tier(predictions: List[Dict]) -> Dict:
     return tier_analysis
 
 
-def plot_calibration_curve(calibration_data: Dict, output_path: str):
+def plot_calibration_curve(calibration_data: dict, output_path: str):
     """Generate calibration curve plot."""
     bins = calibration_data['bins']
 
@@ -208,7 +207,7 @@ def plot_calibration_curve(calibration_data: Dict, output_path: str):
         print("  Warning: No bins available for calibration plot")
         return
 
-    bin_centers = [b['bin_center'] for b in bins]
+    [b['bin_center'] for b in bins]
     avg_confidences = [b['avg_confidence'] for b in bins]
     actual_accuracies = [b['actual_accuracy'] for b in bins]
     counts = [b['count'] for b in bins]
@@ -252,7 +251,7 @@ def plot_calibration_curve(calibration_data: Dict, output_path: str):
     plt.close()
 
 
-def plot_confidence_vs_error(predictions: List[Dict], output_path: str):
+def plot_confidence_vs_error(predictions: list[dict], output_path: str):
     """Generate scatter plot of confidence vs error."""
     # Sample if too many predictions (for performance)
     if len(predictions) > 5000:
@@ -276,7 +275,7 @@ def plot_confidence_vs_error(predictions: List[Dict], output_path: str):
     fig, ax = plt.subplots(figsize=(12, 8))
 
     # Scatter plot
-    scatter = ax.scatter(confidences, errors, c=colors, alpha=0.3, s=20)
+    ax.scatter(confidences, errors, c=colors, alpha=0.3, s=20)
 
     # Add trend line
     z = np.polyfit(confidences, errors, 1)
@@ -395,7 +394,7 @@ def main():
     print(f"✅ Confidence correlation calculated: {correlation_results['confidence_vs_accuracy_correlation']['correlation']:.4f}")
     print(f"✅ Calibration curve generated: {calibration_results['n_bins']} bins")
     print(f"✅ Tier analysis completed: {len(tier_analysis)} tiers")
-    print(f"✅ Visualizations created: 2 plots")
+    print("✅ Visualizations created: 2 plots")
 
     # Target check
     corr = correlation_results['confidence_vs_accuracy_correlation']['correlation']

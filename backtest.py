@@ -25,7 +25,7 @@ Usage:
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
@@ -55,7 +55,7 @@ class BacktestResults:
     confidence_correlation: float  # Correlation between confidence and outcomes
 
     # Breakdown by confidence bucket
-    breakdown_by_confidence: Dict = field(default_factory=dict)
+    breakdown_by_confidence: dict = field(default_factory=dict)
 
     # Timestamps
     backtest_date: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -94,29 +94,27 @@ CONFIDENCE-OUTCOME CORRELATION: {self.confidence_correlation:.3f}
         """Interpret Brier score quality."""
         if self.brier_score < 0.20:
             return "(excellent)"
-        elif self.brier_score < 0.22:
+        if self.brier_score < 0.22:
             return "(very good)"
-        elif self.brier_score < 0.25:
+        if self.brier_score < 0.25:
             return "(good)"
-        elif self.brier_score < 0.28:
+        if self.brier_score < 0.28:
             return "(fair)"
-        else:
-            return "(needs improvement)"
+        return "(needs improvement)"
 
     def _interpret_ece(self) -> str:
         """Interpret calibration quality."""
         if self.ece < 0.03:
             return "(excellent calibration)"
-        elif self.ece < 0.05:
+        if self.ece < 0.05:
             return "(well calibrated)"
-        elif self.ece < 0.08:
+        if self.ece < 0.08:
             return "(acceptable)"
-        elif self.ece < 0.12:
+        if self.ece < 0.12:
             return "(needs calibration)"
-        else:
-            return "(poorly calibrated)"
+        return "(poorly calibrated)"
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
             "brier_score": self.brier_score,
@@ -144,7 +142,7 @@ CONFIDENCE-OUTCOME CORRELATION: {self.confidence_correlation:.3f}
     @classmethod
     def load(cls, filepath: str) -> "BacktestResults":
         """Load results from JSON file."""
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             data = json.load(f)
         return cls(**data)
 
@@ -226,9 +224,9 @@ class BaseBacktester:
 
     def _calculate_metrics(
         self,
-        predictions: List[float],
-        actuals: List[int],
-        confidences: Optional[List[float]] = None
+        predictions: list[float],
+        actuals: list[int],
+        confidences: list[float] | None = None
     ) -> BacktestResults:
         """
         Calculate all backtest metrics.
@@ -324,7 +322,7 @@ class BaseBacktester:
         predictions: np.ndarray,
         actuals: np.ndarray,
         confidences: np.ndarray
-    ) -> Tuple[float, int, float]:
+    ) -> tuple[float, int, float]:
         """
         Calculate betting-specific metrics.
 
@@ -369,7 +367,7 @@ class BaseBacktester:
         predictions: np.ndarray,
         actuals: np.ndarray,
         confidences: np.ndarray
-    ) -> Dict:
+    ) -> dict:
         """
         Break down performance by confidence level.
 
@@ -423,7 +421,7 @@ class PropBacktester(BaseBacktester):
     def __init__(
         self,
         min_confidence: float = 0.55,
-        prop_types: Optional[List[str]] = None
+        prop_types: list[str] | None = None
     ):
         """
         Initialize prop backtester.
@@ -437,8 +435,8 @@ class PropBacktester(BaseBacktester):
 
     def run_backtest(
         self,
-        historical_props: List[Dict],
-        prediction_fn: Optional[Callable] = None
+        historical_props: list[dict],
+        prediction_fn: Callable | None = None
     ) -> BacktestResults:
         """
         Run backtest on historical prop data.
@@ -494,7 +492,7 @@ class PropBacktester(BaseBacktester):
 
     def run_walk_forward(
         self,
-        historical_props: List[Dict],
+        historical_props: list[dict],
         train_size: float = 0.7,
         retrain_interval: int = 100
     ) -> BacktestResults:
@@ -525,7 +523,7 @@ class MoneylineBacktester(BaseBacktester):
 
     def run_backtest(
         self,
-        historical_games: List[Dict]
+        historical_games: list[dict]
     ) -> BacktestResults:
         """
         Run backtest on historical game data.
@@ -567,7 +565,7 @@ class SpreadBacktester(BaseBacktester):
 
     def run_backtest(
         self,
-        historical_games: List[Dict]
+        historical_games: list[dict]
     ) -> BacktestResults:
         """
         Run backtest on historical spread data.
@@ -646,7 +644,7 @@ Win Rate:            {results_before.win_rate:.1%}          {results_after.win_r
 
 
 # Convenience function for quick validation
-def quick_validate(predictions: List[float], actuals: List[int]) -> None:
+def quick_validate(predictions: list[float], actuals: list[int]) -> None:
     """
     Quick validation of prediction quality.
 
@@ -687,7 +685,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     prop_data = []
-    for i in range(200):
+    for _i in range(200):
         line = np.random.uniform(15, 30)
         prediction = line + np.random.normal(0, 3)
         actual = line + np.random.normal(0, 5)

@@ -12,11 +12,9 @@ Usage:
 
 import requests
 import time
-import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 # API Configuration
 BALLDONTLIE_BASE = "https://api.balldontlie.io/v1"
@@ -98,7 +96,7 @@ def fetch_season_from_nba_api(season: int) -> pd.DataFrame:
 
 def fetch_season_from_balldontlie(
     season: int,
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
     max_pages: int = 50,
 ) -> pd.DataFrame:
     """
@@ -114,7 +112,7 @@ def fetch_season_from_balldontlie(
     """
     season_str = f"{season}-{str(season+1)[-2:]}"
     print(f"\nFetching {season_str} season from Balldontlie API...")
-    print(f"  (Using 100ms delay - fast!)")
+    print("  (Using 100ms delay - fast!)")
 
     all_games = []
     url = f"{BALLDONTLIE_BASE}/games"
@@ -229,8 +227,8 @@ def fetch_season_from_balldontlie(
 
 
 def fetch_all_missing_seasons(
-    seasons: List[int] = None,
-    api_key: Optional[str] = None,
+    seasons: list[int] = None,
+    api_key: str | None = None,
 ) -> pd.DataFrame:
     """
     Fetch all missing seasons.

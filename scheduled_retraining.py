@@ -31,15 +31,13 @@ For Railway deployment, add to railway.toml:
 import os
 import sys
 import json
-import pickle
 import subprocess
 import logging
 import traceback
 import argparse
 import shutil
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
 import signal
 import atexit
 
@@ -94,11 +92,11 @@ logger = logging.getLogger(__name__)
 # HELPER FUNCTIONS
 # ============================================================================
 
-def get_retrain_history() -> List[Dict]:
+def get_retrain_history() -> list[dict]:
     """Load retraining history from JSON log."""
     if RETRAIN_LOG.exists():
         try:
-            with open(RETRAIN_LOG, 'r') as f:
+            with open(RETRAIN_LOG) as f:
                 return json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load retrain history: {e}")
@@ -106,7 +104,7 @@ def get_retrain_history() -> List[Dict]:
 
 
 def save_retrain_record(retrain_type: str, success: bool,
-                        duration_seconds: float, metrics: Dict = None,
+                        duration_seconds: float, metrics: dict = None,
                         error_message: str = None):
     """Save a record of this retrain attempt."""
     record = {
@@ -136,7 +134,7 @@ def save_retrain_record(retrain_type: str, success: bool,
     logger.info(f"Retrain record saved: {retrain_type}, success={success}")
 
 
-def get_last_retrain_info(retrain_type: str = None) -> Optional[Dict]:
+def get_last_retrain_info(retrain_type: str = None) -> dict | None:
     """Get info about the last retrain of given type."""
     history = get_retrain_history()
 
@@ -157,7 +155,7 @@ def count_cached_games() -> int:
     total = 0
     for f in game_files:
         try:
-            with open(f, 'r') as fp:
+            with open(f) as fp:
                 data = json.load(fp)
                 if isinstance(data, list):
                     total += len(data)
@@ -168,7 +166,7 @@ def count_cached_games() -> int:
     return total
 
 
-def get_latest_backtest_metrics() -> Dict:
+def get_latest_backtest_metrics() -> dict:
     """Get metrics from the most recent backtest."""
     if not BACKTEST_RESULTS.exists():
         return {}
@@ -181,7 +179,7 @@ def get_latest_backtest_metrics() -> Dict:
         return {}
 
     try:
-        with open(backtest_files[0], 'r') as f:
+        with open(backtest_files[0]) as f:
             results = json.load(f)
             return {
                 'overall_rmse': results.get('overall', {}).get('rmse', 0),
@@ -231,7 +229,7 @@ def send_alert(subject: str, message: str, severity: str = 'info'):
             logger.warning(f"Failed to send Slack alert: {e}")
 
 
-def check_drift_status() -> Dict:
+def check_drift_status() -> dict:
     """Check if drift detector indicates retraining is needed."""
     try:
         from continuous_learning.drift_detector import DriftDetector
@@ -293,9 +291,8 @@ print(f"Fetched {len(games)} games from last 14 days")
         if result.returncode == 0:
             logger.info(result.stdout.strip() if result.stdout else "Data fetch complete")
             return True
-        else:
-            logger.error(f"Data fetch failed: {result.stderr[:200]}")
-            return False
+        logger.error(f"Data fetch failed: {result.stderr[:200]}")
+        return False
 
     except subprocess.TimeoutExpired:
         logger.error("Data fetch timed out after 3 minutes")
@@ -365,7 +362,7 @@ def full_retrain() -> bool:
 
         old_metrics = get_latest_backtest_metrics()
 
-        backtest_result = subprocess.run(
+        subprocess.run(
             [sys.executable, str(BACKTEST_SCRIPT)],
             cwd=PROJECT_DIR,
             capture_output=True,
@@ -414,8 +411,7 @@ def full_retrain() -> bool:
                     severity='error'
                 )
                 return False
-            else:
-                logger.info(f"Performance validated: RMSE {old_rmse:.3f} → {new_rmse:.3f}")
+            logger.info(f"Performance validated: RMSE {old_rmse:.3f} → {new_rmse:.3f}")
 
         # Step 6: Save training record
         duration = (datetime.now() - start_time).total_seconds()
@@ -501,10 +497,10 @@ def incremental_update() -> bool:
         # Step 4: Quick validation (last 30 days)
         logger.info("Running quick validation...")
 
-        old_metrics = get_latest_backtest_metrics()
+        get_latest_backtest_metrics()
 
         # Run quick backtest (smaller dataset)
-        backtest_result = subprocess.run(
+        subprocess.run(
             [sys.executable, str(BACKTEST_SCRIPT), '--quick'],
             cwd=PROJECT_DIR,
             capture_output=True,
@@ -567,14 +563,14 @@ def drift_triggered_retrain():
         if urgency == 'immediate':
             send_alert(
                 "CRITICAL: Model Drift Detected",
-                f"Immediate retraining triggered!\nReasons:\n" + "\n".join(f"- {r}" for r in reasons),
+                "Immediate retraining triggered!\nReasons:\n" + "\n".join(f"- {r}" for r in reasons),
                 severity='critical'
             )
             full_retrain()
         else:
             send_alert(
                 "Model Drift Detected",
-                f"Retraining recommended.\nReasons:\n" + "\n".join(f"- {r}" for r in reasons),
+                "Retraining recommended.\nReasons:\n" + "\n".join(f"- {r}" for r in reasons),
                 severity='warning'
             )
 
@@ -653,12 +649,12 @@ def remove_pid():
         PID_FILE.unlink()
 
 
-def get_scheduler_status() -> Dict:
+def get_scheduler_status() -> dict:
     """Get status of the scheduler."""
     if not PID_FILE.exists():
         return {'running': False, 'message': 'Scheduler not running'}
 
-    with open(PID_FILE, 'r') as f:
+    with open(PID_FILE) as f:
         pid = int(f.read().strip())
 
     # Check if process is running

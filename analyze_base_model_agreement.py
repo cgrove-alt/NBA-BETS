@@ -109,7 +109,7 @@ def analyze_model_agreement_on_samples(n_samples=1000):
         # Analyze CV distribution
         cv_array = np.array(cv_values)
 
-        print(f'\n  Coefficient of Variation (CV) Analysis:')
+        print('\n  Coefficient of Variation (CV) Analysis:')
         print(f'    Mean CV: {np.mean(cv_array):.4f}')
         print(f'    Median CV: {np.median(cv_array):.4f}')
         print(f'    Std CV: {np.std(cv_array):.4f}')
@@ -123,7 +123,7 @@ def analyze_model_agreement_on_samples(n_samples=1000):
         weak_count = sum(1 for cv in cv_array if 0.20 <= cv < 0.30)
         avoid_count = sum(1 for cv in cv_array if cv >= 0.30)
 
-        print(f'\n  Expected Confidence Distribution (based on CV thresholds):')
+        print('\n  Expected Confidence Distribution (based on CV thresholds):')
         print(f'    Elite (CV <0.05):     {elite_count:3d} ({100*elite_count/len(cv_array):5.1f}%)')
         print(f'    Strong (0.05-0.10):   {strong_count:3d} ({100*strong_count/len(cv_array):5.1f}%)')
         print(f'    Moderate (0.10-0.20): {moderate_count:3d} ({100*moderate_count/len(cv_array):5.1f}%)')
@@ -134,7 +134,7 @@ def analyze_model_agreement_on_samples(n_samples=1000):
         print(f'\n  Elite + Strong: {elite_strong_pct:.2f}% (target: ≥10%)')
 
         # Analyze inter-model correlation
-        print(f'\n  Inter-Model Correlations:')
+        print('\n  Inter-Model Correlations:')
         model_names = list(predictions_by_model.keys())
         for i, model1 in enumerate(model_names):
             for model2 in model_names[i+1:]:
@@ -160,7 +160,7 @@ def analyze_model_agreement_on_samples(n_samples=1000):
 
     for prop_type, stats in results.items():
         status = '✅' if stats['elite_strong_pct'] >= 10 else '❌'
-        print(f'\n{prop_type:8s}: Mean CV={stats[\"mean_cv\"]:.4f}  Elite+Strong={stats[\"elite_strong_pct\"]:5.2f}% {status}')
+        print(f'\n{prop_type:8s}: Mean CV={stats['mean_cv']:.4f}  Elite+Strong={stats['elite_strong_pct']:5.2f}% {status}')
 
     # Save results
     output_file = Path('backtest_results/base_model_agreement.json')

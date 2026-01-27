@@ -13,11 +13,10 @@ Python tries to find these classes in `uvicorn.__main__` which fails.
 This module provides the class definitions so unpickling works correctly.
 """
 
-import pickle
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Any
 from sklearn.preprocessing import StandardScaler
+import contextlib
 
 
 # =============================================================================
@@ -91,7 +90,7 @@ class PropEnsembleModel:
     etc.) are already trained and stored inside self.models dict.
     """
 
-    def __init__(self, prop_type: str = None, optimized_params: Optional[Dict] = None):
+    def __init__(self, prop_type: str = None, optimized_params: dict | None = None):
         self.prop_type = prop_type
         self.models = {}
         self.scaler = StandardScaler()
@@ -104,7 +103,7 @@ class PropEnsembleModel:
         self.optimized_params = optimized_params
         self.model_weights = {}
 
-    def predict(self, features: Dict, prop_line: float = None) -> Dict:
+    def predict(self, features: dict, prop_line: float = None) -> dict:
         """Make a prediction with the ensemble."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -193,7 +192,7 @@ class QuantilePropModel:
         self.is_fitted = False
         self.training_metrics = {}
 
-    def predict_distribution(self, features: Dict) -> Dict[float, float]:
+    def predict_distribution(self, features: dict) -> dict[float, float]:
         """Predict the full distribution of outcomes."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -208,7 +207,7 @@ class QuantilePropModel:
         return {q: float(model.predict(X_scaled)[0])
                 for q, model in self.quantile_models.items()}
 
-    def predict_over_probability(self, features: Dict, line: float) -> float:
+    def predict_over_probability(self, features: dict, line: float) -> float:
         """
         Estimate probability of actual value being OVER the line.
         Uses linear interpolation between quantile predictions.
@@ -236,7 +235,7 @@ class QuantilePropModel:
 
         return 0.50
 
-    def get_confidence_interval(self, features: Dict) -> Dict:
+    def get_confidence_interval(self, features: dict) -> dict:
         """Get 80% confidence interval for prediction."""
         dist = self.predict_distribution(features)
         return {
@@ -277,16 +276,15 @@ class PositionAwarePropEnsemble:
         self.is_fitted = False
         self.training_metrics = {}
 
-    def _get_position_group(self, features: Dict) -> str:
+    def _get_position_group(self, features: dict) -> str:
         """Determine position group from features."""
         if features.get('is_center', 0) == 1:
             return 'centers'
-        elif features.get('is_forward', 0) == 1:
+        if features.get('is_forward', 0) == 1:
             return 'forwards'
-        else:
-            return 'guards'
+        return 'guards'
 
-    def predict(self, features: Dict, prop_line: float = None) -> Dict:
+    def predict(self, features: dict, prop_line: float = None) -> dict:
         """Make prediction using position-appropriate model."""
         if not self.is_fitted:
             raise ValueError("Model not fitted")
@@ -365,17 +363,14 @@ class EnsembleMoneylineWrapper:
 
         # Average probability predictions from models that support it
         probas = []
-        for name, model in self.models.items():
+        for _name, model in self.models.items():
             if hasattr(model, 'predict_proba'):
-                try:
+                with contextlib.suppress(Exception):
                     probas.append(model.predict_proba(X_scaled))
-                except Exception:
-                    pass
 
         if probas:
             return np.mean(probas, axis=0)
-        else:
-            # Fallback to logistic sigmoid of prediction
-            pred = self.predict(X)
-            proba = 1 / (1 + np.exp(-pred))
-            return np.column_stack([1 - proba, proba])
+        # Fallback to logistic sigmoid of prediction
+        pred = self.predict(X)
+        proba = 1 / (1 + np.exp(-pred))
+        return np.column_stack([1 - proba, proba])

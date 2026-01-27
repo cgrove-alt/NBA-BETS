@@ -20,8 +20,6 @@ Usage:
 
 import numpy as np
 from collections import defaultdict
-from typing import Dict, List, Optional, Set
-from datetime import datetime
 
 
 class PlayerUsageTracker:
@@ -53,8 +51,8 @@ class PlayerUsageTracker:
         # Structure: team_id -> set of player_ids
         self.team_rosters = defaultdict(set)
 
-    def add_player_game(self, player_id: int, game_date: str, stats: Dict,
-                        player_info: Dict = None, team_id: int = None):
+    def add_player_game(self, player_id: int, game_date: str, stats: dict,
+                        player_info: dict = None, team_id: int = None):
         """
         Add a game's stats for a player.
 
@@ -117,7 +115,7 @@ class PlayerUsageTracker:
             self.team_rosters[team_id].add(player_id)
 
     def get_player_metrics_before_date(self, player_id: int, game_date: str,
-                                        window: int = 10) -> Optional[Dict]:
+                                        window: int = 10) -> dict | None:
         """
         Get player metrics using only games BEFORE game_date.
 
@@ -168,7 +166,7 @@ class PlayerUsageTracker:
 
         return metrics
 
-    def get_team_usage_distribution(self, team_id: int, game_date: str) -> Dict:
+    def get_team_usage_distribution(self, team_id: int, game_date: str) -> dict:
         """
         Get usage distribution for a team.
 
@@ -222,7 +220,7 @@ class InjuryImpactCalculator:
     def __init__(self, usage_tracker: PlayerUsageTracker = None):
         self.usage_tracker = usage_tracker or PlayerUsageTracker()
 
-    def classify_player_tier(self, metrics: Dict) -> str:
+    def classify_player_tier(self, metrics: dict) -> str:
         """
         Classify player into tier based on metrics.
 
@@ -234,21 +232,20 @@ class InjuryImpactCalculator:
 
         if pts >= 25 or (pts >= 22 and usage >= 0.28):
             return 'superstar'
-        elif pts >= 18 or (pts >= 15 and usage >= 0.22):
+        if pts >= 18 or (pts >= 15 and usage >= 0.22):
             return 'star'
-        elif mins >= 28 and pts >= 10:
+        if mins >= 28 and pts >= 10:
             return 'starter'
-        elif mins >= 15:
+        if mins >= 15:
             return 'rotation'
-        else:
-            return 'bench'
+        return 'bench'
 
     def calculate_injury_impact(
         self,
         team_id: int,
-        injured_player_ids: List[int],
+        injured_player_ids: list[int],
         game_date: str
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate the combined impact of injuries on a team.
 
@@ -323,9 +320,9 @@ class InjuryImpactCalculator:
         self,
         player_id: int,
         team_id: int,
-        injured_player_ids: List[int],
+        injured_player_ids: list[int],
         game_date: str
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate the opportunity boost for a player given team injuries.
 
@@ -369,7 +366,7 @@ class InjuryImpactCalculator:
 
         # Player's share of the redistribution
         # Higher usage players absorb more
-        player_usage = player_metrics.get('usage_rate', 0.15)
+        player_metrics.get('usage_rate', 0.15)
 
         # Redistribution assumes top players get ~40% of lost usage
         # Remaining is spread among others
@@ -421,18 +418,18 @@ class TeamInjuryManager:
         # Track current injuries: team_id -> set of player_ids
         self.current_injuries = defaultdict(set)
 
-    def add_player_game(self, player_id: int, game_date: str, stats: Dict,
-                        player_info: Dict = None, team_id: int = None):
+    def add_player_game(self, player_id: int, game_date: str, stats: dict,
+                        player_info: dict = None, team_id: int = None):
         """Add a game for a player (passthrough to usage tracker)."""
         self.usage_tracker.add_player_game(
             player_id, game_date, stats, player_info, team_id
         )
 
-    def set_injuries(self, team_id: int, injured_player_ids: List[int]):
+    def set_injuries(self, team_id: int, injured_player_ids: list[int]):
         """Set current injuries for a team."""
         self.current_injuries[team_id] = set(injured_player_ids)
 
-    def get_team_injury_features(self, team_id: int, game_date: str) -> Dict:
+    def get_team_injury_features(self, team_id: int, game_date: str) -> dict:
         """
         Get injury-related features for a team.
 
@@ -444,7 +441,7 @@ class TeamInjuryManager:
         injured = list(self.current_injuries.get(team_id, []))
         return self.impact_calc.calculate_injury_impact(team_id, injured, game_date)
 
-    def get_player_injury_boost(self, player_id: int, team_id: int, game_date: str) -> Dict:
+    def get_player_injury_boost(self, player_id: int, team_id: int, game_date: str) -> dict:
         """
         Get opportunity boost for a player given team injuries.
 
@@ -464,7 +461,7 @@ def generate_injury_features(
     home_id: int,
     away_id: int,
     game_date: str
-) -> Dict:
+) -> dict:
     """
     Generate all injury-related features for a game.
 
@@ -506,7 +503,7 @@ def generate_player_prop_features(
     team_id: int,
     opponent_id: int,
     game_date: str
-) -> Dict:
+) -> dict:
     """
     Generate injury-related features for player prop prediction.
 

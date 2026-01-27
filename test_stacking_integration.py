@@ -65,7 +65,7 @@ def test_ensemble_moneyline_with_stacking():
         sample_weights=sample_weights
     )
 
-    print(f"\n✓ Training completed successfully")
+    print("\n✓ Training completed successfully")
     print(f"  Accuracy: {metrics['accuracy']:.4f}")
     print(f"  Using StackingMetaLearner: {metrics.get('using_stacking_meta_learner', False)}")
 
@@ -74,13 +74,13 @@ def test_ensemble_moneyline_with_stacking():
     test_context = generate_context_features(1)
 
     prediction = model.predict(test_features, context_features=test_context)
-    print(f"\n✓ Prediction successful")
+    print("\n✓ Prediction successful")
     print(f"  Home win probability: {prediction['home_win_probability']:.4f}")
     print(f"  Away win probability: {prediction['away_win_probability']:.4f}")
 
     # Test predict_with_confidence
     prediction_conf, confidence = model.predict_with_confidence(test_features, context_features=test_context)
-    print(f"\n✓ Confidence prediction successful")
+    print("\n✓ Confidence prediction successful")
     print(f"  Confidence score: {confidence:.2f}/100")
 
     assert model.stacking_ensemble is not None, "Stacking ensemble should be initialized"
@@ -123,7 +123,7 @@ def test_spread_model_with_stacking():
         sample_weights=sample_weights
     )
 
-    print(f"\n✓ Training completed successfully")
+    print("\n✓ Training completed successfully")
     print(f"  RMSE: {metrics['rmse']:.2f}")
     print(f"  R²: {metrics['r2']:.4f}")
     print(f"  Using StackingMetaLearner: {metrics.get('using_stacking_meta_learner', False)}")
@@ -133,7 +133,7 @@ def test_spread_model_with_stacking():
     test_context = generate_context_features(1)
 
     prediction = model.predict(test_features, spread_line=-5.5, context_features=test_context)
-    print(f"\n✓ Prediction successful")
+    print("\n✓ Prediction successful")
     print(f"  Predicted spread: {prediction['predicted_spread']:.2f}")
     print(f"  Covers spread: {prediction['covers_spread']}")
     print(f"  Edge: {prediction['edge']:.2f}")
@@ -178,7 +178,7 @@ def test_player_prop_regressor_with_stacking():
         sample_weights=sample_weights
     )
 
-    print(f"\n✓ Training completed successfully")
+    print("\n✓ Training completed successfully")
     print(f"  RMSE: {metrics['rmse']:.2f}")
     print(f"  R²: {metrics['r2']:.4f}")
     print(f"  Using StackingMetaLearner: {metrics.get('using_stacking_meta_learner', False)}")
@@ -188,7 +188,7 @@ def test_player_prop_regressor_with_stacking():
     test_context = generate_context_features(1)
 
     prediction = model.predict(test_features, prop_line=24.5, context_features=test_context)
-    print(f"\n✓ Prediction successful")
+    print("\n✓ Prediction successful")
     print(f"  Predicted value: {prediction['predicted_value']:.2f}")
     print(f"  Prediction: {prediction['prediction']}")
     print(f"  Edge: {prediction['edge']:.2f}")
@@ -233,7 +233,7 @@ def test_player_prop_classifier_with_stacking():
         sample_weights=sample_weights
     )
 
-    print(f"\n✓ Training completed successfully")
+    print("\n✓ Training completed successfully")
     print(f"  Accuracy: {metrics['accuracy']:.4f}")
     print(f"  F1 Score: {metrics['f1']:.4f}")
     print(f"  Using StackingMetaLearner: {metrics.get('using_stacking_meta_learner', False)}")
@@ -243,7 +243,7 @@ def test_player_prop_classifier_with_stacking():
     test_context = generate_context_features(1)
 
     prediction = model.predict(test_features, context_features=test_context)
-    print(f"\n✓ Prediction successful")
+    print("\n✓ Prediction successful")
     print(f"  Over probability: {prediction['over_probability']:.4f}")
     print(f"  Under probability: {prediction['under_probability']:.4f}")
     print(f"  Prediction: {prediction['prediction']}")
@@ -288,7 +288,7 @@ def test_quantile_prop_model_with_stacking():
         sample_weights=sample_weights
     )
 
-    print(f"\n✓ Training completed successfully")
+    print("\n✓ Training completed successfully")
     print(f"  RMSE: {metrics['rmse']:.2f}")
     print(f"  R²: {metrics['r2']:.4f}")
     print(f"  Quantile crossings: {metrics['quantile_crossings']}")
@@ -299,7 +299,7 @@ def test_quantile_prop_model_with_stacking():
     test_context = generate_context_features(1)
 
     prediction = model.predict(test_features, prop_line=24.5, context_features=test_context)
-    print(f"\n✓ Prediction successful")
+    print("\n✓ Prediction successful")
     print(f"  Predicted value (q50): {prediction['predicted_value']:.2f}")
     print(f"  Q45: {prediction['q45']:.2f}")
     print(f"  Q50: {prediction['q50']:.2f}")
@@ -330,22 +330,22 @@ def test_backward_compatibility():
 
     # Test models WITHOUT stacking (should use standard sklearn models)
     model1 = EnsembleMoneylineModel(use_stacking=False)
-    metrics1 = model1.train(X, y_classification, test_size=0.2, cv_folds=3)
+    model1.train(X, y_classification, test_size=0.2, cv_folds=3)
     assert model1.stacking_ensemble is None, "Should not use stacking"
     print("✓ EnsembleMoneylineModel works without stacking")
 
     model2 = LightGBMSpreadModel(use_stacking=False)
-    metrics2 = model2.train(X, y_regression, test_size=0.2, cv_folds=3)
+    model2.train(X, y_regression, test_size=0.2, cv_folds=3)
     assert model2.stacking_ensemble is None, "Should not use stacking"
     print("✓ LightGBMSpreadModel works without stacking")
 
     model3 = PlayerPropModel(use_stacking=False)
-    metrics3 = model3.train(X, y_regression, test_size=0.2, cv_folds=3)
+    model3.train(X, y_regression, test_size=0.2, cv_folds=3)
     assert model3.stacking_ensemble is None, "Should not use stacking"
     print("✓ PlayerPropModel works without stacking")
 
     model4 = QuantilePropModel(use_stacking=False)
-    metrics4 = model4.train(X, y_regression, test_size=0.2, cv_folds=3)
+    model4.train(X, y_regression, test_size=0.2, cv_folds=3)
     assert len(model4.stacking_ensembles) == 0, "Should not use stacking"
     print("✓ QuantilePropModel works without stacking")
 

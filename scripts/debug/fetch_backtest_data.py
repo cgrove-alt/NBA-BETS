@@ -14,9 +14,6 @@ import os
 import json
 import time
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List
-from collections import defaultdict
 
 from balldontlie_api import BalldontlieAPI
 
@@ -68,7 +65,7 @@ def fetch_season_games(api: BalldontlieAPI):
 
     return completed_games
 
-def fetch_player_stats_for_games(api: BalldontlieAPI, games: List[Dict]):
+def fetch_player_stats_for_games(api: BalldontlieAPI, games: list[dict]):
     """Fetch player stats (box scores) for all games."""
     print("\n" + "="*70)
     print("FETCHING PLAYER STATS")
@@ -142,7 +139,7 @@ def fetch_historical_stats(api: BalldontlieAPI):
 
         try:
             # Use get_player_stats_paginated for large datasets
-            print(f"  Fetching paginated data...")
+            print("  Fetching paginated data...")
             all_stats = api.get_player_stats_paginated(seasons=[season], per_page=100)
 
             print(f"  Got {len(all_stats)} records")
@@ -157,14 +154,14 @@ def fetch_historical_stats(api: BalldontlieAPI):
             print(f"  Error: {e}")
             continue
 
-def verify_data_quality(games: List[Dict], stats: Dict[int, List]):
+def verify_data_quality(games: list[dict], stats: dict[int, list]):
     """Verify we have sufficient data for backtesting."""
     print("\n" + "="*70)
     print("DATA QUALITY VERIFICATION")
     print("="*70)
 
     # Check games
-    print(f"\nGames:")
+    print("\nGames:")
     print(f"  Total: {len(games)}")
     print(f"  Date range: {games[0]['date']} to {games[-1]['date']}")
 
@@ -172,7 +169,7 @@ def verify_data_quality(games: List[Dict], stats: Dict[int, List]):
     games_with_stats = sum(1 for g in games if g["id"] in stats)
     coverage = games_with_stats / len(games) * 100 if games else 0
 
-    print(f"\nPlayer Stats Coverage:")
+    print("\nPlayer Stats Coverage:")
     print(f"  Games with stats: {games_with_stats}/{len(games)} ({coverage:.1f}%)")
 
     # Check average players per game

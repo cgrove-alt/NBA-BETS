@@ -150,9 +150,8 @@ def test_four_factors():
     if all_valid:
         print("\n✅ ALL VALIDATIONS PASSED")
         return True
-    else:
-        print("\n❌ SOME VALIDATIONS FAILED")
-        return False
+    print("\n❌ SOME VALIDATIONS FAILED")
+    return False
 
 
 if __name__ == '__main__':

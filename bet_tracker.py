@@ -19,8 +19,7 @@ import json
 import sqlite3
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Union
 from dataclasses import dataclass, asdict, field
 from enum import Enum
 import numpy as np
@@ -75,7 +74,7 @@ class TrackedBet:
     # Event info
     event_id: str = ""
     event_name: str = ""  # e.g., "Lakers vs Celtics"
-    event_date: Optional[datetime] = None
+    event_date: datetime | None = None
 
     # Bet details
     selection: str = ""  # e.g., "Lakers ML", "Over 220.5"
@@ -89,22 +88,22 @@ class TrackedBet:
     edge: float = 0.0
 
     # Market data
-    opening_odds: Optional[float] = None
-    closing_odds: Optional[float] = None
+    opening_odds: float | None = None
+    closing_odds: float | None = None
     line_movement: float = 0.0  # How much the line moved
 
     # Outcome
     status: BetStatus = BetStatus.PENDING
-    actual_result: Optional[str] = None  # e.g., "Lakers 112-105"
+    actual_result: str | None = None  # e.g., "Lakers 112-105"
     pnl: float = 0.0
-    settled_at: Optional[datetime] = None
+    settled_at: datetime | None = None
 
     # Additional metadata
     notes: str = ""
-    tags: List[str] = field(default_factory=list)
-    parlay_legs: List[Dict] = field(default_factory=list)  # For parlay bets
+    tags: list[str] = field(default_factory=list)
+    parlay_legs: list[dict] = field(default_factory=list)  # For parlay bets
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         d = asdict(self)
         d['bet_type'] = self.bet_type.value
         d['status'] = self.status.value
@@ -114,7 +113,7 @@ class TrackedBet:
         return d
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "TrackedBet":
+    def from_dict(cls, d: dict) -> "TrackedBet":
         d = d.copy()
         d['bet_type'] = BetType(d['bet_type']) if isinstance(d['bet_type'], str) else d['bet_type']
         d['status'] = BetStatus(d['status']) if isinstance(d['status'], str) else d['status']
@@ -141,7 +140,7 @@ class TrackedBet:
             pass
         return self.pnl
 
-    def closing_line_value(self) -> Optional[float]:
+    def closing_line_value(self) -> float | None:
         """
         Calculate Closing Line Value.
 
@@ -162,8 +161,7 @@ class TrackedBet:
         """Convert American odds to implied probability."""
         if american_odds >= 100:
             return 100 / (american_odds + 100)
-        else:
-            return abs(american_odds) / (abs(american_odds) + 100)
+        return abs(american_odds) / (abs(american_odds) + 100)
 
 
 @dataclass
@@ -182,7 +180,7 @@ class PerformanceMetrics:
     avg_odds: float = 0.0
     avg_stake: float = 0.0
     avg_edge: float = 0.0
-    avg_clv: Optional[float] = None
+    avg_clv: float | None = None
     max_win: float = 0.0
     max_loss: float = 0.0
     longest_win_streak: int = 0
@@ -190,7 +188,7 @@ class PerformanceMetrics:
     profit_factor: float = 0.0
     sharpe_ratio: float = 0.0
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "period_start": self.period_start.isoformat(),
             "period_end": self.period_end.isoformat(),
@@ -440,7 +438,7 @@ class BetTracker:
         logger.info(f"Settled bet {bet_id}: {status.value}, P&L: ${bet.pnl:+.2f}")
         return bet
 
-    def get_bet(self, bet_id: str) -> Optional[TrackedBet]:
+    def get_bet(self, bet_id: str) -> TrackedBet | None:
         """Get a single bet by ID."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -454,7 +452,7 @@ class BetTracker:
             return self._row_to_bet(dict(row))
         return None
 
-    def get_pending_bets(self) -> List[TrackedBet]:
+    def get_pending_bets(self) -> list[TrackedBet]:
         """Get all pending (unsettled) bets."""
         return self._query_bets("status = ?", (BetStatus.PENDING.value,))
 
@@ -462,7 +460,7 @@ class BetTracker:
         self,
         start_date: datetime,
         end_date: datetime = None
-    ) -> List[TrackedBet]:
+    ) -> list[TrackedBet]:
         """Get bets within date range."""
         if end_date is None:
             end_date = datetime.now()
@@ -472,15 +470,15 @@ class BetTracker:
             (start_date.isoformat(), end_date.isoformat())
         )
 
-    def get_bets_by_type(self, bet_type: BetType) -> List[TrackedBet]:
+    def get_bets_by_type(self, bet_type: BetType) -> list[TrackedBet]:
         """Get bets of specific type."""
         return self._query_bets("bet_type = ?", (bet_type.value,))
 
-    def get_bets_by_sportsbook(self, sportsbook: str) -> List[TrackedBet]:
+    def get_bets_by_sportsbook(self, sportsbook: str) -> list[TrackedBet]:
         """Get bets from specific sportsbook."""
         return self._query_bets("sportsbook = ?", (sportsbook,))
 
-    def _query_bets(self, where_clause: str, params: tuple) -> List[TrackedBet]:
+    def _query_bets(self, where_clause: str, params: tuple) -> list[TrackedBet]:
         """Query bets with WHERE clause."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -492,7 +490,7 @@ class BetTracker:
 
         return [self._row_to_bet(dict(row)) for row in rows]
 
-    def _row_to_bet(self, row: Dict) -> TrackedBet:
+    def _row_to_bet(self, row: dict) -> TrackedBet:
         """Convert database row to TrackedBet."""
         return TrackedBet(
             bet_id=row['bet_id'],
@@ -609,7 +607,7 @@ class BetTracker:
 
         return metrics
 
-    def _calculate_streaks(self, bets: List[TrackedBet]) -> Tuple[int, int]:
+    def _calculate_streaks(self, bets: list[TrackedBet]) -> tuple[int, int]:
         """Calculate longest winning and losing streaks."""
         max_win, max_loss = 0, 0
         current_win, current_loss = 0, 0
@@ -626,9 +624,9 @@ class BetTracker:
 
         return max_win, max_loss
 
-    def _calculate_sharpe(self, bets: List[TrackedBet]) -> float:
+    def _calculate_sharpe(self, bets: list[TrackedBet]) -> float:
         """Calculate Sharpe ratio."""
-        daily_pnl: Dict[str, float] = {}
+        daily_pnl: dict[str, float] = {}
         for bet in bets:
             day = bet.placed_at.strftime("%Y-%m-%d")
             daily_pnl[day] = daily_pnl.get(day, 0) + bet.pnl
@@ -648,7 +646,7 @@ class BetTracker:
         self,
         start_date: datetime = None,
         initial_bankroll: float = 10000.0
-    ) -> List[Tuple[datetime, float]]:
+    ) -> list[tuple[datetime, float]]:
         """
         Get bankroll over time.
 
@@ -718,7 +716,7 @@ class BetTracker:
         logger.info(f"Exported {len(bets)} bets to {filepath}")
         return filepath
 
-    def get_performance_by_edge_range(self) -> Dict[str, PerformanceMetrics]:
+    def get_performance_by_edge_range(self) -> dict[str, PerformanceMetrics]:
         """Analyze performance grouped by edge ranges."""
         edge_ranges = [
             ("0-2%", 0, 0.02),
@@ -756,7 +754,7 @@ class BetTracker:
         self,
         bankroll: float = 1000,
         min_edge: float = 0.02
-    ) -> Dict:
+    ) -> dict:
         """
         Optimize stake sizing for pending bets using portfolio optimization.
 
@@ -839,7 +837,7 @@ class BetTracker:
             logger.error(f"Portfolio optimization failed: {e}")
             return {'bets': [], 'total_stake': 0, 'message': str(e)}
 
-    def get_correlation_matrix(self) -> Optional[np.ndarray]:
+    def get_correlation_matrix(self) -> np.ndarray | None:
         """
         Get correlation matrix for pending bets.
 
@@ -909,7 +907,7 @@ class BetTracker:
         else:
             print("No CLV data available (closing odds not recorded)")
 
-    def get_clv_analytics(self) -> Dict:
+    def get_clv_analytics(self) -> dict:
         """
         Get comprehensive CLV (Closing Line Value) analytics.
 

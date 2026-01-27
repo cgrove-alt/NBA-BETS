@@ -22,9 +22,7 @@ Key Principles:
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
-from pathlib import Path
 from enum import Enum
 import numpy as np
 
@@ -114,7 +112,7 @@ def calculate_risk_of_ruin_monte_carlo(
     num_simulations: int = 10000,
     num_bets: int = 1000,
     ruin_threshold_pct: float = 0.0
-) -> Dict:
+) -> dict:
     """
     Calculate Risk of Ruin using Monte Carlo simulation.
 
@@ -203,7 +201,7 @@ class CLVTracker:
     """
 
     def __init__(self):
-        self.bets: List[Dict] = []
+        self.bets: list[dict] = []
 
     def record_bet(
         self,
@@ -213,7 +211,7 @@ class CLVTracker:
         bet_odds: float,
         closing_odds: float,
         won: bool = None
-    ) -> Dict:
+    ) -> dict:
         """
         Record a bet with opening, bet, and closing odds.
 
@@ -232,8 +230,7 @@ class CLVTracker:
         def american_to_prob(odds):
             if odds > 0:
                 return 100 / (odds + 100)
-            else:
-                return abs(odds) / (abs(odds) + 100)
+            return abs(odds) / (abs(odds) + 100)
 
         bet_prob = american_to_prob(bet_odds)
         closing_prob = american_to_prob(closing_odds)
@@ -267,7 +264,7 @@ class CLVTracker:
 
         return bet_record
 
-    def get_clv_summary(self) -> Dict:
+    def get_clv_summary(self) -> dict:
         """Get summary statistics of CLV performance."""
         if not self.bets:
             return {"error": "No bets recorded"}
@@ -292,7 +289,7 @@ class CLVTracker:
             "avg_clv_losers": np.mean([b["clv"] for b in lost_bets]) if lost_bets else None,
         }
 
-    def is_profitable_long_term(self) -> Tuple[bool, str]:
+    def is_profitable_long_term(self) -> tuple[bool, str]:
         """
         Assess if betting strategy shows signs of long-term profitability.
 
@@ -316,15 +313,14 @@ class CLVTracker:
         if avg_clv > 0.01 and positive_clv_pct > 55:
             return (True, f"Strong positive CLV: avg {avg_clv:.2%}, {positive_clv_pct:.0f}% positive. "
                          "Strategy shows signs of genuine edge.")
-        elif avg_clv > 0 and positive_clv_pct > 50:
+        if avg_clv > 0 and positive_clv_pct > 50:
             return (True, f"Marginal positive CLV: avg {avg_clv:.2%}, {positive_clv_pct:.0f}% positive. "
                          "Strategy may have edge but needs more data to confirm.")
-        elif avg_clv < -0.02:
+        if avg_clv < -0.02:
             return (False, f"Significant negative CLV: avg {avg_clv:.2%}. "
                           "Market is pricing better - strategy likely unprofitable long-term.")
-        else:
-            return (None, f"CLV near zero: avg {avg_clv:.2%}. "
-                         "No clear edge detected - may be positive or negative variance.")
+        return (None, f"CLV near zero: avg {avg_clv:.2%}. "
+                     "No clear edge detected - may be positive or negative variance.")
 
 
 class RiskLevel(Enum):
@@ -359,7 +355,7 @@ class RiskStatus:
     current_streak: int  # Negative = losing streak
     timestamp: datetime = field(default_factory=datetime.now)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         d = asdict(self)
         d['risk_level'] = self.risk_level.value
         d['halt_reason'] = self.halt_reason.value
@@ -584,10 +580,10 @@ class BankrollManager:
         )
 
         # Tracking
-        self.bet_history: List[Dict] = []
-        self.daily_pnl: Dict[str, float] = {}  # date -> pnl
-        self.daily_exposure: Dict[str, float] = {}  # date -> total exposure
-        self.snapshots: List[BankrollSnapshot] = []
+        self.bet_history: list[dict] = []
+        self.daily_pnl: dict[str, float] = {}  # date -> pnl
+        self.daily_exposure: dict[str, float] = {}  # date -> total exposure
+        self.snapshots: list[BankrollSnapshot] = []
         self.current_streak: int = 0
         self.manual_halt: bool = False
 
@@ -642,7 +638,7 @@ class BankrollManager:
             return 0.0
         return self.get_daily_exposure() / self.current_bankroll
 
-    def can_place_bet(self, bet_size: float) -> Tuple[bool, str]:
+    def can_place_bet(self, bet_size: float) -> tuple[bool, str]:
         """
         Check if a bet can be placed given current limits.
 
@@ -839,7 +835,7 @@ class BankrollManager:
         else:
             logger.info("Manual halt cleared")
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get comprehensive bankroll statistics."""
         total_bets = len(self.bet_history)
         wins = sum(1 for b in self.bet_history if b['won'])
@@ -883,7 +879,7 @@ class BankrollManager:
     def load(self, filepath: str = "bankroll_state.json") -> "BankrollManager":
         """Load bankroll state from disk."""
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath) as f:
                 state = json.load(f)
 
             self.initial_bankroll = state.get("initial_bankroll", self.initial_bankroll)
@@ -999,7 +995,7 @@ class DynamicKellyCalculator:
         # Formula: adjusted_kelly = kelly * (1 - variance/edge_squared)
         # where variance = probability_std^2
 
-        b = decimal_odds - 1  # Net odds
+        decimal_odds - 1  # Net odds
         implied_prob = 1 / decimal_odds
         edge = win_probability - implied_prob
 
@@ -1024,7 +1020,7 @@ class DynamicKellyCalculator:
         current_drawdown: float = 0.0,
         num_same_day_bets: int = 1,
         probability_std: float = None
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate dynamically adjusted Kelly stake.
 
@@ -1247,7 +1243,7 @@ def calculate_recommended_stake(
     confidence: str = "medium",
     kelly_fraction: float = 0.25,
     edge_tier: str = None
-) -> Dict:
+) -> dict:
     """
     Convenience function to calculate recommended stake.
 
@@ -1353,7 +1349,7 @@ if __name__ == "__main__":
         confidence="medium"
     )
 
-    print(f"\nFor a bet with 55% probability at -110 odds:")
+    print("\nFor a bet with 55% probability at -110 odds:")
     print(f"  Recommended stake: ${result['recommended_stake']:,.2f}")
     print(f"  Stake fraction: {result['stake_fraction']:.2%}")
     print(f"  Full Kelly would be: {result['kelly_details']['full_kelly']:.2%}")

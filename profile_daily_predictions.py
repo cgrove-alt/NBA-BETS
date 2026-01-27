@@ -12,7 +12,6 @@ Outputs:
 import cProfile
 import pstats
 import io
-import sys
 from datetime import datetime
 
 def profile_predictions():

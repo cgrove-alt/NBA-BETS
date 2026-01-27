@@ -26,13 +26,10 @@ import time
 import json
 import hashlib
 import re
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 from enum import Enum
 import threading
-from collections import defaultdict
 
 
 # =============================================================================
@@ -92,23 +89,23 @@ class NewsItem:
     timestamp: float
     headline: str
     content: str
-    url: Optional[str] = None
+    url: str | None = None
 
     # Extracted entities
-    players: List[str] = field(default_factory=list)
-    teams: List[str] = field(default_factory=list)
+    players: list[str] = field(default_factory=list)
+    teams: list[str] = field(default_factory=list)
 
     # Analysis results
     analyzed: bool = False
-    insights: List[Dict] = field(default_factory=list)
+    insights: list[dict] = field(default_factory=list)
 
 
 @dataclass
 class PlayerInsight:
     """Insight about a specific player."""
     player_name: str
-    player_id: Optional[int] = None
-    team: Optional[str] = None
+    player_id: int | None = None
+    team: str | None = None
 
     insight_type: InsightType = InsightType.GENERAL
     severity: int = 1  # 1-10 scale
@@ -130,7 +127,7 @@ class PlayerInsight:
 class TeamInsight:
     """Insight about a team."""
     team_name: str
-    team_id: Optional[int] = None
+    team_id: int | None = None
 
     insight_type: InsightType = InsightType.GENERAL
     impact_score: float = 0.0  # -1 to +1 (-1 = very negative, +1 = very positive)
@@ -165,7 +162,7 @@ class NewsIngestor:
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(exist_ok=True)
 
-        self.news_items: Dict[str, NewsItem] = {}
+        self.news_items: dict[str, NewsItem] = {}
         self._lock = threading.Lock()
 
         # Load cached news
@@ -213,7 +210,7 @@ class NewsIngestor:
 
         return item
 
-    def get_news_for_player(self, player_name: str, hours: int = 24) -> List[NewsItem]:
+    def get_news_for_player(self, player_name: str, hours: int = 24) -> list[NewsItem]:
         """Get recent news mentioning a player."""
         cutoff = time.time() - (hours * 3600)
         name_lower = player_name.lower()
@@ -224,14 +221,12 @@ class NewsIngestor:
                 if item.timestamp < cutoff:
                     continue
                 # Check if player mentioned
-                if name_lower in item.headline.lower() or name_lower in item.content.lower():
-                    results.append(item)
-                elif any(name_lower in p.lower() for p in item.players):
+                if name_lower in item.headline.lower() or name_lower in item.content.lower() or any(name_lower in p.lower() for p in item.players):
                     results.append(item)
 
         return sorted(results, key=lambda x: x.timestamp, reverse=True)
 
-    def get_news_for_team(self, team_name: str, hours: int = 24) -> List[NewsItem]:
+    def get_news_for_team(self, team_name: str, hours: int = 24) -> list[NewsItem]:
         """Get recent news mentioning a team."""
         cutoff = time.time() - (hours * 3600)
         team_lower = team_name.lower()
@@ -241,19 +236,17 @@ class NewsIngestor:
             for item in self.news_items.values():
                 if item.timestamp < cutoff:
                     continue
-                if team_lower in item.headline.lower() or team_lower in item.content.lower():
-                    results.append(item)
-                elif any(team_lower in t.lower() for t in item.teams):
+                if team_lower in item.headline.lower() or team_lower in item.content.lower() or any(team_lower in t.lower() for t in item.teams):
                     results.append(item)
 
         return sorted(results, key=lambda x: x.timestamp, reverse=True)
 
-    def get_unanalyzed_news(self) -> List[NewsItem]:
+    def get_unanalyzed_news(self) -> list[NewsItem]:
         """Get news items that haven't been analyzed yet."""
         with self._lock:
             return [item for item in self.news_items.values() if not item.analyzed]
 
-    def mark_analyzed(self, news_id: str, insights: List[Dict]):
+    def mark_analyzed(self, news_id: str, insights: list[dict]):
         """Mark a news item as analyzed with insights."""
         with self._lock:
             if news_id in self.news_items:
@@ -261,7 +254,7 @@ class NewsIngestor:
                 self.news_items[news_id].insights = insights
                 self._save_cache()
 
-    def _extract_players(self, text: str) -> List[str]:
+    def _extract_players(self, text: str) -> list[str]:
         """Extract player names from text (basic pattern matching)."""
         # This is a simplified extraction - in production, would use NER
         # Pattern: Capitalized first name + Capitalized last name
@@ -280,7 +273,7 @@ class NewsIngestor:
 
         return list(set(players))
 
-    def _extract_teams(self, text: str) -> List[str]:
+    def _extract_teams(self, text: str) -> list[str]:
         """Extract NBA team names from text."""
         nba_teams = [
             'Lakers', 'Celtics', 'Warriors', 'Nets', 'Knicks', 'Heat', 'Bulls',
@@ -303,12 +296,12 @@ class NewsIngestor:
         cache_file = self.cache_dir / "news_items.json"
         if cache_file.exists():
             try:
-                with open(cache_file, 'r') as f:
+                with open(cache_file) as f:
                     data = json.load(f)
                     for item_data in data.get('items', []):
                         item = NewsItem(**item_data)
                         self.news_items[item.id] = item
-            except (json.JSONDecodeError, IOError, TypeError):
+            except (OSError, json.JSONDecodeError, TypeError):
                 pass
 
     def _save_cache(self):
@@ -332,7 +325,7 @@ class NewsIngestor:
             ]
             with open(cache_file, 'w') as f:
                 json.dump({'items': items_data}, f)
-        except IOError:
+        except OSError:
             pass
 
 
@@ -418,7 +411,7 @@ Be conservative with severity ratings - only high severity for confirmed major n
         self.min_call_interval = 1.0  # seconds between calls
 
         # Cache analyzed results
-        self.analysis_cache: Dict[str, Dict] = {}
+        self.analysis_cache: dict[str, dict] = {}
 
     def _init_client(self):
         """Lazy initialization of Anthropic client."""
@@ -438,7 +431,7 @@ Be conservative with severity ratings - only high severity for confirmed major n
                 "anthropic package required. Install with: pip install anthropic"
             )
 
-    def analyze(self, news_item: NewsItem) -> Dict:
+    def analyze(self, news_item: NewsItem) -> dict:
         """
         Analyze a news item using Claude.
 
@@ -455,7 +448,7 @@ Be conservative with severity ratings - only high severity for confirmed major n
 
         try:
             self._init_client()
-        except (ValueError, ImportError) as e:
+        except (ValueError, ImportError):
             # Return fallback analysis if API not available
             return self._fallback_analysis(news_item)
 
@@ -499,7 +492,7 @@ Be conservative with severity ratings - only high severity for confirmed major n
             print(f"Claude analysis error: {e}")
             return self._fallback_analysis(news_item)
 
-    def _fallback_analysis(self, news_item: NewsItem) -> Dict:
+    def _fallback_analysis(self, news_item: NewsItem) -> dict:
         """
         Rule-based fallback when Claude API is unavailable.
         """
@@ -566,7 +559,7 @@ Be conservative with severity ratings - only high severity for confirmed major n
             'summary': 'Fallback rule-based analysis (API unavailable)',
         }
 
-    def batch_analyze(self, news_items: List[NewsItem]) -> List[Dict]:
+    def batch_analyze(self, news_items: list[NewsItem]) -> list[dict]:
         """Analyze multiple news items."""
         return [self.analyze(item) for item in news_items]
 
@@ -587,8 +580,8 @@ class InjuryImpactCalculator:
         self.analyzer = analyzer
 
         # Store calculated impacts
-        self.player_impacts: Dict[str, PlayerInsight] = {}
-        self.team_impacts: Dict[str, TeamInsight] = {}
+        self.player_impacts: dict[str, PlayerInsight] = {}
+        self.team_impacts: dict[str, TeamInsight] = {}
 
     def process_all_news(self):
         """Process all unanalyzed news and update impacts."""
@@ -617,7 +610,7 @@ class InjuryImpactCalculator:
             # Mark as analyzed
             self.ingestor.mark_analyzed(news_item.id, analysis.get('players', []) + analysis.get('teams', []))
 
-    def _create_player_insight(self, data: Dict, news_item: NewsItem) -> Optional[PlayerInsight]:
+    def _create_player_insight(self, data: dict, news_item: NewsItem) -> PlayerInsight | None:
         """Create PlayerInsight from analysis data."""
         try:
             return PlayerInsight(
@@ -636,7 +629,7 @@ class InjuryImpactCalculator:
         except (KeyError, ValueError):
             return None
 
-    def _create_team_insight(self, data: Dict, news_item: NewsItem) -> Optional[TeamInsight]:
+    def _create_team_insight(self, data: dict, news_item: NewsItem) -> TeamInsight | None:
         """Create TeamInsight from analysis data."""
         try:
             affects = data.get('affects', ['moneyline', 'spread'])
@@ -655,7 +648,7 @@ class InjuryImpactCalculator:
         except (KeyError, ValueError):
             return None
 
-    def get_player_adjustment(self, player_name: str) -> Dict:
+    def get_player_adjustment(self, player_name: str) -> dict:
         """
         Get adjustment factors for a player.
 
@@ -683,7 +676,7 @@ class InjuryImpactCalculator:
             'confidence': insight.confidence,
         }
 
-    def get_team_adjustment(self, team_name: str) -> Dict:
+    def get_team_adjustment(self, team_name: str) -> dict:
         """
         Get adjustment factors for a team.
 
@@ -735,7 +728,7 @@ class InjuryImpactCalculator:
         if insight.insight_type == InsightType.INJURY:
             if stat == 'points':
                 return max(0.2, insight.points_adjustment)
-            elif stat == 'minutes':
+            if stat == 'minutes':
                 # Convert minutes change to multiplier
                 if insight.minutes_adjustment != 0:
                     base_minutes = 28  # Assume ~28 min average
@@ -784,11 +777,11 @@ class SentimentPipeline:
         """Process all unanalyzed news."""
         self.calculator.process_all_news()
 
-    def get_player_adjustment(self, player_name: str) -> Dict:
+    def get_player_adjustment(self, player_name: str) -> dict:
         """Get adjustment for a player."""
         return self.calculator.get_player_adjustment(player_name)
 
-    def get_team_adjustment(self, team_name: str) -> Dict:
+    def get_team_adjustment(self, team_name: str) -> dict:
         """Get adjustment for a team."""
         return self.calculator.get_team_adjustment(team_name)
 
@@ -796,7 +789,7 @@ class SentimentPipeline:
         """Get injury boost factor for player prop."""
         return self.calculator.get_injury_boost_factor(player_name, stat)
 
-    def get_all_active_insights(self) -> Dict:
+    def get_all_active_insights(self) -> dict:
         """Get all active player and team insights."""
         now = time.time()
 
@@ -828,9 +821,9 @@ class SentimentPipeline:
 # =============================================================================
 
 def update_injury_adjustments_from_sentiment(
-    injury_data: Dict,
+    injury_data: dict,
     pipeline: SentimentPipeline
-) -> Dict:
+) -> dict:
     """
     Enhance injury_fetcher.py output with sentiment-based adjustments.
 
@@ -956,7 +949,7 @@ def demo_sentiment_analysis():
             print(f"    Minutes Change: {adj['minutes_change']}")
             print(f"    Injury Boost Factor: {boost:.2f}")
         else:
-            print(f"    No insights available")
+            print("    No insights available")
 
     print("\n5. INTEGRATION EXAMPLE")
     print("-" * 40)

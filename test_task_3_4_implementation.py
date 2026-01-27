@@ -105,18 +105,18 @@ try:
     print(f"  ✓ Loaded {len(models)} models")
 
     # Check for quantile models
-    quantile_models = [k for k in models.keys() if 'quantile' in k]
+    quantile_models = [k for k in models if 'quantile' in k]
     if quantile_models:
         print(f"  ✓ Found {len(quantile_models)} quantile models: {quantile_models}")
     else:
-        print(f"  ⚠ No quantile models found (expected if not yet trained)")
+        print("  ⚠ No quantile models found (expected if not yet trained)")
 
     # Check for prop models
-    prop_models = [k for k in models.keys() if 'prop_' in k and 'quantile' not in k]
+    prop_models = [k for k in models if 'prop_' in k and 'quantile' not in k]
     if prop_models:
         print(f"  ✓ Found {len(prop_models)} prop models")
     else:
-        print(f"  ⚠ No prop models found")
+        print("  ⚠ No prop models found")
 
 except Exception as e:
     print(f"  ✗ Model loading failed: {e}")

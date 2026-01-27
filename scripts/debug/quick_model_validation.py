@@ -13,11 +13,7 @@ This script:
 
 import json
 import pickle
-import numpy as np
-import pandas as pd
 from pathlib import Path
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from collections import defaultdict
 
 MODEL_DIR = Path("models")
 TRAINING_DATA = Path("training_data/games_data_20251212_214916.json")

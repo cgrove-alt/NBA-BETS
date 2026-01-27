@@ -7,9 +7,8 @@ Validates current model performance with meta-learner stacking.
 import sys
 import pickle
 import numpy as np
-import pandas as pd
 from pathlib import Path
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.metrics import mean_squared_error
 from collections import defaultdict
 import json
 
@@ -51,7 +50,7 @@ def main():
         sys.exit(1)
 
     # Sample validation: Load 100 random box scores and extract actuals
-    print(f"\nSampling 100 games for validation...")
+    print("\nSampling 100 games for validation...")
 
     sample_files = np.random.choice(box_score_files, min(100, len(box_score_files)), replace=False)
 
@@ -60,7 +59,7 @@ def main():
 
     for file_path in sample_files:
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 game_data = json.load(f)
 
             # Extract player stats
@@ -86,7 +85,7 @@ def main():
 
             games_processed += 1
 
-        except Exception as e:
+        except Exception:
             continue
 
     print(f"Processed {games_processed} games")
@@ -127,11 +126,11 @@ def main():
 
         if has_meta:
             print(f"  Meta-model type: {type(model.meta_model).__name__}")
-            print(f"  ✅ Using STACKING")
+            print("  ✅ Using STACKING")
         elif has_weights:
-            print(f"  ⚠️  Using WEIGHTED AVERAGING")
+            print("  ⚠️  Using WEIGHTED AVERAGING")
         else:
-            print(f"  ⚠️  Using SIMPLE AVERAGING")
+            print("  ⚠️  Using SIMPLE AVERAGING")
 
     print("\n" + "=" * 70)
     print("SUMMARY")

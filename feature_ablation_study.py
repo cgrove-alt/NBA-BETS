@@ -91,7 +91,7 @@ def test_feature_configuration(prop_type, feature_config_name, features_to_exclu
     cv_values = []
     n_samples = 100
 
-    for i in range(n_samples):
+    for _i in range(n_samples):
         # Generate realistic feature values
         features = {
             'season_pts_avg': np.random.uniform(5, 30),
@@ -126,7 +126,7 @@ def test_feature_configuration(prop_type, feature_config_name, features_to_exclu
                 X[col] = 0
 
         # Use only available features
-        X_filtered = X[available_features].copy()
+        X[available_features].copy()
 
         # For features not in available list, set to 0 (effectively removing them)
         for col in feature_names:
@@ -201,7 +201,7 @@ def run_ablation_study():
     results = defaultdict(dict)
 
     for config_name, excluded_features in configurations:
-        print(f'\n{\"=\"*70}')
+        print(f'\n{"="*70}')
         print(f'CONFIGURATION: {config_name}')
         print(f'{"="*70}')
         print(f'Excluding {len(excluded_features)} features')
@@ -215,7 +215,7 @@ def run_ablation_study():
 
             if result:
                 config_results[prop_type] = result
-                print(f'CV={result[\"mean_cv\"]:.4f}  E+S={result[\"elite_strong_pct\"]:.1f}%')
+                print(f'CV={result['mean_cv']:.4f}  E+S={result['elite_strong_pct']:.1f}%')
             else:
                 print('SKIPPED')
 
@@ -226,7 +226,7 @@ def run_ablation_study():
     print('SUMMARY: MEAN CV BY CONFIGURATION')
     print('='*70)
 
-    print(f'\n{\"Configuration\":30s}', end='')
+    print(f'\n{"Configuration":30s}', end='')
     for prop in prop_types:
         print(f' {prop:8s}', end='')
     print('  Overall')
@@ -241,20 +241,20 @@ def run_ablation_study():
                 cvs.append(cv)
                 print(f' {cv:8.4f}', end='')
             else:
-                print(f' {\"N/A\":8s}', end='')
+                print(f' {"N/A":8s}', end='')
 
         if cvs:
             overall_cv = np.mean(cvs)
             print(f'  {overall_cv:.4f}')
         else:
-            print(f'  {\"N/A\"}')
+            print(f'  {"N/A"}')
 
     # Elite+Strong comparison
     print('\n' + '='*70)
     print('SUMMARY: ELITE+STRONG % BY CONFIGURATION')
     print('='*70)
 
-    print(f'\n{\"Configuration\":30s}', end='')
+    print(f'\n{"Configuration":30s}', end='')
     for prop in prop_types:
         print(f' {prop:8s}', end='')
     print('  Overall  Status')
@@ -269,14 +269,14 @@ def run_ablation_study():
                 es_pcts.append(es)
                 print(f' {es:7.1f}%', end='')
             else:
-                print(f' {\"N/A\":8s}', end='')
+                print(f' {"N/A":8s}', end='')
 
         if es_pcts:
             overall_es = np.mean(es_pcts)
             status = '✅' if overall_es >= 10 else '❌'
             print(f'  {overall_es:6.1f}%  {status}')
         else:
-            print(f'  {\"N/A\"}')
+            print(f'  {"N/A"}')
 
     # Identify best configuration
     print('\n' + '='*70)
@@ -290,7 +290,7 @@ def run_ablation_study():
         baseline_cv = np.mean([baseline[p]['mean_cv'] for p in prop_types if p in baseline])
         baseline_es = np.mean([baseline[p]['elite_strong_pct'] for p in prop_types if p in baseline])
 
-        print(f'\nBaseline:')
+        print('\nBaseline:')
         print(f'  Mean CV: {baseline_cv:.4f}')
         print(f'  Elite+Strong: {baseline_es:.1f}%')
 
@@ -322,18 +322,18 @@ def run_ablation_study():
         # Sort by ES improvement
         improvements.sort(key=lambda x: x['es_improvement'], reverse=True)
 
-        print(f'\nImprovements vs Baseline:')
-        print(f'{\"Configuration\":30s} {\"CV Change\":>12s} {\"E+S Change\":>12s} {\"Final E+S\":>12s}')
+        print('\nImprovements vs Baseline:')
+        print(f'{"Configuration":30s} {"CV Change":>12s} {"E+S Change":>12s} {"Final E+S":>12s}')
         print('-'*70)
 
         for imp in improvements:
             cv_arrow = '↓' if imp['cv_improvement'] > 0 else '↑'
             es_arrow = '↑' if imp['es_improvement'] > 0 else '↓'
 
-            print(f'{imp[\"config\"]:30s} '
-                  f'{cv_arrow}{abs(imp[\"cv_improvement\"]):.4f} ({imp[\"cv_improvement_pct\"]:+.1f}%)  '
-                  f'{es_arrow}{abs(imp[\"es_improvement\"]):.1f}% ({imp[\"es_improvement_pct\"]:+.1f}%)  '
-                  f'{imp[\"final_es\"]:.1f}%')
+            print(f'{imp['config']:30s} '
+                  f'{cv_arrow}{abs(imp['cv_improvement']):.4f} ({imp['cv_improvement_pct']:+.1f}%)  '
+                  f'{es_arrow}{abs(imp['es_improvement']):.1f}% ({imp['es_improvement_pct']:+.1f}%)  '
+                  f'{imp['final_es']:.1f}%')
 
     # Save results
     output_file = Path('backtest_results/feature_ablation_results.json')
@@ -349,22 +349,22 @@ def run_ablation_study():
 
     if improvements:
         best = improvements[0]
-        print(f'\nBest configuration: {best[\"config\"]}')
-        print(f'  Elite+Strong: {best[\"final_es\"]:.1f}% ({best[\"es_improvement\"]:+.1f}% vs baseline)')
-        print(f'  Mean CV: {best[\"final_cv\"]:.4f} ({best[\"cv_improvement\"]:+.4f} vs baseline)')
+        print(f'\nBest configuration: {best['config']}')
+        print(f'  Elite+Strong: {best['final_es']:.1f}% ({best['es_improvement']:+.1f}% vs baseline)')
+        print(f'  Mean CV: {best['final_cv']:.4f} ({best['cv_improvement']:+.4f} vs baseline)')
 
         if best['final_es'] >= 10:
-            print(f'\n✅ TARGET ACHIEVED! Remove features from: {best[\"config\"]}')
+            print(f'\n✅ TARGET ACHIEVED! Remove features from: {best['config']}')
         elif best['es_improvement'] > 0:
-            print(f'\n⚠️  Improvement shown but target not met.')
-            print(f'   Consider: Remove features + recalibrate thresholds')
+            print('\n⚠️  Improvement shown but target not met.')
+            print('   Consider: Remove features + recalibrate thresholds')
         else:
-            print(f'\n❌ No configuration improves Elite+Strong percentage.')
-            print(f'   Phase 2 features are NOT the primary cause.')
-            print(f'   Next steps:')
-            print(f'   1. Recalibrate confidence thresholds')
-            print(f'   2. Consider removing Ridge model')
-            print(f'   3. Apply calibration methods')
+            print('\n❌ No configuration improves Elite+Strong percentage.')
+            print('   Phase 2 features are NOT the primary cause.')
+            print('   Next steps:')
+            print('   1. Recalibrate confidence thresholds')
+            print('   2. Consider removing Ridge model')
+            print('   3. Apply calibration methods')
 
     return results
 

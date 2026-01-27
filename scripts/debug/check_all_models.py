@@ -58,7 +58,7 @@ def check_all_prop_models():
             except Exception as e:
                 print(f"  ✗ Error loading legacy: {e}")
         else:
-            print(f"  ✗ NO MODEL FOUND!")
+            print("  ✗ NO MODEL FOUND!")
             issues_found.append(f"{prop_type}: No model found")
             continue
 
@@ -71,7 +71,7 @@ def check_all_prop_models():
 
                 if loaded_features < 20 and ensemble_features > 100:
                     print(f"  ⚠️  ISSUE: Stacking has {loaded_features} features, ensemble has {ensemble_features}")
-                    print(f"      Stacking model likely incomplete!")
+                    print("      Stacking model likely incomplete!")
                     issues_found.append(
                         f"{prop_type}: Broken stacking model ({loaded_features} features) "
                         f"blocking ensemble ({ensemble_features} features)"

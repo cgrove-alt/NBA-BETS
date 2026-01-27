@@ -33,7 +33,7 @@ def load_backtest_results():
     if not results_file.exists():
         raise FileNotFoundError(f"Backtest results not found: {results_file}")
 
-    with open(results_file, 'r') as f:
+    with open(results_file) as f:
         return json.load(f)
 
 
@@ -79,7 +79,7 @@ def fit_platt_scaling(confidence_scores, binary_outcomes):
     platt_model = LogisticRegression()
     platt_model.fit(X, y)
 
-    print(f"\nPlatt Scaling Parameters:")
+    print("\nPlatt Scaling Parameters:")
     print(f"  Coefficient (A): {platt_model.coef_[0][0]:.4f}")
     print(f"  Intercept (B): {platt_model.intercept_[0]:.4f}")
 
@@ -113,9 +113,8 @@ def apply_calibration(confidence_scores, calibration_model):
         calibrated = calibration_model.predict(confidence_scores)
 
     # Scale back to 0-100 range
-    calibrated_scores = calibrated * 100
+    return calibrated * 100
 
-    return calibrated_scores
 
 
 def evaluate_calibration(original_conf, calibrated_conf, binary_outcomes):
@@ -131,18 +130,18 @@ def evaluate_calibration(original_conf, calibrated_conf, binary_outcomes):
     r_calibrated, p_calibrated = pearsonr(calibrated_conf, binary_outcomes)
 
     print(f"\n{'='*70}")
-    print(f"CALIBRATION EVALUATION")
+    print("CALIBRATION EVALUATION")
     print(f"{'='*70}")
-    print(f"\nOriginal Confidence:")
+    print("\nOriginal Confidence:")
     print(f"  Correlation with accuracy: {r_original:.4f} (p={p_original:.4e})")
 
-    print(f"\nCalibrated Confidence:")
+    print("\nCalibrated Confidence:")
     print(f"  Correlation with accuracy: {r_calibrated:.4f} (p={p_calibrated:.4e})")
 
     improvement = r_calibrated - r_original
     improvement_pct = 100 * improvement / abs(r_original) if r_original != 0 else float('inf')
 
-    print(f"\nImprovement:")
+    print("\nImprovement:")
     print(f"  Absolute: {improvement:+.4f}")
     print(f"  Relative: {improvement_pct:+.1f}%")
 
@@ -228,7 +227,7 @@ def main():
     print(f"  Correlation: {best_correlation:.4f}")
 
     if best_correlation > 0.5:
-        print(f"\n✅ TARGET ACHIEVED! Confidence correlation > 0.5")
+        print("\n✅ TARGET ACHIEVED! Confidence correlation > 0.5")
 
         # Save calibration model
         model_file = Path('models/confidence_calibration.pkl')
@@ -241,11 +240,11 @@ def main():
         print(f"\nSaved calibration model to: {model_file}")
     else:
         print(f"\n⚠️  Target not met (r={best_correlation:.4f} < 0.5)")
-        print(f"   Calibration provides improvement but insufficient.")
-        print(f"   Consider:")
-        print(f"   1. Recalibrate with different accuracy threshold")
-        print(f"   2. Apply calibration to tree-based ensemble (after Ridge removal)")
-        print(f"   3. Alternative confidence metrics (quantile regression)")
+        print("   Calibration provides improvement but insufficient.")
+        print("   Consider:")
+        print("   1. Recalibrate with different accuracy threshold")
+        print("   2. Apply calibration to tree-based ensemble (after Ridge removal)")
+        print("   3. Alternative confidence metrics (quantile regression)")
 
     # Save results
     output = {

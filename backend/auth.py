@@ -22,7 +22,7 @@ Usage:
 
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Any
 
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -71,7 +71,7 @@ def get_password_hash(password: str) -> str:
 
 # ============== JWT TOKEN UTILITIES ==============
 
-def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
     """Create a JWT access token.
 
     Args:
@@ -89,12 +89,11 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
         expire = datetime.utcnow() + timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
-
-    return encoded_jwt
+    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
-def decode_access_token(token: str) -> Dict[str, Any]:
+
+def decode_access_token(token: str) -> dict[str, Any]:
     """Decode and verify a JWT token.
 
     Args:
@@ -107,8 +106,7 @@ def decode_access_token(token: str) -> Dict[str, Any]:
         HTTPException: If token is invalid or expired
     """
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-        return payload
+        return jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -120,9 +118,9 @@ def decode_access_token(token: str) -> Dict[str, Any]:
 # ============== AUTHENTICATION DEPENDENCIES ==============
 
 async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    api_key: Optional[str] = Header(None, alias="X-API-Key")
-) -> Optional[Dict[str, Any]]:
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    api_key: str | None = Header(None, alias="X-API-Key")
+) -> dict[str, Any] | None:
     """Get current authenticated user from JWT token or API key.
 
     This dependency can be used to protect endpoints.
@@ -142,9 +140,8 @@ async def get_current_user(
         return {"user_id": "anonymous", "username": "anonymous"}
 
     # Try API key authentication first
-    if api_key and API_KEY:
-        if api_key == API_KEY:
-            return {"user_id": "api_key_user", "username": "api_key_user"}
+    if api_key and API_KEY and api_key == API_KEY:
+        return {"user_id": "api_key_user", "username": "api_key_user"}
 
     # Try JWT authentication
     if credentials:
@@ -175,9 +172,9 @@ async def get_current_user(
 
 
 async def get_optional_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    api_key: Optional[str] = Header(None, alias="X-API-Key")
-) -> Optional[Dict[str, Any]]:
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    api_key: str | None = Header(None, alias="X-API-Key")
+) -> dict[str, Any] | None:
     """Get current user but don't require authentication.
 
     Useful for endpoints that provide different features for authenticated users.
@@ -220,9 +217,9 @@ def add_auth_endpoints(app):
 
     class VerifyResponse(BaseModel):
         valid: bool
-        user_id: Optional[str] = None
-        username: Optional[str] = None
-        expires_at: Optional[str] = None
+        user_id: str | None = None
+        username: str | None = None
+        expires_at: str | None = None
 
     @app.post("/api/auth/token", response_model=TokenResponse)
     async def login(request: TokenRequest):
@@ -264,7 +261,7 @@ def add_auth_endpoints(app):
         )
 
     @app.get("/api/auth/verify", response_model=VerifyResponse)
-    async def verify_token(current_user: Dict[str, Any] = Depends(get_current_user)):
+    async def verify_token(current_user: dict[str, Any] = Depends(get_current_user)):
         """Verify current JWT token is valid."""
         return VerifyResponse(
             valid=True,
@@ -284,7 +281,7 @@ class RateLimiter:
     def __init__(self, max_requests: int = 100, window_seconds: int = 3600):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        self._requests: Dict[str, list] = {}
+        self._requests: dict[str, list] = {}
 
     def check_rate_limit(self, identifier: str) -> bool:
         """Check if identifier has exceeded rate limit.
@@ -322,7 +319,7 @@ rate_limiter = RateLimiter(max_requests=100, window_seconds=3600)
 
 
 async def check_rate_limit(
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user)
+    current_user: dict[str, Any] | None = Depends(get_optional_user)
 ) -> None:
     """Rate limiting dependency.
 
@@ -336,10 +333,7 @@ async def check_rate_limit(
         return
 
     # Use user_id if authenticated, otherwise skip rate limiting
-    if current_user:
-        identifier = current_user.get("user_id", "anonymous")
-    else:
-        identifier = "anonymous"
+    identifier = current_user.get("user_id", "anonymous") if current_user else "anonymous"
 
     if not rate_limiter.check_rate_limit(identifier):
         raise HTTPException(

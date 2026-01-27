@@ -14,14 +14,12 @@ Usage:
 """
 
 import sys
-import json
 import argparse
 import requests
 from datetime import datetime
-from typing import Dict, List, Tuple
 
 
-def check_api_health(base_url: str, api_key: str = None) -> Tuple[bool, str]:
+def check_api_health(base_url: str, api_key: str = None) -> tuple[bool, str]:
     """Check API /health endpoint."""
     try:
         headers = {}
@@ -33,14 +31,13 @@ def check_api_health(base_url: str, api_key: str = None) -> Tuple[bool, str]:
         if response.status_code == 200:
             data = response.json()
             return True, f"✅ API Health: {data.get('status', 'unknown')}"
-        else:
-            return False, f"❌ API Health: HTTP {response.status_code}"
+        return False, f"❌ API Health: HTTP {response.status_code}"
 
     except requests.exceptions.RequestException as e:
         return False, f"❌ API Health: Connection failed - {str(e)}"
 
 
-def check_predictions_endpoint(base_url: str, api_key: str = None) -> Tuple[bool, str]:
+def check_predictions_endpoint(base_url: str, api_key: str = None) -> tuple[bool, str]:
     """Check predictions endpoint with today's date."""
     try:
         headers = {}
@@ -54,16 +51,15 @@ def check_predictions_endpoint(base_url: str, api_key: str = None) -> Tuple[bool
             data = response.json()
             count = len(data.get('predictions', []))
             return True, f"✅ Predictions Endpoint: {count} predictions for {today}"
-        elif response.status_code == 404:
+        if response.status_code == 404:
             return True, f"⚠️  Predictions Endpoint: No predictions for {today} (this is OK if no games scheduled)"
-        else:
-            return False, f"❌ Predictions Endpoint: HTTP {response.status_code}"
+        return False, f"❌ Predictions Endpoint: HTTP {response.status_code}"
 
     except requests.exceptions.RequestException as e:
         return False, f"❌ Predictions Endpoint: {str(e)}"
 
 
-def check_injuries_endpoint(base_url: str, api_key: str = None) -> Tuple[bool, str]:
+def check_injuries_endpoint(base_url: str, api_key: str = None) -> tuple[bool, str]:
     """Check injuries endpoint."""
     try:
         headers = {}
@@ -77,16 +73,15 @@ def check_injuries_endpoint(base_url: str, api_key: str = None) -> Tuple[bool, s
             data = response.json()
             count = len(data.get('injuries', []))
             return True, f"✅ Injuries Endpoint: {count} injuries for {today}"
-        elif response.status_code == 404:
-            return True, f"⚠️  Injuries Endpoint: No injuries data (this is OK)"
-        else:
-            return False, f"❌ Injuries Endpoint: HTTP {response.status_code}"
+        if response.status_code == 404:
+            return True, "⚠️  Injuries Endpoint: No injuries data (this is OK)"
+        return False, f"❌ Injuries Endpoint: HTTP {response.status_code}"
 
     except requests.exceptions.RequestException as e:
         return False, f"❌ Injuries Endpoint: {str(e)}"
 
 
-def check_backtest_endpoint(base_url: str, api_key: str = None) -> Tuple[bool, str]:
+def check_backtest_endpoint(base_url: str, api_key: str = None) -> tuple[bool, str]:
     """Check backtest endpoint."""
     try:
         headers = {}
@@ -99,16 +94,15 @@ def check_backtest_endpoint(base_url: str, api_key: str = None) -> Tuple[bool, s
             data = response.json()
             roi = data.get('overall_metrics', {}).get('roi', 'N/A')
             return True, f"✅ Backtest Endpoint: ROI = {roi}%"
-        elif response.status_code == 404:
-            return True, f"⚠️  Backtest Endpoint: No backtest results (run backtest first)"
-        else:
-            return False, f"❌ Backtest Endpoint: HTTP {response.status_code}"
+        if response.status_code == 404:
+            return True, "⚠️  Backtest Endpoint: No backtest results (run backtest first)"
+        return False, f"❌ Backtest Endpoint: HTTP {response.status_code}"
 
     except requests.exceptions.RequestException as e:
         return False, f"❌ Backtest Endpoint: {str(e)}"
 
 
-def check_cors_headers(base_url: str) -> Tuple[bool, str]:
+def check_cors_headers(base_url: str) -> tuple[bool, str]:
     """Check CORS headers are properly configured."""
     try:
         response = requests.options(f"{base_url}/api/health", timeout=10)
@@ -120,27 +114,25 @@ def check_cors_headers(base_url: str) -> Tuple[bool, str]:
 
         if cors_headers['Access-Control-Allow-Origin']:
             return True, f"✅ CORS Configured: {cors_headers['Access-Control-Allow-Origin']}"
-        else:
-            return False, "❌ CORS: Not configured"
+        return False, "❌ CORS: Not configured"
 
     except requests.exceptions.RequestException as e:
         return False, f"❌ CORS Check: {str(e)}"
 
 
-def check_response_time(base_url: str) -> Tuple[bool, str]:
+def check_response_time(base_url: str) -> tuple[bool, str]:
     """Check API response time."""
     try:
         import time
         start = time.time()
-        response = requests.get(f"{base_url}/api/health", timeout=10)
+        requests.get(f"{base_url}/api/health", timeout=10)
         elapsed = (time.time() - start) * 1000  # Convert to ms
 
         if elapsed < 500:
             return True, f"✅ Response Time: {elapsed:.0f}ms (excellent)"
-        elif elapsed < 1000:
+        if elapsed < 1000:
             return True, f"⚠️  Response Time: {elapsed:.0f}ms (good)"
-        else:
-            return False, f"❌ Response Time: {elapsed:.0f}ms (slow)"
+        return False, f"❌ Response Time: {elapsed:.0f}ms (slow)"
 
     except requests.exceptions.RequestException as e:
         return False, f"❌ Response Time: {str(e)}"
@@ -201,12 +193,11 @@ def main():
     if passed_count == total_count:
         print("\n  🎉 All checks passed! Deployment verified successfully.")
         return 0
-    elif passed_count >= total_count * 0.7:
+    if passed_count >= total_count * 0.7:
         print("\n  ⚠️  Most checks passed. Review warnings above.")
         return 0
-    else:
-        print("\n  ❌ Deployment verification failed. Fix errors above.")
-        return 1
+    print("\n  ❌ Deployment verification failed. Fix errors above.")
+    return 1
 
 
 if __name__ == '__main__':

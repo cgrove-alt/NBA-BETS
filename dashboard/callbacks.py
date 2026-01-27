@@ -3,7 +3,7 @@ Callbacks for NBA Betting Dashboard.
 """
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from dash import callback, Input, Output, State, html, no_update
 
 # Import live adjustments for in-progress games

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 Closing Odds Scheduler - Captures closing lines before game start.
 
 This script monitors today's NBA games and captures closing odds ~5 minutes
@@ -23,8 +23,7 @@ import os
 import sys
 import time
 import argparse
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import datetime
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -43,7 +42,7 @@ except ImportError:
     HAS_BALLDONTLIE = False
 
 
-def parse_game_time(status_str: str) -> Optional[datetime]:
+def parse_game_time(status_str: str) -> datetime | None:
     """
     Parse game time from various status string formats.
 
@@ -76,7 +75,7 @@ def parse_game_time(status_str: str) -> Optional[datetime]:
     return None
 
 
-def get_todays_games() -> List[Dict]:
+def get_todays_games() -> list[dict]:
     """
     Fetch today's NBA games from available sources.
 
@@ -113,7 +112,7 @@ def get_todays_games() -> List[Dict]:
         today = datetime.now().strftime("%Y-%m-%d")
         cache_file = f"cache/schedule_{today}.json"
         if os.path.exists(cache_file):
-            with open(cache_file, 'r') as f:
+            with open(cache_file) as f:
                 games = json.load(f)
     except Exception:
         pass
@@ -122,7 +121,7 @@ def get_todays_games() -> List[Dict]:
 
 
 def capture_closing_odds(
-    game: Dict,
+    game: dict,
     line_tracker: LineMovementTracker,
     odds_fetcher: OddsFetcher,
 ) -> bool:
@@ -248,7 +247,7 @@ def capture_closing_odds(
 def check_and_capture_closing_odds(
     minutes_before: int = 10,
     verbose: bool = True
-) -> Dict:
+) -> dict:
     """
     Check all games and capture closing odds for games starting soon.
 
@@ -318,7 +317,7 @@ def check_and_capture_closing_odds(
             if existing:
                 result["already_had"] += 1
                 if verbose:
-                    print(f"    Already have closing odds")
+                    print("    Already have closing odds")
             else:
                 # Capture closing odds
                 success = capture_closing_odds(game, line_tracker, odds_fetcher)
@@ -332,7 +331,7 @@ def check_and_capture_closing_odds(
                 print(f"    Not yet (game in {time_until_start:.0f} min)")
         else:
             if verbose:
-                print(f"    Game already started or finished")
+                print("    Game already started or finished")
 
     return result
 

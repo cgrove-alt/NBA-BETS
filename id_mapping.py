@@ -12,11 +12,9 @@ Usage:
     team_id = TEAM_ABBREV_TO_BDL["LAL"]
 """
 
-import os
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Tuple
 from difflib import SequenceMatcher
 
 # Balldontlie team IDs (verified from API)
@@ -107,19 +105,16 @@ class IDMapper:
             cache_dir: Directory for cache files (defaults to .bdl_cache/)
             cache_ttl_hours: How long to keep cached data
         """
-        if cache_dir is None:
-            cache_dir = Path(__file__).parent / ".bdl_cache"
-        else:
-            cache_dir = Path(cache_dir)
+        cache_dir = Path(__file__).parent / ".bdl_cache" if cache_dir is None else Path(cache_dir)
 
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(exist_ok=True)
         self.cache_ttl = timedelta(hours=cache_ttl_hours)
 
         # In-memory caches
-        self._player_cache: Dict[str, int] = {}  # name -> id
-        self._player_by_id: Dict[int, Dict] = {}  # id -> player data
-        self._all_players: List[Dict] = []
+        self._player_cache: dict[str, int] = {}  # name -> id
+        self._player_by_id: dict[int, dict] = {}  # id -> player data
+        self._all_players: list[dict] = []
 
         # Load cache from disk
         self._load_cache()
@@ -210,7 +205,7 @@ class IDMapper:
         player_name: str,
         fuzzy: bool = True,
         min_score: float = 0.8,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Get Balldontlie player ID from name.
 
@@ -260,7 +255,7 @@ class IDMapper:
                 name = name[:-len(suffix)]
         return name.strip()
 
-    def _fuzzy_match(self, name: str) -> Tuple[Optional[str], float]:
+    def _fuzzy_match(self, name: str) -> tuple[str | None, float]:
         """
         Find best fuzzy match for a player name.
 
@@ -270,7 +265,7 @@ class IDMapper:
         best_match = None
         best_score = 0
 
-        for cached_name in self._player_cache.keys():
+        for cached_name in self._player_cache:
             score = SequenceMatcher(None, name, cached_name).ratio()
             if score > best_score:
                 best_score = score
@@ -278,7 +273,7 @@ class IDMapper:
 
         return best_match, best_score
 
-    def get_player_name(self, player_id: int) -> Optional[str]:
+    def get_player_name(self, player_id: int) -> str | None:
         """
         Get player name from Balldontlie ID.
 
@@ -296,7 +291,7 @@ class IDMapper:
         last = player.get("last_name", "")
         return f"{first} {last}".strip() if first or last else None
 
-    def get_player_info(self, player_id: int) -> Optional[Dict]:
+    def get_player_info(self, player_id: int) -> dict | None:
         """
         Get full player info from Balldontlie ID.
 
@@ -311,7 +306,7 @@ class IDMapper:
 
         return self._player_by_id.get(player_id)
 
-    def get_team_id(self, team_abbrev: str) -> Optional[int]:
+    def get_team_id(self, team_abbrev: str) -> int | None:
         """
         Get Balldontlie team ID from abbreviation.
 
@@ -323,7 +318,7 @@ class IDMapper:
         """
         return TEAM_ABBREV_TO_BDL.get(team_abbrev.upper())
 
-    def get_team_abbrev(self, team_id: int) -> Optional[str]:
+    def get_team_abbrev(self, team_id: int) -> str | None:
         """
         Get team abbreviation from Balldontlie ID.
 
@@ -339,7 +334,7 @@ class IDMapper:
         self,
         query: str,
         limit: int = 5,
-    ) -> List[Tuple[str, int, float]]:
+    ) -> list[tuple[str, int, float]]:
         """
         Search for players by name (fuzzy).
 
@@ -366,13 +361,13 @@ class IDMapper:
 
 
 # Convenience function
-def get_player_id(player_name: str) -> Optional[int]:
+def get_player_id(player_name: str) -> int | None:
     """Quick lookup of Balldontlie player ID."""
     mapper = IDMapper()
     return mapper.get_player_id(player_name)
 
 
-def get_team_id(team_abbrev: str) -> Optional[int]:
+def get_team_id(team_abbrev: str) -> int | None:
     """Quick lookup of Balldontlie team ID."""
     return TEAM_ABBREV_TO_BDL.get(team_abbrev.upper())
 

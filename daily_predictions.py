@@ -17,13 +17,12 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import os
-import sys
 import pickle
 import logging
 import time
-from datetime import datetime, date
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 import numpy as np
 
 # Create logger instance
@@ -37,8 +36,7 @@ from balldontlie_api import BalldontlieAPI
 from feature_engineering import generate_game_features, PlayerPropFeatureGenerator, InjuryReportManager
 from scipy.stats import norm
 from data_fetcher import fetch_player_stats_bdl
-from injury_tracker_v3 import fetch_current_injuries, is_player_available, InjuryStatus
-from model_classes import QuantilePropModel  # BUG FIX: Import for pickle deserialization
+from injury_tracker_v3 import fetch_current_injuries, InjuryStatus
 
 # BUG FIX: Prop-specific standard deviations (not line-based)
 # Previous bug: std = line * 0.20 caused massive miscalibration
@@ -93,14 +91,13 @@ def get_tier_from_confidence(confidence_score: float) -> str:
     """Map confidence score (0-100) to edge quality tier."""
     if confidence_score >= 90:
         return 'elite'
-    elif confidence_score >= 75:
+    if confidence_score >= 75:
         return 'strong'
-    elif confidence_score >= 60:
+    if confidence_score >= 60:
         return 'moderate'
-    elif confidence_score >= 40:
+    if confidence_score >= 40:
         return 'weak'
-    else:
-        return 'avoid'
+    return 'avoid'
 
 # Import training feature generator for accurate prop predictions
 try:
@@ -147,7 +144,7 @@ except ImportError:
     HAS_TRACKING_DATA = False
 
 
-def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> Tuple[Optional['ShotAtlas'], Optional['RotationTracker']]:
+def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> tuple[Optional['ShotAtlas'], Optional['RotationTracker']]:
     """
     Fetch tracking data for a team's recent games.
 
@@ -192,7 +189,7 @@ def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> Tuple[Optional['
 
         return shot_atlas, rotation_tracker
 
-    except Exception as e:
+    except Exception:
         return None, None
 
 
@@ -254,14 +251,14 @@ def get_id_mapper():
             return None
     return _id_mapper
 
-def get_player_name_from_bdl_id(bdl_player_id: int) -> Optional[str]:
+def get_player_name_from_bdl_id(bdl_player_id: int) -> str | None:
     """Get player name from Balldontlie player ID."""
     mapper = get_id_mapper()
     if mapper:
         return mapper.get_player_name(bdl_player_id)
     return None
 
-def get_bdl_player_id(player_name: str) -> Optional[int]:
+def get_bdl_player_id(player_name: str) -> int | None:
     """Get Balldontlie player ID from player name (fast, cached)."""
     mapper = get_id_mapper()
     if mapper:
@@ -281,7 +278,7 @@ def get_injury_manager(season: str = "2025-26") -> InjuryReportManager:
     return _injury_manager
 
 
-def get_balldontlie_api() -> Optional[BalldontlieAPI]:
+def get_balldontlie_api() -> BalldontlieAPI | None:
     """Get or create shared Balldontlie API instance."""
     global _balldontlie_api
     if _balldontlie_api is None:
@@ -294,7 +291,7 @@ def get_balldontlie_api() -> Optional[BalldontlieAPI]:
 # Cache for future games to avoid redundant API calls
 _future_games_cache = {}
 
-def get_future_games_for_team(team_id: int, game_date: str) -> List[Dict]:
+def get_future_games_for_team(team_id: int, game_date: str) -> list[dict]:
     """
     Get upcoming games for a team (cached).
 
@@ -319,7 +316,7 @@ def get_future_games_for_team(team_id: int, game_date: str) -> List[Dict]:
         future_games = api.get_upcoming_games(team_id, game_date, days_ahead=7)
         _future_games_cache[cache_key] = future_games
         return future_games
-    except Exception as e:
+    except Exception:
         return []
 
 
@@ -337,7 +334,7 @@ def generate_complete_prop_features(
     opponent_team_id: int,
     is_home: bool = False,
     vegas_total: float = None,
-) -> Optional[Dict]:
+) -> dict | None:
     """
     Generate ALL 150 features matching what the model was trained on.
 
@@ -522,8 +519,8 @@ def generate_complete_prop_features(
 def apply_injury_adjustments(
     home_prob: float,
     away_prob: float,
-    injury_features: Dict
-) -> Tuple[float, float]:
+    injury_features: dict
+) -> tuple[float, float]:
     """
     Apply post-hoc injury adjustments to win probabilities.
 
@@ -593,7 +590,7 @@ def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
             if features:
                 _player_feature_cache[cache_key] = features
                 return features
-        except Exception as e:
+        except Exception:
             # Log but continue to fallback
             pass
 
@@ -634,7 +631,7 @@ NBA_SPREAD_VOLATILITY = 13.0  # Historical std dev of NBA margins
 MODEL_DIR = Path("models")
 
 
-def load_models() -> Dict:
+def load_models() -> dict:
     """Load all prediction models."""
     models = {}
 
@@ -713,7 +710,7 @@ def load_models() -> Dict:
                         break
 
                     # Handle dict format with single model, scaler, feature_names
-                    elif isinstance(data, dict):
+                    if isinstance(data, dict):
                         model = data.get('model')
                         scaler = data.get('scaler')
                         feature_names = data.get('feature_names', [])
@@ -729,7 +726,7 @@ def load_models() -> Dict:
                     elif hasattr(data, 'predict'):
                         models[f'prop_{prop_type}'] = data
                         break
-                except Exception as e:
+                except Exception:
                     continue
 
     return models
@@ -744,11 +741,10 @@ def get_implied_probability(american_odds: int) -> float:
     """Convert American odds to implied probability."""
     if american_odds > 0:
         return 100 / (american_odds + 100)
-    else:
-        return abs(american_odds) / (abs(american_odds) + 100)
+    return abs(american_odds) / (abs(american_odds) + 100)
 
 
-def predict_moneyline(features: Dict, models: Dict) -> Tuple[float, float]:
+def predict_moneyline(features: dict, models: dict) -> tuple[float, float]:
     """Predict moneyline probabilities."""
     model = models.get('moneyline')
     if not model:
@@ -776,7 +772,7 @@ def predict_moneyline(features: Dict, models: Dict) -> Tuple[float, float]:
     return home_prob, 1 - home_prob
 
 
-def predict_spread(features: Dict, models: Dict) -> float:
+def predict_spread(features: dict, models: dict) -> float:
     """Predict point spread (positive = home favored)."""
     model = models.get('spread')
 
@@ -789,8 +785,7 @@ def predict_spread(features: Dict, models: Dict) -> float:
             feature_cols = ['net_rating_diff', 'off_rating_diff', 'def_rating_diff',
                           'pace_diff', 'expected_point_diff']
             X = np.array([[features.get(col, 0) for col in feature_cols]])
-            predicted = model.predict(X)[0]
-            return predicted
+            return model.predict(X)[0]
         except Exception:
             pass
 
@@ -799,12 +794,12 @@ def predict_spread(features: Dict, models: Dict) -> float:
 
 
 def simulate_game_predictions(
-    home_team_data: Dict,
-    away_team_data: Dict,
-    home_players: List[Dict],
-    away_players: List[Dict],
+    home_team_data: dict,
+    away_team_data: dict,
+    home_players: list[dict],
+    away_players: list[dict],
     n_simulations: int = 1000
-) -> Optional[Dict]:
+) -> dict | None:
     """
     Use Monte Carlo simulation for enhanced predictions.
 
@@ -858,7 +853,7 @@ def simulate_game_predictions(
                 shots_loaded = 0
                 for cache_file in cache_dir.glob("shots_*.json"):
                     try:
-                        with open(cache_file, 'r') as f:
+                        with open(cache_file) as f:
                             data = json.load(f)
 
                         # Parse shots
@@ -868,7 +863,7 @@ def simulate_game_predictions(
 
                         if shots:
                             # Check if shots are from either team
-                            game_team_ids = set(s.team_id for s in shots)
+                            game_team_ids = {s.team_id for s in shots}
                             if home_team_id in game_team_ids or away_team_id in game_team_ids:
                                 shot_atlas.add_shots(shots)
                                 shots_loaded += len(shots)
@@ -879,7 +874,7 @@ def simulate_game_predictions(
                 games_processed = 0
                 for cache_file in list(cache_dir.glob("pbp_*.json"))[:10]:
                     try:
-                        with open(cache_file, 'r') as f:
+                        with open(cache_file) as f:
                             data = json.load(f)
 
                         # Parse PBP
@@ -893,7 +888,7 @@ def simulate_game_predictions(
 
                         if plays:
                             # Identify team IDs from plays
-                            play_team_ids = set(p.team_id for p in plays if p.team_id)
+                            play_team_ids = {p.team_id for p in plays if p.team_id}
                             if home_team_id in play_team_ids or away_team_id in play_team_ids:
                                 rotation_tracker.process_game(plays, home_team_id, away_team_id)
                                 games_processed += 1
@@ -908,7 +903,7 @@ def simulate_game_predictions(
                     )
                     tracking_loaded = True
 
-            except Exception as e:
+            except Exception:
                 pass  # Fall back to V3 without tracking data
 
             results = simulator.run_simulation(n_simulations=n_simulations)
@@ -939,9 +934,9 @@ def simulate_game_predictions(
 
 
 def optimize_bet_portfolio(
-    predictions: List[Dict],
+    predictions: list[dict],
     bankroll: float = 1000,
-) -> Optional[Dict]:
+) -> dict | None:
     """
     Optimize bet sizing across all predictions using portfolio optimization.
 
@@ -995,7 +990,7 @@ def optimize_bet_portfolio(
         return None
 
 
-def analyze_game(game: Dict, odds: Dict, models: Dict) -> Dict:
+def analyze_game(game: dict, odds: dict, models: dict) -> dict:
     """
     Analyze a single game with all bet types.
 
@@ -1049,7 +1044,7 @@ def analyze_game(game: Dict, odds: Dict, models: Dict) -> Dict:
                 'injury_advantage': ml_features.get('injury_advantage', 0),
             }
             injury_details = ml_features.get('injury_details', {'home': [], 'away': []})
-    except Exception as e:
+    except Exception:
         ml_features = {}
 
     if not ml_features:
@@ -1098,7 +1093,7 @@ def analyze_game(game: Dict, odds: Dict, models: Dict) -> Dict:
                 is_home=False,
                 future_games=away_future
             )
-        except Exception as e:
+        except Exception:
             pass  # Continue without schedule spots if analysis fails
 
     analysis['schedule_spots'] = schedule_spots
@@ -1164,7 +1159,7 @@ def analyze_game(game: Dict, odds: Dict, models: Dict) -> Dict:
     return analysis
 
 
-def print_game_analysis(analysis: Dict):
+def print_game_analysis(analysis: dict):
     """Print formatted game analysis."""
     home = analysis['home_team']
     away = analysis['away_team']
@@ -1180,7 +1175,7 @@ def print_game_analysis(analysis: Dict):
     away_injured = injury_details.get('away', []) if isinstance(injury_details, dict) else []
 
     if home_injured or away_injured:
-        print(f"\n  INJURIES:")
+        print("\n  INJURIES:")
         if home_injured:
             print(f"    {home}:")
             for inj in home_injured[:5]:  # Limit to 5 per team
@@ -1207,7 +1202,7 @@ def print_game_analysis(analysis: Dict):
     elif away_edge > 3:
         ml_rec = f">>> {away} ML"
 
-    print(f"\n  MONEYLINE:")
+    print("\n  MONEYLINE:")
     print(f"    {home}: {home_prob:.1%} (edge: {home_edge:+.1f}%)")
     print(f"    {away}: {away_prob:.1%} (edge: {away_edge:+.1f}%)")
     if ml_rec:
@@ -1215,7 +1210,7 @@ def print_game_analysis(analysis: Dict):
 
     # Spread
     sp = analysis['spread']
-    print(f"\n  SPREAD:")
+    print("\n  SPREAD:")
     print(f"    Model: {home} {sp['predicted_spread']:+.1f}")
     print(f"    Market: {home} {sp['market_spread']:+.1f}")
     print(f"    Cover Prob: {sp['cover_prob']:.1%} | Edge: {sp['edge_pct']:+.1f}%")
@@ -1225,7 +1220,7 @@ def print_game_analysis(analysis: Dict):
     # Player props (if any)
     props = analysis.get('player_props', [])
     if props:
-        print(f"\n  PLAYER PROPS:")
+        print("\n  PLAYER PROPS:")
         for prop in props:
             player = prop.get('player', 'Unknown')
             stat = prop.get('stat', '')
@@ -1260,7 +1255,7 @@ def print_game_analysis(analysis: Dict):
                 print(f"    {player} {stat} {line}: {direction} {prob:.0%} ({edge:+.1f}%) {marker}")
 
 
-def get_player_props_for_game(api: BalldontlieAPI, game_id: int) -> Dict[int, Dict]:
+def get_player_props_for_game(api: BalldontlieAPI, game_id: int) -> dict[int, dict]:
     """
     Get player props from Balldontlie API for a game.
 
@@ -1320,12 +1315,12 @@ def predict_player_prop(
     line: float,
     opponent: str,
     opponent_id: int,
-    models: Dict,
+    models: dict,
     use_api_features: bool = False,  # Disable by default for speed
     player_position: str = None,  # Player position (G/F/C)
-    opponent_injured: List[str] = None,  # Injured players on opponent
-    teammate_injured: List[str] = None,  # Injured teammates
-) -> Dict:
+    opponent_injured: list[str] = None,  # Injured players on opponent
+    teammate_injured: list[str] = None,  # Injured teammates
+) -> dict:
     """
     Predict over/under probability for a player prop.
 
@@ -1364,7 +1359,7 @@ def predict_player_prop(
                 if isinstance(model_data, dict) and model_data.get('ensemble'):
                     base_models = model_data['models']
                     meta_model = model_data['meta_model']
-                    model_weights = model_data.get('model_weights', {})
+                    model_data.get('model_weights', {})
                     scaler = model_data.get('scaler')
                     feature_names = model_data.get('feature_names', [])
 
@@ -1373,10 +1368,7 @@ def predict_player_prop(
                     X = X[feature_names].fillna(0)
 
                     # Scale if scaler available
-                    if scaler is not None:
-                        X_scaled = scaler.transform(X)
-                    else:
-                        X_scaled = X.values
+                    X_scaled = scaler.transform(X) if scaler is not None else X.values
 
                     # Get predictions from tree-based models only (ridge can have scaling issues)
                     tree_models = ['xgboost', 'lightgbm', 'catboost', 'random_forest']
@@ -1415,10 +1407,7 @@ def predict_player_prop(
                     X = X[feature_names].fillna(0)
 
                     # Scale if scaler available
-                    if scaler is not None:
-                        X_scaled = scaler.transform(X)
-                    else:
-                        X_scaled = X.values
+                    X_scaled = scaler.transform(X) if scaler is not None else X.values
 
                     # Get base model predictions
                     base_preds = []
@@ -1459,10 +1448,7 @@ def predict_player_prop(
                     X = X[feature_names].fillna(0)
 
                     # Scale if scaler available
-                    if scaler is not None:
-                        X_scaled = scaler.transform(X)
-                    else:
-                        X_scaled = X.values
+                    X_scaled = scaler.transform(X) if scaler is not None else X.values
 
                     # Predict (regression model predicts stat value)
                     predicted_value = float(model.predict(X_scaled)[0])
@@ -1487,7 +1473,7 @@ def predict_player_prop(
                         over_prob = float(norm.cdf(z_score))
                         edge = (over_prob - 0.524) * 100
 
-        except Exception as e:
+        except Exception:
             pass  # Fall through to return defaults
 
     # Apply injury-based adjustments to predicted value
@@ -1561,10 +1547,7 @@ def predict_player_prop(
                 X = X[feature_names].fillna(0)
 
                 # Scale if scaler available
-                if scaler is not None:
-                    X_scaled = scaler.transform(X)
-                else:
-                    X_scaled = X.values
+                X_scaled = scaler.transform(X) if scaler is not None else X.values
 
                 # Get predictions from all quantile models
                 # BUG FIX: Use correct quantile keys (0.1, 0.5, 0.9 not 0.10, 0.50, 0.90)
@@ -1575,7 +1558,7 @@ def predict_player_prop(
                 # Use median as the primary prediction if we don't have one yet
                 if predicted_value is None:
                     predicted_value = pred_median
-        except Exception as e:
+        except Exception:
             # Silently fall back to defaults if quantile prediction fails
             pass
 
@@ -1642,7 +1625,7 @@ def predict_player_prop(
             )
 
             # Calculate bet size as percentage of bankroll for display
-            bet_size_pct = (suggested_bet_size / default_bankroll) * 100
+            (suggested_bet_size / default_bankroll) * 100
 
             # Determine recommendation based on edge and confidence
             if edge_quality_tier in ['elite', 'strong'] and abs(edge) > 5:
@@ -1652,7 +1635,7 @@ def predict_player_prop(
             else:
                 bet_recommendation = 'MONITOR'
 
-        except Exception as e:
+        except Exception:
             # Fall back to defaults
             pass
 
@@ -1678,7 +1661,7 @@ def predict_player_prop(
     }
 
 
-def get_starters_for_game(api: BalldontlieAPI, game: Dict) -> Dict[str, List[Dict]]:
+def get_starters_for_game(api: BalldontlieAPI, game: dict) -> dict[str, list[dict]]:
     """Get starters for both teams from recent games."""
     home_team = game.get('home_team', {})
     away_team = game.get('visitor_team', {})
@@ -1928,7 +1911,7 @@ def main():
 
             if props_data:
                 # Get player names from API
-                player_ids = list(props_data.keys())
+                list(props_data.keys())
 
                 # Filter to players with points lines > 15 (likely starters/key players)
                 key_players = {pid: props for pid, props in props_data.items()
@@ -2004,7 +1987,7 @@ def main():
                                 # Skip prediction for OUT or DOUBTFUL players
                                 print(f"    Skipping {player_name} ({status.value})")
                                 continue
-                            elif status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
+                            if status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
                                 uncertainty_flag = "HIGH_UNCERTAINTY"
 
                         # Get player metadata
@@ -2216,7 +2199,7 @@ def main():
                 database_url = os.getenv("DATABASE_URL")
 
                 if database_url:
-                    print(f"\n  Saving to database...")
+                    print("\n  Saving to database...")
                     conn = psycopg2.connect(database_url)
                     cursor = conn.cursor()
 
@@ -2302,10 +2285,10 @@ def main():
                     conn.close()
                     print(f"  ✓ Saved {inserted_count} predictions to database!")
                 else:
-                    print(f"  ℹ️ DATABASE_URL not set - skipping database save (CSV only)")
+                    print("  ℹ️ DATABASE_URL not set - skipping database save (CSV only)")
             except Exception as db_error:
                 print(f"  ⚠️ Database save failed: {db_error}")
-                print(f"     CSV file still available as fallback")
+                print("     CSV file still available as fallback")
 
             # Show summary by recommendation
             if 'bet_recommendation' in df.columns:

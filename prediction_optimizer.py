@@ -13,12 +13,13 @@ Goal: Reduce prediction generation time from >10 minutes to <5 minutes
 import time
 import hashlib
 import json
-from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Callable, Any
+from typing import Any
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import wraps, lru_cache
+from functools import wraps
 import threading
+import contextlib
 
 # ============================================================================
 # ADVANCED CACHING
@@ -55,7 +56,7 @@ def get_cache_path(cache_key: str) -> Path:
     return CACHE_DIR / f"{cache_key}.json"
 
 
-def read_from_cache(cache_key: str, ttl_seconds: int = 3600) -> Optional[Any]:
+def read_from_cache(cache_key: str, ttl_seconds: int = 3600) -> Any | None:
     """Read data from cache if valid."""
     cache_path = get_cache_path(cache_key)
 
@@ -63,7 +64,7 @@ def read_from_cache(cache_key: str, ttl_seconds: int = 3600) -> Optional[Any]:
         return None
 
     try:
-        with open(cache_path, 'r') as f:
+        with open(cache_path) as f:
             cached = json.load(f)
 
         # Check if cache is still valid
@@ -77,7 +78,7 @@ def read_from_cache(cache_key: str, ttl_seconds: int = 3600) -> Optional[Any]:
 
         return cached.get('data')
 
-    except (json.JSONDecodeError, IOError, KeyError):
+    except (OSError, json.JSONDecodeError, KeyError):
         # Invalid cache file
         cache_path.unlink(missing_ok=True)
         return None
@@ -96,7 +97,7 @@ def write_to_cache(cache_key: str, data: Any) -> None:
                 'timestamp': time.time(),
                 'data': data
             }, f)
-    except (IOError, TypeError):
+    except (OSError, TypeError):
         pass  # Silently fail on cache write errors
 
 
@@ -153,17 +154,17 @@ def clear_cache(older_than_hours: float = 0) -> int:
     for cache_file in CACHE_DIR.glob("*.json"):
         try:
             if older_than_hours > 0:
-                with open(cache_file, 'r') as f:
+                with open(cache_file) as f:
                     cached = json.load(f)
                     if cached.get('timestamp', 0) > cutoff:
                         continue
             cache_file.unlink()
             removed += 1
-        except (IOError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError):
             try:
                 cache_file.unlink()
                 removed += 1
-            except IOError:
+            except OSError:
                 pass
 
     return removed
@@ -186,8 +187,8 @@ class ParallelExecutor:
         self.max_workers = max_workers
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
 
-    def map(self, func: Callable, items: List[Any],
-            desc: str = "Processing", show_progress: bool = True) -> List[Any]:
+    def map(self, func: Callable, items: list[Any],
+            desc: str = "Processing", show_progress: bool = True) -> list[Any]:
         """
         Execute function on multiple items in parallel.
 
@@ -230,8 +231,8 @@ class ParallelExecutor:
 
         return results
 
-    def map_dict(self, func: Callable, items: Dict[Any, Any],
-                  desc: str = "Processing", show_progress: bool = True) -> Dict[Any, Any]:
+    def map_dict(self, func: Callable, items: dict[Any, Any],
+                  desc: str = "Processing", show_progress: bool = True) -> dict[Any, Any]:
         """
         Execute function on dict values in parallel.
 
@@ -254,7 +255,7 @@ class ParallelExecutor:
         processed_values = self.map(func, values, desc, show_progress)
 
         # Reconstruct dict
-        return dict(zip(keys, processed_values))
+        return dict(zip(keys, processed_values, strict=False))
 
     def shutdown(self):
         """Shutdown the executor."""
@@ -284,9 +285,9 @@ class BatchProcessor:
     """Process items in batches to optimize API calls."""
 
     @staticmethod
-    def batch_fetch_player_stats(player_ids: List[int],
+    def batch_fetch_player_stats(player_ids: list[int],
                                   api_func: Callable,
-                                  batch_size: int = 25) -> Dict[int, Dict]:
+                                  batch_size: int = 25) -> dict[int, dict]:
         """
         Fetch player stats in batches.
 
@@ -320,8 +321,8 @@ class BatchProcessor:
         return results
 
     @staticmethod
-    def batch_fetch_team_stats(team_ids: List[int],
-                                api_func: Callable) -> Dict[int, Dict]:
+    def batch_fetch_team_stats(team_ids: list[int],
+                                api_func: Callable) -> dict[int, dict]:
         """
         Fetch team stats in a single batch.
 
@@ -460,7 +461,7 @@ def benchmark(func: Callable, *args, iterations: int = 1, **kwargs) -> float:
 # CACHE WARMUP
 # ============================================================================
 
-def warmup_cache(api, game_date: str, team_ids: List[int], player_ids: List[int]):
+def warmup_cache(api, game_date: str, team_ids: list[int], player_ids: list[int]):
     """
     Pre-populate cache with data for today's games.
 
@@ -494,15 +495,13 @@ def warmup_cache(api, game_date: str, team_ids: List[int], player_ids: List[int]
     # Fetch player stats in batches (more efficient)
     if player_ids:
         print(f"    Fetching {len(player_ids)} player stats...", end='', flush=True)
-        batch_processor = BatchProcessor()
+        BatchProcessor()
 
         # Use batch API call (25 players at a time)
         for i in range(0, len(player_ids), 25):
             batch = player_ids[i:i+25]
-            try:
+            with contextlib.suppress(Exception):
                 api.get_season_averages(player_ids=batch)
-            except Exception:
-                pass
         print(" ✓")
 
     elapsed = time.time() - start

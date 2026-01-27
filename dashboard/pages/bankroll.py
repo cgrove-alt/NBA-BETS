@@ -156,7 +156,7 @@ def create_empty_state() -> html.Div:
 
 def create_bankroll_gauge(current: float, target: float) -> dcc.Graph:
     """Create a gauge showing bankroll progress to target."""
-    pct = min(100, (current / target) * 100)
+    min(100, (current / target) * 100)
 
     fig = go.Figure(go.Indicator(
         mode="gauge+number+delta",
@@ -186,7 +186,7 @@ def create_bankroll_gauge(current: float, target: float) -> dcc.Graph:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font={"color": COLORS["text_primary"]},
-        margin=dict(l=30, r=30, t=50, b=30),
+        margin={"l": 30, "r": 30, "t": 50, "b": 30},
         height=250,
     )
 
@@ -201,10 +201,10 @@ def create_monte_carlo_chart(bankroll: float = 1000, win_rate: float = 0.54,
 
     # Calculate implied probability and edge
     if avg_odds < 0:
-        implied_prob = abs(avg_odds) / (abs(avg_odds) + 100)
+        abs(avg_odds) / (abs(avg_odds) + 100)
         payout_mult = 100 / abs(avg_odds)
     else:
-        implied_prob = 100 / (avg_odds + 100)
+        100 / (avg_odds + 100)
         payout_mult = avg_odds / 100
 
     # Run simulations
@@ -246,7 +246,7 @@ def create_monte_carlo_chart(bankroll: float = 1000, win_rate: float = 0.54,
         y=list(p95) + list(p5)[::-1],
         fill='toself',
         fillcolor='rgba(88, 166, 255, 0.1)',
-        line=dict(color='rgba(0,0,0,0)'),
+        line={"color": 'rgba(0,0,0,0)'},
         name='90% CI',
         showlegend=True,
     ))
@@ -257,7 +257,7 @@ def create_monte_carlo_chart(bankroll: float = 1000, win_rate: float = 0.54,
         y=list(p75) + list(p25)[::-1],
         fill='toself',
         fillcolor='rgba(88, 166, 255, 0.2)',
-        line=dict(color='rgba(0,0,0,0)'),
+        line={"color": 'rgba(0,0,0,0)'},
         name='50% CI',
         showlegend=True,
     ))
@@ -268,7 +268,7 @@ def create_monte_carlo_chart(bankroll: float = 1000, win_rate: float = 0.54,
         y=p50,
         mode='lines',
         name='Median',
-        line=dict(color=COLORS["accent_primary"], width=2),
+        line={"color": COLORS["accent_primary"], "width": 2},
     ))
 
     # Starting bankroll line
@@ -281,15 +281,15 @@ def create_monte_carlo_chart(bankroll: float = 1000, win_rate: float = 0.54,
         yaxis_title="Bankroll ($)",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=COLORS["text_primary"]),
-        xaxis=dict(gridcolor=COLORS["border_color"]),
-        yaxis=dict(gridcolor=COLORS["border_color"], tickprefix="$"),
-        margin=dict(l=60, r=20, t=50, b=40),
-        legend=dict(
-            x=0.02,
-            y=0.98,
-            bgcolor="rgba(0,0,0,0)",
-        ),
+        font={"color": COLORS["text_primary"]},
+        xaxis={"gridcolor": COLORS["border_color"]},
+        yaxis={"gridcolor": COLORS["border_color"], "tickprefix": "$"},
+        margin={"l": 60, "r": 20, "t": 50, "b": 40},
+        legend={
+            "x": 0.02,
+            "y": 0.98,
+            "bgcolor": "rgba(0,0,0,0)",
+        },
         hovermode="x unified",
     )
 
@@ -695,10 +695,7 @@ def layout():
 def update_kelly_calculator(win_prob, odds, quality, settings):
     """Calculate Kelly criterion stake recommendations."""
     # Calculate decimal odds
-    if odds < 0:
-        decimal_odds = 1 + (100 / abs(odds))
-    else:
-        decimal_odds = 1 + (odds / 100)
+    decimal_odds = 1 + 100 / abs(odds) if odds < 0 else 1 + odds / 100
 
     # Kelly formula: (bp - q) / b
     # b = decimal odds - 1

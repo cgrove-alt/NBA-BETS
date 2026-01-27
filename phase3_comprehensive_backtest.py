@@ -16,28 +16,21 @@ Usage:
     python3 phase3_comprehensive_backtest.py
 """
 
-import os
-import sys
 import json
 import pickle
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
-from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from typing import Any
+from dataclasses import dataclass, asdict
 import traceback
 
 import numpy as np
-import pandas as pd
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from scipy.stats import pearsonr
 
 # Import from existing backtest infrastructure
 from comprehensive_backtest import (
-    SeasonBacktester,
-    smart_fillna_prediction,
-    PREDICTION_FEATURE_DEFAULTS
+    SeasonBacktester
 )
 
 # Import Risk Management with Kelly Criterion
@@ -68,14 +61,13 @@ def get_tier_from_confidence(confidence: float) -> str:
     """Map confidence score (0-100) to edge quality tier."""
     if confidence >= 90:
         return 'elite'
-    elif confidence >= 75:
+    if confidence >= 75:
         return 'strong'
-    elif confidence >= 60:
+    if confidence >= 60:
         return 'moderate'
-    elif confidence >= 40:
+    if confidence >= 40:
         return 'weak'
-    else:
-        return 'avoid'
+    return 'avoid'
 
 
 @dataclass
@@ -94,7 +86,7 @@ class QuantilePrediction:
     predicted_value: float  # Mean prediction (for betting)
 
     # Actual
-    actual_value: Optional[float] = None
+    actual_value: float | None = None
 
     # Confidence & Tier
     confidence: float = 0.0
@@ -102,7 +94,7 @@ class QuantilePrediction:
     band_width: float = 0.0
 
     # Betting
-    line: Optional[float] = None
+    line: float | None = None
     over_prob: float = 0.5
     edge: float = 0.0
     suggested_bet_size: float = 0.0
@@ -110,11 +102,11 @@ class QuantilePrediction:
     bet_recommendation: str = "MONITOR"
 
     # Error metrics (filled after game)
-    error: Optional[float] = None
-    abs_error: Optional[float] = None
-    squared_error: Optional[float] = None
-    hit_over: Optional[bool] = None
-    hit_under: Optional[bool] = None
+    error: float | None = None
+    abs_error: float | None = None
+    squared_error: float | None = None
+    hit_over: bool | None = None
+    hit_under: bool | None = None
 
     def to_dict(self) -> dict:
         result = asdict(self)
@@ -155,12 +147,12 @@ class BettingPortfolio:
     daily_exposure_limit: float = 0.20  # 20% of bankroll per day
 
     # Daily exposure tracking
-    current_day: Optional[str] = None
+    current_day: str | None = None
     daily_exposure: float = 0.0
 
     # State
     is_stopped: bool = False
-    stop_reason: Optional[str] = None
+    stop_reason: str | None = None
 
     def check_stop_loss(self, current_date: str) -> bool:
         """Check if any stop-loss condition is triggered."""
@@ -198,10 +190,7 @@ class BettingPortfolio:
             self.daily_exposure = 0.0
 
         # Check if adding this bet would exceed daily exposure
-        if self.daily_exposure + bet_size > self.daily_exposure_limit * self.current_bankroll:
-            return False
-
-        return True
+        return not self.daily_exposure + bet_size > self.daily_exposure_limit * self.current_bankroll
 
     def place_bet(self, bet_size: float, current_date: str):
         """Record a bet being placed."""
@@ -263,7 +252,7 @@ class BettingPortfolio:
             return 0.0
         return (self.wins / decided_bets) * 100
 
-    def get_sharpe_ratio(self, bet_returns: List[float]) -> float:
+    def get_sharpe_ratio(self, bet_returns: list[float]) -> float:
         """Calculate Sharpe ratio from bet returns."""
         if len(bet_returns) < 2:
             return 0.0
@@ -310,9 +299,9 @@ class Phase3Backtester(SeasonBacktester):
 
         print(f"\nLoaded {len(self.quantile_models)} quantile models")
 
-    def predict_with_quantiles(self, prop_type: str, features: Dict,
-                                predicted_minutes: Optional[float] = None,
-                                line: Optional[float] = None) -> Optional[QuantilePrediction]:
+    def predict_with_quantiles(self, prop_type: str, features: dict,
+                                predicted_minutes: float | None = None,
+                                line: float | None = None) -> QuantilePrediction | None:
         """
         Make prediction with quantile bands.
 
@@ -417,17 +406,14 @@ class Phase3Backtester(SeasonBacktester):
             return 0.0
 
         # Determine bet direction
-        if prediction.over_prob > 0.5:
-            win_prob = prediction.over_prob
-        else:
-            win_prob = 1 - prediction.over_prob
+        win_prob = prediction.over_prob if prediction.over_prob > 0.5 else 1 - prediction.over_prob
 
         # Assume -110 odds (decimal 1.909)
         decimal_odds = 1.909
 
         # Calculate Kelly size with tier adjustment
         try:
-            bet_size = calculate_kelly_bet_size(
+            return calculate_kelly_bet_size(
                 win_prob=win_prob,
                 decimal_odds=decimal_odds,
                 bankroll=self.portfolio.current_bankroll,
@@ -437,7 +423,6 @@ class Phase3Backtester(SeasonBacktester):
                 num_same_day_bets=1,  # Simplified
                 max_bet_pct=0.05
             )
-            return bet_size
         except Exception as e:
             print(f"    Kelly calculation failed: {e}")
             return 0.0
@@ -446,12 +431,11 @@ class Phase3Backtester(SeasonBacktester):
         """Determine if we should BET, CONSIDER, or MONITOR."""
         if prediction.tier in ['elite', 'strong'] and abs(prediction.edge) > 5:
             return 'BET'
-        elif prediction.tier == 'moderate' and abs(prediction.edge) > 3:
+        if prediction.tier == 'moderate' and abs(prediction.edge) > 3:
             return 'CONSIDER'
-        else:
-            return 'MONITOR'
+        return 'MONITOR'
 
-    def run_comprehensive_backtest(self, start_date: str, end_date: str, enable_stop_loss: bool = True) -> Dict[str, Any]:
+    def run_comprehensive_backtest(self, start_date: str, end_date: str, enable_stop_loss: bool = True) -> dict[str, Any]:
         """
         Run comprehensive backtest with quantile predictions and Kelly sizing.
 
@@ -658,7 +642,7 @@ class Phase3Backtester(SeasonBacktester):
         # Calculate comprehensive metrics
         return self.calculate_comprehensive_metrics()
 
-    def calculate_comprehensive_metrics(self) -> Dict[str, Any]:
+    def calculate_comprehensive_metrics(self) -> dict[str, Any]:
         """Calculate all Phase 3 metrics."""
         print("\n=== Calculating Comprehensive Metrics ===")
 
@@ -866,17 +850,17 @@ class Phase3Backtester(SeasonBacktester):
         print(f"\n{'='*80}")
         print("PHASE 3 BACKTEST SUMMARY")
         print(f"{'='*80}")
-        print(f"\nOverall Performance:")
+        print("\nOverall Performance:")
         print(f"  Total Predictions: {len(self.predictions):,}")
         print(f"  RMSE: {overall_metrics['rmse']:.3f}")
         print(f"  MAE: {overall_metrics['mae']:.3f}")
         print(f"  Bias: {overall_metrics['bias']:.3f}")
 
-        print(f"\nElite + Strong Tier:")
+        print("\nElite + Strong Tier:")
         print(f"  Count: {elite_strong_metrics['count']:,} ({elite_strong_metrics.get('percentage', 0):.1f}%)")
         print(f"  RMSE: {elite_strong_metrics.get('rmse', 0):.3f}")
 
-        print(f"\nBetting Performance:")
+        print("\nBetting Performance:")
         print(f"  Total Bets: {betting_metrics['total_bets']}")
         print(f"  Win Rate: {betting_metrics['win_rate']:.1f}%")
         print(f"  ROI: {betting_metrics['roi']:.2f}%")
@@ -884,7 +868,7 @@ class Phase3Backtester(SeasonBacktester):
         print(f"  Max Drawdown: {betting_metrics['max_drawdown']:.1f}%")
         print(f"  Final Bankroll: ${betting_metrics['final_bankroll']:.2f}")
 
-        print(f"\nPhase 3 Targets:")
+        print("\nPhase 3 Targets:")
         for target_name, target_data in targets.items():
             status = "✓" if target_data['met'] else "✗"
             print(f"  {status} {target_name}: {target_data['actual']} (target: {target_data['target']})")

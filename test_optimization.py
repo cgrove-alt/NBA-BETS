@@ -48,9 +48,8 @@ def test_cache_performance():
     if expected_min < elapsed < expected_max:
         print("✓ Cache working efficiently")
         return True
-    else:
-        print(f"✗ Cache performance outside expected range")
-        return False
+    print("✗ Cache performance outside expected range")
+    return False
 
 
 def test_parallel_execution():
@@ -94,9 +93,8 @@ def test_parallel_execution():
     if speedup >= 3.0:
         print("✓ Parallel execution working efficiently")
         return True
-    else:
-        print(f"✗ Speedup ({speedup:.1f}x) below expected (>3x)")
-        return False
+    print(f"✗ Speedup ({speedup:.1f}x) below expected (>3x)")
+    return False
 
 
 def test_batch_processing():
@@ -128,7 +126,7 @@ def test_batch_processing():
 
     batch_processor = BatchProcessor()
     start = time.time()
-    results_batch = batch_processor.batch_fetch_player_stats(
+    batch_processor.batch_fetch_player_stats(
         player_ids,
         batch_api_call,
         batch_size=25
@@ -143,9 +141,8 @@ def test_batch_processing():
     if speedup >= 4.0:
         print("✓ Batch processing working efficiently")
         return True
-    else:
-        print(f"✗ Speedup ({speedup:.1f}x) below expected (>4x)")
-        return False
+    print(f"✗ Speedup ({speedup:.1f}x) below expected (>4x)")
+    return False
 
 
 def test_lazy_loading():
@@ -185,9 +182,8 @@ def test_lazy_loading():
     if time2 < 0.001:  # Should be instantaneous
         print("✓ Lazy loading working efficiently")
         return True
-    else:
-        print(f"✗ Cached access too slow ({time2:.3f}s)")
-        return False
+    print(f"✗ Cached access too slow ({time2:.3f}s)")
+    return False
 
 
 def test_full_integration():
@@ -215,7 +211,7 @@ def test_full_integration():
         return {'player_id': player_id, 'ppg': 20.0}
 
     def predict_prop(task):
-        features = fetch_features(task['player_id'])
+        fetch_features(task['player_id'])
         time.sleep(0.002)  # 2ms for prediction
         return {'player': task['player_id'], 'prediction': 25.0}
 
@@ -245,9 +241,8 @@ def test_full_integration():
     if avg_time < max_time_per_pred:
         print(f"✓ Performance target met ({avg_time*1000:.1f}ms < {max_time_per_pred*1000:.0f}ms)")
         return True
-    else:
-        print(f"✗ Performance target missed ({avg_time*1000:.1f}ms > {max_time_per_pred*1000:.0f}ms)")
-        return False
+    print(f"✗ Performance target missed ({avg_time*1000:.1f}ms > {max_time_per_pred*1000:.0f}ms)")
+    return False
 
 
 def run_all_tests():
@@ -294,10 +289,9 @@ def run_all_tests():
         print("\n🎉 All optimizations working correctly!")
         print("✓ Ready for production use")
         return 0
-    else:
-        print(f"\n⚠️  {total - passed} test(s) failed")
-        print("✗ Review failures before deploying")
-        return 1
+    print(f"\n⚠️  {total - passed} test(s) failed")
+    print("✗ Review failures before deploying")
+    return 1
 
 
 if __name__ == "__main__":

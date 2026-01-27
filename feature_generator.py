@@ -14,8 +14,6 @@ Purpose: Fix feature mismatch bug discovered during Phase 1
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional
-from collections import defaultdict
 
 
 class PlayerFeatureGenerator:
@@ -32,15 +30,15 @@ class PlayerFeatureGenerator:
 
     def generate_features(
         self,
-        player_games: List[Tuple[str, Dict]],  # [(date, stats), ...]
+        player_games: list[tuple[str, dict]],  # [(date, stats), ...]
         game_date: str,
         opponent_id: int = None,
         is_home: bool = True,
         player_position: str = 'F',
-        position_defense_features: Dict = None,
+        position_defense_features: dict = None,
         team_pace: float = 100.0,
         opp_pace: float = 100.0,
-    ) -> Optional[Dict[str, float]]:
+    ) -> dict[str, float] | None:
         """
         Generate all 150 features for a player for a specific game.
 
@@ -502,7 +500,7 @@ class PlayerFeatureGenerator:
             return round(float(np.var(game_fg3_pcts)), 4)
         return 0.1
 
-    def _calc_fg3_streak_features(self, games) -> Dict[str, float]:
+    def _calc_fg3_streak_features(self, games) -> dict[str, float]:
         """Calculate hot/cold streak features for 3PM."""
         if len(games) < 3:
             return {'fg3_hot_streak': 0, 'fg3_cold_streak': 0, 'fg3_momentum': 0.0}
@@ -531,7 +529,7 @@ class PlayerFeatureGenerator:
             'fg3_momentum': round(float(momentum), 4),
         }
 
-    def _calc_three_pm_features(self, recent, all_games, mins) -> Dict[str, float]:
+    def _calc_three_pm_features(self, recent, all_games, mins) -> dict[str, float]:
         """Calculate specialized 3PM prediction features."""
         LEAGUE_AVG_FG3_PCT = 0.36
 
@@ -594,7 +592,7 @@ class PlayerFeatureGenerator:
             'shooting_confidence': round(shooting_confidence, 3),
         }
 
-    def _infer_position_features(self, pts_avg, reb_avg, ast_avg, min_avg) -> Dict[str, float]:
+    def _infer_position_features(self, pts_avg, reb_avg, ast_avg, min_avg) -> dict[str, float]:
         """Infer position and role features from stats."""
         if reb_avg > 7 and ast_avg < 3:
             is_center, is_forward, is_guard = 1, 0, 0

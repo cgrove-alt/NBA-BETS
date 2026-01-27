@@ -264,9 +264,8 @@ def main():
         print("  🎉 All deployment configuration tests passed!")
         print("  ✅ Ready to deploy to Railway")
         return 0
-    else:
-        print("  ❌ Some tests failed. Fix errors above before deploying.")
-        return 1
+    print("  ❌ Some tests failed. Fix errors above before deploying.")
+    return 1
 
 
 if __name__ == '__main__':

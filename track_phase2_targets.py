@@ -12,7 +12,6 @@ This script provides a single dashboard to track progress through Phase 2.5.
 """
 
 import json
-import numpy as np
 from pathlib import Path
 from scipy.stats import pearsonr
 
@@ -25,7 +24,7 @@ def load_backtest_results():
         print(f"❌ Backtest results not found: {results_file}")
         return None
 
-    with open(results_file, 'r') as f:
+    with open(results_file) as f:
         return json.load(f)
 
 

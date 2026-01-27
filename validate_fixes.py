@@ -17,7 +17,6 @@ Targets:
 
 import json
 from pathlib import Path
-from typing import Dict, List
 import sys
 
 # Phase 1 baseline for comparison
@@ -34,18 +33,18 @@ TARGETS = {
 }
 
 
-def load_results(file_path: str = "backtest_results_2025.json") -> Dict:
+def load_results(file_path: str = "backtest_results_2025.json") -> dict:
     """Load backtest results."""
     path = Path(file_path)
     if not path.exists():
         print(f"❌ Error: {file_path} not found!")
         sys.exit(1)
 
-    with open(path, 'r') as f:
+    with open(path) as f:
         return json.load(f)
 
 
-def check_dnp_errors(results: Dict) -> Dict:
+def check_dnp_errors(results: dict) -> dict:
     """Check for DNP errors (predictions with actual=0)."""
     if 'raw_predictions' not in results:
         return {'status': 'SKIP', 'reason': 'No raw predictions available'}
@@ -75,7 +74,7 @@ def check_dnp_errors(results: Dict) -> Dict:
     }
 
 
-def validate_results(results: Dict) -> Dict:
+def validate_results(results: dict) -> dict:
     """Validate all targets."""
     import math
 
@@ -201,7 +200,7 @@ def validate_results(results: Dict) -> Dict:
     return validation
 
 
-def print_validation_report(validation: Dict):
+def print_validation_report(validation: dict):
     """Print formatted validation report."""
     print("\n" + "="*70)
     print(" PHASE 2.5 VALIDATION REPORT")
@@ -214,12 +213,12 @@ def print_validation_report(validation: Dict):
     if dnp['status'] == 'SKIP':
         print(f"  ⏩ SKIPPED: {dnp['reason']}")
     elif dnp['status'] == 'PASS':
-        print(f"  ✅ PASS: No DNP errors found")
+        print("  ✅ PASS: No DNP errors found")
     else:
         print(f"  ❌ FAIL: {dnp['total_dnp_predictions']} DNP predictions found")
         print(f"     By prop type: {dnp['by_prop_type']}")
         if dnp['sample_dnp_errors']:
-            print(f"     Sample errors:")
+            print("     Sample errors:")
             for err in dnp['sample_dnp_errors']:
                 print(f"       - {err}")
 

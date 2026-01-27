@@ -16,7 +16,7 @@ SHEET_ID = "1mhwOLqPu2F9026EQiVxFPIN1t9RGafGpl-dokaIsm9c"
 # Try to export as CSV (gid=0 is usually the first sheet)
 csv_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
 
-print(f"Attempting to fetch DARKO data from Google Sheets...")
+print("Attempting to fetch DARKO data from Google Sheets...")
 print(f"URL: {csv_url}")
 print()
 

@@ -37,7 +37,7 @@ def save_retrain_result(success: bool, duration_seconds: float, error: str = Non
         try:
             with open(history_file) as f:
                 history = json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             history = []
 
     # Add new entry

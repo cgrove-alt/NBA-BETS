@@ -2,7 +2,6 @@
 Simple layout helpers for NBA Betting Dashboard.
 """
 
-from typing import Dict, List
 from dash import html
 import dash_bootstrap_components as dbc
 
@@ -17,7 +16,7 @@ PROP_LABELS = {
 }
 
 
-def create_prop_table(props: List[Dict], prop_type: str, home_abbrev: str, away_abbrev: str) -> dbc.Card:
+def create_prop_table(props: list[dict], prop_type: str, home_abbrev: str, away_abbrev: str) -> dbc.Card:
     """Create a table for a single prop type.
 
     Args:
@@ -107,7 +106,7 @@ def create_prop_table(props: List[Dict], prop_type: str, home_abbrev: str, away_
     })
 
 
-def create_game_card(game_data: Dict, props: List[Dict]) -> dbc.Card:
+def create_game_card(game_data: dict, props: list[dict]) -> dbc.Card:
     """Create a simple card with game info and props table.
 
     Note: This is the old function kept for backwards compatibility.

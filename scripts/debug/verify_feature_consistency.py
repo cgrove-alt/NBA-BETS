@@ -6,9 +6,7 @@ that the ensemble models expect. Mismatches cause poor predictions.
 """
 
 import pickle
-import json
 from pathlib import Path
-from collections import defaultdict
 
 MODEL_DIR = Path("models")
 PROP_TYPES = ['points', 'rebounds', 'assists', 'threes', 'pra']
@@ -39,7 +37,7 @@ def get_backtest_features():
     # This is the list of features from comprehensive_backtest.py
     # Lines 699-816 in get_player_features_before_date()
 
-    backtest_features = [
+    return [
         # Season averages (1-6)
         'season_games',
         'season_pts_avg',
@@ -183,7 +181,6 @@ def get_backtest_features():
         'opp_pts_vs_pos_std',
     ]
 
-    return backtest_features
 
 def compare_features():
     """Compare model features vs backtest features."""
@@ -207,7 +204,7 @@ def compare_features():
         model_data, model_features = load_ensemble_model(prop_type)
 
         if not model_features:
-            print(f"  ✗ Could not load model")
+            print("  ✗ Could not load model")
             continue
 
         model_feature_set = set(model_features)
@@ -218,7 +215,7 @@ def compare_features():
         extra_in_backtest = backtest_features - model_feature_set
 
         if not missing_in_backtest and not extra_in_backtest:
-            print(f"  ✓ Perfect match!")
+            print("  ✓ Perfect match!")
         else:
             if missing_in_backtest:
                 print(f"  ✗ Missing in backtest: {len(missing_in_backtest)} features")
@@ -232,7 +229,7 @@ def compare_features():
 
             if extra_in_backtest:
                 print(f"  ⚠  Extra in backtest: {len(extra_in_backtest)} features")
-                print(f"    (These are ignored by model)")
+                print("    (These are ignored by model)")
 
     print("\n" + "="*80)
     print("SUMMARY")
@@ -242,25 +239,24 @@ def compare_features():
         print("\n✅ ALL MODELS HAVE MATCHING FEATURES!")
         print("   Feature generation is consistent.")
         return True
-    else:
-        print(f"\n❌ FEATURE MISMATCHES FOUND!")
-        print(f"   {len(all_issues)} prop types have missing features\n")
+    print("\n❌ FEATURE MISMATCHES FOUND!")
+    print(f"   {len(all_issues)} prop types have missing features\n")
 
-        # Show common missing features
-        if all_issues:
-            all_missing = set()
-            for issue in all_issues:
-                if issue['type'] == 'missing':
-                    all_missing.update(issue['features'])
+    # Show common missing features
+    if all_issues:
+        all_missing = set()
+        for issue in all_issues:
+            if issue['type'] == 'missing':
+                all_missing.update(issue['features'])
 
-            if all_missing:
-                print(f"Common missing features ({len(all_missing)}):")
-                for feat in sorted(all_missing)[:20]:
-                    print(f"  - {feat}")
-                if len(all_missing) > 20:
-                    print(f"  ... and {len(all_missing) - 20} more")
+        if all_missing:
+            print(f"Common missing features ({len(all_missing)}):")
+            for feat in sorted(all_missing)[:20]:
+                print(f"  - {feat}")
+            if len(all_missing) > 20:
+                print(f"  ... and {len(all_missing) - 20} more")
 
-        return False
+    return False
 
 def main():
     """Run feature consistency check."""

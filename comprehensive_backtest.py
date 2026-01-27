@@ -8,14 +8,11 @@ Usage:
     python3 comprehensive_backtest.py
 """
 
-import os
-import sys
 import json
 import pickle
 import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -27,12 +24,10 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from train_complete_balldontlie import (
     calculate_pace_adjusted_features,
     calculate_vegas_total_features,
-    calculate_blowout_risk_features,
     calculate_regression_adjustment_features
 )
 
 # Import injury tracking for DNP detection
-from injury_tracker_v3 import is_player_available, InjuryStatus
 
 warnings.filterwarnings('ignore')
 
@@ -187,7 +182,7 @@ class PositionDefenseCalculator:
         return 'F'  # Default
 
     def process_game(self, game_id: int, game_date: str, home_team_id: int,
-                     away_team_id: int, player_stats: List[Dict]):
+                     away_team_id: int, player_stats: list[dict]):
         """
         Process a game's box scores to update position defense stats.
 
@@ -231,7 +226,7 @@ class PositionDefenseCalculator:
             self.team_position_defense[opponent_id][game_date][pos_group]['fg3m'].append(fg3m)
 
     def get_position_defense_before_date(self, team_id: int, game_date: str,
-                                          player_position: str, min_games: int = 5) -> Dict[str, float]:
+                                          player_position: str, min_games: int = 5) -> dict[str, float]:
         """
         Get team's defensive stats vs position BEFORE game_date.
         Returns features for the model.
@@ -296,7 +291,7 @@ class PositionDefenseCalculator:
 
         return features
 
-    def _get_default_features(self, pos_group: str) -> Dict[str, float]:
+    def _get_default_features(self, pos_group: str) -> dict[str, float]:
         """Return default features when insufficient data."""
         features = {}
         for pos in ['G', 'F', 'C']:
@@ -367,8 +362,8 @@ class TeamPrediction:
 @dataclass
 class BacktestResults:
     """Container for all backtest results."""
-    predictions: List[PropPrediction] = field(default_factory=list)
-    team_predictions: List[TeamPrediction] = field(default_factory=list)
+    predictions: list[PropPrediction] = field(default_factory=list)
+    team_predictions: list[TeamPrediction] = field(default_factory=list)
     games_processed: int = 0
     games_with_errors: int = 0
     start_date: str = ""
@@ -377,16 +372,16 @@ class BacktestResults:
     def add(self, pred: PropPrediction):
         self.predictions.append(pred)
 
-    def get_by_prop_type(self, prop_type: str) -> List[PropPrediction]:
+    def get_by_prop_type(self, prop_type: str) -> list[PropPrediction]:
         return [p for p in self.predictions if p.prop_type == prop_type]
 
-    def get_by_home_away(self, is_home: bool) -> List[PropPrediction]:
+    def get_by_home_away(self, is_home: bool) -> list[PropPrediction]:
         return [p for p in self.predictions if p.is_home == is_home]
 
-    def get_by_rest_days(self, min_days: int, max_days: int) -> List[PropPrediction]:
+    def get_by_rest_days(self, min_days: int, max_days: int) -> list[PropPrediction]:
         return [p for p in self.predictions if min_days <= p.days_rest <= max_days]
 
-    def calculate_metrics(self, preds: List[PropPrediction] = None, exclude_dnp: bool = True) -> Dict:
+    def calculate_metrics(self, preds: list[PropPrediction] = None, exclude_dnp: bool = True) -> dict:
         """Calculate metrics for a set of predictions."""
         if preds is None:
             preds = self.predictions
@@ -478,11 +473,11 @@ class SeasonBacktester:
         if minutes_path.exists():
             with open(minutes_path, 'rb') as f:
                 self.minutes_model = pickle.load(f)
-            print(f"  Loaded minutes model (TIER 2.3)")
+            print("  Loaded minutes model (TIER 2.3)")
         else:
-            print(f"  WARNING: Minutes model not found - predictions won't be minutes-adjusted")
+            print("  WARNING: Minutes model not found - predictions won't be minutes-adjusted")
 
-    def load_games(self) -> List[Dict]:
+    def load_games(self) -> list[dict]:
         """Load 2025-26 season games from cache."""
         print(f"\nLoading games for {self.season}-{self.season + 1} season...")
         games_file = CACHE_DIR / f"games_{self.season}_full.json"
@@ -648,7 +643,7 @@ class SeasonBacktester:
         print(f"  Loaded {stats_loaded} stat records for {len(self.player_stats)} players")
         print(f"  Cached box scores for {len(self.game_box_scores)} games")
 
-    def fetch_box_scores_for_game(self, game: Dict) -> Dict[int, Dict]:
+    def fetch_box_scores_for_game(self, game: dict) -> dict[int, dict]:
         """
         Fetch box scores for a specific game from cache or API.
         Returns dict of player_id -> box score stats.
@@ -704,7 +699,7 @@ class SeasonBacktester:
 
     def get_player_features_before_date(self, player_id: int, game_date: str,
                                          opponent_id: int = None, is_home: bool = True,
-                                         player_position: str = None) -> Optional[Dict]:
+                                         player_position: str = None) -> dict | None:
         """
         Generate features for a player using only data available before game_date.
         This is the CRITICAL point-in-time feature generation.
@@ -1035,7 +1030,7 @@ class SeasonBacktester:
             return round(float(np.var(game_fg3_pcts)), 4)
         return 0.1
 
-    def _calc_fg3_streak_features(self, games) -> Dict[str, float]:
+    def _calc_fg3_streak_features(self, games) -> dict[str, float]:
         """Calculate hot/cold streak features for 3PM."""
         if len(games) < 3:
             return {'fg3_hot_streak': 0, 'fg3_cold_streak': 0, 'fg3_momentum': 0.0}
@@ -1064,7 +1059,7 @@ class SeasonBacktester:
             'fg3_momentum': round(float(momentum), 4),
         }
 
-    def _calc_three_pm_features(self, recent, all_games, mins) -> Dict[str, float]:
+    def _calc_three_pm_features(self, recent, all_games, mins) -> dict[str, float]:
         """Calculate specialized 3PM prediction features."""
         LEAGUE_AVG_FG3_PCT = 0.36
 
@@ -1127,7 +1122,7 @@ class SeasonBacktester:
             'shooting_confidence': round(shooting_confidence, 3),
         }
 
-    def _infer_position_features(self, pts_avg, reb_avg, ast_avg, min_avg) -> Dict[str, float]:
+    def _infer_position_features(self, pts_avg, reb_avg, ast_avg, min_avg) -> dict[str, float]:
         """Infer position and role features from stats (when position data unavailable)."""
         # Infer position from stats ratios
         # Centers: high reb, low ast
@@ -1223,7 +1218,7 @@ class SeasonBacktester:
         'pra': 3.647,  # FIX #2: Fix bias of -0.969
     }
 
-    def predict_minutes(self, features: Dict) -> Optional[float]:
+    def predict_minutes(self, features: dict) -> float | None:
         """
         TIER 2.3: Predict expected minutes for a player.
         Returns predicted minutes or None if model not available.
@@ -1249,10 +1244,7 @@ class SeasonBacktester:
                             X[col] = 0
                     X = smart_fillna_prediction(X[feature_names])
 
-                    if scaler:
-                        X_scaled = scaler.transform(X)
-                    else:
-                        X_scaled = X.values
+                    X_scaled = scaler.transform(X) if scaler else X.values
 
                     predicted_min = float(regressor.predict(X_scaled)[0])
                 elif 'model' in model_data:
@@ -1267,10 +1259,7 @@ class SeasonBacktester:
                             X[col] = 0
                     X = smart_fillna_prediction(X[feature_names])
 
-                    if scaler:
-                        X_scaled = scaler.transform(X)
-                    else:
-                        X_scaled = X.values
+                    X_scaled = scaler.transform(X) if scaler else X.values
 
                     predicted_min = float(model.predict(X_scaled)[0])
                 else:
@@ -1283,12 +1272,12 @@ class SeasonBacktester:
             # Clamp to realistic bounds
             return max(0, min(predicted_min, 48))
 
-        except Exception as e:
+        except Exception:
             # Silently fail - minutes prediction is optional
             return None
 
-    def predict(self, prop_type: str, features: Dict, apply_bias_correction: bool = True,
-                predicted_minutes: Optional[float] = None) -> Optional[float]:
+    def predict(self, prop_type: str, features: dict, apply_bias_correction: bool = True,
+                predicted_minutes: float | None = None) -> float | None:
         """Make a prediction using the trained model."""
         if prop_type not in self.models:
             return None
@@ -1326,7 +1315,7 @@ class SeasonBacktester:
 
             # Get base model predictions
             base_preds = []
-            for name, model in base_models.items():
+            for _name, model in base_models.items():
                 pred = model.predict(X_scaled)[0]
                 base_preds.append(pred)
 
@@ -1347,7 +1336,7 @@ class SeasonBacktester:
             # Legacy format with model/scaler/feature_names dict
             if isinstance(model_data, dict) and 'model' not in model_data:
                 print(f"DEBUG: Failed to identify model format. Keys: {model_data.keys()}")
-            
+
             model = model_data['model']
             scaler = model_data['scaler']
             feature_names = model_data['feature_names']
@@ -1466,7 +1455,7 @@ class SeasonBacktester:
             # TIER 2.2: Process this game through position defense calculator
             # Convert box_scores dict to list format for process_game
             player_stats_list = []
-            for pid, stats in box_scores.items():
+            for _pid, stats in box_scores.items():
                 player_stats_list.append({
                     'player': stats.get('player', {}),
                     'team_id': stats.get('team_id'),
@@ -1594,7 +1583,7 @@ class SeasonBacktester:
     def generate_report(self, results: BacktestResults):
         """Generate a detailed backtest report."""
         print("\n" + "="*60)
-        print(f"2025-26 SEASON BACKTEST RESULTS")
+        print("2025-26 SEASON BACKTEST RESULTS")
         print("="*60)
         print(f"Games Analyzed: {results.games_processed}")
         print(f"Games with Errors: {results.games_with_errors}")
@@ -1651,10 +1640,10 @@ class SeasonBacktester:
             total_games = len(results.team_predictions)
             wins = sum(1 for p in results.team_predictions if p.correct_winner)
             accuracy = wins / total_games if total_games > 0 else 0
-            
+
             spread_errors = [abs(p.spread_error) for p in results.team_predictions]
             mae = sum(spread_errors) / len(spread_errors) if spread_errors else 0
-            
+
             print(f"Teamm Predictions: {total_games}")
             print(f"Moneyline Accuracy: {accuracy:.2%}")
             print(f"Spread MAE (Abs Error): {mae:.2f}")
@@ -1710,7 +1699,7 @@ class SeasonBacktester:
 def main():
     """Main entry point."""
     import argparse
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     parser = argparse.ArgumentParser(description='Run comprehensive backtest')
     parser.add_argument('--quick', action='store_true',
@@ -1808,7 +1797,7 @@ def main():
 
             # Process position defense for this game
             player_stats_list = []
-            for pid, stats in box_scores.items():
+            for _pid, stats in box_scores.items():
                 player_stats_list.append({
                     'player': stats.get('player', {}),
                     'team_id': stats.get('team_id'),

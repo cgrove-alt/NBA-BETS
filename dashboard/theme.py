@@ -98,7 +98,7 @@ def get_confidence_color(confidence: float) -> str:
     """Get color based on confidence level."""
     if confidence >= CONFIDENCE_THRESHOLDS["high"]:
         return COLORS["accent_success"]
-    elif confidence >= CONFIDENCE_THRESHOLDS["medium"]:
+    if confidence >= CONFIDENCE_THRESHOLDS["medium"]:
         return COLORS["accent_warning"]
     return COLORS["text_muted"]
 
@@ -106,7 +106,7 @@ def get_confidence_gradient(confidence: float) -> str:
     """Get gradient based on confidence level."""
     if confidence >= CONFIDENCE_THRESHOLDS["high"]:
         return GRADIENTS["success"]
-    elif confidence >= CONFIDENCE_THRESHOLDS["medium"]:
+    if confidence >= CONFIDENCE_THRESHOLDS["medium"]:
         return GRADIENTS["warning"]
     return GRADIENTS["neutral"]
 
@@ -115,7 +115,7 @@ def get_pick_color(pick: str) -> str:
     """Get color for OVER/UNDER pick."""
     if pick == "OVER":
         return COLORS["accent_success"]
-    elif pick == "UNDER":
+    if pick == "UNDER":
         return COLORS["accent_danger"]
     return COLORS["text_muted"]
 
@@ -123,6 +123,6 @@ def get_pick_bg(pick: str) -> str:
     """Get background color for OVER/UNDER pick."""
     if pick == "OVER":
         return COLORS["success_light"]
-    elif pick == "UNDER":
+    if pick == "UNDER":
         return COLORS["danger_light"]
     return "transparent"
