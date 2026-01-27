@@ -3962,7 +3962,7 @@ class DataService:
                         'Assists': 'assists', 'assists': 'assists',
                         '3PM': 'threes', 'threes': 'threes',
                         'PRA': 'pra', 'pra': 'pra'
-                    }.get(model_key, prop_type)
+                    }.get(model_key, prop_label.lower())
 
                     matchup_data = self._get_player_vs_team_adjustment(
                         player_id, opponent_team_id, matchup_prop_type, season_value

@@ -36,10 +36,12 @@ from pathlib import Path
 # Import our modules
 from data_fetcher import (
     fetch_historical_games as get_team_game_log,
+    fetch_team_roster as get_team_roster,
+    fetch_player_stats_auto as get_player_game_log,
     API_DELAY,
 )
 from nba_api.stats.static import teams as nba_teams
-from feature_engineering import generate_game_features
+from feature_engineering import generate_game_features, generate_player_prop_features
 from model_trainer import ModelTrainingPipeline
 
 # Fast data fetcher (no rate limiting)
