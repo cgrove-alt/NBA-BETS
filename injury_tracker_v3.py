@@ -433,10 +433,7 @@ def detect_star_player_out(team_id: int, date: str = None) -> dict:
     Legacy function - detect if star players are out for a team.
     Returns dict with 'has_star_out': bool and 'players': list
     """
-    tracker = get_injury_tracker()
-    injuries = tracker.fetch_all_injuries()
-
-    # Stub implementation
+    # Stub implementation - returns empty results
     return {
         'has_star_out': False,
         'players': [],
