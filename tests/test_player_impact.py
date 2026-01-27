@@ -59,8 +59,9 @@ class TestPlayerImpactFetcher:
 
     def test_standardize_metric_raptor(self):
         """Test RAPTOR metric standardization."""
-        # Elite RAPTOR (8.0) should map to 10.0
-        assert self.fetcher._standardize_metric(8.0, 'raptor') == 10.0
+        # RAPTOR uses 0.67 multiplier (elite RAPTOR=15 → 10)
+        # So RAPTOR=8.0 → 5.36
+        assert abs(self.fetcher._standardize_metric(8.0, 'raptor') - 5.36) < 0.01
 
         # Average (0.0) should stay 0.0
         assert self.fetcher._standardize_metric(0.0, 'raptor') == 0.0
