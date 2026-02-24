@@ -40,6 +40,7 @@ Usage:
     steam_alerts = tracker.detect_steam_moves(game_id)
 """
 
+import load_env  # noqa: F401  — load .env before any code reads os.environ
 import os
 import sqlite3
 import logging

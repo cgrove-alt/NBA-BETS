@@ -110,6 +110,74 @@ MAX_RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_FACTOR = 2.0
 RETRY_INITIAL_DELAY = 1.0  # seconds
 
+# Circuit breaker configuration
+CIRCUIT_BREAKER_THRESHOLD = 3  # Open after N consecutive failures
+
+
+class CircuitBreakerOpenError(Exception):
+    """Raised when the circuit breaker is open — call should be skipped, not retried."""
+    pass
+
+
+class NbaStatsCircuitBreaker:
+    """
+    Session-scoped circuit breaker for stats.nba.com API.
+
+    After THRESHOLD consecutive timeout/connection failures across ANY
+    stats.nba.com call, the circuit opens and all subsequent calls raise
+    CircuitBreakerOpenError immediately. This prevents wasting minutes
+    per game on a completely unresponsive API.
+
+    The circuit stays open for the duration of the process. Each new run
+    of daily_predictions.py gets a fresh circuit breaker.
+
+    If the API recovers (a call succeeds), the circuit closes and the
+    failure counter resets.
+    """
+
+    def __init__(self, threshold: int = CIRCUIT_BREAKER_THRESHOLD):
+        self._lock = threading.Lock()
+        self._consecutive_failures = 0
+        self._threshold = threshold
+        self._is_open = False
+
+    def record_failure(self):
+        """Record a stats.nba.com API failure (timeout/connection error)."""
+        with self._lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._threshold and not self._is_open:
+                self._is_open = True
+                print(
+                    f"\n  [Circuit Breaker] stats.nba.com marked DOWN after "
+                    f"{self._consecutive_failures} consecutive failures."
+                )
+                print(
+                    f"  [Circuit Breaker] Skipping all NBA stats API calls "
+                    f"for this session. BallDontLie data will be used.\n"
+                )
+
+    def record_success(self):
+        """Record a successful call — resets failure counter, closes circuit."""
+        with self._lock:
+            if self._consecutive_failures > 0 or self._is_open:
+                self._consecutive_failures = 0
+                self._is_open = False
+
+    @property
+    def is_open(self) -> bool:
+        return self._is_open
+
+    def check(self):
+        """Raise CircuitBreakerOpenError if circuit is open."""
+        if self._is_open:
+            raise CircuitBreakerOpenError(
+                "stats.nba.com circuit breaker is OPEN — skipping call"
+            )
+
+
+# Global circuit breaker for stats.nba.com
+_nba_stats_circuit_breaker = NbaStatsCircuitBreaker()
+
 
 def _get_cache_path(cache_key: str) -> Path:
     """Get the file path for a cache entry."""
@@ -225,6 +293,8 @@ def retry_with_backoff(
             for attempt in range(max_attempts):
                 try:
                     return func(*args, **kwargs)
+                except CircuitBreakerOpenError:
+                    raise  # Never retry circuit breaker — propagate immediately
                 except exceptions as e:
                     last_exception = e
                     if attempt < max_attempts - 1:
@@ -554,6 +624,7 @@ def _historical_games_cache_key(team_id=None, season="2025-26", last_n_games=Non
 @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
 def _fetch_historical_games_api(team_id=None, season="2025-26", date_from=None, date_to=None):
     """Raw API call with retry logic."""
+    _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
     game_finder = leaguegamefinder.LeagueGameFinder(
         team_id_nullable=team_id,
@@ -591,10 +662,15 @@ def fetch_historical_games(team_id=None, season="2025-26", last_n_games=None, da
     # Fetch from API with retry
     try:
         games = _fetch_historical_games_api(team_id, season, date_from, date_to)
+        _nba_stats_circuit_breaker.record_success()
+    except CircuitBreakerOpenError:
+        return []
     except (ConnectionError, TimeoutError, ValueError) as e:
+        _nba_stats_circuit_breaker.record_failure()
         logger.warning(f"Failed to fetch historical games for team {team_id}: {type(e).__name__}: {e}")
         return []
     except Exception as e:
+        _nba_stats_circuit_breaker.record_failure()
         logger.warning(f"Unexpected error fetching historical games for team {team_id}: {type(e).__name__}: {e}")
         return []
 
@@ -639,6 +715,7 @@ def _team_stats_cache_key(team_id, season="2025-26"):
 @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
 def _fetch_team_stats_api(team_id, season="2025-26"):
     """Raw API call for team stats with retry logic."""
+    _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
     team_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
         team_id=team_id,
@@ -651,6 +728,7 @@ def _fetch_team_stats_api(team_id, season="2025-26"):
 @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
 def _fetch_team_advanced_stats_api(team_id, season="2025-26"):
     """Raw API call for team advanced stats with retry logic."""
+    _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
     advanced_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
         team_id=team_id,
@@ -687,10 +765,15 @@ def fetch_team_statistics(team_id, season="2025-26"):
     # Fetch base stats with retry
     try:
         stats_dict = _fetch_team_stats_api(team_id, season)
+        _nba_stats_circuit_breaker.record_success()
+    except CircuitBreakerOpenError:
+        stats_dict = {}
     except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        _nba_stats_circuit_breaker.record_failure()
         logger.warning(f"Could not fetch team stats for {team_id}: {type(e).__name__}: {e}")
         stats_dict = {}
     except Exception as e:
+        _nba_stats_circuit_breaker.record_failure()
         logger.warning(f"Unexpected error fetching team stats for {team_id}: {type(e).__name__}: {e}")
         stats_dict = {}
 
@@ -700,11 +783,16 @@ def fetch_team_statistics(team_id, season="2025-26"):
     # Fetch advanced stats for ratings with retry
     try:
         advanced_dict = _fetch_team_advanced_stats_api(team_id, season)
+        _nba_stats_circuit_breaker.record_success()
         advanced_overall = advanced_dict.get("OverallTeamDashboard", [{}])[0] if advanced_dict.get("OverallTeamDashboard") else {}
+    except CircuitBreakerOpenError:
+        advanced_overall = {}
     except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        _nba_stats_circuit_breaker.record_failure()
         logger.warning(f"Could not fetch advanced stats for team {team_id}: {type(e).__name__}: {e}")
         advanced_overall = {}
     except Exception as e:
+        _nba_stats_circuit_breaker.record_failure()
         logger.warning(f"Unexpected error fetching advanced stats for {team_id}: {type(e).__name__}: {e}")
         advanced_overall = {}
 

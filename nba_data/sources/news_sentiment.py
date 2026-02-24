@@ -21,6 +21,7 @@ INSIGHT TYPES:
 =============================================================================
 """
 
+import load_env  # noqa: F401  — load .env before any code reads os.environ
 import os
 import time
 import json
@@ -35,20 +36,6 @@ import threading
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-
-# Load .env if exists
-def _load_env():
-    env_path = Path(__file__).parent / ".env"
-    if env_path.exists():
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    if key not in os.environ:
-                        os.environ[key] = value
-
-_load_env()
 
 # Cache settings
 CACHE_DIR = Path(__file__).parent / ".news_cache"

@@ -32,8 +32,7 @@ from datetime import datetime
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_DIR))
 
-from dotenv import load_dotenv
-load_dotenv()
+import load_env  # noqa: F401  — load .env before any code reads os.environ
 
 try:
     from apscheduler.schedulers.blocking import BlockingScheduler

@@ -8,6 +8,7 @@ Usage:
     python migrate_to_postgres.py --db-url postgresql://user:pass@host:5432/dbname
 """
 
+import load_env  # noqa: F401  — load .env before any code reads os.environ
 import os
 import sys
 import sqlite3

@@ -16,8 +16,7 @@ from datetime import datetime, timedelta
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from dotenv import load_dotenv
-load_dotenv()
+import load_env  # noqa: F401  — load .env before any code reads os.environ
 
 from agents.core.connections import get_redis_client, get_postgres_connection, ensure_agent_schema
 from agents.core.message_bus import MessageBus, InMemoryMessageBus

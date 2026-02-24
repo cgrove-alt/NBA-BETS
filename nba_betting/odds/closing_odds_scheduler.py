@@ -25,6 +25,8 @@ import time
 import argparse
 from datetime import datetime
 
+import load_env  # noqa: F401  — load .env before any code reads os.environ
+
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

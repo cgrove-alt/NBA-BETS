@@ -17,6 +17,7 @@ Usage:
     best = fetcher.get_best_odds(game_id, "spread", "home")
 """
 
+import load_env  # noqa: F401  — load .env before any code reads os.environ
 import os
 import time
 import requests

@@ -28,6 +28,7 @@ New Endpoints (Task 4.4):
     - GET /api/auth/verify - Verify JWT token (if AUTH_ENABLED)
 """
 
+import load_env  # noqa: F401  — load .env before any code reads os.environ
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager

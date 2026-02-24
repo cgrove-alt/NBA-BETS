@@ -13,6 +13,7 @@ Usage:
 Called automatically by the API on startup (see backend/api.py lifespan).
 """
 
+import load_env  # noqa: F401  — load .env before any code reads os.environ
 import argparse
 import glob
 import logging
