@@ -494,7 +494,20 @@ def get_injury_tracker() -> InjuryTrackerV3:
 def fetch_current_injuries():
     """Fetch current injuries from all sources (wrapper for global instance)."""
     tracker = get_injury_tracker()
-    return tracker.fetch_all_injuries()
+    injuries_dict = tracker.get_injuries(force_refresh=True)
+    # Convert dict format to list of InjuryReport for backward compatibility
+    reports = []
+    for pid_str, info in injuries_dict.items():
+        try:
+            reports.append(InjuryReport(
+                player_id=int(pid_str),
+                player_name=info.get('player_name', ''),
+                status=info.get('status', ''),
+                team=info.get('team', ''),
+            ))
+        except (ValueError, TypeError):
+            continue
+    return reports
 
 
 def is_player_available(player_id: int, date: str = None) -> bool:

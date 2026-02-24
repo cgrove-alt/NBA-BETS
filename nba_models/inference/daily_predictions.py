@@ -1495,50 +1495,89 @@ def get_player_props_for_game(api: BalldontlieAPI, game_id: int) -> dict[int, di
     Get player props from Balldontlie API for a game.
 
     Returns dict indexed by player_id with prop lines.
+    Uses positive over_under filter matching proven data_service.py approach.
     """
     props_by_player = {}
 
     try:
-        props = api.get_player_props(game_id)
-        if not props:
+        raw_props = api.get_player_props(game_id)
+        if not raw_props:
+            print(f"    Props API returned empty for game {game_id}")
             return props_by_player
 
-        # Group by player and prop type, preferring DraftKings
-        for prop in props:
-            player_id = prop.get('player_id')
-            prop_type = prop.get('prop_type', '').lower()
-            vendor = prop.get('vendor', '').lower()
-            line = prop.get('line_value')
+        # Diagnostic counters
+        total = len(raw_props)
+        filtered_market = 0
+        filtered_missing = 0
+        accepted = 0
 
-            if not player_id or not prop_type or not line:
+        # Prop type normalization (matches data_service.py lines 2755-2769)
+        prop_type_map = {
+            'points': 'points', 'pts': 'points',
+            'rebounds': 'rebounds', 'reb': 'rebounds',
+            'assists': 'assists', 'ast': 'assists',
+            'threes': 'threes', '3pm': 'threes', 'fg3m': 'threes',
+            'three_pointers_made': 'threes',
+            'pra': 'pra', 'pts_reb_ast': 'pra',
+            'points_rebounds_assists': 'pra',
+            'steals': 'steals', 'stl': 'steals',
+            'blocks': 'blocks', 'blk': 'blocks',
+        }
+
+        for prop in raw_props:
+            # POSITIVE filter: only over_under market type (matching data_service.py line 2655)
+            market = prop.get('market', {})
+            market_type = market.get('type', '') if isinstance(market, dict) else ''
+            if market_type != 'over_under':
+                filtered_market += 1
+                continue
+
+            player_id = prop.get('player_id')
+            raw_prop_type = prop.get('prop_type', '').lower()
+            line = prop.get('line_value')
+            vendor = prop.get('vendor', '').lower()
+
+            if not player_id or not raw_prop_type or line is None:
+                filtered_missing += 1
                 continue
 
             try:
                 line = float(line)
-            except:
+            except (ValueError, TypeError):
+                filtered_missing += 1
                 continue
 
-            # Skip milestone props (like "18+ points" which have high odds)
-            market = prop.get('market', {})
-            if market.get('type') == 'milestone':
-                continue
+            # Normalize prop type name
+            prop_type = prop_type_map.get(raw_prop_type, raw_prop_type)
 
             if player_id not in props_by_player:
                 props_by_player[player_id] = {'player_id': player_id}
 
-            # Store team_id if available
-            team_id = prop.get('team_id')
-            if team_id:
-                props_by_player[player_id]['team_id'] = team_id
-
-            # Store if not exists or vendor is preferred
+            # Store if not exists or vendor is preferred (DraftKings/FanDuel)
             key = f'{prop_type}_line'
             if key not in props_by_player[player_id] or vendor in ['draftkings', 'fanduel']:
                 props_by_player[player_id][key] = line
                 props_by_player[player_id][f'{prop_type}_vendor'] = vendor
 
+            accepted += 1
+
+        print(f"    Props: {total} raw, {filtered_market} non-over_under, {filtered_missing} missing fields, {accepted} accepted, {len(props_by_player)} players")
+
+        # Resolve team_id for each player (matching data_service.py lines 2663-2672)
+        for pid in list(props_by_player.keys()):
+            try:
+                player = api.get_player(pid)
+                if player:
+                    team_data = player.get('team', {})
+                    if isinstance(team_data, dict):
+                        props_by_player[pid]['team_id'] = team_data.get('id')
+                    else:
+                        props_by_player[pid]['team_id'] = player.get('team_id')
+            except Exception:
+                pass  # team_id is nice-to-have, not critical
+
     except Exception as e:
-        print(f"    Error fetching props: {e}")
+        print(f"    Error fetching props for game {game_id}: {e}")
 
     return props_by_player
 
@@ -2229,8 +2268,8 @@ def main():
                         for pid, props in props_data.items():
                             if props.get('points_line', 0) >= 15:
                                 player_ids_to_warm.append(pid)
-                except Exception:
-                    pass  # Continue if one game fails
+                except Exception as e:
+                    print(f" [game {game_id} error: {e}]", end='')
 
         player_ids_to_warm = list(set(player_ids_to_warm))  # Remove duplicates
         print(f" {len(player_ids_to_warm)} players")
@@ -2348,7 +2387,7 @@ def main():
                             status = injury_lookup[player_id]
                             if status in [InjuryStatus.OUT, InjuryStatus.DOUBTFUL]:
                                 # Skip prediction for OUT or DOUBTFUL players
-                                print(f"    Skipping {player_name} ({status.value})")
+                                print(f"    Skipping {player_name} ({status})")
                                 continue
                             if status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
                                 uncertainty_flag = "HIGH_UNCERTAINTY"
@@ -2448,6 +2487,8 @@ def main():
                     prop_count = len(analysis['player_props'])
                     edges = [p['edge'] for p in analysis['player_props'] if abs(p['edge']) > 3]
                     print(f" {prop_count} props analyzed, {len(edges)} edges found")
+            else:
+                print(f" no props available")
 
         all_analyses.append(analysis)
         print_game_analysis(analysis)
