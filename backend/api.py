@@ -95,8 +95,20 @@ def get_service() -> DataService:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize data service on startup."""
+    """Initialize data service on startup, run migrations if needed."""
     print("Initializing NBA Props API...")
+
+    # Run database migrations on startup (idempotent — safe to run every time)
+    try:
+        from scripts.run_migrations import run_migrations
+        ok = run_migrations()
+        if ok:
+            print("Database migrations: up to date.")
+        else:
+            print("WARNING: Database migration failed — some features may be unavailable.")
+    except Exception as e:
+        print(f"WARNING: Could not run migrations: {e} — continuing with existing schema.")
+
     get_service()
     print("Data service ready.")
     yield
