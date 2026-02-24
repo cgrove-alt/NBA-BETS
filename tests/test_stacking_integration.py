@@ -301,9 +301,9 @@ def test_quantile_prop_model_with_stacking():
     prediction = model.predict(test_features, prop_line=24.5, context_features=test_context)
     print("\n✓ Prediction successful")
     print(f"  Predicted value (q50): {prediction['predicted_value']:.2f}")
-    print(f"  Q45: {prediction['q45']:.2f}")
-    print(f"  Q50: {prediction['q50']:.2f}")
-    print(f"  Q55: {prediction['q55']:.2f}")
+    print(f"  Pred Low (Q10): {prediction['pred_low']:.2f}")
+    print(f"  Pred Median (Q50): {prediction['pred_median']:.2f}")
+    print(f"  Pred High (Q90): {prediction['pred_high']:.2f}")
     print(f"  Prediction spread: {prediction['prediction_spread']:.2f}")
     print(f"  Over probability: {prediction['over_probability']:.4f}")
 

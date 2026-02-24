@@ -1,7 +1,13 @@
 import os
 import time
+import pytest
 from balldontlie_api import BalldontlieAPI
 
+
+@pytest.mark.skipif(
+    not os.environ.get('BALLDONTLIE_API_KEY'),
+    reason="requires BALLDONTLIE_API_KEY"
+)
 def test_api():
     print("Initializing BalldontlieAPI...")
     api = BalldontlieAPI()

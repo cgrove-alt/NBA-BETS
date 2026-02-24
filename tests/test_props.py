@@ -2,9 +2,15 @@ import asyncio
 import sys
 import os
 from datetime import datetime
+import pytest
 from dashboard.data_service import DataService
 
-# Mock the asyncio run to test data service directly
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not os.environ.get('BALLDONTLIE_API_KEY'),
+    reason="requires BALLDONTLIE_API_KEY"
+)
 async def test_props_generation():
     print("Initializing DataService...")
     service = DataService()

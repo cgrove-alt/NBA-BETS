@@ -29,7 +29,7 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import scheduled_retraining as sr
+import nba_models.training.scheduled_retraining as sr
 
 
 # ============================================================================
@@ -238,7 +238,7 @@ def test_get_latest_backtest_metrics_no_file(temp_project_dir):
 # ALERT SYSTEM TESTS
 # ============================================================================
 
-@patch('scheduled_retraining.subprocess.run')
+@patch('nba_models.training.scheduled_retraining.subprocess.run')
 def test_send_alert_email(mock_run, temp_project_dir, monkeypatch):
     """Test sending email alert."""
     monkeypatch.setenv('ALERT_EMAIL', 'test@example.com')
@@ -311,7 +311,7 @@ def test_check_drift_status_with_drift(mock_detector_class, temp_project_dir):
 # DATA FETCHING TESTS
 # ============================================================================
 
-@patch('scheduled_retraining.subprocess.run')
+@patch('nba_models.training.scheduled_retraining.subprocess.run')
 def test_fetch_new_data_success(mock_run, temp_project_dir):
     """Test successful data fetch."""
     mock_run.return_value = Mock(returncode=0, stdout="Fetched 50 games")
@@ -322,7 +322,7 @@ def test_fetch_new_data_success(mock_run, temp_project_dir):
     mock_run.assert_called_once()
 
 
-@patch('scheduled_retraining.subprocess.run')
+@patch('nba_models.training.scheduled_retraining.subprocess.run')
 def test_fetch_new_data_failure(mock_run, temp_project_dir):
     """Test failed data fetch."""
     mock_run.return_value = Mock(returncode=1, stderr="API error")
@@ -336,9 +336,9 @@ def test_fetch_new_data_failure(mock_run, temp_project_dir):
 # FULL RETRAINING TESTS
 # ============================================================================
 
-@patch('scheduled_retraining.send_alert')
-@patch('scheduled_retraining.fetch_new_data')
-@patch('scheduled_retraining.subprocess.run')
+@patch('nba_models.training.scheduled_retraining.send_alert')
+@patch('nba_models.training.scheduled_retraining.fetch_new_data')
+@patch('nba_models.training.scheduled_retraining.subprocess.run')
 def test_full_retrain_success(mock_run, mock_fetch, mock_alert, temp_project_dir):
     """Test successful full retraining."""
     # Mock successful data fetch
@@ -370,9 +370,9 @@ def test_full_retrain_success(mock_run, mock_fetch, mock_alert, temp_project_dir
     assert len(alert_calls) > 0
 
 
-@patch('scheduled_retraining.send_alert')
-@patch('scheduled_retraining.fetch_new_data')
-@patch('scheduled_retraining.subprocess.run')
+@patch('nba_models.training.scheduled_retraining.send_alert')
+@patch('nba_models.training.scheduled_retraining.fetch_new_data')
+@patch('nba_models.training.scheduled_retraining.subprocess.run')
 def test_full_retrain_training_failure(mock_run, mock_fetch, mock_alert, temp_project_dir):
     """Test full retraining when training script fails."""
     mock_fetch.return_value = True
@@ -389,10 +389,10 @@ def test_full_retrain_training_failure(mock_run, mock_fetch, mock_alert, temp_pr
     assert len(alert_calls) > 0
 
 
-@patch('scheduled_retraining.send_alert')
-@patch('scheduled_retraining.fetch_new_data')
-@patch('scheduled_retraining.subprocess.run')
-@patch('scheduled_retraining.get_latest_backtest_metrics')
+@patch('nba_models.training.scheduled_retraining.send_alert')
+@patch('nba_models.training.scheduled_retraining.fetch_new_data')
+@patch('nba_models.training.scheduled_retraining.subprocess.run')
+@patch('nba_models.training.scheduled_retraining.get_latest_backtest_metrics')
 def test_full_retrain_performance_degradation(mock_metrics, mock_run, mock_fetch, mock_alert, temp_project_dir):
     """Test full retraining rollback on performance degradation."""
     mock_fetch.return_value = True
@@ -423,8 +423,8 @@ def test_full_retrain_performance_degradation(mock_metrics, mock_run, mock_fetch
 # INCREMENTAL UPDATE TESTS
 # ============================================================================
 
-@patch('scheduled_retraining.fetch_new_data')
-@patch('scheduled_retraining.subprocess.run')
+@patch('nba_models.training.scheduled_retraining.fetch_new_data')
+@patch('nba_models.training.scheduled_retraining.subprocess.run')
 def test_incremental_update_success(mock_run, mock_fetch, temp_project_dir):
     """Test successful incremental update."""
     mock_fetch.return_value = True
@@ -441,8 +441,8 @@ def test_incremental_update_success(mock_run, mock_fetch, temp_project_dir):
     assert mock_run.call_count == 2
 
 
-@patch('scheduled_retraining.fetch_new_data')
-@patch('scheduled_retraining.subprocess.run')
+@patch('nba_models.training.scheduled_retraining.fetch_new_data')
+@patch('nba_models.training.scheduled_retraining.subprocess.run')
 def test_incremental_update_failure(mock_run, mock_fetch, temp_project_dir):
     """Test failed incremental update."""
     mock_fetch.return_value = True
@@ -526,9 +526,9 @@ def test_get_scheduler_status_not_running(temp_project_dir):
 # INTEGRATION TESTS
 # ============================================================================
 
-@patch('scheduled_retraining.send_alert')
-@patch('scheduled_retraining.full_retrain')
-@patch('scheduled_retraining.check_drift_status')
+@patch('nba_models.training.scheduled_retraining.send_alert')
+@patch('nba_models.training.scheduled_retraining.full_retrain')
+@patch('nba_models.training.scheduled_retraining.check_drift_status')
 def test_drift_triggered_retrain_immediate(mock_drift, mock_full, mock_alert, temp_project_dir):
     """Test drift-triggered retraining with immediate urgency."""
     mock_drift.return_value = {
@@ -547,9 +547,9 @@ def test_drift_triggered_retrain_immediate(mock_drift, mock_full, mock_alert, te
     assert len(alert_calls) > 0
 
 
-@patch('scheduled_retraining.send_alert')
-@patch('scheduled_retraining.full_retrain')
-@patch('scheduled_retraining.check_drift_status')
+@patch('nba_models.training.scheduled_retraining.send_alert')
+@patch('nba_models.training.scheduled_retraining.full_retrain')
+@patch('nba_models.training.scheduled_retraining.check_drift_status')
 def test_drift_triggered_retrain_no_drift(mock_drift, mock_full, mock_alert, temp_project_dir):
     """Test drift check when no drift detected."""
     mock_drift.return_value = {

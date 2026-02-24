@@ -46,7 +46,7 @@ class TestOddsTrackerService(unittest.TestCase):
         if Path(self.test_log).exists():
             Path(self.test_log).unlink()
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_service_initialization(self, mock_tracker):
         """Test service initializes correctly."""
         service = OddsTrackerService(
@@ -83,7 +83,7 @@ class TestOddsTrackerService(unittest.TestCase):
 
         self.assertIn("THE_ODDS_API_KEY", str(context.exception))
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_is_nba_season(self, mock_tracker):
         """Test NBA season detection."""
         service = OddsTrackerService(
@@ -93,7 +93,7 @@ class TestOddsTrackerService(unittest.TestCase):
         )
 
         # Mock current month
-        with patch('odds_tracker_service.datetime') as mock_datetime:
+        with patch('nba_betting.odds.odds_tracker_service.datetime') as mock_datetime:
             # October (NBA season)
             mock_datetime.now.return_value = datetime(2024, 10, 15, 12, 0)
             self.assertTrue(service.is_nba_season())
@@ -114,7 +114,7 @@ class TestOddsTrackerService(unittest.TestCase):
             mock_datetime.now.return_value = datetime(2025, 8, 15, 12, 0)
             self.assertFalse(service.is_nba_season())
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_should_run_now(self, mock_tracker):
         """Test operating hours detection."""
         service = OddsTrackerService(
@@ -123,7 +123,7 @@ class TestOddsTrackerService(unittest.TestCase):
             log_file=self.test_log
         )
 
-        with patch('odds_tracker_service.datetime') as mock_datetime:
+        with patch('nba_betting.odds.odds_tracker_service.datetime') as mock_datetime:
             # During season, during operating hours (10 AM)
             mock_datetime.now.return_value = datetime(2024, 11, 15, 10, 0)
             self.assertTrue(service.should_run_now())
@@ -144,7 +144,7 @@ class TestOddsTrackerService(unittest.TestCase):
             mock_datetime.now.return_value = datetime(2024, 8, 15, 10, 0)
             self.assertFalse(service.should_run_now())
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_fetch_and_store_with_retry_success(self, mock_tracker_class):
         """Test successful fetch and store."""
         # Mock tracker instance
@@ -174,7 +174,7 @@ class TestOddsTrackerService(unittest.TestCase):
         self.assertIsNotNone(service.last_success)
         self.assertIsNone(service.last_failure)
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     @patch('time.sleep')  # Mock sleep to speed up test
     def test_fetch_and_store_with_retry_failure(self, mock_sleep, mock_tracker_class):
         """Test fetch failure with retries."""
@@ -205,7 +205,7 @@ class TestOddsTrackerService(unittest.TestCase):
         self.assertIsNone(service.last_success)
         self.assertIsNotNone(service.last_failure)
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     @patch('time.sleep')
     def test_fetch_and_store_with_retry_eventual_success(self, mock_sleep, mock_tracker_class):
         """Test fetch succeeds after initial failures."""
@@ -238,7 +238,7 @@ class TestOddsTrackerService(unittest.TestCase):
         self.assertEqual(service.successful_runs, 1)
         self.assertEqual(service.failed_runs, 0)
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_fetch_outside_operating_hours(self, mock_tracker_class):
         """Test fetch is skipped outside operating hours."""
         mock_tracker_instance = Mock()
@@ -262,7 +262,7 @@ class TestOddsTrackerService(unittest.TestCase):
         # Verify metrics NOT updated
         self.assertEqual(service.total_runs, 0)
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_get_health_status(self, mock_tracker):
         """Test health status reporting."""
         service = OddsTrackerService(
@@ -290,7 +290,7 @@ class TestOddsTrackerService(unittest.TestCase):
         self.assertEqual(status['failed_runs'], 1)
         self.assertEqual(status['success_rate'], '90.0%')
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_start_and_stop_service(self, mock_tracker):
         """Test starting and stopping the scheduler."""
         service = OddsTrackerService(
@@ -321,7 +321,7 @@ class TestOddsTrackerService(unittest.TestCase):
         # Verify scheduler stopped
         self.assertFalse(service.scheduler.running)
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_logging_setup(self, mock_tracker):
         """Test logging configuration."""
         service = OddsTrackerService(
@@ -338,7 +338,7 @@ class TestOddsTrackerService(unittest.TestCase):
         # Just verify logger works without error
         service.logger.info("Test log message")
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_print_status(self, mock_tracker):
         """Test status printing (no assertions, just ensure no errors)."""
         service = OddsTrackerService(
@@ -407,7 +407,7 @@ class TestEdgeCases(unittest.TestCase):
             if Path(file).exists():
                 Path(file).unlink()
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_scheduler_graceful_shutdown(self, mock_tracker):
         """Test scheduler shuts down gracefully."""
         service = OddsTrackerService(
@@ -423,7 +423,7 @@ class TestEdgeCases(unittest.TestCase):
         service.stop()
         self.assertFalse(service.scheduler.running)
 
-    @patch('odds_tracker_service.OddsTracker')
+    @patch('nba_betting.odds.odds_tracker_service.OddsTracker')
     def test_multiple_start_calls(self, mock_tracker):
         """Test service handles multiple start calls."""
         service = OddsTrackerService(

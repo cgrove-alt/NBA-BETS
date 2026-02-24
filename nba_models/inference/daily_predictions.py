@@ -42,6 +42,9 @@ from scipy.stats import norm
 from data_fetcher import fetch_player_stats_bdl
 from injury_tracker_v3 import fetch_current_injuries, InjuryStatus
 
+# Required for pickle deserialization of quantile models
+from nba_models.models.model_trainer import QuantilePropModel  # noqa: F401
+
 # BUG FIX: Prop-specific standard deviations (not line-based)
 # Previous bug: std = line * 0.20 caused massive miscalibration
 # - Rebounds (line ~5): std=1.0 → Z-scores inflated 2-3x → 76.7% avg over_prob
@@ -2094,7 +2097,7 @@ def main():
     print("\n  Fetching injury reports...")
     try:
         target_date_dt = datetime.strptime(target_date, "%Y-%m-%d")
-        current_injuries = fetch_current_injuries(target_date_dt)
+        current_injuries = fetch_current_injuries()
 
         # Build lookup dict: {player_id: status}
         injury_lookup = {}
