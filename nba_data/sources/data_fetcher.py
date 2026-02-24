@@ -8,7 +8,9 @@ DATA SOURCES
 =============================================================================
 - Schedule: Balldontlie (primary), NBA API (fallback)
 - Player Stats: Balldontlie (primary), NBA API (fallback)
-- Team Stats: NBA API only (Balldontlie has no team stats endpoint)
+- Team Stats: Balldontlie (primary), NBA API (fallback)
+  Built from BDL standings + games + player box score aggregation.
+  Advanced ratings (off/def/net/pace) computed from game scores.
 - Clutch Stats: NBA API only (not available in Balldontlie)
 
 Prefer *_auto() functions which automatically try Balldontlie first:
@@ -641,10 +643,11 @@ def fetch_historical_games(team_id=None, season="2025-26", last_n_games=None, da
     """
     Fetch historical game data for analysis.
 
-    RELIABILITY: Includes retry logic with exponential backoff and disk caching.
+    PRIMARY: BallDontLie (reliable, fast)
+    FALLBACK: stats.nba.com LeagueGameFinder (unreliable)
 
     Args:
-        team_id: Optional team ID to filter games
+        team_id: Optional team ID to filter games (nba_api format: 1610612xxx)
         season: NBA season (e.g., "2025-26")
         last_n_games: Limit to last N games
         date_from: Start date (MM/DD/YYYY format)
@@ -659,7 +662,17 @@ def fetch_historical_games(team_id=None, season="2025-26", last_n_games=None, da
     if cached is not None:
         return cached
 
-    # Fetch from API with retry
+    # PRIMARY: BallDontLie (only when team_id is provided)
+    if team_id:
+        try:
+            bdl_games = _fetch_historical_games_bdl(team_id, season, last_n_games, date_from, date_to)
+            if bdl_games:
+                _write_to_cache(cache_key, bdl_games)
+                return bdl_games
+        except Exception as e:
+            logger.warning(f"BDL historical games failed for team {team_id}, trying nba_api: {type(e).__name__}: {e}")
+
+    # FALLBACK: stats.nba.com
     try:
         games = _fetch_historical_games_api(team_id, season, date_from, date_to)
         _nba_stats_circuit_breaker.record_success()
@@ -712,9 +725,609 @@ def _team_stats_cache_key(team_id, season="2025-26"):
     return f"team_stats:{team_id}:{season}"
 
 
+# =============================================================================
+# BALLDONTLIE TEAM STATISTICS (Primary source — replaces stats.nba.com)
+# =============================================================================
+# BDL endpoints used:
+#   get_standings(season) → W/L records, home/away records
+#   get_games(seasons, team_ids) → game scores for pts_avg, plus_minus, etc.
+#   get_player_stats(seasons, team_ids) → box scores for reb, ast, stl, blk, tov, fg%
+#
+# Advanced ratings (off_rating, def_rating, pace) are computed from box score
+# data using standard NBA formulas — no extra API calls needed.
+# =============================================================================
+
+
+def _get_team_abbrev_from_nba_id(nba_team_id: int) -> str | None:
+    """Convert an nba_api team ID (1610612xxx) to a team abbreviation."""
+    try:
+        nba_teams = teams.get_teams()
+        for team in nba_teams:
+            if team['id'] == nba_team_id:
+                return team['abbreviation']
+    except Exception:
+        pass
+    return None
+
+
+def _find_bdl_team_in_standings(standings: list[dict], team_abbrev: str) -> dict | None:
+    """Find a team in BDL standings by abbreviation."""
+    for entry in standings:
+        team_info = entry.get("team", {})
+        if team_info.get("abbreviation", "").upper() == team_abbrev.upper():
+            return entry
+    return None
+
+
+def _get_bdl_team_id_from_standings(standings: list[dict], team_abbrev: str) -> int | None:
+    """Get BDL team ID from standings by team abbreviation."""
+    entry = _find_bdl_team_in_standings(standings, team_abbrev)
+    if entry:
+        return entry.get("team", {}).get("id")
+    return None
+
+
+def _bdl_season_from_nba_season(nba_season: str) -> int:
+    """Convert '2025-26' format to BDL season year (2025)."""
+    try:
+        return int(nba_season.split("-")[0])
+    except (ValueError, IndexError):
+        now = datetime.now()
+        return now.year if now.month > 9 else now.year - 1
+
+
+def _fetch_standings_bdl(season: int) -> list[dict]:
+    """
+    Fetch league standings from BallDontLie. Cached for 1 hour.
+
+    Returns list of standing dicts with team, wins, losses, home_record, road_record.
+    """
+    cache_key = f"bdl_standings:{season}"
+    cached = _read_from_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    api = _get_balldontlie_api()
+    if not api:
+        return []
+
+    try:
+        standings = api.get_standings(season=season)
+        if standings:
+            _write_to_cache(cache_key, standings)
+        return standings or []
+    except Exception as e:
+        logger.warning(f"BDL get_standings failed: {type(e).__name__}: {e}")
+        return []
+
+
+def _fetch_team_games_bdl(bdl_team_id: int, season: int) -> list[dict]:
+    """
+    Fetch all games for a team in a season from BallDontLie with pagination.
+
+    Cached for 1 hour. Returns list of completed game dicts.
+    """
+    cache_key = f"bdl_team_games:{bdl_team_id}:{season}"
+    cached = _read_from_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    api = _get_balldontlie_api()
+    if not api:
+        return []
+
+    try:
+        # BDL get_games returns up to 100 per call — enough for most of the season.
+        # For teams with >100 games played (including postseason overlap), paginate.
+        all_games = []
+        cursor = None
+        max_pages = 3  # 300 games max — more than enough
+
+        for _ in range(max_pages):
+            params = {
+                "seasons[]": [season],
+                "team_ids[]": [bdl_team_id],
+                "per_page": 100,
+            }
+            if cursor:
+                params["cursor"] = cursor
+
+            data = api._get("games", params, cache_ttl="stats")
+            if not data:
+                break
+
+            games = data.get("data", []) if isinstance(data, dict) else data
+            if not games:
+                break
+
+            all_games.extend(games)
+
+            meta = data.get("meta", {}) if isinstance(data, dict) else {}
+            cursor = meta.get("next_cursor")
+            if not cursor:
+                break
+
+        # Filter to completed games only
+        completed = [g for g in all_games if g.get("status") == "Final"]
+
+        if completed:
+            _write_to_cache(cache_key, completed)
+        return completed
+    except Exception as e:
+        logger.warning(f"BDL get_games failed for team {bdl_team_id}: {type(e).__name__}: {e}")
+        return []
+
+
+def _compute_advanced_ratings(games: list[dict], team_abbrev: str, player_stats_by_game: dict | None = None):
+    """
+    Compute off_rating, def_rating, net_rating, and pace from game scores.
+
+    Uses the simplified possession estimation formula:
+        possessions ≈ FGA + 0.44 × FTA - OREB + TOV
+
+    When per-game player box scores are not available, we estimate from scores:
+        off_rating ≈ team_pts × 100 / est_possessions
+        def_rating ≈ opp_pts × 100 / est_possessions
+
+    Args:
+        games: List of BDL game dicts with home_team, visitor_team, scores
+        team_abbrev: This team's abbreviation
+        player_stats_by_game: Optional dict of {game_id: aggregated_team_box} for precise calcs
+
+    Returns:
+        Dict with off_rating, def_rating, net_rating, pace (or None values)
+    """
+    if not games:
+        return {"off_rating": None, "def_rating": None, "net_rating": None, "pace": None}
+
+    total_team_pts = 0
+    total_opp_pts = 0
+    num_games = 0
+
+    for game in games:
+        home_abbrev = game.get("home_team", {}).get("abbreviation", "")
+        visitor_abbrev = game.get("visitor_team", {}).get("abbreviation", "")
+        home_score = game.get("home_team_score") or 0
+        visitor_score = game.get("visitor_team_score") or 0
+
+        if not home_score and not visitor_score:
+            continue
+
+        if home_abbrev.upper() == team_abbrev.upper():
+            total_team_pts += home_score
+            total_opp_pts += visitor_score
+            num_games += 1
+        elif visitor_abbrev.upper() == team_abbrev.upper():
+            total_team_pts += visitor_score
+            total_opp_pts += home_score
+            num_games += 1
+
+    if num_games == 0:
+        return {"off_rating": None, "def_rating": None, "net_rating": None, "pace": None}
+
+    avg_team_pts = total_team_pts / num_games
+    avg_opp_pts = total_opp_pts / num_games
+
+    # Estimate possessions per game from league average relationship
+    # NBA average ~100 possessions per game; approximate via scoring
+    # possessions ≈ (team_pts + opp_pts) / 2.12 (league-wide pts/poss ≈ 1.12, both teams)
+    est_poss = (avg_team_pts + avg_opp_pts) / 2.12
+
+    if est_poss > 0:
+        off_rating = round(avg_team_pts * 100 / est_poss, 1)
+        def_rating = round(avg_opp_pts * 100 / est_poss, 1)
+        net_rating = round(off_rating - def_rating, 1)
+        pace = round(est_poss, 1)
+    else:
+        off_rating = None
+        def_rating = None
+        net_rating = None
+        pace = None
+
+    return {
+        "off_rating": off_rating,
+        "def_rating": def_rating,
+        "net_rating": net_rating,
+        "pace": pace,
+    }
+
+
+def _aggregate_box_scores_bdl(bdl_team_id: int, season: int) -> dict:
+    """
+    Aggregate player box scores from BDL to get team-level shooting/stat averages.
+
+    Returns dict with per-game averages: reb_avg, ast_avg, stl_avg, blk_avg,
+    tov_avg, fg_pct, fg3_pct, ft_pct.
+
+    Uses the BDL player_stats endpoint filtered by team and season.
+    """
+    api = _get_balldontlie_api()
+    if not api:
+        return {}
+
+    cache_key = f"bdl_team_box_agg:{bdl_team_id}:{season}"
+    cached = _read_from_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        # Fetch player stats for this team's season — paginate to get all games
+        all_stats = []
+        cursor = None
+        max_pages = 10  # Up to 1000 stat lines
+
+        for _ in range(max_pages):
+            params = {
+                "seasons[]": [season],
+                "team_ids[]": [bdl_team_id],
+                "per_page": 100,
+            }
+            if cursor:
+                params["cursor"] = cursor
+
+            data = api._get("stats", params, cache_ttl="stats")
+            if not data:
+                break
+
+            stats = data.get("data", []) if isinstance(data, dict) else data
+            if not stats:
+                break
+
+            all_stats.extend(stats)
+
+            meta = data.get("meta", {}) if isinstance(data, dict) else {}
+            cursor = meta.get("next_cursor")
+            if not cursor:
+                break
+
+        if not all_stats:
+            return {}
+
+        # Group by game_id and sum team totals per game
+        game_totals = {}  # game_id -> {reb, ast, stl, blk, tov, fgm, fga, fg3m, fg3a, ftm, fta}
+        for stat in all_stats:
+            game = stat.get("game", {})
+            game_id = game.get("id")
+            if not game_id:
+                continue
+
+            # Only count stats where the player played for this team
+            stat_team_id = stat.get("team", {}).get("id")
+            if stat_team_id != bdl_team_id:
+                continue
+
+            if game_id not in game_totals:
+                game_totals[game_id] = {
+                    "reb": 0, "ast": 0, "stl": 0, "blk": 0, "tov": 0,
+                    "fgm": 0, "fga": 0, "fg3m": 0, "fg3a": 0, "ftm": 0, "fta": 0,
+                    "oreb": 0,
+                }
+
+            gt = game_totals[game_id]
+            gt["reb"] += stat.get("reb") or 0
+            gt["ast"] += stat.get("ast") or 0
+            gt["stl"] += stat.get("stl") or 0
+            gt["blk"] += stat.get("blk") or 0
+            gt["tov"] += stat.get("turnover") or 0
+            gt["fgm"] += stat.get("fgm") or 0
+            gt["fga"] += stat.get("fga") or 0
+            gt["fg3m"] += stat.get("fg3m") or 0
+            gt["fg3a"] += stat.get("fg3a") or 0
+            gt["ftm"] += stat.get("ftm") or 0
+            gt["fta"] += stat.get("fta") or 0
+            gt["oreb"] += stat.get("oreb") or 0
+
+        if not game_totals:
+            return {}
+
+        n_games = len(game_totals)
+        totals = {k: sum(g[k] for g in game_totals.values()) for k in game_totals[next(iter(game_totals))]}
+
+        result = {
+            "reb_avg": round(totals["reb"] / n_games, 1),
+            "ast_avg": round(totals["ast"] / n_games, 1),
+            "stl_avg": round(totals["stl"] / n_games, 1),
+            "blk_avg": round(totals["blk"] / n_games, 1),
+            "tov_avg": round(totals["tov"] / n_games, 1),
+            "fg_pct": round(totals["fgm"] / totals["fga"], 3) if totals["fga"] > 0 else 0.0,
+            "fg3_pct": round(totals["fg3m"] / totals["fg3a"], 3) if totals["fg3a"] > 0 else 0.0,
+            "ft_pct": round(totals["ftm"] / totals["fta"], 3) if totals["fta"] > 0 else 0.0,
+            "games_aggregated": n_games,
+        }
+
+        _write_to_cache(cache_key, result)
+        return result
+    except Exception as e:
+        logger.warning(f"BDL box score aggregation failed for team {bdl_team_id}: {type(e).__name__}: {e}")
+        return {}
+
+
+def _fetch_team_statistics_bdl(team_id, season="2025-26"):
+    """
+    Build team statistics using only BallDontLie data.
+
+    This replaces the stats.nba.com dependency for team stats. Uses:
+      - get_standings() for W/L records
+      - get_games() for scores, pts_avg, plus_minus, home/away splits
+      - get_player_stats() for box score aggregates (reb, ast, stl, blk, tov, fg%)
+      - Computed advanced ratings (off_rating, def_rating, pace) from game scores
+
+    Args:
+        team_id: NBA API team ID (1610612xxx format)
+        season: NBA season string (e.g., "2025-26")
+
+    Returns:
+        Dict with same structure as fetch_team_statistics(), or None on failure
+    """
+    team_abbrev = _get_team_abbrev_from_nba_id(team_id)
+    if not team_abbrev:
+        logger.warning(f"Could not resolve team abbreviation for nba_api ID {team_id}")
+        return None
+
+    bdl_season = _bdl_season_from_nba_season(season)
+
+    # 1) Standings: W/L, home/away records
+    standings = _fetch_standings_bdl(bdl_season)
+    standing = _find_bdl_team_in_standings(standings, team_abbrev)
+
+    if not standing:
+        logger.warning(f"Team {team_abbrev} not found in BDL standings for {bdl_season}")
+        return None
+
+    wins = standing.get("wins") or 0
+    losses = standing.get("losses") or 0
+    games_played = wins + losses
+
+    # Parse home/road records
+    home_record = standing.get("home_record", {})
+    road_record = standing.get("road_record", {})
+
+    # home_record might be a dict {"wins": X, "losses": Y} or a string "24-6"
+    if isinstance(home_record, str):
+        try:
+            parts = home_record.split("-")
+            home_wins, home_losses = int(parts[0]), int(parts[1])
+        except (ValueError, IndexError):
+            home_wins, home_losses = 0, 0
+    elif isinstance(home_record, dict):
+        home_wins = home_record.get("wins") or 0
+        home_losses = home_record.get("losses") or 0
+    else:
+        home_wins, home_losses = 0, 0
+
+    if isinstance(road_record, str):
+        try:
+            parts = road_record.split("-")
+            away_wins, away_losses = int(parts[0]), int(parts[1])
+        except (ValueError, IndexError):
+            away_wins, away_losses = 0, 0
+    elif isinstance(road_record, dict):
+        away_wins = road_record.get("wins") or 0
+        away_losses = road_record.get("losses") or 0
+    else:
+        away_wins, away_losses = 0, 0
+
+    home_gp = home_wins + home_losses
+    away_gp = away_wins + away_losses
+
+    # 2) Games: pts_avg, plus_minus, home/away splits
+    bdl_team_id = _get_bdl_team_id_from_standings(standings, team_abbrev)
+    if not bdl_team_id:
+        logger.warning(f"Could not find BDL team ID for {team_abbrev}")
+        return None
+
+    games = _fetch_team_games_bdl(bdl_team_id, bdl_season)
+
+    # Compute scoring averages from game results
+    home_pts_list = []
+    away_pts_list = []
+    home_pm_list = []
+    away_pm_list = []
+    all_pts_list = []
+    all_pm_list = []
+
+    for game in games:
+        home_abbr = game.get("home_team", {}).get("abbreviation", "")
+        visitor_abbr = game.get("visitor_team", {}).get("abbreviation", "")
+        home_score = game.get("home_team_score") or 0
+        visitor_score = game.get("visitor_team_score") or 0
+
+        if not home_score and not visitor_score:
+            continue
+
+        if home_abbr.upper() == team_abbrev.upper():
+            # We are the home team
+            all_pts_list.append(home_score)
+            all_pm_list.append(home_score - visitor_score)
+            home_pts_list.append(home_score)
+            home_pm_list.append(home_score - visitor_score)
+        elif visitor_abbr.upper() == team_abbrev.upper():
+            # We are the away team
+            all_pts_list.append(visitor_score)
+            all_pm_list.append(visitor_score - home_score)
+            away_pts_list.append(visitor_score)
+            away_pm_list.append(visitor_score - home_score)
+
+    def _safe_avg(lst):
+        return sum(lst) / len(lst) if lst else 0.0
+
+    pts_avg = _safe_avg(all_pts_list)
+    plus_minus = _safe_avg(all_pm_list)
+    home_pts_avg = _safe_avg(home_pts_list)
+    away_pts_avg = _safe_avg(away_pts_list)
+    home_plus_minus = _safe_avg(home_pm_list)
+    away_plus_minus = _safe_avg(away_pm_list)
+
+    # 3) Box score aggregates for shooting and defensive stats
+    box_agg = _aggregate_box_scores_bdl(bdl_team_id, bdl_season)
+
+    # 4) Advanced ratings from game scores
+    advanced = _compute_advanced_ratings(games, team_abbrev)
+
+    result = {
+        "team_id": team_id,
+        "season": season,
+        "overall": {
+            "games_played": games_played,
+            "wins": wins,
+            "losses": losses,
+            "win_pct": round(wins / games_played, 3) if games_played > 0 else 0.0,
+            "pts_avg": round(pts_avg, 1),
+            "reb_avg": box_agg.get("reb_avg", 0.0),
+            "ast_avg": box_agg.get("ast_avg", 0.0),
+            "stl_avg": box_agg.get("stl_avg", 0.0),
+            "blk_avg": box_agg.get("blk_avg", 0.0),
+            "tov_avg": box_agg.get("tov_avg", 0.0),
+            "fg_pct": box_agg.get("fg_pct", 0.0),
+            "fg3_pct": box_agg.get("fg3_pct", 0.0),
+            "ft_pct": box_agg.get("ft_pct", 0.0),
+            "plus_minus": round(plus_minus, 1),
+            "off_rating": advanced.get("off_rating"),
+            "def_rating": advanced.get("def_rating"),
+            "net_rating": advanced.get("net_rating"),
+            "pace": advanced.get("pace"),
+        },
+        "home": {
+            "games_played": home_gp,
+            "wins": home_wins,
+            "losses": home_losses,
+            "win_pct": round(home_wins / home_gp, 3) if home_gp > 0 else 0.0,
+            "pts_avg": round(home_pts_avg, 1),
+            "plus_minus": round(home_plus_minus, 1),
+        },
+        "away": {
+            "games_played": away_gp,
+            "wins": away_wins,
+            "losses": away_losses,
+            "win_pct": round(away_wins / away_gp, 3) if away_gp > 0 else 0.0,
+            "pts_avg": round(away_pts_avg, 1),
+            "plus_minus": round(away_plus_minus, 1),
+        },
+    }
+
+    return result
+
+
+def _fetch_historical_games_bdl(team_id, season="2025-26", last_n_games=None, date_from=None, date_to=None):
+    """
+    Fetch historical game data from BallDontLie (replaces stats.nba.com leaguegamefinder).
+
+    Returns list of game dicts in the same format as fetch_historical_games().
+
+    Args:
+        team_id: NBA API team ID (1610612xxx format)
+        season: NBA season string
+        last_n_games: Limit to last N games
+        date_from: Start date filter (MM/DD/YYYY format, for compatibility)
+        date_to: End date filter (MM/DD/YYYY format, for compatibility)
+    """
+    team_abbrev = _get_team_abbrev_from_nba_id(team_id)
+    if not team_abbrev:
+        return []
+
+    bdl_season = _bdl_season_from_nba_season(season)
+
+    # Get BDL team ID from standings
+    standings = _fetch_standings_bdl(bdl_season)
+    bdl_team_id = _get_bdl_team_id_from_standings(standings, team_abbrev)
+    if not bdl_team_id:
+        return []
+
+    games = _fetch_team_games_bdl(bdl_team_id, bdl_season)
+    if not games:
+        return []
+
+    # Convert date filters from MM/DD/YYYY to YYYY-MM-DD for comparison
+    filter_from = None
+    filter_to = None
+    if date_from:
+        try:
+            filter_from = datetime.strptime(date_from, "%m/%d/%Y").strftime("%Y-%m-%d")
+        except ValueError:
+            try:
+                filter_from = datetime.strptime(date_from, "%Y-%m-%d").strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+    if date_to:
+        try:
+            filter_to = datetime.strptime(date_to, "%m/%d/%Y").strftime("%Y-%m-%d")
+        except ValueError:
+            try:
+                filter_to = datetime.strptime(date_to, "%Y-%m-%d").strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+
+    parsed_games = []
+    for game in games:
+        # Parse game date
+        game_date_raw = game.get("date", "")
+        if "T" in game_date_raw:
+            game_date = game_date_raw.split("T")[0]
+        else:
+            game_date = game_date_raw[:10] if game_date_raw else ""
+
+        # Apply date filters
+        if filter_from and game_date < filter_from:
+            continue
+        if filter_to and game_date > filter_to:
+            continue
+
+        home_abbr = game.get("home_team", {}).get("abbreviation", "")
+        visitor_abbr = game.get("visitor_team", {}).get("abbreviation", "")
+        home_score = game.get("home_team_score") or 0
+        visitor_score = game.get("visitor_team_score") or 0
+
+        is_home = home_abbr.upper() == team_abbrev.upper()
+
+        if is_home:
+            team_pts = home_score
+            opp_pts = visitor_score
+            opp_abbr = visitor_abbr
+            matchup = f"{team_abbrev} vs. {opp_abbr}"
+        else:
+            team_pts = visitor_score
+            opp_pts = home_score
+            opp_abbr = home_abbr
+            matchup = f"{team_abbrev} @ {opp_abbr}"
+
+        wl = "W" if team_pts > opp_pts else ("L" if opp_pts > team_pts else None)
+
+        parsed_games.append({
+            "game_id": str(game.get("id", "")),
+            "game_date": game_date,
+            "matchup": matchup,
+            "wl": wl,
+            "team_id": team_id,
+            "team_abbreviation": team_abbrev,
+            "pts": team_pts,
+            "fg_pct": None,  # Not available from game-level BDL data
+            "fg3_pct": None,
+            "ft_pct": None,
+            "reb": None,
+            "ast": None,
+            "stl": None,
+            "blk": None,
+            "tov": None,
+            "plus_minus": team_pts - opp_pts,
+            "min": None,
+        })
+
+    # Sort by date descending (most recent first) to match nba_api behavior
+    parsed_games.sort(key=lambda g: g.get("game_date", ""), reverse=True)
+
+    if last_n_games:
+        parsed_games = parsed_games[:last_n_games]
+
+    return parsed_games
+
+
+# =============================================================================
+# stats.nba.com TEAM STATISTICS (Fallback only)
+# =============================================================================
+
 @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
 def _fetch_team_stats_api(team_id, season="2025-26"):
-    """Raw API call for team stats with retry logic."""
+    """Raw API call for team stats with retry logic (stats.nba.com fallback)."""
     _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
     team_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
@@ -727,7 +1340,7 @@ def _fetch_team_stats_api(team_id, season="2025-26"):
 
 @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
 def _fetch_team_advanced_stats_api(team_id, season="2025-26"):
-    """Raw API call for team advanced stats with retry logic."""
+    """Raw API call for team advanced stats with retry logic (stats.nba.com fallback)."""
     _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
     advanced_stats = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
@@ -739,46 +1352,33 @@ def _fetch_team_advanced_stats_api(team_id, season="2025-26"):
     return advanced_stats.get_normalized_dict()
 
 
-def fetch_team_statistics(team_id, season="2025-26"):
+def _fetch_team_statistics_nba_api(team_id, season="2025-26"):
     """
-    Fetch comprehensive team statistics.
+    Fetch team statistics from stats.nba.com (FALLBACK ONLY).
 
-    WARNING: This function returns CURRENT (full-season) stats, which may cause
-    TEMPORAL LEAKAGE when used for training on historical games. For training,
-    use fetch_team_statistics_before_date() instead.
-
-    RELIABILITY: Includes retry logic with exponential backoff and disk caching.
-
-    Args:
-        team_id: NBA team ID
-        season: NBA season (e.g., "2025-26")
-
-    Returns:
-        Dictionary with team statistics
+    This is kept as a fallback in case BallDontLie is unavailable.
+    The primary path is _fetch_team_statistics_bdl().
     """
-    # Check cache first
-    cache_key = _team_stats_cache_key(team_id, season)
-    cached = _read_from_cache(cache_key)
-    if cached is not None:
-        return cached
-
     # Fetch base stats with retry
     try:
         stats_dict = _fetch_team_stats_api(team_id, season)
         _nba_stats_circuit_breaker.record_success()
     except CircuitBreakerOpenError:
-        stats_dict = {}
+        return None
     except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
         _nba_stats_circuit_breaker.record_failure()
-        logger.warning(f"Could not fetch team stats for {team_id}: {type(e).__name__}: {e}")
-        stats_dict = {}
+        logger.warning(f"[nba_api fallback] Could not fetch team stats for {team_id}: {type(e).__name__}: {e}")
+        return None
     except Exception as e:
         _nba_stats_circuit_breaker.record_failure()
-        logger.warning(f"Unexpected error fetching team stats for {team_id}: {type(e).__name__}: {e}")
-        stats_dict = {}
+        logger.warning(f"[nba_api fallback] Unexpected error fetching team stats for {team_id}: {type(e).__name__}: {e}")
+        return None
 
     overall = stats_dict.get("OverallTeamDashboard", [{}])[0] if stats_dict.get("OverallTeamDashboard") else {}
     home_away = stats_dict.get("LocationTeamDashboard", [])
+
+    if not overall.get("GP"):
+        return None
 
     # Fetch advanced stats for ratings with retry
     try:
@@ -787,22 +1387,17 @@ def fetch_team_statistics(team_id, season="2025-26"):
         advanced_overall = advanced_dict.get("OverallTeamDashboard", [{}])[0] if advanced_dict.get("OverallTeamDashboard") else {}
     except CircuitBreakerOpenError:
         advanced_overall = {}
-    except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
-        _nba_stats_circuit_breaker.record_failure()
-        logger.warning(f"Could not fetch advanced stats for team {team_id}: {type(e).__name__}: {e}")
-        advanced_overall = {}
     except Exception as e:
         _nba_stats_circuit_breaker.record_failure()
-        logger.warning(f"Unexpected error fetching advanced stats for {team_id}: {type(e).__name__}: {e}")
+        logger.warning(f"[nba_api fallback] Could not fetch advanced stats for team {team_id}: {type(e).__name__}: {e}")
         advanced_overall = {}
 
     home_stats = next((s for s in home_away if s.get("GROUP_VALUE") == "Home"), {})
     away_stats = next((s for s in home_away if s.get("GROUP_VALUE") == "Road"), {})
 
-    # Calculate games played for dividing totals into averages
-    gp = max(overall.get("GP") or 1, 1)  # Avoid division by zero
+    gp = max(overall.get("GP") or 1, 1)
 
-    result = {
+    return {
         "team_id": team_id,
         "season": season,
         "overall": {
@@ -810,7 +1405,6 @@ def fetch_team_statistics(team_id, season="2025-26"):
             "wins": overall.get("W"),
             "losses": overall.get("L"),
             "win_pct": overall.get("W_PCT"),
-            # NBA API returns season TOTALS, divide by GP for per-game averages
             "pts_avg": (overall.get("PTS") or 0) / gp,
             "reb_avg": (overall.get("REB") or 0) / gp,
             "ast_avg": (overall.get("AST") or 0) / gp,
@@ -831,7 +1425,6 @@ def fetch_team_statistics(team_id, season="2025-26"):
             "wins": home_stats.get("W"),
             "losses": home_stats.get("L"),
             "win_pct": home_stats.get("W_PCT"),
-            # PTS is total points, divide by GP for average
             "pts_avg": (home_stats.get("PTS") or 0) / max(home_stats.get("GP") or 1, 1),
             "plus_minus": home_stats.get("PLUS_MINUS"),
         },
@@ -840,17 +1433,88 @@ def fetch_team_statistics(team_id, season="2025-26"):
             "wins": away_stats.get("W"),
             "losses": away_stats.get("L"),
             "win_pct": away_stats.get("W_PCT"),
-            # PTS is total points, divide by GP for average
             "pts_avg": (away_stats.get("PTS") or 0) / max(away_stats.get("GP") or 1, 1),
             "plus_minus": away_stats.get("PLUS_MINUS"),
         },
     }
 
-    # Cache successful result
-    if result.get("overall", {}).get("games_played"):
-        _write_to_cache(cache_key, result)
 
-    return result
+# =============================================================================
+# PUBLIC API: fetch_team_statistics / fetch_historical_games
+# =============================================================================
+
+def fetch_team_statistics(team_id, season="2025-26"):
+    """
+    Fetch comprehensive team statistics.
+
+    PRIMARY: BallDontLie (reliable, fast)
+    FALLBACK: stats.nba.com (unreliable, slow)
+
+    WARNING: This function returns CURRENT (full-season) stats, which may cause
+    TEMPORAL LEAKAGE when used for training on historical games. For training,
+    use fetch_team_statistics_before_date() instead.
+
+    Args:
+        team_id: NBA team ID (1610612xxx format)
+        season: NBA season (e.g., "2025-26")
+
+    Returns:
+        Dictionary with team statistics
+    """
+    # Check cache first
+    cache_key = _team_stats_cache_key(team_id, season)
+    cached = _read_from_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    # PRIMARY: BallDontLie
+    try:
+        result = _fetch_team_statistics_bdl(team_id, season)
+        if result and result.get("overall", {}).get("games_played"):
+            _write_to_cache(cache_key, result)
+            return result
+    except Exception as e:
+        logger.warning(f"BDL team stats failed for {team_id}, trying nba_api fallback: {type(e).__name__}: {e}")
+
+    # FALLBACK: stats.nba.com
+    result = _fetch_team_statistics_nba_api(team_id, season)
+    if result and result.get("overall", {}).get("games_played"):
+        _write_to_cache(cache_key, result)
+        return result
+
+    # Both sources failed — return empty structure with league-average defaults
+    return {
+        "team_id": team_id,
+        "season": season,
+        "overall": {
+            "games_played": None,
+            "wins": None,
+            "losses": None,
+            "win_pct": None,
+            "pts_avg": 0,
+            "reb_avg": 0,
+            "ast_avg": 0,
+            "stl_avg": 0,
+            "blk_avg": 0,
+            "tov_avg": 0,
+            "fg_pct": None,
+            "fg3_pct": None,
+            "ft_pct": None,
+            "plus_minus": 0,
+            "off_rating": None,
+            "def_rating": None,
+            "net_rating": None,
+            "pace": None,
+        },
+        "home": {
+            "games_played": None, "wins": None, "losses": None, "win_pct": None,
+            "pts_avg": 0, "plus_minus": None,
+        },
+        "away": {
+            "games_played": None, "wins": None, "losses": None, "win_pct": None,
+            "pts_avg": 0, "plus_minus": None,
+        },
+    }
 
 
 def fetch_team_statistics_before_date(team_id, season="2025-26", before_date=None):

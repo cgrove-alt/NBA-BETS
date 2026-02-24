@@ -1149,19 +1149,19 @@ class TeamFeatureGenerator:
         """Extract offensive efficiency metrics."""
         overall = team_stats.get("overall", {})
         return {
-            "off_rating": overall.get("off_rating", 0) or 0,
-            "pts_avg": overall.get("pts_avg", 0) or 0,
+            "off_rating": overall.get("off_rating", 110) or 110,
+            "pts_avg": overall.get("pts_avg", 112) or 112,
             "fg_pct": overall.get("fg_pct", 0) or 0,
             "fg3_pct": overall.get("fg3_pct", 0) or 0,
             "ast_avg": overall.get("ast_avg", 0) or 0,
-            "pace": overall.get("pace", 0) or 0,
+            "pace": overall.get("pace", 100) or 100,
         }
 
     def calculate_defensive_rating(self, team_stats):
         """Extract defensive efficiency metrics."""
         overall = team_stats.get("overall", {})
         return {
-            "def_rating": overall.get("def_rating", 0) or 0,
+            "def_rating": overall.get("def_rating", 110) or 110,
             "stl_avg": overall.get("stl_avg", 0) or 0,
             "blk_avg": overall.get("blk_avg", 0) or 0,
             "reb_avg": overall.get("reb_avg", 0) or 0,
@@ -1416,15 +1416,15 @@ class TeamFeatureGenerator:
             "home_away_advantage": home_advantage.get("home_away_win_diff", 0),
 
             # Offensive metrics
-            "off_rating": offensive.get("off_rating", 0),
-            "pts_avg": offensive.get("pts_avg", 0),
+            "off_rating": offensive.get("off_rating", 110),
+            "pts_avg": offensive.get("pts_avg", 112),
             "fg_pct": offensive.get("fg_pct", 0),
             "fg3_pct": offensive.get("fg3_pct", 0),
             "ast_avg": offensive.get("ast_avg", 0),
-            "pace": offensive.get("pace", 0),
+            "pace": offensive.get("pace", 100),
 
             # Defensive metrics
-            "def_rating": defensive.get("def_rating", 0),
+            "def_rating": defensive.get("def_rating", 110),
             "stl_avg": defensive.get("stl_avg", 0),
             "blk_avg": defensive.get("blk_avg", 0),
             "reb_avg": defensive.get("reb_avg", 0),
@@ -2632,7 +2632,7 @@ class PlayerPropFeatureGenerator:
                 opp_stats = fetch_team_statistics(opponent_team_id, self.season)
             opp_overall = opp_stats.get("overall", {})
             features["opp_reb_avg"] = opp_overall.get("reb_avg", 0) or 0
-            features["opp_pace"] = opp_overall.get("pace", 0) or 0
+            features["opp_pace"] = opp_overall.get("pace", 100) or 100
 
             # Position-specific defensive features for rebounds
             if player_position:
@@ -2710,7 +2710,7 @@ class PlayerPropFeatureGenerator:
         if opponent_team_id:
             opp_stats = fetch_team_statistics(opponent_team_id, self.season)
             opp_overall = opp_stats.get("overall", {})
-            features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
+            features["opp_def_rating"] = opp_overall.get("def_rating", 110) or 110
             features["opp_stl_avg"] = opp_overall.get("stl_avg", 0) or 0
 
             # Position-specific defensive features for assists
@@ -2792,7 +2792,7 @@ class PlayerPropFeatureGenerator:
                 opp_stats = fetch_team_statistics(opponent_team_id, self.season)
             opp_overall = opp_stats.get("overall", {})
             features["opp_fg3_pct_allowed"] = opp_overall.get("fg3_pct", 0) or 0
-            features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
+            features["opp_def_rating"] = opp_overall.get("def_rating", 110) or 110
 
             # Position-specific defensive features for 3PM
             if player_position:
@@ -2880,8 +2880,8 @@ class PlayerPropFeatureGenerator:
         if opponent_team_id:
             opp_stats = fetch_team_statistics(opponent_team_id, self.season)
             opp_overall = opp_stats.get("overall", {})
-            features["opp_def_rating"] = opp_overall.get("def_rating", 0) or 0
-            features["opp_pace"] = opp_overall.get("pace", 0) or 0
+            features["opp_def_rating"] = opp_overall.get("def_rating", 110) or 110
+            features["opp_pace"] = opp_overall.get("pace", 100) or 100
 
         # Position-specific defensive features for PRA (combines all stat types)
         if player_position and opponent_team_id:
