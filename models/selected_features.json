@@ -1,0 +1,12 @@
+{
+  "selected_features": [],
+  "feature_importances": {},
+  "pruned_features": {},
+  "n_original_features": 0,
+  "n_selected_features": 0,
+  "n_pruned_features": 0,
+  "threshold": 0.01,
+  "method": "pending_audit",
+  "generated_at": null,
+  "_note": "Placeholder. Run scripts/feature_importance_audit.py or retrain to populate."
+}

@@ -39,6 +39,7 @@ was available at the time of the game.
 """
 
 import json
+import logging
 import time
 import threading
 import hashlib
@@ -47,6 +48,8 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, TypeVar
+
+logger = logging.getLogger(__name__)
 from collections.abc import Callable
 
 # Type variable for generic return types
@@ -588,8 +591,11 @@ def fetch_historical_games(team_id=None, season="2025-26", last_n_games=None, da
     # Fetch from API with retry
     try:
         games = _fetch_historical_games_api(team_id, season, date_from, date_to)
+    except (ConnectionError, TimeoutError, ValueError) as e:
+        logger.warning(f"Failed to fetch historical games for team {team_id}: {type(e).__name__}: {e}")
+        return []
     except Exception as e:
-        print(f"Warning: Failed to fetch historical games: {e}")
+        logger.warning(f"Unexpected error fetching historical games for team {team_id}: {type(e).__name__}: {e}")
         return []
 
     parsed_games = []
@@ -681,8 +687,11 @@ def fetch_team_statistics(team_id, season="2025-26"):
     # Fetch base stats with retry
     try:
         stats_dict = _fetch_team_stats_api(team_id, season)
+    except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        logger.warning(f"Could not fetch team stats for {team_id}: {type(e).__name__}: {e}")
+        stats_dict = {}
     except Exception as e:
-        print(f"Warning: Could not fetch team stats for {team_id}: {e}")
+        logger.warning(f"Unexpected error fetching team stats for {team_id}: {type(e).__name__}: {e}")
         stats_dict = {}
 
     overall = stats_dict.get("OverallTeamDashboard", [{}])[0] if stats_dict.get("OverallTeamDashboard") else {}
@@ -692,8 +701,11 @@ def fetch_team_statistics(team_id, season="2025-26"):
     try:
         advanced_dict = _fetch_team_advanced_stats_api(team_id, season)
         advanced_overall = advanced_dict.get("OverallTeamDashboard", [{}])[0] if advanced_dict.get("OverallTeamDashboard") else {}
+    except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        logger.warning(f"Could not fetch advanced stats for team {team_id}: {type(e).__name__}: {e}")
+        advanced_overall = {}
     except Exception as e:
-        print(f"Warning: Could not fetch advanced stats for team {team_id}: {e}")
+        logger.warning(f"Unexpected error fetching advanced stats for {team_id}: {type(e).__name__}: {e}")
         advanced_overall = {}
 
     home_stats = next((s for s in home_away if s.get("GROUP_VALUE") == "Home"), {})
@@ -971,8 +983,11 @@ def fetch_player_stats(player_id, season="2025-26", last_n_games=None):
     try:
         log_dict = _fetch_player_game_log_api(player_id, season)
         games = log_dict.get("PlayerGameLog", [])
+    except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        logger.warning(f"Could not fetch game log for player {player_id}: {type(e).__name__}: {e}")
+        games = []
     except Exception as e:
-        print(f"Warning: Could not fetch game log for player {player_id}: {e}")
+        logger.warning(f"Unexpected error fetching game log for player {player_id}: {type(e).__name__}: {e}")
         games = []
 
     if last_n_games:
@@ -982,8 +997,11 @@ def fetch_player_stats(player_id, season="2025-26", last_n_games=None):
     try:
         dashboard_dict = _fetch_player_dashboard_api(player_id, season)
         overall = dashboard_dict.get("OverallPlayerDashboard", [{}])[0] if dashboard_dict.get("OverallPlayerDashboard") else {}
+    except (ConnectionError, TimeoutError, ValueError, KeyError) as e:
+        logger.warning(f"Could not fetch dashboard for player {player_id}: {type(e).__name__}: {e}")
+        overall = {}
     except Exception as e:
-        print(f"Warning: Could not fetch dashboard for player {player_id}: {e}")
+        logger.warning(f"Unexpected error fetching dashboard for player {player_id}: {type(e).__name__}: {e}")
         overall = {}
 
     parsed_games = []

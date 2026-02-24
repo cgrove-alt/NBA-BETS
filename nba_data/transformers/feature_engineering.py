@@ -45,10 +45,12 @@ PLAYER PROP FEATURES (NEW - temporal-safe):
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import pandas as pd
 import concurrent.futures
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from data_fetcher import (
     fetch_team_statistics,
@@ -97,6 +99,48 @@ except ImportError:
     _PLAYER_IMPACT_FETCHER = None
     HAS_PLAYER_IMPACT = False
     print("Warning: player_impact_fetcher.py not found. Impact metrics will default to 0.")
+
+
+# =============================================================================
+# Feature Selection: Load selected features to gate computation at inference
+# =============================================================================
+_SELECTED_FEATURES: set | None = None
+_SELECTED_FEATURES_PATH = Path(__file__).parent.parent.parent / 'models' / 'selected_features.json'
+
+
+def load_selected_features(filepath: str | Path | None = None) -> set | None:
+    """
+    Load selected features from JSON. Returns None if file doesn't exist
+    (meaning all features are used — no pruning applied).
+    """
+    global _SELECTED_FEATURES
+    path = Path(filepath) if filepath else _SELECTED_FEATURES_PATH
+    if path.exists():
+        import json
+        with open(path) as f:
+            data = json.load(f)
+        _SELECTED_FEATURES = set(data.get('selected_features', []))
+        logging.info(f"[FeatureSelector] Loaded {len(_SELECTED_FEATURES)} selected features from {path.name}")
+        return _SELECTED_FEATURES
+    return None
+
+
+def filter_features(features: dict, selected: set | None = None) -> dict:
+    """
+    Filter a feature dict to only include selected features.
+    If no selection is loaded (or selection is empty), returns features unchanged.
+    """
+    sel = selected if selected is not None else _SELECTED_FEATURES
+    if not sel:  # None or empty set → no filtering
+        return features
+    return {k: v for k, v in features.items() if k in sel}
+
+
+# Attempt to load at import time (no-op if file doesn't exist)
+try:
+    load_selected_features()
+except Exception:
+    pass
 
 
 # Position mapping for analysis

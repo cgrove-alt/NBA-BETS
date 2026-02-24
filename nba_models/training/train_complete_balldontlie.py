@@ -5175,6 +5175,18 @@ def train_all_models(
     y_ml = np.array([1 if d['home_win'] else 0 for d in team_data])
     y_spread = np.array([d['point_differential'] for d in team_data])
 
+    # Feature selection: run RFECV and save selected features
+    try:
+        from nba_data.transformers.feature_engineering import FeatureSelector
+        print(f"\n[FeatureSelector] Running RFECV on {len(X_team.columns)} team features...")
+        selector = FeatureSelector(min_features=10, cv_folds=5)
+        selector.fit(X_team, y_ml, model_type='classification')
+        selector.save(str(MODEL_DIR / 'selected_features.json'))
+        X_team = selector.transform(X_team)
+        print(f"[FeatureSelector] Training with {len(X_team.columns)} selected features")
+    except Exception as e:
+        print(f"[FeatureSelector] Skipping feature selection: {e}")
+
     # Train Ensemble Moneyline Model
     print("\n--- Enhanced Ensemble Moneyline Model ---")
     print("  Building diverse model ensemble for robust predictions...")

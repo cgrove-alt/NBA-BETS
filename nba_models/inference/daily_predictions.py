@@ -33,7 +33,7 @@ logging.disable(logging.WARNING)
 
 # Import our modules
 from balldontlie_api import BalldontlieAPI
-from feature_engineering import generate_game_features, PlayerPropFeatureGenerator, InjuryReportManager
+from feature_engineering import generate_game_features, PlayerPropFeatureGenerator, InjuryReportManager, filter_features
 from scipy.stats import norm
 from data_fetcher import fetch_player_stats_bdl
 from injury_tracker_v3 import fetch_current_injuries, InjuryStatus
@@ -1010,6 +1010,13 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
     game_time = game.get('status', '')
     game_id = game.get('id')
 
+    # Data freshness tracking (Phase 2, Step 3)
+    try:
+        from nba_data.validators.freshness import DataFreshness
+        freshness = DataFreshness()
+    except ImportError:
+        freshness = None
+
     analysis = {
         'game_id': game_id,
         'home_team': home_abbrev,
@@ -1032,6 +1039,9 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
             include_advanced=True,
             injury_manager=injury_mgr
         )
+        if freshness:
+            freshness.record_stats_fetch()
+            freshness.record_injuries_fetch()
         ml_features = features.get('moneyline_features', {}) if features else {}
 
         # Extract injury features from moneyline_features (where they're stored)
@@ -1106,6 +1116,13 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
     analysis['injury_features'] = injury_features
     analysis['injury_details'] = injury_details
 
+    # Apply feature selection (if models/selected_features.json exists)
+    ml_features = filter_features(ml_features)
+
+    # Record odds freshness (odds were fetched by the caller before this)
+    if freshness and odds:
+        freshness.record_odds_fetch()
+
     # Moneyline prediction (with injury adjustments)
     home_prob, away_prob = predict_moneyline(ml_features, models)
 
@@ -1132,29 +1149,44 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
     predicted_spread = predict_spread(ml_features, models)
     market_spread = odds.get('spread', 0)  # Negative = home favored
 
-    # Edge = model spread - market spread (if positive, home is undervalued)
-    spread_edge_points = predicted_spread - market_spread
-    cover_prob = get_spread_cover_probability(abs(spread_edge_points))
+    # FIXED: Use app.py's proven formula for spread edge calculation.
+    # Convention: predicted_spread = home margin (+ = home wins by X)
+    #             market_spread = home line (- = home favored, + = home underdog)
+    # home_cover_threshold = -market_spread = points home must win by to cover
+    # e.g., market_spread=-12 → threshold=12 (home must win by 12+)
+    # e.g., market_spread=+5.5 → threshold=-5.5 (home can lose by up to 5)
+    home_cover_threshold = -market_spread
+    spread_edge_points = predicted_spread - home_cover_threshold  # = predicted_spread + market_spread
 
-    # Determine which side to bet
     if spread_edge_points > 0:
-        # Model thinks home covers more than market
+        # Home covers: model predicts home exceeds the threshold
         bet_side = f"{home_abbrev} {market_spread:+.1f}"
-        edge_pct = (cover_prob - 0.524) * 100  # vs -110 implied
+        cover_prob = get_spread_cover_probability(spread_edge_points)
     else:
-        # Model thinks away covers
+        # Away covers: home doesn't meet the threshold
         bet_side = f"{away_abbrev} {-market_spread:+.1f}"
-        cover_prob = 1 - cover_prob
-        edge_pct = (cover_prob - 0.524) * 100
+        cover_prob = get_spread_cover_probability(abs(spread_edge_points))
+
+    edge_pct = (cover_prob - 0.524) * 100  # vs -110 implied 52.4%
 
     analysis['spread'] = {
         'predicted_spread': predicted_spread,
         'market_spread': market_spread,
-        'spread_edge_points': spread_edge_points,
+        'spread_edge_points': abs(spread_edge_points),
         'cover_prob': cover_prob,
         'edge_pct': edge_pct,
         'bet_side': bet_side,
     }
+
+    # Include data freshness metadata
+    if freshness:
+        analysis['data_freshness'] = freshness.to_dict()
+        if freshness.is_stale():
+            stale = freshness.stale_sources()
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                f"Stale data for {home_abbrev} vs {away_abbrev}: {', '.join(stale)}"
+            )
 
     return analysis
 

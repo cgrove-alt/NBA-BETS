@@ -259,6 +259,17 @@ class BalldontlieAPI:
 
             data = response.json()
 
+            # Validate response shape (warn-only, don't break callers)
+            try:
+                from nba_data.validators.schemas import validate_bdl_response
+                if not validate_bdl_response(data, context=endpoint):
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"BDL response validation warning for {endpoint}"
+                    )
+            except ImportError:
+                pass
+
             # Cache successful response
             if cache_ttl and data:
                 _write_cache(endpoint, params, data)

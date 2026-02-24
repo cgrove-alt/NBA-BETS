@@ -104,7 +104,17 @@ class OddsFetcher:
                 print(f"Error: API returned status {response.status_code}")
                 return None
 
-            return response.json()
+            data = response.json()
+
+            # Validate response type (reject non-dict/non-list)
+            if not isinstance(data, (dict, list)):
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"OddsAPI unexpected response type for {endpoint}: {type(data)}"
+                )
+                return None
+
+            return data
 
         except requests.exceptions.Timeout:
             print("Error: Request timed out")
