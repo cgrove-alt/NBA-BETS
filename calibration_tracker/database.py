@@ -188,6 +188,23 @@ class CalibrationDatabase:
                 )
             """)
 
+            # ========== WEEKLY REPORTS TABLE ==========
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS weekly_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    week_ending TEXT NOT NULL UNIQUE,
+                    generated_at TEXT NOT NULL,
+                    total_predictions INTEGER,
+                    matched_predictions INTEGER,
+                    overall_hit_rate REAL,
+                    overall_clv REAL,
+                    overall_roi REAL,
+                    ece REAL,
+                    report_json TEXT NOT NULL,
+                    status TEXT DEFAULT 'complete'
+                )
+            """)
+
             # ========== INDEXES ==========
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_predictions_game_date
@@ -569,6 +586,60 @@ class CalibrationDatabase:
             cursor.execute("""
                 SELECT * FROM daily_reports
                 ORDER BY report_date DESC
+                LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    # ========== WEEKLY REPORT OPERATIONS ==========
+
+    def insert_weekly_report(self, week_ending: str, report: dict) -> int:
+        """Insert a weekly calibration report."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO weekly_reports (
+                    week_ending, generated_at,
+                    total_predictions, matched_predictions,
+                    overall_hit_rate, overall_clv, overall_roi, ece,
+                    report_json, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                week_ending,
+                datetime.now().isoformat(),
+                report.get('total_predictions', 0),
+                report.get('matched_predictions', 0),
+                report.get('overall_hit_rate'),
+                report.get('overall_clv'),
+                report.get('overall_roi'),
+                report.get('ece'),
+                json.dumps(report),
+                'complete',
+            ))
+
+            return cursor.lastrowid
+
+    def get_weekly_report(self, week_ending: str) -> Optional[dict]:
+        """Get weekly report by week-ending date."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM weekly_reports WHERE week_ending = ?
+            """, (week_ending,))
+            row = cursor.fetchone()
+            if row:
+                result = dict(row)
+                result['report'] = json.loads(result['report_json'])
+                return result
+            return None
+
+    def get_recent_weekly_reports(self, limit: int = 12) -> list[dict]:
+        """Get recent weekly reports."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM weekly_reports
+                ORDER BY week_ending DESC
                 LIMIT ?
             """, (limit,))
             return [dict(row) for row in cursor.fetchall()]

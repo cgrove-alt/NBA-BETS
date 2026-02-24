@@ -21,6 +21,7 @@ import logging
 from datetime import datetime, timedelta
 
 from .calibration_service import CalibrationService
+from .weekly_report import WeeklyReportGenerator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,6 +106,21 @@ def run_nightly_job(game_date: str = None, verbose: bool = False):
                 print(f"  {adj.dimension}:{adj.dimension_value}: "
                       f"bias={adj.bias:+.2f}, adj={adj.adjustment:+.2f}")
             print()
+
+        # Weekly report: generate on Mondays
+        today = datetime.now()
+        if today.weekday() == 0:  # Monday
+            print("\nMONDAY — Generating weekly report...")
+            try:
+                weekly_gen = WeeklyReportGenerator(service.db)
+                weekly = weekly_gen.generate_weekly_report()
+                print(f"Weekly report generated: {weekly['week_start']} to {weekly['week_ending']}")
+                print(f"  Predictions: {weekly['total_predictions']}")
+                print(f"  Hit Rate: {weekly['overall_hit_rate']:.1%}" if weekly['overall_hit_rate'] else "  Hit Rate: N/A")
+                print(f"  ECE: {weekly['ece']:.4f}")
+            except Exception as e:
+                logger.warning(f"Weekly report generation failed: {e}")
+                print(f"  WARNING: Weekly report failed: {e}")
 
         print("=" * 60)
         print(f"Completed at: {results.get('completed_at', datetime.now().isoformat())}")

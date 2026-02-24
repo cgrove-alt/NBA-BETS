@@ -98,6 +98,26 @@ try:
 except ImportError:
     HAS_CALIBRATION = False
 
+# Phase 5: Calibration adjuster for bias correction
+try:
+    from calibration_tracker import CalibrationAdjuster, CalibrationDatabase
+    HAS_CALIBRATION_ADJUSTER = True
+except ImportError:
+    HAS_CALIBRATION_ADJUSTER = False
+
+# Phase 5: Lazy-init singleton for calibration adjuster
+_calibration_adjuster = None
+
+def _get_calibration_adjuster():
+    """Get or create the CalibrationAdjuster singleton."""
+    global _calibration_adjuster
+    if _calibration_adjuster is None and HAS_CALIBRATION_ADJUSTER:
+        try:
+            _calibration_adjuster = CalibrationAdjuster(CalibrationDatabase())
+        except Exception:
+            pass
+    return _calibration_adjuster
+
 # Import Kelly bet sizing from risk_management (Task 3.4)
 try:
     from risk_management import calculate_kelly_bet_size, get_kelly_multiplier_for_tier
@@ -1740,7 +1760,61 @@ def predict_player_prop(
         except Exception:
             pass  # Continue without injury adjustment if it fails
 
-    # Phase 4: Single edge computation after all adjustments (minutes + injury)
+    # Phase 5: Apply calibration bias corrections BEFORE edge computation
+    calibration_applied = {}
+    if HAS_CALIBRATION_ADJUSTER:
+        try:
+            adjuster = _get_calibration_adjuster()
+            if adjuster:
+                # Classify player tier from minutes
+                _mins = minutes_dist.get('p50') if minutes_dist else None
+                if _mins and _mins >= 32:
+                    _player_tier = 'star'
+                elif _mins and _mins >= 24:
+                    _player_tier = 'starter'
+                else:
+                    _player_tier = 'role_player'
+
+                # Classify position group
+                _pos_group = None
+                if player_position:
+                    if player_position.upper() in ('PG', 'SG', 'G', 'G-F'):
+                        _pos_group = 'guard'
+                    elif player_position.upper() in ('C', 'C-F'):
+                        _pos_group = 'center'
+                    else:
+                        _pos_group = 'forward'
+
+                # Classify minutes bucket
+                _min_bucket = None
+                if _mins:
+                    if _mins >= 30:
+                        _min_bucket = 'starter'
+                    elif _mins >= 20:
+                        _min_bucket = 'rotation'
+                    else:
+                        _min_bucket = 'bench'
+
+                calibration_applied = adjuster.apply_adjustments(
+                    predicted_value=predicted_value,
+                    confidence=0.0,  # Confidence not yet computed; adjusted later
+                    prop_type=prop_type.lower(),
+                    position=_pos_group,
+                    minutes_bucket=_min_bucket,
+                    player_tier=_player_tier,
+                )
+
+                # Apply value correction
+                if calibration_applied.get('total_value_adjustment', 0) != 0:
+                    predicted_value = calibration_applied['adjusted_value']
+                    # Recalculate over_prob with corrected value
+                    std = get_prop_std_dev(prop_type)
+                    z_score = (predicted_value - line) / std
+                    over_prob = float(norm.cdf(z_score))
+        except Exception:
+            pass  # Never block predictions on calibration failure
+
+    # Phase 4: Single edge computation after all adjustments (minutes + injury + calibration)
     edge_info = _calculate_prop_edge(over_prob, american_odds)
     edge = edge_info['edge']
     pick = edge_info['pick']
@@ -1849,6 +1923,24 @@ def predict_player_prop(
         # 'low' = no penalty
         confidence_score = max(40.0, min(90.0, confidence_score))
 
+    # Phase 5: Apply calibration confidence adjustment
+    if calibration_applied and calibration_applied.get('adjustments_applied'):
+        try:
+            adjuster = _get_calibration_adjuster()
+            if adjuster:
+                conf_result = adjuster.apply_adjustments(
+                    predicted_value=0,  # Ignored — only want confidence multiplier
+                    confidence=confidence_score,
+                    prop_type=prop_type.lower(),
+                    position=_pos_group if HAS_CALIBRATION_ADJUSTER else None,
+                    minutes_bucket=_min_bucket if HAS_CALIBRATION_ADJUSTER else None,
+                    player_tier=_player_tier if HAS_CALIBRATION_ADJUSTER else None,
+                )
+                confidence_score = conf_result['adjusted_confidence']
+                confidence_score = max(40.0, min(90.0, confidence_score))
+        except Exception:
+            pass  # Never block predictions on calibration failure
+
     # Calculate edge quality tier based on confidence score (Task 2.4)
     edge_quality_tier = get_tier_from_confidence(confidence_score)
 
@@ -1918,6 +2010,9 @@ def predict_player_prop(
         'has_edge': edge_info['has_edge'],
         'american_odds': american_odds,
         'signal': bet_recommendation,
+        # Phase 5: Calibration feedback loop
+        'calibration_adjustment': calibration_applied.get('total_value_adjustment', 0),
+        'calibration_applied': bool(calibration_applied.get('adjustments_applied')),
     }
 
 

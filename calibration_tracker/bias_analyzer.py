@@ -92,6 +92,11 @@ class BiasReport:
     by_game_type: dict[str, DimensionAnalysis] = field(default_factory=dict)
     by_day_type: dict[str, DimensionAnalysis] = field(default_factory=dict)
     by_confidence: dict[str, DimensionAnalysis] = field(default_factory=dict)
+    by_player_tier: dict[str, DimensionAnalysis] = field(default_factory=dict)
+
+    # ECE (Expected Calibration Error)
+    ece: float = 0.0
+    calibration_bins: list[dict] = field(default_factory=list)
 
     # Recommendations
     recommendations: list[str] = field(default_factory=list)
@@ -117,6 +122,9 @@ class BiasReport:
             'by_game_type': {k: v.to_dict() for k, v in self.by_game_type.items()},
             'by_day_type': {k: v.to_dict() for k, v in self.by_day_type.items()},
             'by_confidence': {k: v.to_dict() for k, v in self.by_confidence.items()},
+            'by_player_tier': {k: v.to_dict() for k, v in self.by_player_tier.items()},
+            'ece': round(self.ece, 4),
+            'calibration_bins': self.calibration_bins,
             'recommendations': self.recommendations,
             'adjustments': self.adjustments,
         }
@@ -150,6 +158,13 @@ class BiasAnalyzer:
         'heavy_underdog': (8, float('inf')),
     }
 
+    # Player tier thresholds (by average minutes)
+    PLAYER_TIER_THRESHOLDS = {
+        'star': 32,        # >= 32 min avg
+        'starter': 24,     # >= 24 min avg
+        'role_player': 0,  # < 24 min avg
+    }
+
     # Minimum sample size for analysis
     MIN_SAMPLE_SIZE = 30
 
@@ -161,6 +176,16 @@ class BiasAnalyzer:
             db: CalibrationDatabase instance
         """
         self.db = db or CalibrationDatabase()
+
+    def _classify_player_tier(self, minutes: float) -> str:
+        """Classify player tier based on average minutes."""
+        if minutes is None:
+            return 'unknown'
+        if minutes >= 32:
+            return 'star'
+        if minutes >= 24:
+            return 'starter'
+        return 'role_player'
 
     def _classify_confidence(self, confidence: float) -> str:
         """Classify confidence into bucket."""
@@ -429,11 +454,89 @@ class BiasAnalyzer:
         for value, group_records in by_confidence.items():
             report.by_confidence[value] = self._analyze_dimension(group_records, 'confidence', value)
 
+        # Analyze by player tier
+        def player_tier_classifier(_, record):
+            return self._classify_player_tier(record.get('minutes_predicted'))
+
+        by_tier = self._group_by_dimension(records, 'minutes_predicted', player_tier_classifier)
+        for value, group_records in by_tier.items():
+            report.by_player_tier[value] = self._analyze_dimension(group_records, 'player_tier', value)
+
+        # Compute Expected Calibration Error (ECE)
+        ece_result = self.compute_ece(records)
+        report.ece = ece_result['ece']
+        report.calibration_bins = ece_result['bin_data']
+
         # Generate recommendations
         report.recommendations = self._generate_recommendations(report)
         report.adjustments = self._generate_adjustments(report)
 
         return report
+
+    def compute_ece(self, records: list[dict], n_bins: int = 10) -> dict:
+        """
+        Compute Expected Calibration Error.
+
+        Bins predictions by predicted_over_prob, compares predicted vs actual hit rate.
+
+        Args:
+            records: Prediction records with 'predicted_over_prob' and 'hit' fields
+            n_bins: Number of bins (default 10)
+
+        Returns:
+            Dict with 'ece' (scalar) and 'bin_data' (list of per-bin stats)
+        """
+        if not records:
+            return {'ece': 0.0, 'bin_data': []}
+
+        # Filter records that have predicted_over_prob
+        valid = [r for r in records if r.get('predicted_over_prob') is not None and r.get('hit') is not None]
+        if not valid:
+            return {'ece': 0.0, 'bin_data': []}
+
+        bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+        bin_data = []
+        total_samples = len(valid)
+        weighted_error_sum = 0.0
+
+        for i in range(n_bins):
+            low = bin_edges[i]
+            high = bin_edges[i + 1]
+            bin_center = (low + high) / 2
+
+            # Collect records in this bin
+            if i < n_bins - 1:
+                bin_records = [r for r in valid if low <= r['predicted_over_prob'] < high]
+            else:
+                # Last bin is inclusive on upper bound
+                bin_records = [r for r in valid if low <= r['predicted_over_prob'] <= high]
+
+            count = len(bin_records)
+            if count == 0:
+                bin_data.append({
+                    'bin_center': round(bin_center, 2),
+                    'avg_confidence': None,
+                    'avg_accuracy': None,
+                    'count': 0,
+                })
+                continue
+
+            avg_confidence = np.mean([r['predicted_over_prob'] for r in bin_records])
+            avg_accuracy = np.mean([r['hit'] for r in bin_records])
+
+            bin_data.append({
+                'bin_center': round(bin_center, 2),
+                'avg_confidence': round(float(avg_confidence), 4),
+                'avg_accuracy': round(float(avg_accuracy), 4),
+                'count': count,
+            })
+
+            weighted_error_sum += (count / total_samples) * abs(avg_confidence - avg_accuracy)
+
+        return {
+            'ece': round(float(weighted_error_sum), 4),
+            'bin_data': bin_data,
+        }
 
     def _generate_recommendations(self, report: BiasReport) -> list[str]:
         """

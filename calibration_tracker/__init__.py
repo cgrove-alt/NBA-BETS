@@ -41,6 +41,7 @@ from .outcome_tracker import OutcomeTracker, OutcomeRecord
 from .bias_analyzer import BiasAnalyzer, BiasReport
 from .calibration_adjuster import CalibrationAdjuster, CalibrationAdjustment
 from .calibration_service import CalibrationService
+from .weekly_report import WeeklyReportGenerator
 
 __all__ = [
     'CalibrationDatabase',
@@ -53,4 +54,5 @@ __all__ = [
     'CalibrationAdjuster',
     'CalibrationAdjustment',
     'CalibrationService',
+    'WeeklyReportGenerator',
 ]

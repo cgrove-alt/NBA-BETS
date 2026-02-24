@@ -394,6 +394,15 @@ class CalibrationService:
 
         is_b2b = game_context.get('is_back_to_back', False)
 
+        # Classify player tier from projected minutes
+        projected_minutes = player.get('projected_minutes', 28)
+        if projected_minutes >= 32:
+            player_tier = 'star'
+        elif projected_minutes >= 24:
+            player_tier = 'starter'
+        else:
+            player_tier = 'role_player'
+
         # Apply calibration adjustments
         calibrated = self.apply_adjustments(
             predicted_value=raw_prediction,
@@ -403,6 +412,7 @@ class CalibrationService:
             minutes_bucket=minutes_bucket,
             game_type=game_type,
             is_back_to_back=is_b2b,
+            player_tier=player_tier,
         )
 
         # Check if should skip

@@ -135,6 +135,7 @@ class CalibrationAdjuster:
             ('minutes_bucket', report.by_minutes_bucket),
             ('game_type', report.by_game_type),
             ('day_type', report.by_day_type),
+            ('player_tier', report.by_player_tier),
         ]
 
         for dimension_name, dimension_data in dimensions:
@@ -213,6 +214,7 @@ class CalibrationAdjuster:
         minutes_bucket: str = None,
         game_type: str = None,
         is_back_to_back: bool = False,
+        player_tier: str = None,
     ) -> dict:
         """
         Apply all relevant adjustments to a prediction.
@@ -271,6 +273,19 @@ class CalibrationAdjuster:
                     'value': minutes_bucket,
                     'value_adjustment': min_adj.adjustment * 0.5,
                     'confidence_multiplier': (min_adj.confidence_multiplier - 1) * 0.5 + 1,
+                })
+
+        # Apply player tier adjustment (0.4 weight)
+        if player_tier:
+            tier_adj = self.get_adjustment('player_tier', player_tier)
+            if tier_adj:
+                adjusted_value += tier_adj.adjustment * 0.4
+                adjusted_confidence *= (tier_adj.confidence_multiplier - 1) * 0.4 + 1
+                applied.append({
+                    'dimension': 'player_tier',
+                    'value': player_tier,
+                    'value_adjustment': tier_adj.adjustment * 0.4,
+                    'confidence_multiplier': (tier_adj.confidence_multiplier - 1) * 0.4 + 1,
                 })
 
         # Apply game type adjustment
