@@ -75,6 +75,15 @@ except ImportError:
     def calculate_prop_injury_boost(*args, **kwargs):
         return {'boost_factor': 1.0, 'reasons': []}
 
+# Minutes Oracle for distribution-based minutes prediction (Phase 3)
+try:
+    from minutes_oracle import MinutesPredictor, MinutesFeatureGenerator
+    MINUTES_ORACLE_AVAILABLE = True
+except ImportError:
+    MinutesPredictor = None
+    MinutesFeatureGenerator = None
+    MINUTES_ORACLE_AVAILABLE = False
+
 # Import Kelly bet sizing from risk_management (Task 3.4)
 try:
     from risk_management import calculate_kelly_bet_size, get_kelly_multiplier_for_tier
@@ -729,7 +738,65 @@ def load_models() -> dict:
                 except Exception:
                     continue
 
+    # Load Minutes Oracle (Phase 3)
+    if MINUTES_ORACLE_AVAILABLE:
+        minutes_path = MODEL_DIR / "minutes_oracle.pkl"
+        if minutes_path.exists():
+            try:
+                models['minutes_oracle'] = MinutesPredictor.load(minutes_path)
+                models['minutes_feature_gen'] = MinutesFeatureGenerator()
+                print(f"    Loaded Minutes Oracle")
+            except Exception as e:
+                print(f"    Warning: Could not load Minutes Oracle: {e}")
+
     return models
+
+
+def predict_minutes_distribution(
+    player_id: int,
+    team_id: int,
+    opponent_team_id: int,
+    game_context: dict,
+    models: dict,
+    game_date: str = None,
+) -> dict:
+    """Predict minutes distribution using the Minutes Oracle.
+
+    Returns dict with p10/p25/p50/p75/p90/expected/uncertainty/spread,
+    or a fallback dict based on historical average if oracle unavailable.
+    """
+    oracle = models.get('minutes_oracle')
+    feature_gen = models.get('minutes_feature_gen')
+
+    if oracle is None or feature_gen is None:
+        return None
+
+    try:
+        if game_date is None:
+            game_date = datetime.now().strftime('%Y-%m-%d')
+
+        # Map game_context keys to what MinutesFeatureGenerator expects
+        oracle_context = {
+            'vegas_spread': game_context.get('spread', 0),
+            'vegas_total': game_context.get('total', 220),
+            'is_home': game_context.get('is_home', True),
+            'is_back_to_back': game_context.get('is_b2b', False),
+            'days_rest': game_context.get('days_rest', 1),
+        }
+
+        features = feature_gen.generate_features(
+            player_id=player_id,
+            team_id=team_id,
+            opponent_team_id=opponent_team_id,
+            game_date=game_date,
+            game_context=oracle_context,
+        )
+
+        dist = oracle.predict(features, player_id=player_id)
+        return dist.to_dict()
+
+    except Exception:
+        return None
 
 
 def get_spread_cover_probability(edge_points: float) -> float:
@@ -1352,6 +1419,8 @@ def predict_player_prop(
     player_position: str = None,  # Player position (G/F/C)
     opponent_injured: list[str] = None,  # Injured players on opponent
     teammate_injured: list[str] = None,  # Injured teammates
+    team_id: int = None,  # Player's team ID (Phase 3: minutes oracle)
+    game_context: dict = None,  # Game context for minutes oracle
 ) -> dict:
     """
     Predict over/under probability for a player prop.
@@ -1508,6 +1577,40 @@ def predict_player_prop(
         except Exception:
             pass  # Fall through to return defaults
 
+    # Phase 3: Minutes Oracle adjustment — per-minute rate scaling
+    minutes_dist = None
+    if predicted_value is not None and game_context and models.get('minutes_oracle'):
+        minutes_dist = predict_minutes_distribution(
+            player_id=player_id,
+            team_id=team_id or 0,
+            opponent_team_id=game_context.get('opponent_team_id', 0),
+            game_context=game_context,
+            models=models,
+        )
+
+        if minutes_dist:
+            # Get player's historical average minutes from features
+            avg_minutes = 0
+            if features:
+                avg_minutes = features.get('season_min_avg', 0) or features.get('recent_min_avg', 0) or 0
+
+            predicted_minutes = minutes_dist.get('p50', avg_minutes)
+
+            # Only adjust if we have meaningful baseline and prediction
+            if avg_minutes > 10 and predicted_minutes > 0:
+                rate = predicted_value / avg_minutes
+                adjusted_value = rate * predicted_minutes
+
+                # Only apply if adjustment is meaningful (>1% change)
+                if abs(adjusted_value - predicted_value) / max(abs(predicted_value), 0.1) > 0.01:
+                    predicted_value = adjusted_value
+
+                    # Recalculate probability with adjusted value
+                    std = get_prop_std_dev(prop_type)
+                    z_score = (predicted_value - line) / std
+                    over_prob = float(norm.cdf(z_score))
+                    edge = (over_prob - 0.524) * 100
+
     # Apply injury-based adjustments to predicted value
     injury_boost_info = {'boost_factor': 1.0, 'reasons': []}
     if predicted_value is not None and HAS_INJURY_BOOST:
@@ -1629,6 +1732,16 @@ def predict_player_prop(
         # Clamp to reasonable range [40, 90]
         confidence_score = max(40.0, min(90.0, confidence_score))
 
+    # Phase 3: Adjust confidence based on minutes uncertainty
+    if minutes_dist:
+        uncertainty = minutes_dist.get('uncertainty', 'medium')
+        if uncertainty == 'high':
+            confidence_score *= 0.80  # 20% penalty for high minutes uncertainty
+        elif uncertainty == 'medium':
+            confidence_score *= 0.92  # 8% penalty for medium uncertainty
+        # 'low' = no penalty
+        confidence_score = max(40.0, min(90.0, confidence_score))
+
     # Calculate edge quality tier based on confidence score (Task 2.4)
     edge_quality_tier = get_tier_from_confidence(confidence_score)
 
@@ -1690,6 +1803,9 @@ def predict_player_prop(
         'bet_recommendation': bet_recommendation,
         'injury_boost': injury_boost_info.get('boost_factor', 1.0),
         'injury_reasons': injury_boost_info.get('reasons', []),
+        'minutes_distribution': minutes_dist,
+        'predicted_minutes': minutes_dist.get('p50') if minutes_dist else None,
+        'minutes_uncertainty': minutes_dist.get('uncertainty') if minutes_dist else None,
     }
 
 
@@ -2060,7 +2176,16 @@ def main():
                                     'player_position': player_position,
                                     'opponent_injured': opponent_injured,
                                     'teammate_injured': teammate_injured,
-                                    'uncertainty_flag': uncertainty_flag
+                                    'uncertainty_flag': uncertainty_flag,
+                                    'team_id': player_team_id,
+                                    'game_context': {
+                                        'spread': odds.get('spread', 0),
+                                        'total': odds.get('total', 220),
+                                        'is_home': player_team_id == home_team_id,
+                                        'is_b2b': False,
+                                        'days_rest': 1,
+                                        'opponent_team_id': opponent_id,
+                                    },
                                 })
 
                     # TASK 4.1: Execute prop predictions in parallel
@@ -2079,7 +2204,9 @@ def main():
                                 use_api_features=True,
                                 player_position=task['player_position'],
                                 opponent_injured=task['opponent_injured'],
-                                teammate_injured=task['teammate_injured']
+                                teammate_injured=task['teammate_injured'],
+                                team_id=task.get('team_id'),
+                                game_context=task.get('game_context'),
                             )
                             if task['uncertainty_flag']:
                                 pred['uncertainty_flag'] = task['uncertainty_flag']
