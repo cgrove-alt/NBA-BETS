@@ -10,14 +10,23 @@ Requirements: FR-4 (P0 Critical)
 - Update frequency: Every 15 minutes during game days
 - Detection rate: 100% (zero DNP players in predictions)
 - Handles OUT, DOUBTFUL, QUESTIONABLE, GTD statuses
-- Caches injury data in SQLite for historical analysis
+- PostgreSQL primary (Railway), SQLite fallback (local dev)
 """
 
 import os
 import sqlite3
+import logging
 import requests
 from datetime import datetime
 from pathlib import Path
+
+try:
+    from agents.core.connections import get_postgres_connection
+except ImportError:
+    def get_postgres_connection():
+        return None
+
+logger = logging.getLogger(__name__)
 
 
 class InjuryStatus:
@@ -36,13 +45,36 @@ class InjuryTrackerV3:
 
     Primary: RotoWire API (paid, real-time)
     Fallback: NBA.com injury reports
-    Cache: SQLite database for historical analysis
+    Storage: PostgreSQL primary (Railway), SQLite fallback (local dev)
     """
 
-    def __init__(self, db_path: str = "data/injuries.db"):
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_database()
+    def __init__(self, db_path: str = "data/injuries.db", pg_conn=None):
+        self._pg_conn = pg_conn
+        self._use_postgres = False
+
+        # Try PostgreSQL first
+        if not self._pg_conn:
+            self._pg_conn = get_postgres_connection()
+
+        if self._pg_conn is not None:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute("SELECT 1 FROM injury_reports LIMIT 1")
+                cur.close()
+                self._use_postgres = True
+                logger.info("InjuryTrackerV3 using PostgreSQL (injury_reports table)")
+            except Exception as e:
+                logger.warning(f"PostgreSQL injury_reports table check failed: {e} — falling back to SQLite")
+                self._pg_conn = None
+                self._use_postgres = False
+
+        if not self._use_postgres:
+            self.db_path = Path(db_path)
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_database()
+            logger.info(f"InjuryTrackerV3 using SQLite: {self.db_path}")
+        else:
+            self.db_path = None
 
         # API configuration
         self.rotowire_api_key = os.getenv("ROTOWIRE_API_KEY")
@@ -54,7 +86,7 @@ class InjuryTrackerV3:
         self._cache_timestamp: datetime | None = None
 
     def _init_database(self):
-        """Initialize SQLite database for injury tracking."""
+        """Initialize SQLite database for injury tracking. PG uses migrations."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -199,14 +231,59 @@ class InjuryTrackerV3:
         return injuries
 
     def _save_to_database(self, injuries: dict[str, dict]):
-        """Save injury data to SQLite for historical analysis."""
+        """Save injury data to database for historical analysis."""
         if not injuries:
             return
 
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        if self._use_postgres:
+            self._save_to_postgres(injuries, today)
+        else:
+            self._save_to_sqlite(injuries, today)
+
+    def _save_to_postgres(self, injuries: dict[str, dict], today: str):
+        """Save injury data to PostgreSQL injury_reports table."""
+        try:
+            cur = self._pg_conn.cursor()
+
+            for player_id, injury_data in injuries.items():
+                try:
+                    cur.execute("""
+                        INSERT INTO injury_reports
+                        (player_id, player_name, team, status, injury_type,
+                         injury_detail, game_date, last_update, source)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (player_id, game_date) DO UPDATE SET
+                            player_name = EXCLUDED.player_name,
+                            team = EXCLUDED.team,
+                            status = EXCLUDED.status,
+                            injury_type = EXCLUDED.injury_type,
+                            injury_detail = EXCLUDED.injury_detail,
+                            last_update = EXCLUDED.last_update,
+                            source = EXCLUDED.source
+                    """, (
+                        int(player_id),
+                        injury_data.get("player_name"),
+                        injury_data.get("team"),
+                        injury_data.get("status"),
+                        injury_data.get("injury_type"),
+                        injury_data.get("injury_detail"),
+                        today,
+                        injury_data.get("last_update"),
+                        injury_data.get("source")
+                    ))
+                except Exception as e:
+                    logger.error(f"Error saving injury for player {player_id} to PostgreSQL: {e}")
+
+            cur.close()
+        except Exception as e:
+            logger.error(f"PostgreSQL save failed: {e}")
+
+    def _save_to_sqlite(self, injuries: dict[str, dict], today: str):
+        """Save injury data to SQLite injuries table."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-
-        today = datetime.now().strftime("%Y-%m-%d")
 
         for player_id, injury_data in injuries.items():
             try:
@@ -306,6 +383,43 @@ class InjuryTrackerV3:
         Returns:
             List of injury records
         """
+        if self._use_postgres:
+            return self._get_historical_availability_pg(player_id, start_date, end_date)
+        else:
+            return self._get_historical_availability_sqlite(player_id, start_date, end_date)
+
+    def _get_historical_availability_pg(self, player_id: int, start_date: str, end_date: str) -> list[dict]:
+        """Get historical injury data from PostgreSQL injury_reports table."""
+        try:
+            cur = self._pg_conn.cursor()
+            cur.execute("""
+                SELECT game_date, status, injury_type, injury_detail, last_update, source
+                FROM injury_reports
+                WHERE player_id = %s AND game_date BETWEEN %s AND %s
+                ORDER BY game_date DESC
+            """, (player_id, start_date, end_date))
+
+            columns = [desc[0] for desc in cur.description]
+            records = []
+            for row in cur.fetchall():
+                row_dict = dict(zip(columns, row))
+                records.append({
+                    "game_date": str(row_dict["game_date"]),
+                    "status": row_dict["status"],
+                    "injury_type": row_dict["injury_type"],
+                    "injury_detail": row_dict["injury_detail"],
+                    "last_update": str(row_dict["last_update"]) if row_dict["last_update"] else None,
+                    "source": row_dict["source"]
+                })
+
+            cur.close()
+            return records
+        except Exception as e:
+            logger.error(f"PostgreSQL historical availability query failed: {e}")
+            return []
+
+    def _get_historical_availability_sqlite(self, player_id: int, start_date: str, end_date: str) -> list[dict]:
+        """Get historical injury data from SQLite injuries table."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 

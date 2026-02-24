@@ -13,6 +13,8 @@ Features:
 5. Performance by bet type, sport, sportsbook
 6. Streak tracking and bankroll management
 7. Export capabilities
+
+Supports PostgreSQL (primary, via Railway) with SQLite fallback.
 """
 
 import json
@@ -23,6 +25,13 @@ from typing import Union
 from dataclasses import dataclass, asdict, field
 from enum import Enum
 import numpy as np
+
+# PostgreSQL connection (optional — falls back to SQLite)
+try:
+    from agents.core.connections import get_postgres_connection
+except ImportError:
+    def get_postgres_connection():
+        return None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -239,25 +248,68 @@ Sharpe Ratio: {self.sharpe_ratio:.2f}
 """
 
 
+# Column order for the PostgreSQL tracked_bets table, matching the migration schema.
+_PG_COLUMNS = [
+    'bet_id', 'placed_at', 'sport', 'bet_type', 'sportsbook',
+    'event_id', 'event_name', 'event_date', 'selection', 'odds',
+    'stake', 'potential_payout', 'model_probability', 'implied_probability',
+    'edge', 'opening_odds', 'closing_odds', 'line_movement', 'status',
+    'actual_result', 'pnl', 'settled_at', 'notes', 'tags', 'parlay_legs',
+    'created_at',
+]
+
+
 class BetTracker:
     """
-    Main bet tracking system with SQLite backend.
+    Main bet tracking system with PostgreSQL primary / SQLite fallback.
 
     Provides comprehensive bet recording, tracking, and analysis.
     """
 
-    def __init__(self, db_path: str = "bets.db"):
+    def __init__(self, db_path: str = "bets.db", pg_conn=None):
         """
         Initialize bet tracker.
 
+        Tries PostgreSQL first (via pg_conn or get_postgres_connection()).
+        Falls back to SQLite at db_path if PG is unavailable.
+
         Args:
-            db_path: Path to SQLite database
+            db_path: Path to SQLite database (fallback)
+            pg_conn: Optional existing psycopg2 connection
         """
         self.db_path = db_path
-        self._init_database()
+        self._use_postgres = False
+        self._pg_conn = None
+
+        # Try PostgreSQL first
+        conn = pg_conn or get_postgres_connection()
+        if conn is not None:
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tracked_bets');"
+                )
+                exists = cur.fetchone()[0]
+                cur.close()
+                if exists:
+                    self._use_postgres = True
+                    self._pg_conn = conn
+                    logger.info("BetTracker: using PostgreSQL (tracked_bets table)")
+                else:
+                    logger.warning("BetTracker: tracked_bets table not found in PostgreSQL, falling back to SQLite")
+                    self._init_database()
+            except Exception as e:
+                logger.warning(f"BetTracker: PostgreSQL probe failed ({e}), falling back to SQLite")
+                self._init_database()
+        else:
+            self._init_database()
+
+    # ------------------------------------------------------------------
+    # Database initialisation (SQLite only — PG uses migrations)
+    # ------------------------------------------------------------------
 
     def _init_database(self) -> None:
-        """Initialize database schema."""
+        """Initialize SQLite database schema."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -306,6 +358,10 @@ class BetTracker:
         conn.close()
         logger.info(f"Database initialized at {self.db_path}")
 
+    # ------------------------------------------------------------------
+    # record_bet
+    # ------------------------------------------------------------------
+
     def record_bet(self, bet: TrackedBet) -> str:
         """
         Record a new bet.
@@ -316,9 +372,6 @@ class BetTracker:
         Returns:
             bet_id
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
         # Calculate potential payout
         if bet.odds > 0:
             bet.potential_payout = bet.stake + bet.stake * (bet.odds / 100)
@@ -328,6 +381,90 @@ class BetTracker:
         # Calculate implied probability
         bet.implied_probability = bet._odds_to_prob(bet.odds)
         bet.edge = bet.model_probability - bet.implied_probability
+
+        if self._use_postgres:
+            self._record_bet_pg(bet)
+        else:
+            self._record_bet_sqlite(bet)
+
+        logger.info(f"Recorded bet {bet.bet_id}: {bet.selection} @ {bet.odds} for ${bet.stake}")
+        return bet.bet_id
+
+    def _record_bet_pg(self, bet: TrackedBet) -> None:
+        """Insert or upsert a bet into PostgreSQL tracked_bets."""
+        cur = self._pg_conn.cursor()
+        cur.execute("""
+            INSERT INTO tracked_bets (
+                bet_id, placed_at, sport, bet_type, sportsbook,
+                event_id, event_name, event_date, selection, odds,
+                stake, potential_payout, model_probability, implied_probability,
+                edge, opening_odds, closing_odds, line_movement, status,
+                actual_result, pnl, settled_at, notes, tags, parlay_legs
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s
+            )
+            ON CONFLICT (bet_id) DO UPDATE SET
+                placed_at = EXCLUDED.placed_at,
+                sport = EXCLUDED.sport,
+                bet_type = EXCLUDED.bet_type,
+                sportsbook = EXCLUDED.sportsbook,
+                event_id = EXCLUDED.event_id,
+                event_name = EXCLUDED.event_name,
+                event_date = EXCLUDED.event_date,
+                selection = EXCLUDED.selection,
+                odds = EXCLUDED.odds,
+                stake = EXCLUDED.stake,
+                potential_payout = EXCLUDED.potential_payout,
+                model_probability = EXCLUDED.model_probability,
+                implied_probability = EXCLUDED.implied_probability,
+                edge = EXCLUDED.edge,
+                opening_odds = EXCLUDED.opening_odds,
+                closing_odds = EXCLUDED.closing_odds,
+                line_movement = EXCLUDED.line_movement,
+                status = EXCLUDED.status,
+                actual_result = EXCLUDED.actual_result,
+                pnl = EXCLUDED.pnl,
+                settled_at = EXCLUDED.settled_at,
+                notes = EXCLUDED.notes,
+                tags = EXCLUDED.tags,
+                parlay_legs = EXCLUDED.parlay_legs
+        """, (
+            bet.bet_id,
+            bet.placed_at,
+            bet.sport,
+            bet.bet_type.value,
+            bet.sportsbook,
+            bet.event_id,
+            bet.event_name,
+            bet.event_date,
+            bet.selection,
+            bet.odds,
+            bet.stake,
+            bet.potential_payout,
+            bet.model_probability,
+            bet.implied_probability,
+            bet.edge,
+            bet.opening_odds,
+            bet.closing_odds,
+            bet.line_movement,
+            bet.status.value,
+            bet.actual_result,
+            bet.pnl,
+            bet.settled_at,
+            bet.notes,
+            json.dumps(bet.tags),
+            json.dumps(bet.parlay_legs),
+        ))
+        cur.close()
+
+    def _record_bet_sqlite(self, bet: TrackedBet) -> None:
+        """Insert or replace a bet in SQLite bets table."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
 
         cursor.execute("""
             INSERT OR REPLACE INTO bets (
@@ -368,8 +505,9 @@ class BetTracker:
         conn.commit()
         conn.close()
 
-        logger.info(f"Recorded bet {bet.bet_id}: {bet.selection} @ {bet.odds} for ${bet.stake}")
-        return bet.bet_id
+    # ------------------------------------------------------------------
+    # settle_bet
+    # ------------------------------------------------------------------
 
     def settle_bet(
         self,
@@ -409,7 +547,39 @@ class BetTracker:
         if closing_odds and bet.opening_odds:
             bet.line_movement = closing_odds - bet.opening_odds
 
-        # Save updates
+        if self._use_postgres:
+            self._settle_bet_pg(bet)
+        else:
+            self._settle_bet_sqlite(bet)
+
+        logger.info(f"Settled bet {bet_id}: {status.value}, P&L: ${bet.pnl:+.2f}")
+        return bet
+
+    def _settle_bet_pg(self, bet: TrackedBet) -> None:
+        """Update a settled bet in PostgreSQL tracked_bets."""
+        cur = self._pg_conn.cursor()
+        cur.execute("""
+            UPDATE tracked_bets SET
+                status = %s,
+                actual_result = %s,
+                pnl = %s,
+                settled_at = %s,
+                closing_odds = %s,
+                line_movement = %s
+            WHERE bet_id = %s
+        """, (
+            bet.status.value,
+            bet.actual_result,
+            bet.pnl,
+            bet.settled_at,
+            bet.closing_odds,
+            bet.line_movement,
+            bet.bet_id,
+        ))
+        cur.close()
+
+    def _settle_bet_sqlite(self, bet: TrackedBet) -> None:
+        """Update a settled bet in SQLite bets table."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -429,17 +599,36 @@ class BetTracker:
             bet.settled_at.isoformat(),
             bet.closing_odds,
             bet.line_movement,
-            bet_id
+            bet.bet_id
         ))
 
         conn.commit()
         conn.close()
 
-        logger.info(f"Settled bet {bet_id}: {status.value}, P&L: ${bet.pnl:+.2f}")
-        return bet
+    # ------------------------------------------------------------------
+    # get_bet
+    # ------------------------------------------------------------------
 
     def get_bet(self, bet_id: str) -> TrackedBet | None:
         """Get a single bet by ID."""
+        if self._use_postgres:
+            return self._get_bet_pg(bet_id)
+        return self._get_bet_sqlite(bet_id)
+
+    def _get_bet_pg(self, bet_id: str) -> TrackedBet | None:
+        """Fetch a single bet from PostgreSQL tracked_bets."""
+        cur = self._pg_conn.cursor()
+        cur.execute("SELECT * FROM tracked_bets WHERE bet_id = %s", (bet_id,))
+        row = cur.fetchone()
+        if row is None:
+            cur.close()
+            return None
+        columns = [desc[0] for desc in cur.description]
+        cur.close()
+        return self._row_to_bet_pg(columns, row)
+
+    def _get_bet_sqlite(self, bet_id: str) -> TrackedBet | None:
+        """Fetch a single bet from SQLite bets table."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -451,6 +640,10 @@ class BetTracker:
         if row:
             return self._row_to_bet(dict(row))
         return None
+
+    # ------------------------------------------------------------------
+    # query helpers
+    # ------------------------------------------------------------------
 
     def get_pending_bets(self) -> list[TrackedBet]:
         """Get all pending (unsettled) bets."""
@@ -479,7 +672,33 @@ class BetTracker:
         return self._query_bets("sportsbook = ?", (sportsbook,))
 
     def _query_bets(self, where_clause: str, params: tuple) -> list[TrackedBet]:
-        """Query bets with WHERE clause."""
+        """
+        Query bets with a WHERE clause.
+
+        The where_clause should use '?' placeholders (SQLite style). When
+        running against PostgreSQL the placeholders and table name are
+        automatically translated.
+        """
+        if self._use_postgres:
+            return self._query_bets_pg(where_clause, params)
+        return self._query_bets_sqlite(where_clause, params)
+
+    def _query_bets_pg(self, where_clause: str, params: tuple) -> list[TrackedBet]:
+        """Run a SELECT on PostgreSQL tracked_bets."""
+        # Translate SQLite '?' placeholders to PG '%s'
+        pg_where = where_clause.replace('?', '%s')
+        cur = self._pg_conn.cursor()
+        cur.execute(
+            f"SELECT * FROM tracked_bets WHERE {pg_where} ORDER BY placed_at DESC",
+            params,
+        )
+        rows = cur.fetchall()
+        columns = [desc[0] for desc in cur.description]
+        cur.close()
+        return [self._row_to_bet_pg(columns, row) for row in rows]
+
+    def _query_bets_sqlite(self, where_clause: str, params: tuple) -> list[TrackedBet]:
+        """Run a SELECT on SQLite bets table."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -490,8 +709,72 @@ class BetTracker:
 
         return [self._row_to_bet(dict(row)) for row in rows]
 
+    # ------------------------------------------------------------------
+    # row-to-bet conversion
+    # ------------------------------------------------------------------
+
+    def _row_to_bet_pg(self, columns: list[str], row: tuple) -> TrackedBet:
+        """Convert a PostgreSQL row (tuple + column names) to TrackedBet."""
+        d = dict(zip(columns, row))
+
+        # PG returns datetime objects directly for TIMESTAMP columns, but
+        # placed_at / event_date / settled_at may also come back as strings
+        # if the connection doesn't auto-cast.  Normalise them.
+        placed_at = d.get('placed_at')
+        if isinstance(placed_at, str):
+            placed_at = datetime.fromisoformat(placed_at)
+
+        event_date = d.get('event_date')
+        if isinstance(event_date, str):
+            event_date = datetime.fromisoformat(event_date)
+
+        settled_at = d.get('settled_at')
+        if isinstance(settled_at, str):
+            settled_at = datetime.fromisoformat(settled_at)
+
+        # PG JSONB columns come back as native Python objects (list/dict)
+        tags_raw = d.get('tags')
+        if isinstance(tags_raw, str):
+            tags_raw = json.loads(tags_raw) if tags_raw else []
+        elif tags_raw is None:
+            tags_raw = []
+
+        parlay_raw = d.get('parlay_legs')
+        if isinstance(parlay_raw, str):
+            parlay_raw = json.loads(parlay_raw) if parlay_raw else []
+        elif parlay_raw is None:
+            parlay_raw = []
+
+        return TrackedBet(
+            bet_id=d['bet_id'],
+            placed_at=placed_at,
+            sport=d.get('sport') or 'NBA',
+            bet_type=BetType(d['bet_type']),
+            sportsbook=d.get('sportsbook') or '',
+            event_id=d.get('event_id') or '',
+            event_name=d.get('event_name') or '',
+            event_date=event_date,
+            selection=d['selection'],
+            odds=d['odds'],
+            stake=d['stake'],
+            potential_payout=d.get('potential_payout') or 0.0,
+            model_probability=d.get('model_probability') or 0.5,
+            implied_probability=d.get('implied_probability') or 0.5,
+            edge=d.get('edge') or 0.0,
+            opening_odds=d.get('opening_odds'),
+            closing_odds=d.get('closing_odds'),
+            line_movement=d.get('line_movement') or 0.0,
+            status=BetStatus(d['status']),
+            actual_result=d.get('actual_result'),
+            pnl=d.get('pnl') or 0.0,
+            settled_at=settled_at,
+            notes=d.get('notes') or '',
+            tags=tags_raw,
+            parlay_legs=parlay_raw,
+        )
+
     def _row_to_bet(self, row: dict) -> TrackedBet:
-        """Convert database row to TrackedBet."""
+        """Convert a SQLite Row dict to TrackedBet."""
         return TrackedBet(
             bet_id=row['bet_id'],
             placed_at=datetime.fromisoformat(row['placed_at']),
@@ -519,6 +802,10 @@ class BetTracker:
             tags=json.loads(row['tags']) if row['tags'] else [],
             parlay_legs=json.loads(row['parlay_legs']) if row['parlay_legs'] else [],
         )
+
+    # ------------------------------------------------------------------
+    # Performance analytics
+    # ------------------------------------------------------------------
 
     def calculate_performance(
         self,
@@ -1024,9 +1311,9 @@ class BetTracker:
         return result
 
 
-def create_tracker(db_path: str = "bets.db") -> BetTracker:
+def create_tracker(db_path: str = "bets.db", pg_conn=None) -> BetTracker:
     """Create a new bet tracker instance."""
-    return BetTracker(db_path)
+    return BetTracker(db_path=db_path, pg_conn=pg_conn)
 
 
 def quick_record(

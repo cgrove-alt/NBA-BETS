@@ -29,7 +29,7 @@ def _get_tracker():
         from nba_betting.edge.bet_tracker import BetTracker
         db_path = os.path.join("data", "bet_tracking.db")
         os.makedirs("data", exist_ok=True)
-        _tracker_instance = BetTracker(db_path)
+        _tracker_instance = BetTracker(db_path=db_path)
     return _tracker_instance
 
 
@@ -102,6 +102,9 @@ def update_closing_odds(bet_id: str, closing_odds: float) -> bool:
     """
     Update closing odds on a TrackedBet for CLV computation.
 
+    Works with both PostgreSQL (tracked_bets) and SQLite (bets) backends
+    depending on which the tracker is configured to use.
+
     Args:
         bet_id: The bet ID to update
         closing_odds: Closing American odds
@@ -109,23 +112,37 @@ def update_closing_odds(bet_id: str, closing_odds: float) -> bool:
     Returns:
         True if updated successfully
     """
-    import sqlite3
-
     tracker = _get_tracker()
-    try:
-        conn = sqlite3.connect(tracker.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE bets SET closing_odds = ? WHERE bet_id = ?",
-            (closing_odds, bet_id)
-        )
-        updated = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
-        return updated
-    except Exception as e:
-        logger.error(f"Failed to update closing odds for {bet_id}: {e}")
-        return False
+
+    if tracker._use_postgres:
+        try:
+            cur = tracker._pg_conn.cursor()
+            cur.execute(
+                "UPDATE tracked_bets SET closing_odds = %s WHERE bet_id = %s",
+                (closing_odds, bet_id)
+            )
+            updated = cur.rowcount > 0
+            cur.close()
+            return updated
+        except Exception as e:
+            logger.error(f"Failed to update closing odds for {bet_id} (PG): {e}")
+            return False
+    else:
+        import sqlite3
+        try:
+            conn = sqlite3.connect(tracker.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE bets SET closing_odds = ? WHERE bet_id = ?",
+                (closing_odds, bet_id)
+            )
+            updated = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+            return updated
+        except Exception as e:
+            logger.error(f"Failed to update closing odds for {bet_id} (SQLite): {e}")
+            return False
 
 
 def update_closing_odds_for_date(game_date: str, closing_odds_map: dict[str, float]) -> int:
@@ -134,7 +151,7 @@ def update_closing_odds_for_date(game_date: str, closing_odds_map: dict[str, flo
 
     Args:
         game_date: Date string (YYYY-MM-DD)
-        closing_odds_map: Mapping of bet_id → closing_odds
+        closing_odds_map: Mapping of bet_id -> closing_odds
 
     Returns:
         Number of bets updated

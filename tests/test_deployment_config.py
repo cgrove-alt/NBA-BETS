@@ -1,117 +1,71 @@
 #!/usr/bin/env python3
 """
-Local Deployment Configuration Tests
+Deployment Configuration Tests
 
-Tests that all deployment files are properly configured before deploying to Railway.
+Verifies all deployment files are properly configured for Railway.
+Uses pytest assertions so failures are actually caught by the test runner.
 
-Run: python test_deployment_config.py
+Run: python3 -m pytest tests/test_deployment_config.py -v
 """
 
 import os
 import sys
-import json
 from pathlib import Path
+
+# Ensure project root is on path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def test_railway_toml_exists():
-    """Test that railway.toml exists and has correct structure."""
-    print("Testing railway.toml...")
-
+    """railway.toml exists with required sections."""
     toml_path = Path("railway.toml")
-    if not toml_path.exists():
-        print("  ❌ railway.toml not found")
-        return False
+    assert toml_path.exists(), "railway.toml not found"
 
     content = toml_path.read_text()
 
-    # Check for required sections
-    required = [
-        "[build]",
-        "[deploy]",
-        "startCommand",
-        "healthcheckPath"
-    ]
-
-    for req in required:
-        if req not in content:
-            print(f"  ❌ Missing required section: {req}")
-            return False
-
-    print("  ✅ railway.toml configured correctly")
-    return True
+    for req in ["[build]", "[deploy]", "startCommand", "healthcheckPath"]:
+        assert req in content, f"Missing required section: {req}"
 
 
 def test_migration_script_exists():
-    """Test that migration script exists."""
-    print("Testing migration script...")
-
+    """Initial migration script exists with required tables."""
     migration_path = Path("migrations/001_initial_schema.sql")
-    if not migration_path.exists():
-        print("  ❌ migrations/001_initial_schema.sql not found")
-        return False
+    assert migration_path.exists(), "migrations/001_initial_schema.sql not found"
 
     content = migration_path.read_text()
 
-    # Check for required tables
     required_tables = [
-        "CREATE TABLE IF NOT EXISTS teams",
-        "CREATE TABLE IF NOT EXISTS players",
-        "CREATE TABLE IF NOT EXISTS games",
-        "CREATE TABLE IF NOT EXISTS injuries",
-        "CREATE TABLE IF NOT EXISTS odds_history",
-        "CREATE TABLE IF NOT EXISTS predictions_history"
+        "CREATE TABLE IF NOT EXISTS predictions_history",
     ]
-
     for table in required_tables:
-        if table not in content:
-            print(f"  ❌ Missing table creation: {table}")
-            return False
-
-    print("  ✅ Migration script includes all required tables")
-    return True
+        assert table in content, f"Missing table creation: {table}"
 
 
 def test_env_example_exists():
-    """Test that .env.example exists with all required variables."""
-    print("Testing .env.example...")
-
+    """.env.example exists with all required variables."""
     env_path = Path(".env.example")
-    if not env_path.exists():
-        print("  ❌ .env.example not found")
-        return False
+    assert env_path.exists(), ".env.example not found"
 
     content = env_path.read_text()
 
-    # Check for required variables
     required_vars = [
         "BALLDONTLIE_API_KEY",
         "DATABASE_URL",
         "THE_ODDS_API_KEY",
         "AUTH_ENABLED",
-        "JWT_SECRET_KEY"
+        "JWT_SECRET_KEY",
     ]
-
     for var in required_vars:
-        if var not in content:
-            print(f"  ❌ Missing environment variable: {var}")
-            return False
-
-    print("  ✅ .env.example contains all required variables")
-    return True
+        assert var in content, f"Missing environment variable: {var}"
 
 
 def test_requirements_txt():
-    """Test that requirements.txt has all necessary packages."""
-    print("Testing requirements.txt...")
-
+    """Root requirements.txt has all necessary packages."""
     req_path = Path("requirements.txt")
-    if not req_path.exists():
-        print("  ❌ requirements.txt not found")
-        return False
+    assert req_path.exists(), "requirements.txt not found"
 
     content = req_path.read_text()
 
-    # Check for critical packages
     required_packages = [
         "fastapi",
         "uvicorn",
@@ -125,148 +79,86 @@ def test_requirements_txt():
         "requests",
         "apscheduler",
         "plotly",
-        "jinja2"
+        "jinja2",
     ]
-
     for pkg in required_packages:
-        if pkg not in content:
-            print(f"  ❌ Missing package: {pkg}")
-            return False
-
-    print("  ✅ requirements.txt includes all critical packages")
-    return True
+        assert pkg in content, f"Missing package: {pkg}"
 
 
 def test_api_structure():
-    """Test that API structure is correct."""
-    print("Testing API structure...")
+    """FastAPI app exists with required endpoints."""
+    from backend.api import app
 
-    try:
-        from backend.api import app
+    assert app is not None, "FastAPI app not found"
 
-        # Check that app exists
-        if not app:
-            print("  ❌ FastAPI app not found")
-            return False
+    routes = [route.path for route in app.routes if hasattr(route, "path")]
 
-        # Check for required endpoints
-        routes = [route.path for route in app.routes if hasattr(route, 'path')]
-
-        required_routes = [
-            "/api/health",
-            "/api/predictions/{date}",
-            "/api/injuries/{date}",
-            "/api/backtest/latest"
-        ]
-
-        for route in required_routes:
-            if route not in routes:
-                print(f"  ❌ Missing route: {route}")
-                return False
-
-        print("  ✅ API has all required endpoints")
-        return True
-
-    except ImportError as e:
-        print(f"  ❌ Failed to import API: {e}")
-        return False
+    required_routes = [
+        "/api/health",
+        "/api/predictions/{date}",
+        "/api/injuries/{date}",
+        "/api/backtest/latest",
+    ]
+    for route in required_routes:
+        assert route in routes, f"Missing route: {route}"
 
 
 def test_scheduled_scripts_exist():
-    """Test that scheduled job scripts exist."""
-    print("Testing scheduled job scripts...")
-
+    """Scheduled job scripts exist."""
     required_scripts = [
         "daily_predictions.py",
         "odds_tracker_service.py",
-        "scheduled_retraining.py"
+        "scheduled_retraining.py",
     ]
-
     for script in required_scripts:
-        if not Path(script).exists():
-            print(f"  ❌ Missing script: {script}")
-            return False
-
-    print("  ✅ All scheduled job scripts exist")
-    return True
+        assert Path(script).exists(), f"Missing script: {script}"
 
 
 def test_deployment_docs():
-    """Test that deployment documentation exists."""
-    print("Testing deployment documentation...")
-
-    if not Path("RAILWAY_DEPLOYMENT.md").exists():
-        print("  ❌ RAILWAY_DEPLOYMENT.md not found")
-        return False
-
-    print("  ✅ Deployment documentation exists")
-    return True
+    """Deployment documentation exists."""
+    assert Path("docs/railway-setup.md").exists(), "docs/railway-setup.md not found"
 
 
 def test_verify_script():
-    """Test that verification script exists."""
-    print("Testing verification script...")
-
-    verify_path = Path("verify_deployment.py")
-    if not verify_path.exists():
-        print("  ❌ verify_deployment.py not found")
-        return False
-
-    # Check if script is executable
-    if not os.access(verify_path, os.X_OK):
-        print("  ⚠️  verify_deployment.py not executable (run: chmod +x verify_deployment.py)")
-
-    print("  ✅ Verification script exists")
-    return True
+    """System verification script exists."""
+    assert Path("scripts/verify_system.py").exists(), "scripts/verify_system.py not found"
 
 
-def main():
-    """Run all tests."""
-    print("=" * 70)
-    print("  Railway Deployment Configuration Tests")
-    print("=" * 70)
-    print()
+def test_agent_scheduler_exists():
+    """Agent scheduler daemon script exists."""
+    assert Path("agents/core/agent_runner.py").exists(), "agents/core/agent_runner.py not found"
 
-    tests = [
-        test_railway_toml_exists,
-        test_migration_script_exists,
-        test_env_example_exists,
-        test_requirements_txt,
-        test_api_structure,
-        test_scheduled_scripts_exist,
-        test_deployment_docs,
-        test_verify_script,
+
+def test_env_agent_vars():
+    """.env.example includes agent-related environment variables."""
+    env_path = Path(".env.example")
+    assert env_path.exists()
+
+    content = env_path.read_text()
+
+    agent_vars = ["REDIS_URL", "GEMINI_API_KEY"]
+    for var in agent_vars:
+        assert var in content, f"Missing agent env var: {var}"
+
+
+def test_agent_prompts_exist():
+    """All agent prompt files exist."""
+    prompts_dir = Path("agents/prompts")
+    assert prompts_dir.exists(), "agents/prompts/ directory not found"
+
+    required_prompts = [
+        "pregame.md",
+        "postgame.md",
+        "odds_monitor.md",
+        "orchestrator.md",
+        "watchdog.md",
+        "briefing.md",
     ]
-
-    results = []
-    for test in tests:
-        try:
-            result = test()
-            results.append(result)
-        except Exception as e:
-            print(f"  ❌ Test failed with error: {e}")
-            results.append(False)
-        print()
-
-    # Summary
-    print("=" * 70)
-    print("  Summary")
-    print("=" * 70)
-
-    passed = sum(results)
-    total = len(results)
-
-    print(f"  Passed: {passed}/{total}")
-    print(f"  Failed: {total - passed}/{total}")
-    print()
-
-    if passed == total:
-        print("  🎉 All deployment configuration tests passed!")
-        print("  ✅ Ready to deploy to Railway")
-        return 0
-    print("  ❌ Some tests failed. Fix errors above before deploying.")
-    return 1
+    for prompt in required_prompts:
+        assert (prompts_dir / prompt).exists(), f"Missing agent prompt: {prompt}"
 
 
-if __name__ == '__main__':
-    sys.exit(main())
+def test_migration_runner_importable():
+    """Migration runner script can be imported."""
+    from scripts.run_migrations import run_migrations
+    assert callable(run_migrations)

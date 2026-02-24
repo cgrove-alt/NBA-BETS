@@ -32,8 +32,14 @@ import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+from typing import Any
+from zoneinfo import ZoneInfo
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+
+# Eastern Time for date-sensitive operations
+ET = ZoneInfo('America/New_York')
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -158,14 +164,77 @@ app.add_middleware(
 
 @app.get("/api/health", response_model=HealthResponse)
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint — verifies actual system state."""
     from datetime import datetime
-    service = get_service()
-    return HealthResponse(
-        status="healthy",
-        service="nba-props-api",
-        timestamp=datetime.now().isoformat(),
-        models_loaded=service.models_loaded if hasattr(service, 'models_loaded') else True,
+    from pathlib import Path
+
+    checks: dict[str, Any] = {}
+
+    # 1. PostgreSQL check
+    db_connected = False
+    try:
+        db_url = os.environ.get("DATABASE_URL")
+        if db_url:
+            import psycopg2
+            conn = psycopg2.connect(db_url)
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            conn.close()
+            db_connected = True
+            checks["database"] = "connected"
+        else:
+            checks["database"] = "DATABASE_URL not set (SQLite fallback)"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+
+    # 2. Redis check (non-fatal — agents have in-memory fallback)
+    redis_connected = False
+    try:
+        redis_url = os.environ.get("REDIS_URL")
+        if redis_url:
+            import redis as redis_lib
+            r = redis_lib.Redis.from_url(redis_url, decode_responses=True)
+            r.ping()
+            redis_connected = True
+            checks["redis"] = "connected"
+        else:
+            checks["redis"] = "REDIS_URL not set (in-memory fallback)"
+    except Exception as e:
+        checks["redis"] = f"error: {e}"
+
+    # 3. Models check
+    models_dir = Path("models")
+    pkl_files = list(models_dir.glob("*.pkl")) if models_dir.exists() else []
+    models_loaded = len(pkl_files) > 0
+    checks["models"] = f"{len(pkl_files)} .pkl files found"
+
+    # 4. Determine overall status
+    if db_connected and models_loaded:
+        status = "healthy"
+    elif models_loaded and not db_connected and os.environ.get("DATABASE_URL"):
+        status = "unhealthy"
+    elif not models_loaded:
+        status = "unhealthy"
+    else:
+        # Redis down or DATABASE_URL not set (local dev) — degraded at worst
+        status = "degraded" if (os.environ.get("REDIS_URL") and not redis_connected) else "healthy"
+
+    from fastapi.responses import JSONResponse
+    status_code = 503 if status == "unhealthy" else 200
+
+    return JSONResponse(
+        status_code=status_code,
+        content=HealthResponse(
+            status=status,
+            service="nba-props-api",
+            timestamp=datetime.now(ET).isoformat(),
+            models_loaded=models_loaded,
+            database_connected=db_connected,
+            redis_connected=redis_connected,
+            checks=checks,
+        ).model_dump(),
     )
 
 

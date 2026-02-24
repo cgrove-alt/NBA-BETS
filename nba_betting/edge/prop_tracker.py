@@ -3,30 +3,77 @@ Prop Prediction Tracker
 
 Tracks player prop predictions vs actual outcomes for calibration and performance analysis.
 Stores predictions before games and settles them after games complete.
+
+PostgreSQL-primary with SQLite-fallback pattern.
+Production uses PostgreSQL (prop_prediction_tracking table from migration 007).
+Local dev/tests fall back to SQLite (prop_predictions table).
 """
 
 import sqlite3
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 import uuid
+
+try:
+    from agents.core.connections import get_postgres_connection
+except ImportError:
+    def get_postgres_connection():
+        return None
+
+logger = logging.getLogger(__name__)
 
 
 class PropTracker:
     """Track and analyze player prop prediction performance."""
 
-    def __init__(self, db_path: str = None):
-        """Initialize prop tracker with SQLite database.
+    def __init__(self, db_path: str = None, pg_conn=None):
+        """Initialize prop tracker with PostgreSQL primary, SQLite fallback.
 
         Args:
             db_path: Path to SQLite database file. Defaults to prop_predictions.db
+            pg_conn: Optional existing PostgreSQL connection
         """
-        if db_path is None:
-            db_path = str(Path(__file__).parent / "prop_predictions.db")
-        self.db_path = db_path
-        self._init_db()
+        self._use_postgres = False
+        self._pg_conn = None
+
+        # Try PostgreSQL first
+        conn = pg_conn or get_postgres_connection()
+        if conn is not None:
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_name = 'prop_prediction_tracking'
+                    )
+                """)
+                exists = cur.fetchone()[0]
+                cur.close()
+                if exists:
+                    self._use_postgres = True
+                    self._pg_conn = conn
+                    logger.info("PropTracker using PostgreSQL (prop_prediction_tracking)")
+                else:
+                    logger.warning(
+                        "PostgreSQL available but prop_prediction_tracking table missing — "
+                        "falling back to SQLite"
+                    )
+            except Exception as e:
+                logger.warning(f"PostgreSQL verification failed: {e} — falling back to SQLite")
+
+        # Fall back to SQLite
+        if not self._use_postgres:
+            if db_path is None:
+                db_path = str(Path(__file__).parent / "prop_predictions.db")
+            self.db_path = db_path
+            self._init_db()
+            logger.info(f"PropTracker using SQLite: {self.db_path}")
+        else:
+            self.db_path = None
 
     def _init_db(self):
-        """Initialize database tables."""
+        """Initialize SQLite database tables."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS prop_predictions (
@@ -103,21 +150,42 @@ class PropTracker:
         """
         prediction_id = str(uuid.uuid4())[:8]
 
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                INSERT INTO prop_predictions (
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute("""
+                    INSERT INTO prop_prediction_tracking (
+                        prediction_id, game_id, game_date, player_id, player_name,
+                        team_abbrev, opponent_abbrev, prop_type, predicted_value,
+                        market_line, pick, edge_pct, confidence, opp_def_rating,
+                        opp_adjustment, created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
                     prediction_id, game_id, game_date, player_id, player_name,
                     team_abbrev, opponent_abbrev, prop_type, predicted_value,
                     market_line, pick, edge_pct, confidence, opp_def_rating,
-                    opp_adjustment, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                prediction_id, game_id, game_date, player_id, player_name,
-                team_abbrev, opponent_abbrev, prop_type, predicted_value,
-                market_line, pick, edge_pct, confidence, opp_def_rating,
-                opp_adjustment, datetime.now().isoformat()
-            ))
-            conn.commit()
+                    opp_adjustment, datetime.now().isoformat()
+                ))
+                cur.close()
+            except Exception as e:
+                logger.error(f"PostgreSQL record_prediction failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO prop_predictions (
+                        prediction_id, game_id, game_date, player_id, player_name,
+                        team_abbrev, opponent_abbrev, prop_type, predicted_value,
+                        market_line, pick, edge_pct, confidence, opp_def_rating,
+                        opp_adjustment, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    prediction_id, game_id, game_date, player_id, player_name,
+                    team_abbrev, opponent_abbrev, prop_type, predicted_value,
+                    market_line, pick, edge_pct, confidence, opp_def_rating,
+                    opp_adjustment, datetime.now().isoformat()
+                ))
+                conn.commit()
 
         return prediction_id
 
@@ -135,31 +203,62 @@ class PropTracker:
         Returns:
             True if prediction was found and settled
         """
-        with sqlite3.connect(self.db_path) as conn:
-            # Get the prediction
-            cursor = conn.execute(
-                "SELECT market_line, pick FROM prop_predictions WHERE prediction_id = ?",
-                (prediction_id,)
-            )
-            row = cursor.fetchone()
-            if not row:
-                return False
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute(
+                    "SELECT market_line, pick FROM prop_prediction_tracking WHERE prediction_id = %s",
+                    (prediction_id,)
+                )
+                row = cur.fetchone()
+                if not row:
+                    cur.close()
+                    return False
 
-            market_line, pick = row
+                market_line, pick = row
 
-            # Determine if pick hit
-            hit = 0
-            if pick == "OVER" and actual_value > market_line or pick == "UNDER" and actual_value < market_line:
-                hit = 1
-            elif pick == "-":
-                hit = -1  # No pick made
+                # Determine if pick hit
+                hit = 0
+                if pick == "OVER" and actual_value > market_line or pick == "UNDER" and actual_value < market_line:
+                    hit = 1
+                elif pick == "-":
+                    hit = -1  # No pick made
 
-            conn.execute("""
-                UPDATE prop_predictions
-                SET actual_value = ?, hit = ?, settled_at = ?, is_settled = 1
-                WHERE prediction_id = ?
-            """, (actual_value, hit, datetime.now().isoformat(), prediction_id))
-            conn.commit()
+                cur.execute("""
+                    UPDATE prop_prediction_tracking
+                    SET actual_value = %s, hit = %s, settled_at = %s, is_settled = TRUE
+                    WHERE prediction_id = %s
+                """, (actual_value, hit, datetime.now().isoformat(), prediction_id))
+                cur.close()
+            except Exception as e:
+                logger.error(f"PostgreSQL settle_prediction failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                # Get the prediction
+                cursor = conn.execute(
+                    "SELECT market_line, pick FROM prop_predictions WHERE prediction_id = ?",
+                    (prediction_id,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
+
+                market_line, pick = row
+
+                # Determine if pick hit
+                hit = 0
+                if pick == "OVER" and actual_value > market_line or pick == "UNDER" and actual_value < market_line:
+                    hit = 1
+                elif pick == "-":
+                    hit = -1  # No pick made
+
+                conn.execute("""
+                    UPDATE prop_predictions
+                    SET actual_value = ?, hit = ?, settled_at = ?, is_settled = 1
+                    WHERE prediction_id = ?
+                """, (actual_value, hit, datetime.now().isoformat(), prediction_id))
+                conn.commit()
 
         return True
 
@@ -179,44 +278,59 @@ class PropTracker:
         """
         settled = 0
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """SELECT prediction_id, player_id, prop_type
-                   FROM prop_predictions
-                   WHERE game_id = ? AND is_settled = 0""",
-                (game_id,)
-            )
-            predictions = cursor.fetchall()
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute(
+                    """SELECT prediction_id, player_id, prop_type
+                       FROM prop_prediction_tracking
+                       WHERE game_id = %s AND is_settled = FALSE""",
+                    (game_id,)
+                )
+                predictions = cur.fetchall()
+                cur.close()
+            except Exception as e:
+                logger.error(f"PostgreSQL settle_game_predictions query failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """SELECT prediction_id, player_id, prop_type
+                       FROM prop_predictions
+                       WHERE game_id = ? AND is_settled = 0""",
+                    (game_id,)
+                )
+                predictions = cursor.fetchall()
 
-            for pred_id, player_id, prop_type in predictions:
-                stats = player_stats.get(player_id, {})
-                if not stats:
+        for pred_id, player_id, prop_type in predictions:
+            stats = player_stats.get(player_id, {})
+            if not stats:
+                continue
+
+            # Map prop type to stat key
+            stat_map = {
+                "points": "pts",
+                "rebounds": "reb",
+                "assists": "ast",
+                "3pm": "fg3m",
+                "pra": None,  # Calculated
+            }
+
+            if prop_type == "pra":
+                actual = (
+                    (stats.get("pts", 0) or 0) +
+                    (stats.get("reb", 0) or 0) +
+                    (stats.get("ast", 0) or 0)
+                )
+            else:
+                stat_key = stat_map.get(prop_type)
+                if stat_key:
+                    actual = stats.get(stat_key, 0) or 0
+                else:
                     continue
 
-                # Map prop type to stat key
-                stat_map = {
-                    "points": "pts",
-                    "rebounds": "reb",
-                    "assists": "ast",
-                    "3pm": "fg3m",
-                    "pra": None,  # Calculated
-                }
-
-                if prop_type == "pra":
-                    actual = (
-                        (stats.get("pts", 0) or 0) +
-                        (stats.get("reb", 0) or 0) +
-                        (stats.get("ast", 0) or 0)
-                    )
-                else:
-                    stat_key = stat_map.get(prop_type)
-                    if stat_key:
-                        actual = stats.get(stat_key, 0) or 0
-                    else:
-                        continue
-
-                if self.settle_prediction(pred_id, actual):
-                    settled += 1
+            if self.settle_prediction(pred_id, actual):
+                settled += 1
 
         return settled
 
@@ -232,18 +346,38 @@ class PropTracker:
         Returns:
             List of unsettled prediction records
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            if game_date:
-                cursor = conn.execute(
-                    "SELECT * FROM prop_predictions WHERE is_settled = 0 AND game_date = ?",
-                    (game_date,)
-                )
-            else:
-                cursor = conn.execute(
-                    "SELECT * FROM prop_predictions WHERE is_settled = 0"
-                )
-            return [dict(row) for row in cursor.fetchall()]
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                if game_date:
+                    cur.execute(
+                        "SELECT * FROM prop_prediction_tracking WHERE is_settled = FALSE AND game_date = %s",
+                        (game_date,)
+                    )
+                else:
+                    cur.execute(
+                        "SELECT * FROM prop_prediction_tracking WHERE is_settled = FALSE"
+                    )
+                columns = [desc[0] for desc in cur.description]
+                rows = cur.fetchall()
+                cur.close()
+                return [dict(zip(columns, row)) for row in rows]
+            except Exception as e:
+                logger.error(f"PostgreSQL get_unsettled_predictions failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                if game_date:
+                    cursor = conn.execute(
+                        "SELECT * FROM prop_predictions WHERE is_settled = 0 AND game_date = ?",
+                        (game_date,)
+                    )
+                else:
+                    cursor = conn.execute(
+                        "SELECT * FROM prop_predictions WHERE is_settled = 0"
+                    )
+                return [dict(row) for row in cursor.fetchall()]
 
     def get_predictions_for_game(self, game_id: str) -> list[dict]:
         """Get all predictions for a specific game.
@@ -254,16 +388,34 @@ class PropTracker:
         Returns:
             List of prediction dicts with player_id, prop_type, predicted_value, etc.
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
-                SELECT player_id, player_name, team_abbrev, prop_type,
-                       predicted_value, market_line, pick, confidence, edge_pct,
-                       actual_value, hit, is_settled
-                FROM prop_predictions
-                WHERE game_id = ?
-            """, (game_id,))
-            return [dict(row) for row in cursor.fetchall()]
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute("""
+                    SELECT player_id, player_name, team_abbrev, prop_type,
+                           predicted_value, market_line, pick, confidence, edge_pct,
+                           actual_value, hit, is_settled
+                    FROM prop_prediction_tracking
+                    WHERE game_id = %s
+                """, (game_id,))
+                columns = [desc[0] for desc in cur.description]
+                rows = cur.fetchall()
+                cur.close()
+                return [dict(zip(columns, row)) for row in rows]
+            except Exception as e:
+                logger.error(f"PostgreSQL get_predictions_for_game failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("""
+                    SELECT player_id, player_name, team_abbrev, prop_type,
+                           predicted_value, market_line, pick, confidence, edge_pct,
+                           actual_value, hit, is_settled
+                    FROM prop_predictions
+                    WHERE game_id = ?
+                """, (game_id,))
+                return [dict(row) for row in cursor.fetchall()]
 
     def get_performance_summary(
         self,
@@ -281,57 +433,115 @@ class PropTracker:
         """
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-        with sqlite3.connect(self.db_path) as conn:
-            # Overall stats
-            cursor = conn.execute("""
-                SELECT
-                    COUNT(*) as total,
-                    SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
-                    SUM(CASE WHEN hit = 0 THEN 1 ELSE 0 END) as losses,
-                    AVG(confidence) as avg_confidence,
-                    AVG(edge_pct) as avg_edge
-                FROM prop_predictions
-                WHERE is_settled = 1 AND hit >= 0
-                  AND game_date >= ?
-                  AND confidence >= ?
-            """, (cutoff_date, min_confidence))
-            overall = cursor.fetchone()
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                # Overall stats
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN hit = 0 THEN 1 ELSE 0 END) as losses,
+                        AVG(confidence) as avg_confidence,
+                        AVG(edge_pct) as avg_edge
+                    FROM prop_prediction_tracking
+                    WHERE is_settled = TRUE AND hit >= 0
+                      AND game_date >= %s
+                      AND confidence >= %s
+                """, (cutoff_date, min_confidence))
+                overall = cur.fetchone()
 
-            # By prop type
-            cursor = conn.execute("""
-                SELECT
-                    prop_type,
-                    COUNT(*) as total,
-                    SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
-                    AVG(confidence) as avg_confidence
-                FROM prop_predictions
-                WHERE is_settled = 1 AND hit >= 0
-                  AND game_date >= ?
-                  AND confidence >= ?
-                GROUP BY prop_type
-            """, (cutoff_date, min_confidence))
-            by_prop = {row[0]: {"total": row[1], "wins": row[2], "avg_conf": row[3]}
-                       for row in cursor.fetchall()}
+                # By prop type
+                cur.execute("""
+                    SELECT
+                        prop_type,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
+                        AVG(confidence) as avg_confidence
+                    FROM prop_prediction_tracking
+                    WHERE is_settled = TRUE AND hit >= 0
+                      AND game_date >= %s
+                      AND confidence >= %s
+                    GROUP BY prop_type
+                """, (cutoff_date, min_confidence))
+                by_prop = {row[0]: {"total": row[1], "wins": row[2], "avg_conf": row[3]}
+                           for row in cur.fetchall()}
 
-            # By confidence bucket
-            cursor = conn.execute("""
-                SELECT
-                    CASE
-                        WHEN confidence >= 75 THEN 'high'
-                        WHEN confidence >= 60 THEN 'medium'
-                        ELSE 'low'
-                    END as bucket,
-                    COUNT(*) as total,
-                    SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins
-                FROM prop_predictions
-                WHERE is_settled = 1 AND hit >= 0
-                  AND game_date >= ?
-                  AND confidence >= ?
-                GROUP BY bucket
-            """, (cutoff_date, min_confidence))
-            by_confidence = {row[0]: {"total": row[1], "wins": row[2],
-                                      "win_rate": row[2] / row[1] if row[1] > 0 else 0}
-                            for row in cursor.fetchall()}
+                # By confidence bucket
+                cur.execute("""
+                    SELECT
+                        CASE
+                            WHEN confidence >= 75 THEN 'high'
+                            WHEN confidence >= 60 THEN 'medium'
+                            ELSE 'low'
+                        END as bucket,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins
+                    FROM prop_prediction_tracking
+                    WHERE is_settled = TRUE AND hit >= 0
+                      AND game_date >= %s
+                      AND confidence >= %s
+                    GROUP BY bucket
+                """, (cutoff_date, min_confidence))
+                by_confidence = {row[0]: {"total": row[1], "wins": row[2],
+                                          "win_rate": row[2] / row[1] if row[1] > 0 else 0}
+                                for row in cur.fetchall()}
+                cur.close()
+            except Exception as e:
+                logger.error(f"PostgreSQL get_performance_summary failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                # Overall stats
+                cursor = conn.execute("""
+                    SELECT
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN hit = 0 THEN 1 ELSE 0 END) as losses,
+                        AVG(confidence) as avg_confidence,
+                        AVG(edge_pct) as avg_edge
+                    FROM prop_predictions
+                    WHERE is_settled = 1 AND hit >= 0
+                      AND game_date >= ?
+                      AND confidence >= ?
+                """, (cutoff_date, min_confidence))
+                overall = cursor.fetchone()
+
+                # By prop type
+                cursor = conn.execute("""
+                    SELECT
+                        prop_type,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
+                        AVG(confidence) as avg_confidence
+                    FROM prop_predictions
+                    WHERE is_settled = 1 AND hit >= 0
+                      AND game_date >= ?
+                      AND confidence >= ?
+                    GROUP BY prop_type
+                """, (cutoff_date, min_confidence))
+                by_prop = {row[0]: {"total": row[1], "wins": row[2], "avg_conf": row[3]}
+                           for row in cursor.fetchall()}
+
+                # By confidence bucket
+                cursor = conn.execute("""
+                    SELECT
+                        CASE
+                            WHEN confidence >= 75 THEN 'high'
+                            WHEN confidence >= 60 THEN 'medium'
+                            ELSE 'low'
+                        END as bucket,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins
+                    FROM prop_predictions
+                    WHERE is_settled = 1 AND hit >= 0
+                      AND game_date >= ?
+                      AND confidence >= ?
+                    GROUP BY bucket
+                """, (cutoff_date, min_confidence))
+                by_confidence = {row[0]: {"total": row[1], "wins": row[2],
+                                          "win_rate": row[2] / row[1] if row[1] > 0 else 0}
+                                for row in cursor.fetchall()}
 
         total = overall[0] or 0
         wins = overall[1] or 0
@@ -360,27 +570,55 @@ class PropTracker:
         """
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
-                SELECT
-                    CAST(confidence / 10 AS INTEGER) * 10 as conf_bucket,
-                    COUNT(*) as total,
-                    SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
-                    AVG(confidence) as avg_confidence
-                FROM prop_predictions
-                WHERE is_settled = 1 AND hit >= 0
-                  AND game_date >= ?
-                GROUP BY conf_bucket
-                ORDER BY conf_bucket
-            """, (cutoff_date,))
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute("""
+                    SELECT
+                        CAST(confidence / 10 AS INTEGER) * 10 as conf_bucket,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
+                        AVG(confidence) as avg_confidence
+                    FROM prop_prediction_tracking
+                    WHERE is_settled = TRUE AND hit >= 0
+                      AND game_date >= %s
+                    GROUP BY conf_bucket
+                    ORDER BY conf_bucket
+                """, (cutoff_date,))
+                rows = cur.fetchall()
+                cur.close()
+                return [{
+                    "confidence_bucket": f"{row[0]}-{row[0]+9}",
+                    "predicted_win_rate": (row[3] or 50) / 100,
+                    "actual_win_rate": row[2] / row[1] if row[1] > 0 else 0,
+                    "total": row[1],
+                    "wins": row[2],
+                } for row in rows]
+            except Exception as e:
+                logger.error(f"PostgreSQL get_calibration_data failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT
+                        CAST(confidence / 10 AS INTEGER) * 10 as conf_bucket,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins,
+                        AVG(confidence) as avg_confidence
+                    FROM prop_predictions
+                    WHERE is_settled = 1 AND hit >= 0
+                      AND game_date >= ?
+                    GROUP BY conf_bucket
+                    ORDER BY conf_bucket
+                """, (cutoff_date,))
 
-            return [{
-                "confidence_bucket": f"{row[0]}-{row[0]+9}",
-                "predicted_win_rate": (row[3] or 50) / 100,  # Convert confidence to rate
-                "actual_win_rate": row[2] / row[1] if row[1] > 0 else 0,
-                "total": row[1],
-                "wins": row[2],
-            } for row in cursor.fetchall()]
+                return [{
+                    "confidence_bucket": f"{row[0]}-{row[0]+9}",
+                    "predicted_win_rate": (row[3] or 50) / 100,
+                    "actual_win_rate": row[2] / row[1] if row[1] > 0 else 0,
+                    "total": row[1],
+                    "wins": row[2],
+                } for row in cursor.fetchall()]
 
     def print_performance_report(self, days: int = 30):
         """Print a formatted performance report."""
@@ -435,53 +673,76 @@ class PropTracker:
         """
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
-                SELECT
-                    player_id,
-                    player_name,
-                    COUNT(*) as total,
-                    SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins
-                FROM prop_predictions
-                WHERE is_settled = 1 AND hit >= 0
-                  AND game_date >= ?
-                GROUP BY player_id, player_name
-                HAVING COUNT(*) >= ?
-                ORDER BY total DESC
-            """, (cutoff_date, min_predictions))
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute("""
+                    SELECT
+                        player_id,
+                        player_name,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins
+                    FROM prop_prediction_tracking
+                    WHERE is_settled = TRUE AND hit >= 0
+                      AND game_date >= %s
+                    GROUP BY player_id, player_name
+                    HAVING COUNT(*) >= %s
+                    ORDER BY total DESC
+                """, (cutoff_date, min_predictions))
+                rows = cur.fetchall()
+                cur.close()
+            except Exception as e:
+                logger.error(f"PostgreSQL get_player_performance failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT
+                        player_id,
+                        player_name,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) as wins
+                    FROM prop_predictions
+                    WHERE is_settled = 1 AND hit >= 0
+                      AND game_date >= ?
+                    GROUP BY player_id, player_name
+                    HAVING COUNT(*) >= ?
+                    ORDER BY total DESC
+                """, (cutoff_date, min_predictions))
+                rows = cursor.fetchall()
 
-            blacklist = []  # Players with <30% win rate
-            whitelist = []  # Players with >60% win rate
-            all_players = []
+        blacklist = []  # Players with <30% win rate
+        whitelist = []  # Players with >60% win rate
+        all_players = []
 
-            for row in cursor.fetchall():
-                player_id, player_name, total, wins = row
-                win_rate = wins / total if total > 0 else 0
+        for row in rows:
+            player_id, player_name, total, wins = row
+            win_rate = wins / total if total > 0 else 0
 
-                player_data = {
-                    'player_id': player_id,
-                    'player_name': player_name,
-                    'total': total,
-                    'wins': wins,
-                    'win_rate': win_rate,
-                }
-                all_players.append(player_data)
-
-                # Blacklist: consistently bad predictions
-                if win_rate < 0.30:
-                    blacklist.append(player_id)
-
-                # Whitelist: consistently good predictions
-                elif win_rate > 0.60:
-                    whitelist.append(player_id)
-
-            return {
-                'blacklist': blacklist,
-                'whitelist': whitelist,
-                'all_players': all_players,
-                'blacklist_count': len(blacklist),
-                'whitelist_count': len(whitelist),
+            player_data = {
+                'player_id': player_id,
+                'player_name': player_name,
+                'total': total,
+                'wins': wins,
+                'win_rate': win_rate,
             }
+            all_players.append(player_data)
+
+            # Blacklist: consistently bad predictions
+            if win_rate < 0.30:
+                blacklist.append(player_id)
+
+            # Whitelist: consistently good predictions
+            elif win_rate > 0.60:
+                whitelist.append(player_id)
+
+        return {
+            'blacklist': blacklist,
+            'whitelist': whitelist,
+            'all_players': all_players,
+            'blacklist_count': len(blacklist),
+            'whitelist_count': len(whitelist),
+        }
 
     def get_blacklisted_players(self, min_predictions: int = 20, days: int = 60) -> list[int]:
         """Get list of player IDs that should be blacklisted (skipped).
@@ -515,27 +776,49 @@ class PropTracker:
         """
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
-                SELECT
-                    prop_type,
-                    AVG(actual_value - predicted_value) as mean_error,
-                    COUNT(*) as n
-                FROM prop_predictions
-                WHERE is_settled = 1
-                  AND actual_value IS NOT NULL
-                  AND game_date >= ?
-                GROUP BY prop_type
-                HAVING COUNT(*) >= ?
-            """, (cutoff_date, min_predictions))
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute("""
+                    SELECT
+                        prop_type,
+                        AVG(actual_value - predicted_value) as mean_error,
+                        COUNT(*) as n
+                    FROM prop_prediction_tracking
+                    WHERE is_settled = TRUE
+                      AND actual_value IS NOT NULL
+                      AND game_date >= %s
+                    GROUP BY prop_type
+                    HAVING COUNT(*) >= %s
+                """, (cutoff_date, min_predictions))
+                rows = cur.fetchall()
+                cur.close()
+            except Exception as e:
+                logger.error(f"PostgreSQL calculate_bias_corrections failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT
+                        prop_type,
+                        AVG(actual_value - predicted_value) as mean_error,
+                        COUNT(*) as n
+                    FROM prop_predictions
+                    WHERE is_settled = 1
+                      AND actual_value IS NOT NULL
+                      AND game_date >= ?
+                    GROUP BY prop_type
+                    HAVING COUNT(*) >= ?
+                """, (cutoff_date, min_predictions))
+                rows = cursor.fetchall()
 
-            corrections = {}
-            for row in cursor.fetchall():
-                prop_type, mean_error, n = row
-                if mean_error is not None:
-                    corrections[prop_type] = mean_error
+        corrections = {}
+        for row in rows:
+            prop_type, mean_error, n = row
+            if mean_error is not None:
+                corrections[prop_type] = mean_error
 
-            return corrections
+        return corrections
 
     def get_direction_calibration(self, days: int = 60) -> dict[str, dict[str, float]]:
         """Get confidence calibration by prop_type and pick direction.
@@ -554,33 +837,58 @@ class PropTracker:
         """
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
-                SELECT
-                    prop_type,
-                    pick,
-                    AVG(confidence) / 100.0 as avg_conf,
-                    1.0 * SUM(CASE WHEN hit=1 THEN 1 ELSE 0 END) / COUNT(*) as actual_wr,
-                    COUNT(*) as n
-                FROM prop_predictions
-                WHERE is_settled = 1
-                  AND hit >= 0
-                  AND pick IN ('OVER', 'UNDER')
-                  AND game_date >= ?
-                GROUP BY prop_type, pick
-                HAVING COUNT(*) >= 50
-            """, (cutoff_date,))
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute("""
+                    SELECT
+                        prop_type,
+                        pick,
+                        AVG(confidence) / 100.0 as avg_conf,
+                        1.0 * SUM(CASE WHEN hit=1 THEN 1 ELSE 0 END) / COUNT(*) as actual_wr,
+                        COUNT(*) as n
+                    FROM prop_prediction_tracking
+                    WHERE is_settled = TRUE
+                      AND hit >= 0
+                      AND pick IN ('OVER', 'UNDER')
+                      AND game_date >= %s
+                    GROUP BY prop_type, pick
+                    HAVING COUNT(*) >= 50
+                """, (cutoff_date,))
+                rows = cur.fetchall()
+                cur.close()
+            except Exception as e:
+                logger.error(f"PostgreSQL get_direction_calibration failed: {e}")
+                raise
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT
+                        prop_type,
+                        pick,
+                        AVG(confidence) / 100.0 as avg_conf,
+                        1.0 * SUM(CASE WHEN hit=1 THEN 1 ELSE 0 END) / COUNT(*) as actual_wr,
+                        COUNT(*) as n
+                    FROM prop_predictions
+                    WHERE is_settled = 1
+                      AND hit >= 0
+                      AND pick IN ('OVER', 'UNDER')
+                      AND game_date >= ?
+                    GROUP BY prop_type, pick
+                    HAVING COUNT(*) >= 50
+                """, (cutoff_date,))
+                rows = cursor.fetchall()
 
-            calibration = {}
-            for row in cursor.fetchall():
-                prop_type, pick, avg_conf, actual_wr, n = row
-                if prop_type not in calibration:
-                    calibration[prop_type] = {}
-                if avg_conf > 0:
-                    # Calibration factor: actual performance / expected
-                    calibration[prop_type][pick] = actual_wr / avg_conf
+        calibration = {}
+        for row in rows:
+            prop_type, pick, avg_conf, actual_wr, n = row
+            if prop_type not in calibration:
+                calibration[prop_type] = {}
+            if avg_conf > 0:
+                # Calibration factor: actual performance / expected
+                calibration[prop_type][pick] = actual_wr / avg_conf
 
-            return calibration
+        return calibration
 
     def print_bias_report(self):
         """Print a report of bias corrections and calibration data."""

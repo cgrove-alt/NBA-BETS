@@ -23,7 +23,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 import numpy as np
+
+# Eastern Time for date-sensitive operations
+ET = ZoneInfo('America/New_York')
 
 # Create logger instance
 logger = logging.getLogger(__name__)
@@ -894,7 +898,7 @@ def predict_minutes_distribution(
 
     try:
         if game_date is None:
-            game_date = datetime.now().strftime('%Y-%m-%d')
+            game_date = datetime.now(ET).strftime('%Y-%m-%d')
 
         # Map game_context keys to what MinutesFeatureGenerator expects
         oracle_context = {
@@ -2052,7 +2056,7 @@ def main():
     parser.add_argument("--clear-cache", action="store_true", help="Clear cache before running")
     args = parser.parse_args()
 
-    target_date = args.date or datetime.now().strftime("%Y-%m-%d")
+    target_date = args.date or datetime.now(ET).strftime("%Y-%m-%d")
 
     # Clear cache if requested
     if args.clear_cache:

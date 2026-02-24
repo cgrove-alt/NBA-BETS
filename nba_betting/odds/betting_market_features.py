@@ -22,6 +22,10 @@ Key Concepts:
 - CLV (Closing Line Value): Difference between bet odds and closing line (positive = edge)
 - Consensus Odds: Fair market odds calculated across 10+ sportsbooks
 
+Database:
+- PostgreSQL primary (Railway), SQLite fallback (local dev/tests)
+- PG tables prefixed with 'tracked_' to avoid collision with 001_initial_schema
+
 Usage:
     # Initialize with The Odds API key
     tracker = BettingMarketFeatures(api_key="your_key")
@@ -38,10 +42,20 @@ Usage:
 
 import os
 import sqlite3
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 import numpy as np
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
+
+# PostgreSQL connection import — falls back gracefully if agents package unavailable
+try:
+    from agents.core.connections import get_postgres_connection
+except ImportError:
+    def get_postgres_connection():
+        return None
 
 # Import existing infrastructure
 try:
@@ -91,21 +105,50 @@ UPDATE_INTERVAL_SECONDS = 300  # 5 minutes between updates
 
 class OddsHistoryDB:
     """
-    SQLite database for storing historical odds snapshots.
+    Database for storing historical odds snapshots.
 
-    Schema:
-    - odds_history: Point-in-time odds snapshots from each sportsbook
-    - games: Game metadata (home/away teams, commence time)
-    - line_movements: Calculated line movements between snapshots
+    PostgreSQL primary (Railway), SQLite fallback (local dev/tests).
+
+    PG tables use 'tracked_' prefix (migration 008) to avoid collision
+    with 001_initial_schema tables:
+    - tracked_games (SQLite: games)
+    - tracked_odds_history (SQLite: odds_history)
+    - tracked_line_movements (SQLite: line_movements)
     """
 
-    def __init__(self, db_path: str = DEFAULT_ODDS_DB):
+    def __init__(self, db_path: str = DEFAULT_ODDS_DB, pg_conn=None):
+        self._pg_conn = None
+        self._use_postgres = False
         self.db_path = db_path
-        self._initialize_schema()
+
+        # Try PostgreSQL first
+        conn = pg_conn or get_postgres_connection()
+        if conn is not None:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT 1 FROM tracked_games LIMIT 0")
+                cur.close()
+                self._pg_conn = conn
+                self._use_postgres = True
+                logger.info("OddsHistoryDB using PostgreSQL")
+            except Exception as e:
+                logger.warning(f"PostgreSQL tracked_games table check failed: {e} — falling back to SQLite")
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
+        if not self._use_postgres:
+            self._initialize_schema()
+            logger.info(f"OddsHistoryDB using SQLite: {self.db_path}")
+
+    # =========================================================================
+    # SQLite-only helpers
+    # =========================================================================
 
     @contextmanager
     def get_connection(self):
-        """Context manager for database connections."""
+        """Context manager for SQLite database connections."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -118,7 +161,7 @@ class OddsHistoryDB:
             conn.close()
 
     def _initialize_schema(self):
-        """Create tables and indexes if they don't exist."""
+        """Create SQLite tables and indexes if they don't exist."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
@@ -191,8 +234,30 @@ class OddsHistoryDB:
                 ON line_movements(game_id)
             """)
 
+    # =========================================================================
+    # upsert_game
+    # =========================================================================
+
     def upsert_game(self, game_id: str, home_team: str, away_team: str, commence_time: str):
         """Insert or update game metadata."""
+        if self._use_postgres:
+            self._upsert_game_pg(game_id, home_team, away_team, commence_time)
+        else:
+            self._upsert_game_sqlite(game_id, home_team, away_team, commence_time)
+
+    def _upsert_game_pg(self, game_id: str, home_team: str, away_team: str, commence_time: str):
+        cur = self._pg_conn.cursor()
+        cur.execute("""
+            INSERT INTO tracked_games (game_id, home_team, away_team, commence_time)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (game_id) DO UPDATE SET
+                home_team = EXCLUDED.home_team,
+                away_team = EXCLUDED.away_team,
+                commence_time = EXCLUDED.commence_time
+        """, (game_id, home_team, away_team, commence_time))
+        cur.close()
+
+    def _upsert_game_sqlite(self, game_id: str, home_team: str, away_team: str, commence_time: str):
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -200,14 +265,48 @@ class OddsHistoryDB:
                 VALUES (?, ?, ?, ?)
             """, (game_id, home_team, away_team, commence_time))
 
+    # =========================================================================
+    # insert_odds_snapshot
+    # =========================================================================
+
     def insert_odds_snapshot(self, game_id: str, book_name: str, market: str,
                             odds_data: dict, is_opening: bool = False, is_closing: bool = False):
         """Insert an odds snapshot."""
+        if self._use_postgres:
+            self._insert_odds_snapshot_pg(game_id, book_name, market, odds_data, is_opening, is_closing)
+        else:
+            self._insert_odds_snapshot_sqlite(game_id, book_name, market, odds_data, is_opening, is_closing)
+
+    def _insert_odds_snapshot_pg(self, game_id: str, book_name: str, market: str,
+                                 odds_data: dict, is_opening: bool, is_closing: bool):
+        cur = self._pg_conn.cursor()
+        timestamp = datetime.now().isoformat()
+        cur.execute("""
+            INSERT INTO tracked_odds_history (
+                game_id, timestamp, book_name, market,
+                home_odds, away_odds, home_line, away_line,
+                total, over_odds, under_odds,
+                is_opening, is_closing
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+        """, (
+            game_id, timestamp, book_name, market,
+            odds_data.get('home_odds'),
+            odds_data.get('away_odds'),
+            odds_data.get('home_line'),
+            odds_data.get('away_line'),
+            odds_data.get('total'),
+            odds_data.get('over_odds'),
+            odds_data.get('under_odds'),
+            is_opening, is_closing
+        ))
+        cur.close()
+
+    def _insert_odds_snapshot_sqlite(self, game_id: str, book_name: str, market: str,
+                                      odds_data: dict, is_opening: bool, is_closing: bool):
         with self.get_connection() as conn:
             cursor = conn.cursor()
-
             timestamp = datetime.now().isoformat()
-
             cursor.execute("""
                 INSERT OR IGNORE INTO odds_history (
                     game_id, timestamp, book_name, market,
@@ -227,8 +326,34 @@ class OddsHistoryDB:
                 is_opening, is_closing
             ))
 
+    # =========================================================================
+    # get_opening_line
+    # =========================================================================
+
     def get_opening_line(self, game_id: str, market: str) -> dict | None:
         """Fetch opening line for a game/market."""
+        if self._use_postgres:
+            return self._get_opening_line_pg(game_id, market)
+        return self._get_opening_line_sqlite(game_id, market)
+
+    def _get_opening_line_pg(self, game_id: str, market: str) -> dict | None:
+        cur = self._pg_conn.cursor()
+        cur.execute("""
+            SELECT * FROM tracked_odds_history
+            WHERE game_id = %s AND market = %s AND is_opening = TRUE
+            ORDER BY timestamp ASC
+            LIMIT 1
+        """, (game_id, market))
+        row = cur.fetchone()
+        if row is None:
+            cur.close()
+            return None
+        columns = [desc[0] for desc in cur.description]
+        result = dict(zip(columns, row))
+        cur.close()
+        return result
+
+    def _get_opening_line_sqlite(self, game_id: str, market: str) -> dict | None:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -240,8 +365,34 @@ class OddsHistoryDB:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    # =========================================================================
+    # get_closing_line
+    # =========================================================================
+
     def get_closing_line(self, game_id: str, market: str) -> dict | None:
         """Fetch closing line for a game/market."""
+        if self._use_postgres:
+            return self._get_closing_line_pg(game_id, market)
+        return self._get_closing_line_sqlite(game_id, market)
+
+    def _get_closing_line_pg(self, game_id: str, market: str) -> dict | None:
+        cur = self._pg_conn.cursor()
+        cur.execute("""
+            SELECT * FROM tracked_odds_history
+            WHERE game_id = %s AND market = %s AND is_closing = TRUE
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (game_id, market))
+        row = cur.fetchone()
+        if row is None:
+            cur.close()
+            return None
+        columns = [desc[0] for desc in cur.description]
+        result = dict(zip(columns, row))
+        cur.close()
+        return result
+
+    def _get_closing_line_sqlite(self, game_id: str, market: str) -> dict | None:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -253,23 +404,91 @@ class OddsHistoryDB:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    # =========================================================================
+    # get_odds_history
+    # =========================================================================
+
     def get_odds_history(self, game_id: str, market: str,
                          lookback_minutes: int = 60) -> list[dict]:
         """Get odds history for a game/market within lookback window."""
+        if self._use_postgres:
+            return self._get_odds_history_pg(game_id, market, lookback_minutes)
+        return self._get_odds_history_sqlite(game_id, market, lookback_minutes)
+
+    def _get_odds_history_pg(self, game_id: str, market: str,
+                              lookback_minutes: int) -> list[dict]:
+        cur = self._pg_conn.cursor()
+        cutoff = (datetime.now() - timedelta(minutes=lookback_minutes)).isoformat()
+        cur.execute("""
+            SELECT * FROM tracked_odds_history
+            WHERE game_id = %s AND market = %s AND timestamp >= %s
+            ORDER BY timestamp ASC
+        """, (game_id, market, cutoff))
+        rows = cur.fetchall()
+        if not rows:
+            cur.close()
+            return []
+        columns = [desc[0] for desc in cur.description]
+        results = [dict(zip(columns, row)) for row in rows]
+        cur.close()
+        return results
+
+    def _get_odds_history_sqlite(self, game_id: str, market: str,
+                                  lookback_minutes: int) -> list[dict]:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cutoff = (datetime.now() - timedelta(minutes=lookback_minutes)).isoformat()
-
             cursor.execute("""
                 SELECT * FROM odds_history
                 WHERE game_id = ? AND market = ? AND timestamp >= ?
                 ORDER BY timestamp ASC
             """, (game_id, market, cutoff))
-
             return [dict(row) for row in cursor.fetchall()]
+
+    # =========================================================================
+    # upsert_line_movement
+    # =========================================================================
 
     def upsert_line_movement(self, game_id: str, market: str, movement_data: dict):
         """Insert or update line movement summary."""
+        if self._use_postgres:
+            self._upsert_line_movement_pg(game_id, market, movement_data)
+        else:
+            self._upsert_line_movement_sqlite(game_id, market, movement_data)
+
+    def _upsert_line_movement_pg(self, game_id: str, market: str, movement_data: dict):
+        cur = self._pg_conn.cursor()
+        cur.execute("""
+            INSERT INTO tracked_line_movements (
+                game_id, market, opening_line, closing_line, movement,
+                opening_time, closing_time, num_moves, max_move,
+                rlm_detected, steam_detected
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (game_id, market) DO UPDATE SET
+                opening_line = EXCLUDED.opening_line,
+                closing_line = EXCLUDED.closing_line,
+                movement = EXCLUDED.movement,
+                opening_time = EXCLUDED.opening_time,
+                closing_time = EXCLUDED.closing_time,
+                num_moves = EXCLUDED.num_moves,
+                max_move = EXCLUDED.max_move,
+                rlm_detected = EXCLUDED.rlm_detected,
+                steam_detected = EXCLUDED.steam_detected
+        """, (
+            game_id, market,
+            movement_data.get('opening_line'),
+            movement_data.get('closing_line'),
+            movement_data.get('movement'),
+            movement_data.get('opening_time'),
+            movement_data.get('closing_time'),
+            movement_data.get('num_moves', 0),
+            movement_data.get('max_move', 0),
+            movement_data.get('rlm_detected', False),
+            movement_data.get('steam_detected', False)
+        ))
+        cur.close()
+
+    def _upsert_line_movement_sqlite(self, game_id: str, market: str, movement_data: dict):
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -291,8 +510,32 @@ class OddsHistoryDB:
                 movement_data.get('steam_detected', False)
             ))
 
+    # =========================================================================
+    # get_line_movement
+    # =========================================================================
+
     def get_line_movement(self, game_id: str, market: str) -> dict | None:
         """Get line movement summary for a game/market."""
+        if self._use_postgres:
+            return self._get_line_movement_pg(game_id, market)
+        return self._get_line_movement_sqlite(game_id, market)
+
+    def _get_line_movement_pg(self, game_id: str, market: str) -> dict | None:
+        cur = self._pg_conn.cursor()
+        cur.execute("""
+            SELECT * FROM tracked_line_movements
+            WHERE game_id = %s AND market = %s
+        """, (game_id, market))
+        row = cur.fetchone()
+        if row is None:
+            cur.close()
+            return None
+        columns = [desc[0] for desc in cur.description]
+        result = dict(zip(columns, row))
+        cur.close()
+        return result
+
+    def _get_line_movement_sqlite(self, game_id: str, market: str) -> dict | None:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -313,22 +556,24 @@ class BettingMarketFeatures:
 
     Provides unified interface to:
     - Fetch real-time odds from The Odds API
-    - Store odds history in SQLite
+    - Store odds history in PostgreSQL or SQLite
     - Calculate line movements
     - Detect RLM and steam moves
     - Generate features for ML models
     """
 
-    def __init__(self, api_key: str | None = None, db_path: str = DEFAULT_ODDS_DB):
+    def __init__(self, api_key: str | None = None, db_path: str = DEFAULT_ODDS_DB,
+                 pg_conn=None):
         """
         Initialize betting market features tracker.
 
         Args:
             api_key: The Odds API key (or set THE_ODDS_API_KEY env var)
             db_path: Path to SQLite database for odds history
+            pg_conn: Optional psycopg2 connection for PostgreSQL
         """
         self.api_key = api_key or os.environ.get("THE_ODDS_API_KEY")
-        self.db = OddsHistoryDB(db_path)
+        self.db = OddsHistoryDB(db_path, pg_conn=pg_conn)
 
         # Initialize odds fetcher if available
         if HAS_ODDS_FETCHER and self.api_key:
@@ -815,7 +1060,8 @@ class OddsTracker:
 
     def __init__(self, api_key: str | None = None,
                  update_interval_minutes: int = 5,
-                 db_path: str = DEFAULT_ODDS_DB):
+                 db_path: str = DEFAULT_ODDS_DB,
+                 pg_conn=None):
         """
         Initialize odds tracker.
 
@@ -823,8 +1069,9 @@ class OddsTracker:
             api_key: The Odds API key
             update_interval_minutes: Minutes between updates
             db_path: Path to SQLite database
+            pg_conn: Optional psycopg2 connection for PostgreSQL
         """
-        self.features = BettingMarketFeatures(api_key, db_path)
+        self.features = BettingMarketFeatures(api_key, db_path, pg_conn=pg_conn)
         self.update_interval = update_interval_minutes
         self.last_update: datetime | None = None
 
@@ -873,6 +1120,7 @@ def test_betting_market_features():
     print("\n1. DATABASE INITIALIZATION")
     print("-" * 40)
     print(f"Database path: {tracker.db.db_path}")
+    print(f"Using PostgreSQL: {tracker.db._use_postgres}")
     print("Schema created successfully")
 
     if api_key:

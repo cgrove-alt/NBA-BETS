@@ -7,13 +7,13 @@
 # ============================================================================
 # Service Type: Cron Job
 # Start Command: python daily_predictions.py
-# Schedule: 0 9 * * * (9 AM EST daily)
+# Schedule: 0 14 * * * (14:00 UTC = ~9-10 AM ET daily)
 # Description: Generates predictions for all NBA games scheduled for today
 
 daily_predictions:
-  schedule: "0 9 * * *"  # Every day at 9 AM EST
+  schedule: "0 14 * * *"  # 14:00 UTC (~9-10 AM ET depending on DST)
   command: python daily_predictions.py
-  timezone: America/New_York
+  timezone: UTC
   timeout: 600  # 10 minutes max execution time
   expected_duration: 300  # ~5 minutes typical
   retry_on_failure: true
@@ -36,7 +36,7 @@ odds_tracker:
   command: python odds_tracker_service.py --daemon
   internal_schedule:
     - interval: "*/5 * * * *"  # Every 5 minutes
-    - operating_hours: "8-23"  # 8 AM - 11 PM EST
+    - operating_hours: "8-23"  # 8 AM - 11 PM ET
     - season: "Oct-Jun"  # NBA season only
   health_check:
     - heartbeat_interval: 300  # 5 minutes
@@ -58,7 +58,7 @@ retraining_scheduler:
   internal_schedules:
     # Full retraining (all base models + meta-learner)
     full_retrain:
-      schedule: "0 2 * * 0"  # Sundays at 2 AM EST
+      schedule: "0 2 * * 0"  # Sundays at 2 AM ET
       frequency: "Every 14 days"
       expected_duration: 7200  # 2 hours max
       timeout: 7200
@@ -68,7 +68,7 @@ retraining_scheduler:
 
     # Incremental update (meta-learner only)
     incremental_update:
-      schedule: "0 4 */3 * *"  # Every 3 days at 4 AM EST
+      schedule: "0 4 */3 * *"  # Every 3 days at 4 AM ET
       expected_duration: 900  # 15 minutes max
       timeout: 1800
       success_criteria:
@@ -77,12 +77,12 @@ retraining_scheduler:
 
     # Drift detection (daily monitoring)
     drift_check:
-      schedule: "0 6 * * *"  # Daily at 6 AM EST
+      schedule: "0 6 * * *"  # Daily at 6 AM ET
       expected_duration: 120  # 2 minutes
       alert_conditions:
         - rmse_increase > 10%  # RMSE increased by 10%+
         - accuracy_drop_3_days: true  # 3 consecutive days of accuracy drop
-        - r2_below_threshold: -0.5  # R² drops below -0.5
+        - r2_below_threshold: -0.5  # R2 drops below -0.5
       action_on_drift:
         - trigger: full_retrain
         - send_alert: true
@@ -94,22 +94,27 @@ retraining_scheduler:
   restart_policy: on_failure
 
 # ============================================================================
-# Service #5: Pre-Game Intelligence Agent
+# Service #5: Agent Scheduler Daemon
 # ============================================================================
-# Service Type: Cron Job
-# Start Command: python -m agents.core.agent_runner --agent pregame
-# Schedule: Runs twice daily (morning intel + pre-tip update)
-# Description: Gathers injury reports, lineup confirmations, schedule context
-#              and synthesizes with LLM reasoning for game intelligence
+# Service Type: Worker (Always-On Daemon)
+# Start Command: python -m agents.core.agent_runner --daemon
+# Schedule: Managed internally by APScheduler — all 6 agents consolidated
+# Description: Unified scheduler that runs all agents on their configured
+#              cron schedules. Replaced individual agent services #5-#11.
+#
+# Internal schedules:
+#   pregame:      0 11,17 * * *     (11 AM + 5 PM ET)
+#   postgame:     0 1 * * *         (1 AM ET)
+#   odds_monitor: */15 8-23 * * *   (every 15 min during game hours)
+#   orchestrator: 30 11 * * *       (11:30 AM ET)
+#   watchdog:     30 1 * * *        (1:30 AM ET)
+#   briefing:     0 12,18 * * *     (noon + 6 PM ET)
 
-pregame_agent:
-  schedule:
-    - "0 11 * * *"  # 11 AM ET — 6-8 hours before typical first tip-off
-    - "0 17 * * *"  # 5 PM ET — 2 hours before first tip for late-breaking updates
-  command: python -m agents.core.agent_runner --agent pregame
+agent_scheduler:
+  service_type: worker
+  command: python -m agents.core.agent_runner --daemon
   timezone: America/New_York
-  timeout: 600  # 10 minutes max
-  expected_duration: 180  # ~3 minutes typical
+  timeout: 900  # 15 minutes max per agent run
   retry_on_failure: true
   max_retries: 2
   required_env:
@@ -117,123 +122,10 @@ pregame_agent:
     - DATABASE_URL
     - REDIS_URL
     - BALLDONTLIE_API_KEY
-
-# ============================================================================
-# Service #6: Post-Game Analysis Agent
-# ============================================================================
-# Service Type: Cron Job
-# Start Command: python -m agents.core.agent_runner --agent postgame
-# Schedule: After all games complete (~1 AM ET)
-# Description: Reviews predictions vs actual results, analyzes misses with
-#              LLM reasoning, detects patterns, generates model feedback
-
-postgame_agent:
-  schedule: "0 1 * * *"  # 1 AM ET — after all games complete
-  command: python -m agents.core.agent_runner --agent postgame
-  timezone: America/New_York
-  timeout: 600  # 10 minutes max
-  expected_duration: 120  # ~2 minutes typical
-  retry_on_failure: true
-  max_retries: 2
-  required_env:
-    - GEMINI_API_KEY
-    - DATABASE_URL
-    - REDIS_URL
-
-# ============================================================================
-# Service #8: Odds Monitoring Agent
-# ============================================================================
-# Service Type: Cron Job
-# Start Command: python -m agents.core.agent_runner --agent odds_monitor
-# Schedule: Every 15 minutes during game hours (8 AM - 11 PM ET)
-# Description: Monitors line movements, detects steam moves and stale lines,
-#              interprets sharp vs public money with LLM reasoning
-
-odds_monitor_agent:
-  schedule: "*/15 8-23 * * *"  # Every 15 min, 8 AM - 11 PM ET
-  command: python -m agents.core.agent_runner --agent odds_monitor
-  timezone: America/New_York
-  timeout: 180  # 3 minutes max
-  expected_duration: 60  # ~1 minute typical
-  retry_on_failure: true
-  max_retries: 2
-  required_env:
-    - GEMINI_API_KEY
-    - DATABASE_URL
-    - REDIS_URL
     - THE_ODDS_API_KEY
 
 # ============================================================================
-# Service #9: Prediction Orchestrator Agent
-# ============================================================================
-# Service Type: Cron Job
-# Start Command: python -m agents.core.agent_runner --agent orchestrator
-# Schedule: 11:30 AM ET (30 min after pregame's first run)
-# Description: Coordinates prediction pipeline with agent intelligence —
-#              confidence adjustments, correlation checks, bankroll sizing
-
-orchestrator_agent:
-  schedule: "30 11 * * *"  # 11:30 AM ET daily
-  command: python -m agents.core.agent_runner --agent orchestrator
-  timezone: America/New_York
-  timeout: 900  # 15 minutes max
-  expected_duration: 300  # ~5 minutes typical
-  retry_on_failure: true
-  max_retries: 2
-  required_env:
-    - GEMINI_API_KEY
-    - DATABASE_URL
-    - REDIS_URL
-    - BALLDONTLIE_API_KEY
-
-# ============================================================================
-# Service #10: Model Watchdog Agent
-# ============================================================================
-# Service Type: Cron Job
-# Start Command: python -m agents.core.agent_runner --agent watchdog
-# Schedule: 1:30 AM ET (30 min after postgame)
-# Description: Monitors model health, detects drift and degradation,
-#              triggers retraining recommendations when statistically justified
-
-watchdog_agent:
-  schedule: "30 1 * * *"  # 1:30 AM ET daily
-  command: python -m agents.core.agent_runner --agent watchdog
-  timezone: America/New_York
-  timeout: 300  # 5 minutes max
-  expected_duration: 60  # ~1 minute typical
-  retry_on_failure: true
-  max_retries: 2
-  required_env:
-    - GEMINI_API_KEY
-    - DATABASE_URL
-    - REDIS_URL
-
-# ============================================================================
-# Service #11: Daily Briefing Agent
-# ============================================================================
-# Service Type: Cron Job
-# Start Command: python -m agents.core.agent_runner --agent briefing
-# Schedule: Noon + 6 PM ET (after orchestrator, then 1hr before tip-off)
-# Description: Synthesizes all agent outputs into a clear daily briefing
-#              for Colin — plain language, no jargon
-
-briefing_agent:
-  schedule:
-    - "0 12 * * *"   # Noon ET — after orchestrator completes
-    - "0 18 * * *"   # 6 PM ET — 1 hour before typical first tip-off
-  command: python -m agents.core.agent_runner --agent briefing
-  timezone: America/New_York
-  timeout: 300  # 5 minutes max
-  expected_duration: 60  # ~1 minute typical
-  retry_on_failure: true
-  max_retries: 2
-  required_env:
-    - GEMINI_API_KEY
-    - DATABASE_URL
-    - REDIS_URL
-
-# ============================================================================
-# Service #7: Redis (Provision via Railway dashboard)
+# Service #6: Redis (Provision via Railway dashboard)
 # ============================================================================
 # - Add Redis service from Railway's built-in integrations
 # - Railway auto-sets REDIS_URL for linked services
@@ -281,28 +173,6 @@ monitoring:
         channels: [email, slack]
 
 # ============================================================================
-# Cost Optimization Notes
-# ============================================================================
-# To reduce Railway costs:
-# 1. Use Cron Jobs instead of Workers when possible
-#    - Daily Predictions: ✅ Uses Cron Job (only runs once/day)
-#    - Odds Tracker: ❌ Uses Worker (needs to run every 5 min)
-#    - Retraining: ❌ Uses Worker (needs internal scheduler)
-#
-# 2. Optimize schedules
-#    - Only fetch odds during NBA games (8 AM - 11 PM)
-#    - Only run predictions on game days (check schedule first)
-#    - Run retraining off-peak hours (2 AM)
-#
-# 3. Archive old data
-#    - Delete odds_history older than 30 days
-#    - Delete predictions_history older than 90 days
-#
-# 4. Use Railway's free tier
-#    - $5/month credit included
-#    - Sufficient for light usage
-
-# ============================================================================
 # Deployment Checklist
 # ============================================================================
 # Before going live, ensure:
@@ -329,26 +199,9 @@ monitoring:
 # 5. Check database connectivity
 # 6. Review recent code changes
 # 7. Contact support if Railway issue
-#
-# Emergency contacts:
-# - Railway Support: https://railway.app/help
-# - GitHub Issues: [your-repo]/issues
-
-# ============================================================================
-# Success Metrics (Production)
-# ============================================================================
-# After 7 days of deployment, verify:
-# - API uptime: > 99.5%
-# - Daily predictions: 7/7 successful runs
-# - Odds tracker: > 95% data capture rate
-# - No critical alerts
-# - Database size: < 2 GB
-# - API response time: < 500ms (p95)
-# - Zero model deployment failures
-# - Positive paper trading ROI
 
 # ============================================================================
 # This configuration file is for reference only.
 # Actual schedules are configured in Railway dashboard.
-# See RAILWAY_DEPLOYMENT.md for detailed setup instructions.
+# See docs/railway-setup.md for detailed setup instructions.
 # ============================================================================

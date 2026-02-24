@@ -221,6 +221,9 @@ class HealthResponse(BaseModel):
     service: str
     timestamp: str
     models_loaded: bool = False
+    database_connected: bool = False
+    redis_connected: bool = False
+    checks: dict[str, Any] = {}
 
 
 # ============== DAILY PREDICTIONS SCHEMAS ==============
