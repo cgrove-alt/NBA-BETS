@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 from enum import Enum
 
@@ -730,7 +731,7 @@ def fetch_season_games(season: str = "2024-25", team_id: int | None = None) -> l
 def fetch_pbp_batch(
     game_ids: list[str],
     max_games: int = 100,
-    progress_callback: callable | None = None
+    progress_callback: Callable | None = None
 ) -> dict[str, list[Play]]:
     """
     Fetch PBP for multiple games (with rate limiting).
@@ -763,7 +764,7 @@ def fetch_pbp_batch(
 def fetch_shot_charts_batch(
     game_ids: list[str],
     max_games: int = 100,
-    progress_callback: callable | None = None
+    progress_callback: Callable | None = None
 ) -> dict[str, list[ShotLocation]]:
     """
     Fetch shot charts for multiple games.
