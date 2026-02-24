@@ -24,9 +24,9 @@ healthcheckTimeout = 300
 
 # NOTE: Multi-Service Deployment Strategy
 # ========================================
-# This Railway project should contain 4 separate services:
+# This Railway project contains 5 app services + 2 databases (7 total):
 #
-# 1. API Service (this file)
+# 1. API Service (this file's startCommand)
 #    - Start command: python -m uvicorn backend.api:app --host 0.0.0.0 --port $PORT
 #    - Handles all REST API endpoints
 #    - Connects to shared PostgreSQL database
@@ -50,58 +50,30 @@ healthcheckTimeout = 300
 #    - Incremental update: Every 3 days at 4 AM
 #    - Drift detection: Daily at 6 AM
 #
-# 5. Pre-Game Intelligence Agent
-#    - Start command: python -m agents.core.agent_runner --agent pregame
-#    - Cron schedule: 0 11,17 * * * (11 AM + 5 PM ET)
-#    - Gathers injury/lineup intel, synthesizes with LLM
+# 5. Agent Scheduler (unified daemon for all 6 AI agents)
+#    - Start command: python agent_scheduler.py --daemon
+#    - Runs continuously as background daemon
+#    - Uses APScheduler to run all 6 agents on their respective schedules:
+#      pregame:      11 AM + 5 PM ET (injury/lineup intel)
+#      postgame:     1 AM ET (post-game miss analysis)
+#      odds_monitor: every 15 min, 8 AM-11 PM ET (line movements)
+#      orchestrator: 11:30 AM ET (prediction pipeline)
+#      watchdog:     1:30 AM ET (model health check)
+#      briefing:     noon + 6 PM ET (daily briefing)
+#    - Each agent runs in its own thread; failures are isolated
+#    - Requires: REDIS_URL, GEMINI_API_KEY (optional)
 #
-# 6. Post-Game Analysis Agent
-#    - Start command: python -m agents.core.agent_runner --agent postgame
-#    - Cron schedule: 0 1 * * * (1 AM ET)
-#    - Analyzes prediction misses, detects patterns
+# 6. PostgreSQL (provision via Railway dashboard)
+#    - Railway auto-sets DATABASE_URL for linked services
 #
-# 7. Redis (Provision via Railway dashboard)
-#    - Add Redis service from Railway's built-in integrations
+# 7. Redis (provision via Railway dashboard)
 #    - Railway auto-sets REDIS_URL for linked services
 #    - Used by: agent message bus, inter-agent communication
-#
-# 8. Odds Monitor Agent
-#    - Start command: python -m agents.core.agent_runner --agent odds_monitor
-#    - Cron schedule: */15 8-23 * * * (every 15 min, 8 AM - 11 PM ET)
-#    - Tracks line movements, detects steam/RLM, alerts on edge erosion
-#    - Requires: THE_ODDS_API_KEY, REDIS_URL, GEMINI_API_KEY (optional)
-#
-# 9. Prediction Orchestrator Agent
-#    - Start command: python -m agents.core.agent_runner --agent orchestrator
-#    - Cron schedule: 30 11 * * * (11:30 AM ET, after pregame intel)
-#    - Coordinates prediction pipeline, adjusts confidence, generates signals
-#    - Requires: BALLDONTLIE_API_KEY, REDIS_URL, GEMINI_API_KEY (optional)
-#
-# 10. Model Watchdog Agent
-#    - Start command: python -m agents.core.agent_runner --agent watchdog
-#    - Cron schedule: 30 1 * * * (1:30 AM ET, after postgame)
-#    - Monitors model drift, feature staleness, performance degradation
-#    - Requires: REDIS_URL, GEMINI_API_KEY (optional)
-#
-# 11. Daily Briefing Agent
-#    - Start command: python -m agents.core.agent_runner --agent briefing
-#    - Cron schedule: 0 12,18 * * * (12 PM + 6 PM ET)
-#    - Synthesizes all agent outputs into plain-language daily brief
-#    - Requires: REDIS_URL, GEMINI_API_KEY (optional)
 #
 # All services share:
 # - Same GitHub repository
 # - Same PostgreSQL database (DATABASE_URL)
 # - Same environment variables (BALLDONTLIE_API_KEY, etc.)
-#
-# Railway Cron Service Setup:
-# ---------------------------
-# For services #2-4, create separate Railway services with:
-# - Service name: nba-betting-{service-name}
-# - Same repo link
-# - Custom start command (see above)
-# - Shared environment variables
-# - Shared PostgreSQL database link
 #
 # This architecture allows:
 # - Independent scaling of API vs background jobs

@@ -1,6 +1,6 @@
 # Railway Setup Guide
 
-Everything on the code side is done and pushed. You need to do 3 things in Railway's dashboard, then create 10 services. Here's exactly what to do.
+Everything on the code side is done and pushed. You need to do 3 things in Railway's dashboard, then create 5 services. Here's exactly what to do.
 
 ---
 
@@ -51,9 +51,9 @@ Everything on the code side is done and pushed. You need to do 3 things in Railw
 
 ---
 
-## Part 2: Create the 10 Services
+## Part 2: Create the 5 Services
 
-Your project needs 12 items total. You already have 1 service (the API). You need to create 10 more services + the 2 databases from Part 1.
+Your project needs 7 items total. You already have 1 service (the API). You need to create 4 more services + the 2 databases from Part 1.
 
 ### How to Create Each Service
 
@@ -110,63 +110,20 @@ For **every** service below, do this:
 
 ---
 
-### Service 5: Pre-Game Intel Agent
+### Service 5: Agent Scheduler (all 6 agents in one daemon)
 
-- **Name:** `nba-agent-pregame`
-- **Type:** Cron Job
-- **Start Command:** `python -m agents.core.agent_runner --agent pregame`
-- **Cron Schedule:** `0 11,17 * * *`
-- **What it does:** Runs at 11 AM + 5 PM ET. Gathers injury reports, lineup predictions, schedule context. Synthesizes with AI reasoning.
-
----
-
-### Service 6: Post-Game Analysis Agent
-
-- **Name:** `nba-agent-postgame`
-- **Type:** Cron Job
-- **Start Command:** `python -m agents.core.agent_runner --agent postgame`
-- **Cron Schedule:** `0 1 * * *`
-- **What it does:** Runs at 1 AM ET. Reviews yesterday's predictions vs actual results. Identifies why predictions missed.
-
----
-
-### Service 7: Odds Monitor Agent
-
-- **Name:** `nba-agent-odds-monitor`
-- **Type:** Cron Job
-- **Start Command:** `python -m agents.core.agent_runner --agent odds_monitor`
-- **Cron Schedule:** `*/15 8-23 * * *`
-- **What it does:** Runs every 15 minutes (8 AM - 11 PM ET). Tracks line movements, detects sharp money, alerts on edge erosion.
-
----
-
-### Service 8: Prediction Orchestrator Agent
-
-- **Name:** `nba-agent-orchestrator`
-- **Type:** Cron Job
-- **Start Command:** `python -m agents.core.agent_runner --agent orchestrator`
-- **Cron Schedule:** `30 11 * * *`
-- **What it does:** Runs at 11:30 AM ET (after pregame intel). Coordinates the full prediction pipeline, adjusts confidence, generates final bet/pass/lean signals.
-
----
-
-### Service 9: Model Watchdog Agent
-
-- **Name:** `nba-agent-watchdog`
-- **Type:** Cron Job
-- **Start Command:** `python -m agents.core.agent_runner --agent watchdog`
-- **Cron Schedule:** `30 1 * * *`
-- **What it does:** Runs at 1:30 AM ET (after postgame). Monitors model health, detects drift, recommends retraining when needed.
-
----
-
-### Service 10: Daily Briefing Agent
-
-- **Name:** `nba-agent-briefing`
-- **Type:** Cron Job
-- **Start Command:** `python -m agents.core.agent_runner --agent briefing`
-- **Cron Schedule:** `0 12,18 * * *`
-- **What it does:** Runs at noon + 6 PM ET. Creates your daily briefing -- today's picks, yesterday's results, system health, bankroll status. Plain English, no jargon.
+- **Name:** `nba-agent-scheduler`
+- **Type:** Worker (always-on)
+- **Start Command:** `python agent_scheduler.py --daemon`
+- **What it does:** Runs continuously. A single daemon that schedules and runs all 6 AI agents on their respective cron schedules:
+  - **pregame** — 11 AM + 5 PM ET: injury/lineup intel
+  - **postgame** — 1 AM ET: post-game miss analysis
+  - **odds_monitor** — every 15 min (8 AM-11 PM ET): line movement tracking
+  - **orchestrator** — 11:30 AM ET: prediction pipeline coordination
+  - **watchdog** — 1:30 AM ET: model health monitoring
+  - **briefing** — noon + 6 PM ET: daily briefing for Colin
+- Each agent runs in its own thread. If one agent fails, the others continue normally.
+- You can still run individual agents manually: `python -m agents.core.agent_runner --agent pregame`
 
 ---
 
@@ -189,14 +146,9 @@ After you've created all services:
 | 2 | Daily Predictions | Cron | `0 9 * * *` | `python daily_predictions.py` |
 | 3 | Odds Tracker | Worker | Always on | `python odds_tracker_service.py --daemon` |
 | 4 | Retraining | Worker | Always on | `python scheduled_retraining.py --daemon` |
-| 5 | PreGame Agent | Cron | `0 11,17 * * *` | `python -m agents.core.agent_runner --agent pregame` |
-| 6 | PostGame Agent | Cron | `0 1 * * *` | `python -m agents.core.agent_runner --agent postgame` |
-| 7 | Odds Monitor Agent | Cron | `*/15 8-23 * * *` | `python -m agents.core.agent_runner --agent odds_monitor` |
-| 8 | Orchestrator Agent | Cron | `30 11 * * *` | `python -m agents.core.agent_runner --agent orchestrator` |
-| 9 | Watchdog Agent | Cron | `30 1 * * *` | `python -m agents.core.agent_runner --agent watchdog` |
-| 10 | Briefing Agent | Cron | `0 12,18 * * *` | `python -m agents.core.agent_runner --agent briefing` |
-| 11 | PostgreSQL | Database | Always on | (auto-provisioned) |
-| 12 | Redis | Database | Always on | (auto-provisioned) |
+| 5 | Agent Scheduler | Worker | Always on | `python agent_scheduler.py --daemon` |
+| 6 | PostgreSQL | Database | Always on | (auto-provisioned) |
+| 7 | Redis | Database | Always on | (auto-provisioned) |
 
 ---
 
@@ -204,10 +156,10 @@ After you've created all services:
 
 - **Railway free tier:** $5/month credit
 - **PostgreSQL + Redis:** ~$5-10/month each depending on usage
-- **Cron jobs:** Billed per execution time (very cheap -- most run < 5 minutes)
-- **Workers (Odds Tracker + Retraining):** ~$5-10/month each (always on)
+- **Cron job (Daily Predictions):** Billed per execution time (very cheap -- runs < 5 minutes)
+- **Workers (Odds Tracker + Retraining + Agent Scheduler):** ~$5-10/month each (always on)
 - **Gemini API:** Free tier is sufficient for agent usage
-- **Estimated total:** ~$20-40/month
+- **Estimated total:** ~$15-30/month (down from ~$20-40 with separate agent services)
 
 ## If Something Goes Wrong
 
