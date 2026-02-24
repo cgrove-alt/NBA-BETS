@@ -48,6 +48,21 @@ healthcheckTimeout = 300
 #    - Incremental update: Every 3 days at 4 AM
 #    - Drift detection: Daily at 6 AM
 #
+# 5. Pre-Game Intelligence Agent
+#    - Start command: python -m agents.core.agent_runner --agent pregame
+#    - Cron schedule: 0 11,17 * * * (11 AM + 5 PM ET)
+#    - Gathers injury/lineup intel, synthesizes with LLM
+#
+# 6. Post-Game Analysis Agent
+#    - Start command: python -m agents.core.agent_runner --agent postgame
+#    - Cron schedule: 0 1 * * * (1 AM ET)
+#    - Analyzes prediction misses, detects patterns
+#
+# 7. Redis (Provision via Railway dashboard)
+#    - Add Redis service from Railway's built-in integrations
+#    - Railway auto-sets REDIS_URL for linked services
+#    - Used by: agent message bus, future odds monitoring
+#
 # All services share:
 # - Same GitHub repository
 # - Same PostgreSQL database (DATABASE_URL)

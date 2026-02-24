@@ -94,12 +94,69 @@ retraining_scheduler:
   restart_policy: on_failure
 
 # ============================================================================
+# Service #5: Pre-Game Intelligence Agent
+# ============================================================================
+# Service Type: Cron Job
+# Start Command: python -m agents.core.agent_runner --agent pregame
+# Schedule: Runs twice daily (morning intel + pre-tip update)
+# Description: Gathers injury reports, lineup confirmations, schedule context
+#              and synthesizes with LLM reasoning for game intelligence
+
+pregame_agent:
+  schedule:
+    - "0 11 * * *"  # 11 AM ET — 6-8 hours before typical first tip-off
+    - "0 17 * * *"  # 5 PM ET — 2 hours before first tip for late-breaking updates
+  command: python -m agents.core.agent_runner --agent pregame
+  timezone: America/New_York
+  timeout: 600  # 10 minutes max
+  expected_duration: 180  # ~3 minutes typical
+  retry_on_failure: true
+  max_retries: 2
+  required_env:
+    - GEMINI_API_KEY
+    - DATABASE_URL
+    - REDIS_URL
+    - BALLDONTLIE_API_KEY
+
+# ============================================================================
+# Service #6: Post-Game Analysis Agent
+# ============================================================================
+# Service Type: Cron Job
+# Start Command: python -m agents.core.agent_runner --agent postgame
+# Schedule: After all games complete (~1 AM ET)
+# Description: Reviews predictions vs actual results, analyzes misses with
+#              LLM reasoning, detects patterns, generates model feedback
+
+postgame_agent:
+  schedule: "0 1 * * *"  # 1 AM ET — after all games complete
+  command: python -m agents.core.agent_runner --agent postgame
+  timezone: America/New_York
+  timeout: 600  # 10 minutes max
+  expected_duration: 120  # ~2 minutes typical
+  retry_on_failure: true
+  max_retries: 2
+  required_env:
+    - GEMINI_API_KEY
+    - DATABASE_URL
+    - REDIS_URL
+
+# ============================================================================
+# Service #7: Redis (Provision via Railway dashboard)
+# ============================================================================
+# - Add Redis service from Railway's built-in integrations
+# - Railway auto-sets REDIS_URL for linked services
+# - Used by: agent message bus, future odds monitoring
+# - No custom configuration needed
+
+# ============================================================================
 # Environment Variables Required
 # ============================================================================
 # All cron jobs and workers require these environment variables:
 # - BALLDONTLIE_API_KEY (required)
 # - DATABASE_URL (required, auto-provisioned by Railway)
 # - THE_ODDS_API_KEY (optional, for odds tracker)
+# - REDIS_URL (required for agents, auto-provisioned by Railway Redis)
+# - GEMINI_API_KEY (required for agent LLM reasoning)
 # - ALERT_EMAIL (optional, for alerts)
 # - SLACK_WEBHOOK (optional, for alerts)
 # - MAX_TRAINING_TIME (optional, default: 7200)
