@@ -32,8 +32,12 @@ logger = logging.getLogger(__name__)
 
 # Agent name -> (module_path, class_name, schedule)
 AGENT_CATALOG = {
-    'pregame': ('agents.pregame.pregame_agent', 'PreGameIntelAgent', '0 11,17 * * *'),
-    'postgame': ('agents.postgame.postgame_agent', 'PostGameAnalysisAgent', '0 1 * * *'),
+    'pregame':      ('agents.pregame.pregame_agent',            'PreGameIntelAgent',              '0 11,17 * * *'),
+    'postgame':     ('agents.postgame.postgame_agent',          'PostGameAnalysisAgent',          '0 1 * * *'),
+    'odds_monitor': ('agents.odds_monitor.odds_monitor_agent',  'OddsMonitorAgent',               '*/15 8-23 * * *'),
+    'orchestrator': ('agents.orchestrator.orchestrator_agent',  'PredictionOrchestratorAgent',    '30 11 * * *'),
+    'watchdog':     ('agents.watchdog.watchdog_agent',          'ModelWatchdogAgent',             '30 1 * * *'),
+    'briefing':     ('agents.briefing.briefing_agent',          'DailyBriefingAgent',             '0 12,18 * * *'),
 }
 
 

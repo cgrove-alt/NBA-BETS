@@ -141,6 +141,98 @@ postgame_agent:
     - REDIS_URL
 
 # ============================================================================
+# Service #8: Odds Monitoring Agent
+# ============================================================================
+# Service Type: Cron Job
+# Start Command: python -m agents.core.agent_runner --agent odds_monitor
+# Schedule: Every 15 minutes during game hours (8 AM - 11 PM ET)
+# Description: Monitors line movements, detects steam moves and stale lines,
+#              interprets sharp vs public money with LLM reasoning
+
+odds_monitor_agent:
+  schedule: "*/15 8-23 * * *"  # Every 15 min, 8 AM - 11 PM ET
+  command: python -m agents.core.agent_runner --agent odds_monitor
+  timezone: America/New_York
+  timeout: 180  # 3 minutes max
+  expected_duration: 60  # ~1 minute typical
+  retry_on_failure: true
+  max_retries: 2
+  required_env:
+    - GEMINI_API_KEY
+    - DATABASE_URL
+    - REDIS_URL
+    - THE_ODDS_API_KEY
+
+# ============================================================================
+# Service #9: Prediction Orchestrator Agent
+# ============================================================================
+# Service Type: Cron Job
+# Start Command: python -m agents.core.agent_runner --agent orchestrator
+# Schedule: 11:30 AM ET (30 min after pregame's first run)
+# Description: Coordinates prediction pipeline with agent intelligence —
+#              confidence adjustments, correlation checks, bankroll sizing
+
+orchestrator_agent:
+  schedule: "30 11 * * *"  # 11:30 AM ET daily
+  command: python -m agents.core.agent_runner --agent orchestrator
+  timezone: America/New_York
+  timeout: 900  # 15 minutes max
+  expected_duration: 300  # ~5 minutes typical
+  retry_on_failure: true
+  max_retries: 2
+  required_env:
+    - GEMINI_API_KEY
+    - DATABASE_URL
+    - REDIS_URL
+    - BALLDONTLIE_API_KEY
+
+# ============================================================================
+# Service #10: Model Watchdog Agent
+# ============================================================================
+# Service Type: Cron Job
+# Start Command: python -m agents.core.agent_runner --agent watchdog
+# Schedule: 1:30 AM ET (30 min after postgame)
+# Description: Monitors model health, detects drift and degradation,
+#              triggers retraining recommendations when statistically justified
+
+watchdog_agent:
+  schedule: "30 1 * * *"  # 1:30 AM ET daily
+  command: python -m agents.core.agent_runner --agent watchdog
+  timezone: America/New_York
+  timeout: 300  # 5 minutes max
+  expected_duration: 60  # ~1 minute typical
+  retry_on_failure: true
+  max_retries: 2
+  required_env:
+    - GEMINI_API_KEY
+    - DATABASE_URL
+    - REDIS_URL
+
+# ============================================================================
+# Service #11: Daily Briefing Agent
+# ============================================================================
+# Service Type: Cron Job
+# Start Command: python -m agents.core.agent_runner --agent briefing
+# Schedule: Noon + 6 PM ET (after orchestrator, then 1hr before tip-off)
+# Description: Synthesizes all agent outputs into a clear daily briefing
+#              for Colin — plain language, no jargon
+
+briefing_agent:
+  schedule:
+    - "0 12 * * *"   # Noon ET — after orchestrator completes
+    - "0 18 * * *"   # 6 PM ET — 1 hour before typical first tip-off
+  command: python -m agents.core.agent_runner --agent briefing
+  timezone: America/New_York
+  timeout: 300  # 5 minutes max
+  expected_duration: 60  # ~1 minute typical
+  retry_on_failure: true
+  max_retries: 2
+  required_env:
+    - GEMINI_API_KEY
+    - DATABASE_URL
+    - REDIS_URL
+
+# ============================================================================
 # Service #7: Redis (Provision via Railway dashboard)
 # ============================================================================
 # - Add Redis service from Railway's built-in integrations

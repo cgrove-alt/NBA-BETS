@@ -15,11 +15,19 @@ Core Framework:
 Agents:
     - PreGameIntelAgent: Pre-game intelligence (injuries, lineups, context)
     - PostGameAnalysisAgent: Post-game analysis (miss analysis, patterns)
+    - OddsMonitorAgent: Real-time odds monitoring (steam moves, stale lines)
+    - PredictionOrchestratorAgent: Prediction pipeline orchestration with judgment
+    - ModelWatchdogAgent: Model health monitoring and drift detection
+    - DailyBriefingAgent: Daily briefing synthesis for Colin
 
 Usage:
     from agents.core import AgentBase, MessageBus, Guardrails
     from agents.pregame import PreGameIntelAgent
     from agents.postgame import PostGameAnalysisAgent
+    from agents.odds_monitor import OddsMonitorAgent
+    from agents.orchestrator import PredictionOrchestratorAgent
+    from agents.watchdog import ModelWatchdogAgent
+    from agents.briefing import DailyBriefingAgent
 """
 
 from agents.core.agent_base import AgentBase, AgentResult, AgentStatus
