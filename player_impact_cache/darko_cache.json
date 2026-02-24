@@ -1,19 +1,9 @@
 {
-  "timestamp": "2026-01-27T14:48:20.768711",
+  "timestamp": "2026-02-24T15:09:51.903421",
   "players": {
-    "Nikola Jokic": {
-      "source": "darko",
-      "raw_dpm": 7.5,
-      "impact_metric": 9.375,
-      "team": "DEN",
-      "season": "2024-25"
-    },
-    "Luka Doncic": {
-      "source": "darko",
-      "raw_dpm": 6.8,
-      "impact_metric": 8.5,
-      "team": "DAL",
-      "season": "2024-25"
+    "Test Player": {
+      "impact_metric": 7.0,
+      "team": "BOS"
     }
   }
 }
