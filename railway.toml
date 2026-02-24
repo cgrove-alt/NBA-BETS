@@ -33,7 +33,7 @@ healthcheckTimeout = 300
 #
 # 2. Daily Predictions Service
 #    - Start command: python daily_predictions.py
-#    - Cron schedule: 0 9 * * * (every day at 9 AM EST)
+#    - Cron schedule: 0 14 * * * (every day at 9 AM ET / 14:00 UTC)
 #    - Generates predictions for all games
 #    - Stores results in database and CSV
 #

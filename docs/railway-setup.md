@@ -53,6 +53,8 @@ Everything on the code side is done and pushed. You need to do 3 things in Railw
 
 ## Part 2: Create the 5 Services
 
+> **Important:** Railway cron schedules are in **UTC**, not Eastern Time. All cron expressions below use UTC values. The descriptions note the equivalent ET time so you know when things actually run.
+
 Your project needs 7 items total. You already have 1 service (the API). You need to create 4 more services + the 2 databases from Part 1.
 
 ### How to Create Each Service
@@ -87,8 +89,8 @@ For **every** service below, do this:
 - **Name:** `nba-daily-predictions`
 - **Type:** Cron Job
 - **Start Command:** `python daily_predictions.py`
-- **Cron Schedule:** `0 9 * * *`
-- **What it does:** Runs at 9 AM ET every day. Loads models, fetches today's games, generates spread + prop predictions, saves to database.
+- **Cron Schedule:** `0 14 * * *`
+- **What it does:** Runs at 9 AM ET (14:00 UTC) every day. Loads models, fetches today's games, generates spread + prop predictions, saves to database.
 
 ---
 
@@ -143,7 +145,7 @@ After you've created all services:
 | # | Service | Type | Schedule | Start Command |
 |---|---------|------|----------|---------------|
 | 1 | API | Web | Always on | `python -m uvicorn backend.api:app --host 0.0.0.0 --port $PORT` |
-| 2 | Daily Predictions | Cron | `0 9 * * *` | `python daily_predictions.py` |
+| 2 | Daily Predictions | Cron | `0 14 * * *` | `python daily_predictions.py` |
 | 3 | Odds Tracker | Worker | Always on | `python odds_tracker_service.py --daemon` |
 | 4 | Retraining | Worker | Always on | `python scheduled_retraining.py --daemon` |
 | 5 | Agent Scheduler | Worker | Always on | `python agent_scheduler.py --daemon` |

@@ -593,7 +593,8 @@ def create_scheduler(daemon: bool = False):
     Args:
         daemon: If True, use BackgroundScheduler; else BlockingScheduler
     """
-    scheduler = BackgroundScheduler() if daemon else BlockingScheduler()
+    tz = 'America/New_York'
+    scheduler = BackgroundScheduler(timezone=tz) if daemon else BlockingScheduler(timezone=tz)
 
     # Job 1: Full retraining every 7 days (Sundays at 2 AM)
     scheduler.add_job(
