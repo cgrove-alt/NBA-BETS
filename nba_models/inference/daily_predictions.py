@@ -84,6 +84,20 @@ except ImportError:
     MinutesFeatureGenerator = None
     MINUTES_ORACLE_AVAILABLE = False
 
+# Phase 4: Edge Calculator for proper edge/EV computation
+try:
+    from edge_calculator import EdgeCalculator
+    HAS_EDGE_CALCULATOR = True
+except ImportError:
+    HAS_EDGE_CALCULATOR = False
+
+# Phase 4: Calibration Service for prediction logging
+try:
+    from calibration_tracker import CalibrationService
+    HAS_CALIBRATION = True
+except ImportError:
+    HAS_CALIBRATION = False
+
 # Import Kelly bet sizing from risk_management (Task 3.4)
 try:
     from risk_management import calculate_kelly_bet_size, get_kelly_multiplier_for_tier
@@ -107,6 +121,93 @@ def get_tier_from_confidence(confidence_score: float) -> str:
     if confidence_score >= 40:
         return 'weak'
     return 'avoid'
+
+# Phase 4: Edge-focused prop edge calculation
+def _calculate_prop_edge(over_prob: float, american_odds: int = -110) -> dict:
+    """
+    Calculate edge for both OVER and UNDER sides of a prop bet.
+
+    Uses EdgeCalculator when available, falls back to legacy formula.
+
+    Args:
+        over_prob: Model's probability of the OVER hitting (0-1)
+        american_odds: American odds for the bet (default -110)
+
+    Returns:
+        Dict with over_edge, under_edge, pick, edge, edge_quality, ev_per_dollar,
+        implied_probability, model_probability, has_edge
+    """
+    under_prob = 1.0 - over_prob
+
+    if HAS_EDGE_CALCULATOR:
+        calc = EdgeCalculator(min_edge_threshold=0.02)
+
+        over_result = calc.calculate_edge(over_prob, american_odds)
+        under_result = calc.calculate_edge(under_prob, american_odds)
+
+        # Pick the side with more edge
+        if over_result.edge >= under_result.edge:
+            pick = 'OVER'
+            best = over_result
+        else:
+            pick = 'UNDER'
+            best = under_result
+
+        return {
+            'over_edge': over_result.edge_percentage,
+            'under_edge': under_result.edge_percentage,
+            'pick': pick,
+            'edge': best.edge_percentage,
+            'edge_quality': best.edge_quality,
+            'ev_per_dollar': best.ev_per_dollar,
+            'implied_probability': best.implied_probability,
+            'model_probability': best.model_probability,
+            'has_edge': best.has_edge,
+        }
+    else:
+        # Legacy fallback: assumes -110 odds (implied 52.4%)
+        over_edge = (over_prob - 0.524) * 100
+        under_edge = (under_prob - 0.524) * 100
+
+        if over_edge >= under_edge:
+            pick = 'OVER'
+            edge = over_edge
+        else:
+            pick = 'UNDER'
+            edge = under_edge
+
+        return {
+            'over_edge': over_edge,
+            'under_edge': under_edge,
+            'pick': pick,
+            'edge': edge,
+            'edge_quality': 'strong' if edge >= 5 else 'moderate' if edge >= 3 else 'marginal' if edge >= 2 else 'none',
+            'ev_per_dollar': edge / 100,
+            'implied_probability': 0.524,
+            'model_probability': over_prob if pick == 'OVER' else under_prob,
+            'has_edge': edge >= 2,
+        }
+
+
+def get_signal_from_edge(edge: float, edge_quality: str = None) -> str:
+    """
+    Map edge magnitude to BET/LEAN/PASS/FADE signal per CLAUDE.md.
+
+    Args:
+        edge: Edge percentage (positive = value, negative = anti-value)
+        edge_quality: Quality classification from EdgeCalculator
+
+    Returns:
+        Signal string: 'BET', 'LEAN', 'PASS', or 'FADE'
+    """
+    if edge_quality in ('strong', 'moderate'):
+        return 'BET'
+    if edge_quality == 'marginal':
+        return 'LEAN'
+    if edge < -5:
+        return 'FADE'
+    return 'PASS'
+
 
 # Import training feature generator for accurate prop predictions
 try:
@@ -1234,7 +1335,14 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
         bet_side = f"{away_abbrev} {-market_spread:+.1f}"
         cover_prob = get_spread_cover_probability(abs(spread_edge_points))
 
-    edge_pct = (cover_prob - 0.524) * 100  # vs -110 implied 52.4%
+    # Phase 4: Use EdgeCalculator for spread edge when available
+    spread_odds = odds.get('spread_home_odds', -110) if spread_edge_points > 0 else odds.get('spread_away_odds', -110)
+    if HAS_EDGE_CALCULATOR:
+        _spread_calc = EdgeCalculator(min_edge_threshold=0.02)
+        _spread_result = _spread_calc.calculate_edge(cover_prob, spread_odds)
+        edge_pct = _spread_result.edge_percentage
+    else:
+        edge_pct = (cover_prob - 0.524) * 100  # vs -110 implied 52.4%
 
     analysis['spread'] = {
         'predicted_spread': predicted_spread,
@@ -1421,6 +1529,7 @@ def predict_player_prop(
     teammate_injured: list[str] = None,  # Injured teammates
     team_id: int = None,  # Player's team ID (Phase 3: minutes oracle)
     game_context: dict = None,  # Game context for minutes oracle
+    american_odds: int = -110,  # Phase 4: actual odds for edge calc
 ) -> dict:
     """
     Predict over/under probability for a player prop.
@@ -1494,7 +1603,6 @@ def predict_player_prop(
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
                     z_score = (predicted_value - line) / std
                     over_prob = float(norm.cdf(z_score))
-                    edge = (over_prob - 0.524) * 100
 
                 # Handle StackingRegressor format (has 'base_models' key)
                 elif isinstance(model_data, dict) and 'base_models' in model_data and 'meta_model' in model_data:
@@ -1533,7 +1641,6 @@ def predict_player_prop(
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
                     z_score = (predicted_value - line) / std
                     over_prob = float(norm.cdf(z_score))
-                    edge = (over_prob - 0.524) * 100
 
                 # Handle dict format with single model
                 elif isinstance(model_data, dict) and 'model' in model_data:
@@ -1558,7 +1665,6 @@ def predict_player_prop(
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
                     z_score = (predicted_value - line) / std
                     over_prob = float(norm.cdf(z_score))
-                    edge = (over_prob - 0.524) * 100
 
                 # Handle model object with predict method
                 elif hasattr(model_data, 'predict'):
@@ -1566,13 +1672,11 @@ def predict_player_prop(
 
                     if 'over_probability' in result:
                         over_prob = result['over_probability']
-                        edge = (over_prob - 0.524) * 100
                     elif 'predicted_value' in result:
                         predicted_value = result['predicted_value']
                         std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
                         z_score = (predicted_value - line) / std
                         over_prob = float(norm.cdf(z_score))
-                        edge = (over_prob - 0.524) * 100
 
         except Exception:
             pass  # Fall through to return defaults
@@ -1609,7 +1713,6 @@ def predict_player_prop(
                     std = get_prop_std_dev(prop_type)
                     z_score = (predicted_value - line) / std
                     over_prob = float(norm.cdf(z_score))
-                    edge = (over_prob - 0.524) * 100
 
     # Apply injury-based adjustments to predicted value
     injury_boost_info = {'boost_factor': 1.0, 'reasons': []}
@@ -1634,9 +1737,13 @@ def predict_player_prop(
                 std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
                 z_score = (predicted_value - line) / std
                 over_prob = float(norm.cdf(z_score))
-                edge = (over_prob - 0.524) * 100
         except Exception:
             pass  # Continue without injury adjustment if it fails
+
+    # Phase 4: Single edge computation after all adjustments (minutes + injury)
+    edge_info = _calculate_prop_edge(over_prob, american_odds)
+    edge = edge_info['edge']
+    pick = edge_info['pick']
 
     # Task 3.4: Add prediction bands using quantile models
     pred_low = None
@@ -1645,7 +1752,7 @@ def predict_player_prop(
     confidence_score = 50.0  # Default moderate confidence
     edge_quality_tier = 'moderate'
     suggested_bet_size = 0.0
-    bet_recommendation = 'MONITOR'
+    bet_recommendation = 'PASS'  # Phase 4: default to PASS
 
     # Try to get quantile predictions for better risk assessment
     quantile_model_dict = models.get(f'prop_{prop_type}_quantile')
@@ -1772,26 +1879,20 @@ def predict_player_prop(
             # Calculate bet size as percentage of bankroll for display
             (suggested_bet_size / default_bankroll) * 100
 
-            # Determine recommendation based on edge and confidence
-            if edge_quality_tier in ['elite', 'strong'] and abs(edge) > 5:
-                bet_recommendation = 'BET'
-            elif edge_quality_tier == 'moderate' and abs(edge) > 3:
-                bet_recommendation = 'CONSIDER'
-            else:
-                bet_recommendation = 'MONITOR'
-
         except Exception:
             # Fall back to defaults
             pass
 
-    # Without full feature generation, just show the prop lines
-    # Edge calculation would need player stats
+    # Phase 4: Signal classification using edge magnitude
+    bet_recommendation = get_signal_from_edge(edge, edge_info.get('edge_quality'))
+
     return {
         'player': player_name,
         'player_id': player_id,
         'stat': prop_type.upper(),
         'line': line,
         'over_prob': over_prob,
+        'under_prob': 1.0 - over_prob,
         'edge': edge,
         'predicted_value': predicted_value,
         'pred_low': pred_low,
@@ -1806,6 +1907,17 @@ def predict_player_prop(
         'minutes_distribution': minutes_dist,
         'predicted_minutes': minutes_dist.get('p50') if minutes_dist else None,
         'minutes_uncertainty': minutes_dist.get('uncertainty') if minutes_dist else None,
+        # Phase 4: Edge-focused fields
+        'pick': pick,
+        'over_edge': edge_info['over_edge'],
+        'under_edge': edge_info['under_edge'],
+        'edge_quality': edge_info['edge_quality'],
+        'ev_per_dollar': edge_info['ev_per_dollar'],
+        'implied_probability': edge_info['implied_probability'],
+        'model_probability': edge_info['model_probability'],
+        'has_edge': edge_info['has_edge'],
+        'american_odds': american_odds,
+        'signal': bet_recommendation,
     }
 
 
@@ -2237,6 +2349,55 @@ def main():
         all_analyses.append(analysis)
         print_game_analysis(analysis)
 
+    # Phase 4: Log predictions to calibration tracker
+    if HAS_CALIBRATION and all_player_props:
+        try:
+            _cal_service = CalibrationService()
+            logged_count = 0
+            for prop in all_player_props:
+                try:
+                    game_str = prop.get('game', '')
+                    opponent = ''
+                    if '@' in game_str:
+                        parts = game_str.split('@')
+                        opponent = parts[0]  # away team abbreviation
+
+                    _cal_service.log_prediction(
+                        player_id=prop.get('player_id', 0),
+                        player_name=prop.get('player', ''),
+                        team='',
+                        opponent=opponent,
+                        game_date=target_date,
+                        prop_type=prop.get('stat', ''),
+                        predicted_value=prop.get('predicted_value') or 0,
+                        prop_line=prop.get('line', 0),
+                        predicted_over_prob=prop.get('over_prob'),
+                        confidence=prop.get('confidence_score'),
+                        edge=prop.get('edge'),
+                        minutes_predicted=prop.get('predicted_minutes'),
+                        minutes_uncertainty=prop.get('minutes_uncertainty'),
+                        is_home=prop.get('game_context', {}).get('is_home') if isinstance(prop.get('game_context'), dict) else None,
+                        spread=prop.get('game_context', {}).get('spread') if isinstance(prop.get('game_context'), dict) else None,
+                        total=prop.get('game_context', {}).get('total') if isinstance(prop.get('game_context'), dict) else None,
+                    )
+                    logged_count += 1
+                except Exception:
+                    continue
+            print(f"\n  Logged {logged_count} predictions to calibration tracker")
+        except Exception as e:
+            print(f"\n  Warning: Prediction logging failed: {e}")
+
+    # Phase 4: Record BET/LEAN signals to bet tracker for CLV
+    try:
+        from nba_betting.edge.clv_bridge import record_predictions_as_bets
+        bet_count = record_predictions_as_bets(all_player_props, target_date)
+        if bet_count > 0:
+            print(f"  Recorded {bet_count} BET/LEAN signals to bet tracker")
+    except ImportError:
+        pass  # CLV bridge not yet available
+    except Exception as e:
+        print(f"  Warning: CLV recording failed: {e}")
+
     # Summary of best bets
     print("\n" + "=" * 65)
     print("  TOP RECOMMENDATIONS (>5% edge)")
@@ -2273,16 +2434,18 @@ def main():
                 'edge': a['spread']['edge_pct']
             })
 
-        # Player prop edges
+        # Player prop edges — Phase 4: use pick and signal fields
         for prop in a.get('player_props', []):
-            if abs(prop['edge']) > 5:
-                direction = "Over" if prop['over_prob'] > 0.5 else "Under"
-                prob = prop['over_prob'] if prop['over_prob'] > 0.5 else (1 - prop['over_prob'])
+            signal = prop.get('signal', prop.get('bet_recommendation', 'PASS'))
+            if signal in ('BET', 'LEAN'):
+                direction = prop.get('pick', 'OVER' if prop['over_prob'] > 0.5 else 'UNDER')
+                prob = prop.get('model_probability', prop['over_prob'] if prop['over_prob'] > 0.5 else (1 - prop['over_prob']))
                 recommendations.append({
                     'game': f"{away}@{home}",
                     'bet': f"{prop['player']} {prop['stat']} {direction} {prop['line']}",
                     'prob': prob,
-                    'edge': prop['edge']
+                    'edge': prop['edge'],
+                    'signal': signal,
                 })
 
     # Sort by edge
@@ -2313,13 +2476,10 @@ def main():
                     # For now, leave empty - frontend doesn't strictly need it
                     team = ''
 
-                # Generate pick from over_prob and bet_recommendation
+                # Phase 4: Use pick directly from prediction output
                 over_prob = prop.get('over_prob', 0.5)
-                bet_rec = prop.get('bet_recommendation', 'MONITOR')
-                if bet_rec in ['BET', 'STRONG_BET']:
-                    pick = 'OVER' if over_prob > 0.5 else 'UNDER'
-                else:
-                    pick = '-'
+                bet_rec = prop.get('bet_recommendation', 'PASS')
+                pick = prop.get('pick', 'OVER' if over_prob > 0.5 else 'UNDER')
 
                 row = {
                     'date': target_date,
@@ -2333,12 +2493,20 @@ def main():
                     'pred_median': prop.get('pred_median', ''),
                     'pred_high': prop.get('pred_high', ''),
                     'over_prob': over_prob,
+                    'under_prob': prop.get('under_prob', 1.0 - over_prob),
                     'edge': prop.get('edge', 0),
+                    'over_edge': prop.get('over_edge', 0),
+                    'under_edge': prop.get('under_edge', 0),
                     'confidence_score': prop.get('confidence_score', 50),
                     'edge_quality_tier': prop.get('edge_quality_tier', 'moderate'),
+                    'edge_quality': prop.get('edge_quality', ''),
                     'suggested_bet_size': prop.get('suggested_bet_size', 0),
                     'bet_recommendation': bet_rec,
-                    'pick': pick,  # Added for API compatibility
+                    'signal': prop.get('signal', bet_rec),
+                    'pick': pick,
+                    'american_odds': prop.get('american_odds', -110),
+                    'ev_per_dollar': prop.get('ev_per_dollar', 0),
+                    'has_edge': prop.get('has_edge', False),
                     'uncertainty_flag': prop.get('uncertainty_flag', ''),
                     'injury_boost': prop.get('injury_boost', 1.0),
                 }

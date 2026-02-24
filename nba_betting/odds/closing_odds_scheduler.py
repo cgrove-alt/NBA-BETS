@@ -192,6 +192,17 @@ def capture_closing_odds(
                 # Save to disk
                 line_tracker.save_history(game_id)
 
+                # Phase 4: Update CLV bridge with closing odds
+                try:
+                    from nba_betting.edge.clv_bridge import update_closing_odds as _update_clv
+                    # Update any tracked prop bets for this game
+                    # Prop closing odds default to the spread odds as approximation
+                    _update_clv(game_id, formatted_odds.get('spread', {}).get('home_odds', -110))
+                except ImportError:
+                    pass
+                except Exception:
+                    pass
+
                 print(f"  Captured closing odds for {away_team}@{home_team}")
                 return True
 
