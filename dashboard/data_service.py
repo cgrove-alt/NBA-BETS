@@ -50,6 +50,15 @@ except ImportError:
     training_module = None
     TRAINING_MODULE_AVAILABLE = False
 
+# Minutes Oracle for minutes distribution prediction
+try:
+    from minutes_oracle import MinutesPredictor, MinutesFeatureGenerator
+    MINUTES_ORACLE_AVAILABLE = True
+except ImportError:
+    MinutesPredictor = None
+    MinutesFeatureGenerator = None
+    MINUTES_ORACLE_AVAILABLE = False
+
 
 class ModelUnpickler(pickle.Unpickler):
     """Custom unpickler that remaps __main__ to portable model classes.
@@ -63,6 +72,16 @@ class ModelUnpickler(pickle.Unpickler):
     2. Fall back to train_complete_balldontlie (full training module)
     3. Default pickle behavior
     """
+    # Remap old root-level module paths to new package paths
+    MODULE_REMAPS = {
+        'model_trainer': 'nba_models.models.model_trainer',
+        'model_classes': 'nba_models.models.model_classes',
+        'train_complete_balldontlie': 'nba_models.training.train_complete_balldontlie',
+        'stacking_meta_learner': 'nba_models.models.stacking_meta_learner',
+        'stacked_model_v2': 'nba_models.models.stacked_model_v2',
+        'calibration': 'nba_models.models.calibration',
+    }
+
     def find_class(self, module, name):
         # First, try portable model_classes module (preferred)
         if module == '__main__' and MODEL_CLASSES_AVAILABLE:
@@ -73,6 +92,10 @@ class ModelUnpickler(pickle.Unpickler):
         if module == '__main__' and TRAINING_MODULE_AVAILABLE:
             if hasattr(training_module, name):
                 return getattr(training_module, name)
+
+        # Remap old root-level module paths to new package locations
+        if module in self.MODULE_REMAPS:
+            module = self.MODULE_REMAPS[module]
 
         return super().find_class(module, name)
 
@@ -693,6 +716,10 @@ class DataService:
         # Continuous learning orchestrator (auto-settlement, drift detection, retraining)
         self._continuous_learning = None
 
+        # Minutes Oracle for distribution-based minutes prediction
+        self._minutes_oracle = None
+        self._minutes_feature_gen = None
+
         self._initialize()
         DataService._initialized = True
 
@@ -733,6 +760,16 @@ class DataService:
         # Custom unpickler to handle class name mismatches
         # Use portable classes from model_classes.py when available
         class LocalModelUnpickler(pickle.Unpickler):
+            # Remap old root-level module paths to new package paths
+            MODULE_REMAPS = {
+                'model_trainer': 'nba_models.models.model_trainer',
+                'model_classes': 'nba_models.models.model_classes',
+                'train_complete_balldontlie': 'nba_models.training.train_complete_balldontlie',
+                'stacking_meta_learner': 'nba_models.models.stacking_meta_learner',
+                'stacked_model_v2': 'nba_models.models.stacked_model_v2',
+                'calibration': 'nba_models.models.calibration',
+            }
+
             def find_class(self, module, name):
                 # Map class names to our local/portable wrapper classes
                 if name == 'SpreadEnsembleWrapper':
@@ -751,6 +788,9 @@ class DataService:
                 if module == '__main__' and TRAINING_MODULE_AVAILABLE:
                     if hasattr(training_module, name):
                         return getattr(training_module, name)
+                # Remap old root-level module paths to new package locations
+                if module in self.MODULE_REMAPS:
+                    module = self.MODULE_REMAPS[module]
                 # Fall back to default behavior
                 return super().find_class(module, name)
 
@@ -896,6 +936,21 @@ class DataService:
 
             except Exception as e:
                 print(f"Error loading {prop_type} model: {e}")
+
+        # Load Minutes Oracle for minutes distribution prediction
+        if MINUTES_ORACLE_AVAILABLE:
+            try:
+                minutes_oracle_path = model_dir / "minutes_oracle.pkl"
+                if minutes_oracle_path.exists():
+                    self._minutes_oracle = MinutesPredictor.load(minutes_oracle_path)
+                    self._minutes_feature_gen = MinutesFeatureGenerator()
+                    print(f"Minutes Oracle loaded (interval_scale={self._minutes_oracle.interval_scale:.2f}, "
+                          f"samples={self._minutes_oracle.training_samples})")
+                else:
+                    print("Minutes Oracle not found - using fallback minutes projection")
+            except Exception as e:
+                print(f"Error loading Minutes Oracle: {e}")
+                self._minutes_oracle = None
 
     def _start_continuous_learning(self):
         """Start the continuous learning system with auto-settlement and drift detection."""
@@ -2814,7 +2869,8 @@ class DataService:
     def _calculate_prop_confidence(self, prediction: float, line: float,
                                     season_avg: float, recent_avg: float,
                                     games_played: int, features: dict = None,
-                                    player_name: str = None) -> float:
+                                    player_name: str = None,
+                                    minutes_dist: dict = None) -> float:
         """Calculate confidence score for prop prediction (0-100).
 
         Data-driven confidence based on historical analysis of 6,076 predictions.
@@ -2829,6 +2885,7 @@ class DataService:
             games_played: Number of games played
             features: Optional full features dict from PlayerPropFeatureGenerator
             player_name: Optional player name for whitelist/blacklist check
+            minutes_dist: Optional minutes distribution from Minutes Oracle
         """
         # WHITELIST: Players with >80% historical win rate
         WHITELIST_BOOST = {
@@ -2915,6 +2972,16 @@ class DataService:
             hit_rate = features.get("last_10_hit_rate")
             if hit_rate is not None and hit_rate > 0.6:
                 confidence += 5  # Proven winner - beats line >60% of time
+
+        # Factor 10: Minutes Oracle Uncertainty Penalty
+        # High uncertainty in minutes prediction = high variance in stat output
+        # This is the key insight: if we can't predict minutes, we can't predict stats
+        if minutes_dist:
+            uncertainty = minutes_dist.get('uncertainty', 'medium')
+            if uncertainty == 'high':
+                confidence -= 8  # High minutes variance = hard to predict stats
+            elif uncertainty == 'low':
+                confidence += 4  # Stable minutes = more reliable stat predictions
 
         # Cap at reasonable range - WIDENED from 55-65% to 50-85%
         # With improved training (OT normalization, blowout weighting, regression-to-mean)
@@ -3564,6 +3631,103 @@ class DataService:
 
         # Clamp to reasonable range
         return max(8.0, min(42.0, base_minutes))
+
+    def _predict_minutes_distribution(self, player: dict, game_context: dict = None) -> dict:
+        """Predict minutes distribution using the Minutes Oracle.
+
+        Returns a distribution with percentiles and uncertainty classification.
+        This is more accurate than point estimates because it captures:
+        - Blowout risk (starters sit in 4th quarter)
+        - Coach tendencies (Thibs vs Kerr rotations)
+        - Back-to-back fatigue
+        - Injury-related usage boosts
+
+        Args:
+            player: Player data dictionary
+            game_context: Game context with spread, total, is_home, is_b2b, etc.
+
+        Returns:
+            dict with p10, p25, p50, p75, p90, expected, uncertainty, spread
+        """
+        # Default fallback distribution based on season average
+        season_min = player.get("avg_minutes", 0) or player.get("season_averages", {}).get("min_avg", 28)
+        recent_min = player.get("recent_averages", {}).get("min_avg", season_min)
+        base_min = recent_min if recent_min > 0 else season_min
+
+        fallback = {
+            'p10': max(10, base_min - 8),
+            'p25': max(15, base_min - 4),
+            'p50': base_min,
+            'p75': min(42, base_min + 4),
+            'p90': min(48, base_min + 8),
+            'expected': base_min,
+            'uncertainty': 'medium',
+            'spread': 16.0,
+            'player_id': player.get('id') or player.get('player_id'),
+        }
+
+        if not self._minutes_oracle or not self._minutes_feature_gen:
+            return fallback
+
+        try:
+            # Extract player info
+            player_id = player.get('id') or player.get('player_id', 0)
+            team_id = player.get('team_id', 0)
+            opponent_team_id = game_context.get('opponent_team_id', 0) if game_context else 0
+
+            # Build game context for feature generation
+            ctx = {
+                'vegas_spread': game_context.get('spread', 0) if game_context else 0,
+                'vegas_total': game_context.get('total', 220) if game_context else 220,
+                'is_home': game_context.get('is_home', True) if game_context else True,
+                'is_back_to_back': game_context.get('is_b2b', False) if game_context else False,
+                'days_rest': game_context.get('days_rest', 2) if game_context else 2,
+            }
+
+            # Build player game logs from recent stats
+            game_logs = []
+            recent_avg = player.get('recent_averages', {})
+            season_avg = player.get('season_averages', {})
+
+            # Use available stats
+            min_avg = recent_avg.get('min_avg', 0) or season_avg.get('min_avg', 0) or base_min
+            pts_avg = recent_avg.get('pts_avg', 0) or season_avg.get('pts_avg', 0) or 0
+            reb_avg = recent_avg.get('reb_avg', 0) or season_avg.get('reb_avg', 0) or 0
+            ast_avg = recent_avg.get('ast_avg', 0) or season_avg.get('ast_avg', 0) or 0
+            pf_avg = recent_avg.get('pf_avg', 0) or season_avg.get('pf_avg', 0) or 2.5
+
+            # Create synthetic game logs at the average (for feature generation)
+            for _ in range(5):
+                game_logs.append({
+                    'min': min_avg,
+                    'pts': pts_avg,
+                    'reb': reb_avg,
+                    'ast': ast_avg,
+                    'pf': pf_avg,
+                })
+
+            # Generate features
+            from datetime import datetime
+            game_date = datetime.now().strftime('%Y-%m-%d')
+
+            features = self._minutes_feature_gen.generate_features(
+                player_id=player_id,
+                team_id=team_id,
+                opponent_team_id=opponent_team_id,
+                game_date=game_date,
+                game_context=ctx,
+                player_game_logs=game_logs,
+            )
+
+            # Get prediction from Minutes Oracle
+            result = self._minutes_oracle.predict(features, player_id=player_id)
+
+            return result.to_dict()
+
+        except Exception as e:
+            # Log but don't crash - fallback gracefully
+            print(f"Minutes Oracle prediction error for player {player.get('id')}: {e}")
+            return fallback
 
     def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None, threshold: float = 5.0) -> tuple[str, float]:
         """Determine OVER/UNDER pick based on ML model prediction vs Vegas line.

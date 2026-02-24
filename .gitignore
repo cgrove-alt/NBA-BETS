@@ -27,6 +27,10 @@ data/balldontlie_cache/
 .api_cache/
 .prediction_cache/
 *.cache
+.news_cache/
+.tracking_cache/
+player_impact_cache/
+catboost_info/
 
 # Databases (start fresh on deploy)
 *.db
