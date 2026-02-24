@@ -10,9 +10,11 @@ healthcheckTimeout = 300
 # Environment variables (set in Railway dashboard)
 # Required:
 # - BALLDONTLIE_API_KEY
-# - DATABASE_URL (PostgreSQL connection string, auto-provisioned by Railway)
-# Optional:
+# - DATABASE_URL (PostgreSQL, auto-provisioned by Railway)
+# - REDIS_URL (Redis, auto-provisioned by Railway)
 # - THE_ODDS_API_KEY
+# Optional:
+# - GEMINI_API_KEY (agent LLM reasoning; agents use deterministic fallback without it)
 # - JWT_SECRET_KEY
 # - API_KEY
 # - FRONTEND_URL
@@ -61,7 +63,31 @@ healthcheckTimeout = 300
 # 7. Redis (Provision via Railway dashboard)
 #    - Add Redis service from Railway's built-in integrations
 #    - Railway auto-sets REDIS_URL for linked services
-#    - Used by: agent message bus, future odds monitoring
+#    - Used by: agent message bus, inter-agent communication
+#
+# 8. Odds Monitor Agent
+#    - Start command: python -m agents.core.agent_runner --agent odds_monitor
+#    - Cron schedule: */15 8-23 * * * (every 15 min, 8 AM - 11 PM ET)
+#    - Tracks line movements, detects steam/RLM, alerts on edge erosion
+#    - Requires: THE_ODDS_API_KEY, REDIS_URL, GEMINI_API_KEY (optional)
+#
+# 9. Prediction Orchestrator Agent
+#    - Start command: python -m agents.core.agent_runner --agent orchestrator
+#    - Cron schedule: 30 11 * * * (11:30 AM ET, after pregame intel)
+#    - Coordinates prediction pipeline, adjusts confidence, generates signals
+#    - Requires: BALLDONTLIE_API_KEY, REDIS_URL, GEMINI_API_KEY (optional)
+#
+# 10. Model Watchdog Agent
+#    - Start command: python -m agents.core.agent_runner --agent watchdog
+#    - Cron schedule: 30 1 * * * (1:30 AM ET, after postgame)
+#    - Monitors model drift, feature staleness, performance degradation
+#    - Requires: REDIS_URL, GEMINI_API_KEY (optional)
+#
+# 11. Daily Briefing Agent
+#    - Start command: python -m agents.core.agent_runner --agent briefing
+#    - Cron schedule: 0 12,18 * * * (12 PM + 6 PM ET)
+#    - Synthesizes all agent outputs into plain-language daily brief
+#    - Requires: REDIS_URL, GEMINI_API_KEY (optional)
 #
 # All services share:
 # - Same GitHub repository
