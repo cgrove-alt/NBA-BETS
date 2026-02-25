@@ -477,7 +477,7 @@ def warmup_cache(api, game_date: str, team_ids: list[int], player_ids: list[int]
     print("\n  Warming up cache...")
     start = time.time()
 
-    executor = get_executor(max_workers=20)
+    executor = get_executor(max_workers=5)
 
     # Fetch team stats in parallel
     def fetch_team(tid):

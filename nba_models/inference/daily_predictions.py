@@ -1689,7 +1689,8 @@ def get_player_props_for_game(api: BalldontlieAPI, game_id: int) -> dict[int, di
 
         print(f"    Props: {total} raw, {filtered_market} non-over_under, {filtered_missing} missing fields, {accepted} accepted, {len(props_by_player)} players")
 
-        # Resolve team_id for each player (matching data_service.py lines 2663-2672)
+        # Resolve team_id for each player using cached get_player() calls.
+        # With cache_ttl="static" on get_player(), these are free after first run.
         for pid in list(props_by_player.keys()):
             try:
                 player = api.get_player(pid)
@@ -2626,7 +2627,7 @@ def main():
 
                     # TASK 4.1: Execute prop predictions in parallel
                     if prop_tasks:
-                        executor = get_executor(max_workers=10)
+                        executor = get_executor(max_workers=5)
 
                         def process_prop_task(task):
                             pred = predict_player_prop(

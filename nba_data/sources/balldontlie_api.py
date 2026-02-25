@@ -30,10 +30,14 @@ import os
 import requests
 import time
 import hashlib
+import threading
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 from pathlib import Path
 import json
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # RESPONSE CACHING
@@ -201,19 +205,25 @@ class BalldontlieAPI:
             "Accept": "application/json",
         }
 
-        # Rate limiting
+        # Rate limiting — thread-safe with 20% safety margin
         self.requests_per_minute = self.RATE_LIMITS.get(self.tier, 60)
-        self.min_delay = 60.0 / self.requests_per_minute
+        # Use 80% of allowed rate to leave headroom and avoid 429s
+        effective_rate = self.requests_per_minute * 0.80
+        self.min_delay = 60.0 / effective_rate
         self._last_request = 0
+        self._rate_lock = threading.Lock()
 
     def _rate_limit(self):
-        """Ensure we don't exceed rate limits."""
-        elapsed = time.time() - self._last_request
-        if elapsed < self.min_delay:
-            time.sleep(self.min_delay - elapsed)
-        self._last_request = time.time()
+        """Ensure we don't exceed rate limits. Thread-safe."""
+        with self._rate_lock:
+            now = time.time()
+            elapsed = now - self._last_request
+            if elapsed < self.min_delay:
+                time.sleep(self.min_delay - elapsed)
+            self._last_request = time.time()
 
-    def _get(self, endpoint: str, params: dict = None, version: int = 1, cache_ttl: str = None) -> Any:
+    def _get(self, endpoint: str, params: dict = None, version: int = 1,
+             cache_ttl: str = None, _retry_count: int = 0) -> Any:
         """
         Make a GET request to the API with optional caching.
 
@@ -223,10 +233,13 @@ class BalldontlieAPI:
             version: API version (1 or 2)
             cache_ttl: Cache TTL type ("live", "daily", "stats", "historical", "static")
                        If None, no caching is used.
+            _retry_count: Internal retry counter for 429 handling
 
         Returns:
             JSON response data
         """
+        MAX_429_RETRIES = 3
+
         # Check cache first (if caching enabled for this request)
         if cache_ttl:
             cached = _read_cache(endpoint, params, cache_ttl)
@@ -250,11 +263,16 @@ class BalldontlieAPI:
             if response.status_code == 403:
                 raise ValueError("This endpoint requires a higher tier subscription")
             if response.status_code == 429:
-                print("Rate limited - waiting 60 seconds...")
-                time.sleep(60)
-                return self._get(endpoint, params, version, cache_ttl)
+                if _retry_count >= MAX_429_RETRIES:
+                    logger.error(f"BDL rate limited {MAX_429_RETRIES} times on {endpoint}, giving up")
+                    return None
+                # Exponential backoff: 5s, 15s, 45s
+                wait = 5 * (3 ** _retry_count)
+                logger.warning(f"BDL rate limited on {endpoint} (attempt {_retry_count + 1}/{MAX_429_RETRIES}), waiting {wait}s...")
+                time.sleep(wait)
+                return self._get(endpoint, params, version, cache_ttl, _retry_count + 1)
             if response.status_code != 200:
-                print(f"API error {response.status_code}: {response.text[:200]}")
+                logger.warning(f"BDL API error {response.status_code}: {response.text[:200]}")
                 return None
 
             data = response.json()
@@ -311,8 +329,8 @@ class BalldontlieAPI:
         return data.get("data", []) if data else []
 
     def get_player(self, player_id: int) -> dict:
-        """Get a specific player by ID."""
-        data = self._get(f"players/{player_id}")
+        """Get a specific player by ID (cached 1 week — player metadata rarely changes)."""
+        data = self._get(f"players/{player_id}", cache_ttl="static")
         return data.get("data", {}) if data else {}
 
     def get_games(
@@ -453,7 +471,8 @@ class BalldontlieAPI:
         """
         Fetch ALL player game stats with pagination.
 
-        Requires: All-Star tier or higher
+        Requires: All-Star tier or higher.
+        Cached for 1 hour (stats TTL) to avoid redundant fetches within a run.
 
         Args:
             player_id: Player ID to fetch stats for
@@ -465,6 +484,12 @@ class BalldontlieAPI:
         """
         if season is None:
             season = datetime.now().year if datetime.now().month > 9 else datetime.now().year - 1
+
+        # Check composite cache for the full paginated result
+        cache_endpoint = f"stats_paginated/{player_id}/{season}"
+        cached = _read_cache(cache_endpoint, None, "stats")
+        if cached is not None:
+            return cached
 
         all_stats = []
         cursor = None
@@ -479,7 +504,7 @@ class BalldontlieAPI:
             if cursor:
                 params["cursor"] = cursor
 
-            data = self._get("stats", params)
+            data = self._get("stats", params, cache_ttl="stats")
             if not data:
                 break
 
@@ -496,6 +521,10 @@ class BalldontlieAPI:
                 break
 
             page += 1
+
+        # Cache the full composite result
+        if all_stats:
+            _write_cache(cache_endpoint, None, all_stats)
 
         return all_stats
 
@@ -766,7 +795,7 @@ class BalldontlieAPI:
         if player_ids:
             for pid in player_ids:
                 params = {"season": season, "player_id": pid}
-                data = self._get("season_averages", params)
+                data = self._get("season_averages", params, cache_ttl="stats")
                 if data and data.get("data"):
                     results.extend(data.get("data", []))
         else:
@@ -830,7 +859,7 @@ class BalldontlieAPI:
         Returns:
             List of player props with lines and odds
         """
-        data = self._get("odds/player_props", params={"game_id": game_id}, version=2)
+        data = self._get("odds/player_props", params={"game_id": game_id}, version=2, cache_ttl="daily")
         return data.get("data", []) if data else []
 
     def get_advanced_stats(
