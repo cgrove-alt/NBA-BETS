@@ -5840,6 +5840,51 @@ def train_all_models(
         ('pra', 'actual_pra'),
     ]
 
+    # Map prop type to (season_avg_col, recent_avg_col) for prop_line feature injection
+    # At training time, season avg serves as proxy for market line (~0.95 correlation)
+    PROP_LINE_SEASON_AVG_MAP = {
+        'points': ('season_pts_avg', 'recent_pts_avg'),
+        'rebounds': ('season_reb_avg', 'recent_reb_avg'),
+        'assists': ('season_ast_avg', 'recent_ast_avg'),
+        'threes': ('season_fg3m_avg', 'recent_fg3m_avg'),
+        'pra': None,  # Computed as sum of component avgs
+    }
+
+    def _inject_prop_line_features(X_df, prop_name):
+        """Inject prop_line + derived features into feature DataFrame for training.
+
+        Uses season average as proxy for market line. This gives tree models an
+        anchor for each player's expected output level, preventing regression-to-mean
+        compression.
+        """
+        X_with_line = X_df.copy()
+        mapping = PROP_LINE_SEASON_AVG_MAP.get(prop_name)
+
+        if mapping is not None:
+            season_col, recent_col = mapping
+            X_with_line['prop_line'] = X_with_line[season_col].fillna(0)
+            X_with_line['prop_line_vs_season'] = 0.0  # line == season avg at training time
+            X_with_line['prop_line_vs_recent'] = (
+                X_with_line['prop_line'] - X_with_line[recent_col].fillna(X_with_line[season_col])
+            )
+        else:
+            # PRA: sum of component season avgs
+            X_with_line['prop_line'] = (
+                X_with_line['season_pts_avg'].fillna(0) +
+                X_with_line['season_reb_avg'].fillna(0) +
+                X_with_line['season_ast_avg'].fillna(0)
+            )
+            X_with_line['prop_line_vs_season'] = 0.0
+            X_with_line['prop_line_vs_recent'] = (
+                X_with_line['prop_line'] - (
+                    X_with_line['recent_pts_avg'].fillna(0) +
+                    X_with_line['recent_reb_avg'].fillna(0) +
+                    X_with_line['recent_ast_avg'].fillna(0)
+                )
+            )
+
+        return X_with_line
+
     # TIER 1.4: Props that benefit from position-specific models
     # Rebounds and assists vary significantly by position
     POSITION_AWARE_PROPS = ['rebounds', 'assists']
@@ -5848,6 +5893,10 @@ def train_all_models(
         print(f"\n--- {prop_name.upper()} Prop Model ---")
 
         y = np.array([d[target_col] for d in player_data])
+
+        # Inject prop_line features (season avg as proxy for market line)
+        X_with_line = _inject_prop_line_features(X_player, prop_name)
+        print(f"  Added prop_line features ({len(X_with_line.columns)} total features)")
 
         if use_ensemble_props:
             # TIER 1.4: Use position-aware models for rebounds and assists
@@ -5858,7 +5907,7 @@ def train_all_models(
 
                 prop_model = PositionAwarePropEnsemble(prop_name)
                 metrics = prop_model.train(
-                    X_player, y, player_data,
+                    X_with_line, y, player_data,
                     sample_weights=player_sample_weights
                 )
 
@@ -5872,7 +5921,7 @@ def train_all_models(
                 # Also save regular ensemble for backward compatibility
                 print("  Also training general ensemble for backward compatibility...")
                 general_model = PropEnsembleModel(prop_name)
-                general_metrics = general_model.train(X_player, y, sample_weights=player_sample_weights)
+                general_metrics = general_model.train(X_with_line, y, sample_weights=player_sample_weights)
                 general_model.save(MODEL_DIR / f'player_{prop_name}_ensemble.pkl')
 
                 results[f'prop_{prop_name}'] = {
@@ -5895,7 +5944,7 @@ def train_all_models(
                     print(f"  Running Optuna hyperparameter optimization ({optuna_trials} trials)...")
                     # Scale features for Optuna tuning
                     temp_scaler = StandardScaler()
-                    X_scaled = temp_scaler.fit_transform(smart_fillna(X_player).values)
+                    X_scaled = temp_scaler.fit_transform(smart_fillna(X_with_line).values)
 
                     tuner = OptunaHyperparameterTuner(n_trials=optuna_trials, cv_folds=3)
                     optimized_params = tuner.tune_all_models(X_scaled, y, prop_name)
@@ -5908,7 +5957,7 @@ def train_all_models(
 
                 prop_model = PropEnsembleModel(prop_name, optimized_params=optimized_params)
                 player_dates = [d.get('game_date', '') for d in player_data]
-                metrics = prop_model.train(X_player, y, dates=player_dates, sample_weights=player_sample_weights)
+                metrics = prop_model.train(X_with_line, y, dates=player_dates, sample_weights=player_sample_weights)
 
                 print(f"  Ensemble RMSE: {metrics['ensemble_rmse']:.2f}")
                 print(f"  Ensemble MAE: {metrics['ensemble_mae']:.2f}")
@@ -5931,7 +5980,7 @@ def train_all_models(
         else:
             # Use original single model
             prop_model = PropModel(prop_name)
-            metrics = prop_model.train(X_player, y, sample_weights=player_sample_weights)
+            metrics = prop_model.train(X_with_line, y, sample_weights=player_sample_weights)
 
             print(f"  RMSE: {metrics['rmse']:.2f}")
             print(f"  MAE: {metrics['mae']:.2f}")
@@ -5955,17 +6004,20 @@ def train_all_models(
 
         y = np.array([d[target_col] for d in player_data])
 
+        # Inject prop_line features (same as ensemble training)
+        X_with_line = _inject_prop_line_features(X_player, prop_name)
+
         try:
             quantile_model = QuantilePropModel(prop_name)
-            q_metrics = quantile_model.train(X_player, y, sample_weights=player_sample_weights)
+            q_metrics = quantile_model.train(X_with_line, y, sample_weights=player_sample_weights)
 
-            # Save quantile model
+            # Save quantile model with updated feature names
             quantile_path = MODEL_DIR / f'player_{prop_name}_quantile.pkl'
             with open(quantile_path, 'wb') as f:
                 pickle.dump({
                     'model': quantile_model,
                     'training_metrics': q_metrics,
-                    'feature_names': player_feature_names,
+                    'feature_names': list(X_with_line.columns),
                 }, f)
             print(f"  Saved: models/player_{prop_name}_quantile.pkl")
             print(f"  Coverage (80%): {q_metrics['coverage_80']:.1%}")

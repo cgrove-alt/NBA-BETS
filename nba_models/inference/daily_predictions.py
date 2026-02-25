@@ -59,6 +59,24 @@ PROP_STD_DEVS = {
     'pra': 9.0,         # Points + Rebounds + Assists combined variance
 }
 
+# Quantile model regression-to-mean decompression parameters.
+# Measured by regressing quantile p50 predictions against the prop line.
+# A slope < 1.0 means the model under-predicts high-line players and over-predicts
+# low-line players (regression to mean). mean_gap < 0 means overall under-prediction.
+# Correction: pred += slope_fix * (line - mean_line) + level_fix
+# where slope_fix = target_slope - measured_slope, level_fix = -mean_gap
+# Re-measure these after every model retrain.
+QUANTILE_DECOMPRESSION = {
+    # mean_gap is the END-TO-END gap (after minutes oracle + injury + calibration),
+    # not just the raw quantile median gap. Measured from production prediction run.
+    'points':   {'slope': 0.724, 'mean_gap': -3.15, 'mean_line': 19.9},
+    'rebounds':  {'slope': 0.805, 'mean_gap':  0.00, 'mean_line':  5.1},
+    'assists':   {'slope': 0.644, 'mean_gap':  0.38, 'mean_line':  4.1},
+    'threes':    {'slope': 0.85,  'mean_gap':  0.00, 'mean_line':  2.5},  # assumed ~balanced
+    'pra':       {'slope': 0.80,  'mean_gap': -1.00, 'mean_line': 30.0},  # estimated
+}
+QUANTILE_TARGET_SLOPE = 0.85
+
 def get_prop_std_dev(prop_type: str) -> float:
     """
     Get empirically-derived standard deviation for prop type.
@@ -70,6 +88,54 @@ def get_prop_std_dev(prop_type: str) -> float:
         float: Standard deviation for calculating Z-scores
     """
     return PROP_STD_DEVS.get(prop_type.lower(), 5.0)
+
+
+def compute_quantile_sigma(pred_low: float, pred_high: float, prop_type: str) -> float:
+    """Derive player-specific sigma from quantile model's 10th-90th percentile spread.
+
+    For normal distribution: P90 - P10 = 2 * 1.282 * sigma = 2.564 * sigma.
+    Floor at 50% of fixed PROP_STD_DEVS to prevent overconfidence.
+    """
+    spread = pred_high - pred_low
+    if spread <= 0:
+        return get_prop_std_dev(prop_type)
+    quantile_sigma = spread / 2.564
+    min_sigma = get_prop_std_dev(prop_type) * 0.5
+    return max(quantile_sigma, min_sigma)
+
+
+def decompress_quantile_prediction(predicted_value: float, line: float, prop_type: str) -> float:
+    """Correct regression-to-mean compression in quantile model predictions.
+
+    The quantile models predict with slope < 1.0 relative to the line, meaning
+    they under-predict high-line players and over-predict low-line players. This
+    is especially severe for POINTS (slope=0.724 → high scorers predicted 3-9
+    points too low).
+
+    Applies two corrections:
+    1. Slope fix: adds back missing variation around the mean line
+    2. Level fix: shifts the overall prediction level to center on the line
+
+    These parameters are measured from production predictions and should be
+    re-measured after every model retrain.
+    """
+    params = QUANTILE_DECOMPRESSION.get(prop_type.lower())
+    if not params:
+        return predicted_value
+
+    current_slope = params['slope']
+    mean_gap = params['mean_gap']
+    mean_line = params['mean_line']
+
+    # Skip correction if slope is already close to target
+    slope_fix = QUANTILE_TARGET_SLOPE - current_slope
+    if abs(slope_fix) < 0.01 and abs(mean_gap) < 0.1:
+        return predicted_value
+
+    level_fix = -mean_gap
+    corrected = predicted_value + slope_fix * (line - mean_line) + level_fix
+    return corrected
+
 
 # Import performance optimizations (Task 4.1)
 from prediction_optimizer import get_executor, warmup_cache, clear_cache
@@ -888,11 +954,18 @@ def predict_minutes_distribution(
     game_context: dict,
     models: dict,
     game_date: str = None,
+    prop_features: dict = None,
 ) -> dict:
     """Predict minutes distribution using the Minutes Oracle.
 
     Returns dict with p10/p25/p50/p75/p90/expected/uncertainty/spread,
     or a fallback dict based on historical average if oracle unavailable.
+
+    Args:
+        prop_features: Feature dict from the prop prediction pipeline. Used to
+            override the oracle's baseline features (season_min_avg, recent_min_avg,
+            etc.) with real player data. Without this, the oracle uses hardcoded
+            defaults and systematically under-predicts minutes.
     """
     oracle = models.get('minutes_oracle')
     feature_gen = models.get('minutes_feature_gen')
@@ -920,6 +993,24 @@ def predict_minutes_distribution(
             game_date=game_date,
             game_context=oracle_context,
         )
+
+        # Override baseline features with real player data from the prop pipeline.
+        # The feature generator defaults to season_min_avg=28, games_played=0 when
+        # no game logs are passed, which causes the oracle to systematically
+        # under-predict minutes for all players.
+        if prop_features:
+            season_avg = prop_features.get('season_min_avg', 0)
+            recent_avg = prop_features.get('recent_min_avg', 0)
+
+            if season_avg > 0:
+                features['season_min_avg'] = season_avg
+                features['recent_min_avg'] = recent_avg or season_avg
+                features['last3_min_avg'] = recent_avg or season_avg
+                features['min_trend'] = (recent_avg - season_avg) if recent_avg > 0 else 0.0
+                features['min_floor'] = season_avg - 6
+                features['min_ceiling'] = season_avg + 6
+                features['min_consistency'] = 0.85  # Known player with real data
+                features['games_played'] = 50  # Signal that this is a real player
 
         dist = oracle.predict(features, player_id=player_id)
         return dist.to_dict()
@@ -1622,7 +1713,10 @@ def predict_player_prop(
     over_prob = 0.5
     edge = 0.0
     predicted_value = None
+    ensemble_predicted_value = None
     features = None  # Initialize for quantile model usage later
+    effective_sigma = get_prop_std_dev(prop_type)  # Overridden by quantile model if available
+    quantile_sigma = None
 
     model_data = models.get(f'prop_{prop_type}')
 
@@ -1632,6 +1726,30 @@ def predict_player_prop(
             features = get_cached_features(player_name, prop_type, opponent_id, bdl_player_id=player_id)
 
             if features:
+                # Inject prop_line features using actual market line
+                # At inference, we use the real sportsbook line (not season avg proxy)
+                features['prop_line'] = line
+                _season_avg_map = {
+                    'points': ('season_pts_avg', 'recent_pts_avg'),
+                    'rebounds': ('season_reb_avg', 'recent_reb_avg'),
+                    'assists': ('season_ast_avg', 'recent_ast_avg'),
+                    'threes': ('season_fg3m_avg', 'recent_fg3m_avg'),
+                }
+                _line_mapping = _season_avg_map.get(prop_type)
+                if _line_mapping:
+                    _s_avg = features.get(_line_mapping[0], line)
+                    _r_avg = features.get(_line_mapping[1], _s_avg)
+                else:
+                    # PRA: sum of component season avgs
+                    _s_avg = (features.get('season_pts_avg', 0) +
+                              features.get('season_reb_avg', 0) +
+                              features.get('season_ast_avg', 0))
+                    _r_avg = (features.get('recent_pts_avg', 0) +
+                              features.get('recent_reb_avg', 0) +
+                              features.get('recent_ast_avg', 0))
+                features['prop_line_vs_season'] = line - _s_avg
+                features['prop_line_vs_recent'] = line - _r_avg
+
                 # Handle ENSEMBLE format (multiple models with meta_model)
                 if isinstance(model_data, dict) and model_data.get('ensemble'):
                     base_models = model_data['models']
@@ -1748,6 +1866,67 @@ def predict_player_prop(
         except Exception:
             pass  # Fall through to return defaults
 
+    # Quantile model: run BEFORE adjustments so we can derive player-specific sigma
+    pred_low = None
+    pred_median = None
+    pred_high = None
+    quantile_model_dict = models.get(f'prop_{prop_type}_quantile')
+
+    if quantile_model_dict and features and use_api_features:
+        try:
+            import pandas as pd
+
+            # Extract QuantilePropModel from dict
+            quantile_model_obj = None
+            if isinstance(quantile_model_dict, dict) and 'model' in quantile_model_dict:
+                quantile_model_obj = quantile_model_dict['model']
+
+            if quantile_model_obj and hasattr(quantile_model_obj, 'quantile_models'):
+                quantile_models = quantile_model_obj.quantile_models
+                scaler = getattr(quantile_model_obj, 'scaler', None)
+                feature_names = getattr(quantile_model_obj, 'feature_names', [])
+            elif isinstance(quantile_model_dict, dict) and 'quantile_models' in quantile_model_dict:
+                quantile_models = quantile_model_dict['quantile_models']
+                scaler = quantile_model_dict.get('scaler')
+                feature_names = quantile_model_dict.get('feature_names', [])
+            else:
+                quantile_models = None
+                feature_names = []
+
+            if quantile_models and feature_names:
+                X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
+                X = X[feature_names].fillna(0)
+                X_scaled = scaler.transform(X) if scaler is not None else X.values
+
+                pred_low = float(quantile_models[0.1].predict(X_scaled)[0])
+                pred_median = float(quantile_models[0.5].predict(X_scaled)[0])
+                pred_high = float(quantile_models[0.9].predict(X_scaled)[0])
+
+                # Use quantile median as primary prediction when available
+                # Quantile median (slope=0.89) is far less compressed than ensemble (slope=0.62)
+                # The ensemble still serves as fallback when quantile model isn't available
+                ensemble_predicted_value = predicted_value
+                if pred_median is not None:
+                    predicted_value = pred_median
+
+                # Correct regression-to-mean compression in quantile predictions.
+                # POINTS slope=0.724 means high scorers are predicted 3-9 pts too low.
+                predicted_value = decompress_quantile_prediction(predicted_value, line, prop_type)
+
+                # Derive player-specific sigma from quantile spread
+                quantile_sigma = compute_quantile_sigma(pred_low, pred_high, prop_type)
+                effective_sigma = quantile_sigma
+        except Exception:
+            pass
+
+    # Save original prediction for total adjustment cap
+    original_predicted_value = predicted_value
+
+    # Recalculate over_prob with quantile-derived sigma (if we have a prediction)
+    if predicted_value is not None:
+        z_score = (predicted_value - line) / effective_sigma
+        over_prob = float(norm.cdf(z_score))
+
     # Phase 3: Minutes Oracle adjustment — per-minute rate scaling
     minutes_dist = None
     if predicted_value is not None and game_context and models.get('minutes_oracle'):
@@ -1757,6 +1936,7 @@ def predict_player_prop(
             opponent_team_id=game_context.get('opponent_team_id', 0),
             game_context=game_context,
             models=models,
+            prop_features=features,
         )
 
         if minutes_dist:
@@ -1769,16 +1949,24 @@ def predict_player_prop(
 
             # Only adjust if we have meaningful baseline and prediction
             if avg_minutes > 10 and predicted_minutes > 0:
-                rate = predicted_value / avg_minutes
-                adjusted_value = rate * predicted_minutes
+                # Use raw quantile median for rate calculation to avoid amplifying
+                # the decompression correction. The per-minute rate should reflect
+                # model-estimated production, not the decompression adjustment.
+                rate_base = pred_median if pred_median is not None else predicted_value
+                rate = rate_base / avg_minutes
+                minutes_delta = rate * (predicted_minutes - avg_minutes)
+                adjusted_value = predicted_value + minutes_delta
+
+                # Cap minutes adjustment to ±15% of predicted value
+                max_adj = abs(predicted_value) * 0.15
+                adjusted_value = max(predicted_value - max_adj, min(predicted_value + max_adj, adjusted_value))
 
                 # Only apply if adjustment is meaningful (>1% change)
                 if abs(adjusted_value - predicted_value) / max(abs(predicted_value), 0.1) > 0.01:
                     predicted_value = adjusted_value
 
                     # Recalculate probability with adjusted value
-                    std = get_prop_std_dev(prop_type)
-                    z_score = (predicted_value - line) / std
+                    z_score = (predicted_value - line) / effective_sigma
                     over_prob = float(norm.cdf(z_score))
 
     # Apply injury-based adjustments to predicted value
@@ -1801,8 +1989,7 @@ def predict_player_prop(
                 predicted_value = adjusted_value
 
                 # Recalculate probability with adjusted value
-                std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                z_score = (predicted_value - line) / std
+                z_score = (predicted_value - line) / effective_sigma
                 over_prob = float(norm.cdf(z_score))
         except Exception:
             pass  # Continue without injury adjustment if it fails
@@ -1855,75 +2042,31 @@ def predict_player_prop(
                 if calibration_applied.get('total_value_adjustment', 0) != 0:
                     predicted_value = calibration_applied['adjusted_value']
                     # Recalculate over_prob with corrected value
-                    std = get_prop_std_dev(prop_type)
-                    z_score = (predicted_value - line) / std
+                    z_score = (predicted_value - line) / effective_sigma
                     over_prob = float(norm.cdf(z_score))
         except Exception:
             pass  # Never block predictions on calibration failure
+
+    # Total cap: all adjustments (minutes + injury + calibration) stay within ±25% of original
+    if predicted_value is not None and original_predicted_value is not None and original_predicted_value != 0:
+        max_total = abs(original_predicted_value) * 0.25
+        lower = original_predicted_value - max_total
+        upper = original_predicted_value + max_total
+        if predicted_value < lower or predicted_value > upper:
+            predicted_value = max(lower, min(upper, predicted_value))
+            z_score = (predicted_value - line) / effective_sigma
+            over_prob = float(norm.cdf(z_score))
 
     # Phase 4: Single edge computation after all adjustments (minutes + injury + calibration)
     edge_info = _calculate_prop_edge(over_prob, american_odds)
     edge = edge_info['edge']
     pick = edge_info['pick']
 
-    # Task 3.4: Add prediction bands using quantile models
-    pred_low = None
-    pred_median = None
-    pred_high = None
+    # Confidence scoring and bet sizing
     confidence_score = 50.0  # Default moderate confidence
     edge_quality_tier = 'moderate'
     suggested_bet_size = 0.0
     bet_recommendation = 'PASS'  # Phase 4: default to PASS
-
-    # Try to get quantile predictions for better risk assessment
-    quantile_model_dict = models.get(f'prop_{prop_type}_quantile')
-
-    if quantile_model_dict and features and use_api_features:
-        try:
-            import pandas as pd
-
-            # BUG FIX: The dict structure is {'model': QuantilePropModel, 'feature_names': [...]}
-            # Extract the QuantilePropModel object from the dict
-            quantile_model_obj = None
-            if isinstance(quantile_model_dict, dict) and 'model' in quantile_model_dict:
-                quantile_model_obj = quantile_model_dict['model']
-
-            # Check if we have a QuantilePropModel with quantile_models attribute
-            if quantile_model_obj and hasattr(quantile_model_obj, 'quantile_models'):
-                quantile_models = quantile_model_obj.quantile_models
-                scaler = getattr(quantile_model_obj, 'scaler', None)
-                feature_names = getattr(quantile_model_obj, 'feature_names', [])
-            # Legacy format: dict with quantile_models directly
-            elif isinstance(quantile_model_dict, dict) and 'quantile_models' in quantile_model_dict:
-                quantile_models = quantile_model_dict['quantile_models']
-                scaler = quantile_model_dict.get('scaler')
-                feature_names = quantile_model_dict.get('feature_names', [])
-            else:
-                # Unable to extract quantile models
-                quantile_models = None
-                feature_names = []
-
-            if quantile_models and feature_names:
-
-                # Build feature array
-                X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
-                X = X[feature_names].fillna(0)
-
-                # Scale if scaler available
-                X_scaled = scaler.transform(X) if scaler is not None else X.values
-
-                # Get predictions from all quantile models
-                # BUG FIX: Use correct quantile keys (0.1, 0.5, 0.9 not 0.10, 0.50, 0.90)
-                pred_low = float(quantile_models[0.1].predict(X_scaled)[0])
-                pred_median = float(quantile_models[0.5].predict(X_scaled)[0])
-                pred_high = float(quantile_models[0.9].predict(X_scaled)[0])
-
-                # Use median as the primary prediction if we don't have one yet
-                if predicted_value is None:
-                    predicted_value = pred_median
-        except Exception:
-            # Silently fall back to defaults if quantile prediction fails
-            pass
 
     # Calculate confidence score based on prediction band width (Task 2.4)
     if pred_low is not None and pred_high is not None and pred_median is not None:
@@ -2034,6 +2177,7 @@ def predict_player_prop(
         'under_prob': 1.0 - over_prob,
         'edge': edge,
         'predicted_value': predicted_value,
+        'ensemble_predicted_value': ensemble_predicted_value,
         'pred_low': pred_low,
         'pred_median': pred_median,
         'pred_high': pred_high,
@@ -2060,6 +2204,9 @@ def predict_player_prop(
         # Phase 5: Calibration feedback loop
         'calibration_adjustment': calibration_applied.get('total_value_adjustment', 0),
         'calibration_applied': bool(calibration_applied.get('adjustments_applied')),
+        # Sigma diagnostics
+        'effective_sigma': effective_sigma,
+        'quantile_sigma': quantile_sigma,
     }
 
 
