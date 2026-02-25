@@ -839,12 +839,12 @@ def load_models() -> dict:
     """Load all prediction models."""
     models = {}
 
-    # Moneyline - try meta-learner first, then stacking, then fall back to ensemble
-    ml_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
+    # Moneyline - prefer ensemble (has feature_names + predict_proba), then stacking, then metalearner
+    ml_path = MODEL_DIR / "moneyline_ensemble.pkl"
     if not ml_path.exists():
         ml_path = MODEL_DIR / "moneyline_stacking.pkl"
     if not ml_path.exists():
-        ml_path = MODEL_DIR / "moneyline_ensemble.pkl"  # Fallback
+        ml_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
     if ml_path.exists():
         try:
             with open(ml_path, 'rb') as f:
@@ -854,12 +854,12 @@ def load_models() -> dict:
         except Exception as e:
             print(f"    Warning: Could not load moneyline model: {e}")
 
-    # Spread - try meta-learner first, then stacking, then fall back to ensemble
-    spread_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
+    # Spread - prefer ensemble (has feature_names + scaler), then stacking, then metalearner
+    spread_path = MODEL_DIR / "spread_ensemble.pkl"
     if not spread_path.exists():
         spread_path = MODEL_DIR / "spread_stacking.pkl"
     if not spread_path.exists():
-        spread_path = MODEL_DIR / "spread_ensemble.pkl"  # Fallback
+        spread_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
     if spread_path.exists():
         try:
             with open(spread_path, 'rb') as f:
@@ -1037,21 +1037,35 @@ def predict_moneyline(features: dict, models: dict) -> tuple[float, float]:
     if not model:
         return 0.5, 0.5
 
-    # Extract key features
-    feature_cols = ['net_rating_diff', 'win_pct_diff', 'pace_diff', 'off_rating_diff',
-                   'def_rating_diff', 'home_win_streak', 'away_win_streak']
-
-    X = np.array([[features.get(col, 0) for col in feature_cols]])
-
     try:
-        if hasattr(model, 'predict_proba'):
-            probs = model.predict_proba(X)[0]
-            home_prob = probs[1] if len(probs) > 1 else probs[0]
+        # Use model's stored feature_names for correct alignment
+        model_features = getattr(model, 'feature_names', None)
+        if model_features:
+            # Check if this is the dict-based EnsembleMoneylineWrapper from model_trainer
+            # (its predict() takes a dict, not a numpy array, and returns a dict)
+            if hasattr(model, 'model_weights') and hasattr(model, 'model_name'):
+                result = model.predict(features)
+                home_prob = result.get('home_win_probability', 0.5)
+            else:
+                X = np.array([[features.get(col, 0) for col in model_features]])
+                # Warn if most features are zero (data pipeline failure)
+                non_zero = np.count_nonzero(X[0])
+                if non_zero < len(model_features) * 0.3:
+                    print(f"    WARNING: moneyline model has {non_zero}/{len(model_features)} non-zero features")
+
+                if hasattr(model, 'predict_proba'):
+                    probs = model.predict_proba(X)[0]
+                    home_prob = probs[1] if len(probs) > 1 else probs[0]
+                else:
+                    # Model without predict_proba — use sigmoid of predict output
+                    pred = model.predict(X)[0]
+                    home_prob = 1 / (1 + np.exp(-pred))
         else:
-            # Fallback to simple formula
+            print(f"    WARNING: moneyline model has no feature_names, using fallback")
             net_rating_diff = features.get('net_rating_diff', 0)
             home_prob = 0.5 + (net_rating_diff * 0.02)
-    except Exception:
+    except Exception as e:
+        print(f"    WARNING: moneyline model predict failed: {type(e).__name__}: {e}")
         net_rating_diff = features.get('net_rating_diff', 0)
         home_prob = 0.5 + (net_rating_diff * 0.02)
 
@@ -1063,18 +1077,30 @@ def predict_spread(features: dict, models: dict) -> float:
     """Predict point spread (positive = home favored)."""
     model = models.get('spread')
 
-    # Simple formula based on net rating
+    # Heuristic fallback
     net_rating_diff = features.get('net_rating_diff', 0)
     home_advantage = 3.0
 
     if model:
         try:
-            feature_cols = ['net_rating_diff', 'off_rating_diff', 'def_rating_diff',
-                          'pace_diff', 'expected_point_diff']
-            X = np.array([[features.get(col, 0) for col in feature_cols]])
-            return model.predict(X)[0]
-        except Exception:
-            pass
+            # Use model's stored feature_names for correct alignment
+            model_features = getattr(model, 'feature_names', None)
+            if model_features:
+                X = np.array([[features.get(col, 0) for col in model_features]])
+                # Warn if most features are zero (data pipeline failure)
+                non_zero = np.count_nonzero(X[0])
+                if non_zero < len(model_features) * 0.3:
+                    print(f"    WARNING: spread model has {non_zero}/{len(model_features)} non-zero features")
+                pred = model.predict(X)[0]
+                # Sanity check
+                if -30 <= pred <= 30:
+                    return pred
+                else:
+                    print(f"    WARNING: spread prediction {pred:.1f} outside [-30, 30], using fallback")
+            else:
+                print(f"    WARNING: spread model has no feature_names, using fallback")
+        except Exception as e:
+            print(f"    WARNING: spread model predict failed: {type(e).__name__}: {e}")
 
     # Fallback: net rating / 3 + home advantage
     return (net_rating_diff / 3.0) + home_advantage
@@ -1319,6 +1345,7 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
     injury_features = {}
     injury_details = {'home': [], 'away': []}
 
+    spread_features = {}
     try:
         features = generate_game_features(
             home_abbrev, away_abbrev,
@@ -1330,6 +1357,7 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
             freshness.record_stats_fetch()
             freshness.record_injuries_fetch()
         ml_features = features.get('moneyline_features', {}) if features else {}
+        spread_features = features.get('spread_features', {}) if features else {}
 
         # Extract injury features from moneyline_features (where they're stored)
         if ml_features:
@@ -1341,8 +1369,12 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
                 'injury_advantage': ml_features.get('injury_advantage', 0),
             }
             injury_details = ml_features.get('injury_details', {'home': [], 'away': []})
-    except Exception:
+    except Exception as e:
+        import traceback
+        print(f"    WARNING: generate_game_features() failed: {type(e).__name__}: {e}")
+        traceback.print_exc()
         ml_features = {}
+        spread_features = {}
 
     if not ml_features:
         # Use basic defaults
@@ -1399,6 +1431,9 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
         # Use basic defaults
         ml_features = {'net_rating_diff': 0, 'win_pct_diff': 0}
 
+    if not spread_features:
+        spread_features = ml_features.copy()
+
     # Store injury info in analysis
     analysis['injury_features'] = injury_features
     analysis['injury_details'] = injury_details
@@ -1432,8 +1467,8 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
         'away_edge': (away_prob - away_implied) * 100,
     }
 
-    # Spread prediction
-    predicted_spread = predict_spread(ml_features, models)
+    # Spread prediction — use spread_features (richer than moneyline_features)
+    predicted_spread = predict_spread(spread_features if spread_features else ml_features, models)
     market_spread = odds.get('spread', 0)  # Negative = home favored
 
     # FIXED: Use app.py's proven formula for spread edge calculation.

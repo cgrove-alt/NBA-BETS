@@ -1710,12 +1710,20 @@ class MatchupFeatureGenerator:
         # Add advanced matchup analysis
         if include_advanced:
             # Head-to-head analysis - TEMPORAL DISCIPLINE: pass game_date
-            h2h_features = self.analyze_head_to_head(home_team_id, away_team_id, game_date=game_date)
-            features.update(h2h_features)
+            # Wrapped in try/except: h2h uses stats.nba.com which frequently times out.
+            # The core features above (win%, ratings, pace, elo) are more important than h2h.
+            try:
+                h2h_features = self.analyze_head_to_head(home_team_id, away_team_id, game_date=game_date)
+                features.update(h2h_features)
+            except Exception as e:
+                print(f"    WARNING: H2H analysis failed (stats.nba.com likely down): {type(e).__name__}")
 
             # Positional matchup analysis
-            positional_features = self.analyze_positional_matchup(home_team_id, away_team_id)
-            features.update(positional_features)
+            try:
+                positional_features = self.analyze_positional_matchup(home_team_id, away_team_id)
+                features.update(positional_features)
+            except Exception as e:
+                print(f"    WARNING: Positional matchup analysis failed: {type(e).__name__}")
 
             # Injury impact analysis
             injury_features = self.analyze_injury_impact(home_team_id, away_team_id)
@@ -1864,11 +1872,15 @@ class MatchupFeatureGenerator:
             # OPTIMIZED: Use cached H2H (already fetched by generate_moneyline_features)
             # CRITICAL FIX: Pass before_date to prevent temporal leakage!
             # Without this, H2H includes the current game's result = target leakage
-            if self._h2h_cache is None:
-                self._h2h_cache = self.h2h_analyzer.analyze_h2h(home_team_id, away_team_id, before_date=game_date)
-            h2h = self._h2h_cache
-            spread_features["h2h_spread_prediction"] = h2h.get("avg_point_diff", 0)
-            spread_features["h2h_spread_volatility"] = h2h.get("point_diff_std", 0)
+            try:
+                if self._h2h_cache is None:
+                    self._h2h_cache = self.h2h_analyzer.analyze_h2h(home_team_id, away_team_id, before_date=game_date)
+                h2h = self._h2h_cache
+                spread_features["h2h_spread_prediction"] = h2h.get("avg_point_diff", 0)
+                spread_features["h2h_spread_volatility"] = h2h.get("point_diff_std", 0)
+            except Exception:
+                spread_features["h2h_spread_prediction"] = 0
+                spread_features["h2h_spread_volatility"] = 0
 
         features.update(spread_features)
 
