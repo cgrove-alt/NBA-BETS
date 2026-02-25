@@ -12,6 +12,11 @@ import type {
   HealthResponse,
   GameResults,
   LiveStatsResponse,
+  BankrollResponse,
+  PerformanceResponse,
+  SystemHealthResponse,
+  BriefingResponseData,
+  SettingsData,
 } from './types';
 
 // API base URL - uses environment variable in production, proxy in development
@@ -118,5 +123,40 @@ export async function getGameResults(gameId: string): Promise<GameResults> {
 // Live Stats
 export async function getLiveStats(gameId: string): Promise<LiveStatsResponse> {
   const { data } = await api.get<LiveStatsResponse>(`/games/${gameId}/live-stats`);
+  return data;
+}
+
+// Bankroll
+export async function fetchBankroll(): Promise<BankrollResponse> {
+  const { data } = await api.get<BankrollResponse>('/bankroll');
+  return data;
+}
+
+// Performance
+export async function fetchPerformance(days: number = 30): Promise<PerformanceResponse> {
+  const { data } = await api.get<PerformanceResponse>('/performance', { params: { days } });
+  return data;
+}
+
+// System Health
+export async function fetchSystemHealth(): Promise<SystemHealthResponse> {
+  const { data } = await api.get<SystemHealthResponse>('/system-health');
+  return data;
+}
+
+// Briefing
+export async function fetchBriefing(date?: string): Promise<BriefingResponseData> {
+  const { data } = await api.get<BriefingResponseData>('/briefing', { params: date ? { date } : {} });
+  return data;
+}
+
+// Settings
+export async function fetchSettings(): Promise<SettingsData> {
+  const { data } = await api.get<SettingsData>('/settings');
+  return data;
+}
+
+export async function updateSettings(settings: Partial<SettingsData>): Promise<SettingsData> {
+  const { data } = await api.put<SettingsData>('/settings', settings);
   return data;
 }

@@ -7,7 +7,7 @@ import type { BankrollData } from './BankrollSummary';
 export interface ResponsiveLayoutProps {
   children: ReactNode;
   bankroll?: BankrollData;
-  activePage?: 'dashboard' | 'predictions' | 'performance' | 'settings';
+  activePage?: 'dashboard' | 'predictions' | 'performance' | 'health' | 'briefing' | 'settings';
 }
 
 /**

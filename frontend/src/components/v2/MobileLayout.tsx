@@ -6,6 +6,8 @@ import {
   BarChart3,
   Settings,
   Zap,
+  Activity,
+  FileText,
 } from 'lucide-react';
 import type { BankrollData } from './BankrollSummary';
 
@@ -100,7 +102,9 @@ const navItems = [
   { to: '/', icon: Home, label: 'Home' },
   { to: '/predictions', icon: TrendingUp, label: 'Picks' },
   { to: '/performance', icon: BarChart3, label: 'Stats' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/health', icon: Activity, label: 'Health' },
+  { to: '/briefing', icon: FileText, label: 'Brief' },
+  { to: '/settings', icon: Settings, label: 'More' },
 ];
 
 function BottomNav() {

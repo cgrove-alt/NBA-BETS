@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Dashboard, AllPredictions, Performance, Settings } from './pages/v2';
+import { Dashboard, AllPredictions, Performance, Settings, SystemHealth, Briefing } from './pages/v2';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,6 +32,12 @@ function AppV2() {
 
           {/* Performance tracking */}
           <Route path="/performance" element={<Performance />} />
+
+          {/* System Health */}
+          <Route path="/health" element={<SystemHealth />} />
+
+          {/* Daily Briefing */}
+          <Route path="/briefing" element={<Briefing />} />
 
           {/* Settings & Strategy */}
           <Route path="/settings" element={<Settings />} />

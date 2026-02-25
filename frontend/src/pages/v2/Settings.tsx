@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Settings as SettingsIcon,
   DollarSign,
@@ -10,12 +11,15 @@ import {
   ChevronRight,
   Save,
   Zap,
+  Check,
+  AlertCircle,
 } from 'lucide-react';
 import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
-import type { BankrollData } from '../../components/v2/BankrollSummary';
 import { Card } from '../../components/v2/Card';
 import { Button } from '../../components/v2/Button';
 import { Badge } from '../../components/v2/Badge';
+import { fetchSettings, updateSettings as updateSettingsApi } from '../../lib/api';
+import { useBankroll } from '../../hooks/useBankroll';
 
 interface StrategySettings {
   bankroll: number;
@@ -33,14 +37,18 @@ interface StrategySettings {
 
 /**
  * Settings - Configure betting strategy and preferences
- *
- * Features:
- * - Bankroll management
- * - Bet sizing strategy
- * - Filter preferences
- * - Notifications
  */
 export function Settings() {
+  const queryClient = useQueryClient();
+  const { bankrollData } = useBankroll();
+
+  // Load settings from backend
+  const { data: serverSettings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: fetchSettings,
+    staleTime: 60 * 1000,
+  });
+
   const [settings, setSettings] = useState<StrategySettings>({
     bankroll: 5000,
     defaultBetSize: 100,
@@ -56,18 +64,46 @@ export function Settings() {
   });
 
   const [hasChanges, setHasChanges] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
-  // Mock bankroll data
-  const bankrollData: BankrollData = {
-    totalBankroll: settings.bankroll,
-    todayPnL: 245.50,
-    weekPnL: 892.00,
-    monthPnL: 2150.00,
-    allTimeROI: 12.5,
-    winRate: 58.3,
-    activeBets: 3,
-    pendingBets: 2,
-  };
+  // Sync server settings into local state
+  useEffect(() => {
+    if (serverSettings) {
+      setSettings((prev) => ({
+        ...prev,
+        bankroll: serverSettings.bankroll,
+        defaultBetSize: serverSettings.default_bet_size,
+        betSizeType: serverSettings.bet_size_type as 'fixed' | 'percentage' | 'kelly',
+        minConfidence: serverSettings.min_confidence,
+        minEdge: serverSettings.min_edge,
+        maxBetsPerDay: serverSettings.max_bets_per_day,
+      }));
+    }
+  }, [serverSettings]);
+
+  // Save mutation
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updateSettingsApi({
+        bankroll: settings.bankroll,
+        default_bet_size: settings.defaultBetSize,
+        bet_size_type: settings.betSizeType,
+        min_confidence: settings.minConfidence,
+        min_edge: settings.minEdge,
+        max_bets_per_day: settings.maxBetsPerDay,
+      }),
+    onSuccess: () => {
+      setHasChanges(false);
+      setSaveStatus('success');
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      queryClient.invalidateQueries({ queryKey: ['bankroll'] });
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    },
+    onError: () => {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    },
+  });
 
   const updateSetting = <K extends keyof StrategySettings>(
     key: K,
@@ -75,6 +111,7 @@ export function Settings() {
   ) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setHasChanges(true);
+    setSaveStatus('idle');
   };
 
   const updateNotification = (key: keyof StrategySettings['notifications'], value: boolean) => {
@@ -86,9 +123,7 @@ export function Settings() {
   };
 
   const handleSave = () => {
-    // In production: save to backend/localStorage
-    console.log('Saving settings:', settings);
-    setHasChanges(false);
+    saveMutation.mutate();
   };
 
   return (
@@ -102,14 +137,22 @@ export function Settings() {
               Configure your betting strategy
             </p>
           </div>
-          {hasChanges && (
+          {(hasChanges || saveStatus !== 'idle') && (
             <Button
               variant="action"
               size="sm"
-              icon={<Save className="w-4 h-4" />}
+              icon={
+                saveStatus === 'success' ? <Check className="w-4 h-4" /> :
+                saveStatus === 'error' ? <AlertCircle className="w-4 h-4" /> :
+                <Save className="w-4 h-4" />
+              }
               onClick={handleSave}
+              disabled={saveMutation.isPending || saveStatus === 'success'}
             >
-              Save Changes
+              {saveMutation.isPending ? 'Saving...' :
+               saveStatus === 'success' ? 'Saved' :
+               saveStatus === 'error' ? 'Error - Retry' :
+               'Save Changes'}
             </Button>
           )}
         </div>

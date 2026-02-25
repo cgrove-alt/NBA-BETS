@@ -347,3 +347,119 @@ class LatestBacktestResponse(BaseModel):
     latest_backtest: BacktestResults | None = None
     available_backtests: list[str]
     count: int
+
+
+# ============== BANKROLL SCHEMAS ==============
+
+class BankrollResponse(BaseModel):
+    current_bankroll: float
+    initial_bankroll: float
+    daily_pnl: float
+    weekly_pnl: float
+    monthly_pnl: float
+    season_pnl: float
+    season_roi: float
+    total_exposure_today: float
+    total_bets: int
+    win_rate: float
+    active_bets: int
+
+
+# ============== PERFORMANCE SCHEMAS ==============
+
+class DailyRecord(BaseModel):
+    date: str
+    wins: int
+    losses: int
+    pushes: int
+    roi: float
+    clv_avg: float | None = None
+    profit: float
+
+class PropTypeStats(BaseModel):
+    total: int
+    wins: int
+    losses: int
+    hit_rate: float
+
+class ConfidenceTierStats(BaseModel):
+    total: int
+    wins: int
+    hit_rate: float
+
+class CalibrationSummaryResponse(BaseModel):
+    total_predictions: int
+    matched_predictions: int
+    overall_hit_rate: float | None = None
+    overall_clv: float | None = None
+    ece: float | None = None
+
+class PerformanceResponse(BaseModel):
+    daily_records: list[DailyRecord]
+    by_prop_type: dict[str, PropTypeStats]
+    by_confidence_tier: dict[str, ConfidenceTierStats]
+    calibration_summary: CalibrationSummaryResponse | None = None
+    total_bets: int
+    total_wins: int
+    total_losses: int
+    overall_hit_rate: float
+    overall_roi: float
+
+
+# ============== SYSTEM HEALTH SCHEMAS ==============
+
+class AgentStatus(BaseModel):
+    last_run: str | None = None
+    last_status: str | None = None
+    consecutive_failures: int = 0
+    tokens_used_today: int = 0
+
+class ModelStatus(BaseModel):
+    filename: str
+    last_modified: str
+    age_days: int
+
+class SystemHealthResponse(BaseModel):
+    agents: dict[str, AgentStatus]
+    models: list[ModelStatus]
+    data_freshness: dict[str, str | None]
+    overall_status: str  # "healthy", "degraded", "critical"
+
+
+# ============== BRIEFING SCHEMAS ==============
+
+class BriefingSections(BaseModel):
+    yesterday_results: str | None = None
+    today_plays: str | None = None
+    bankroll: str | None = None
+    alerts: str | None = None
+    market_intel: str | None = None
+
+class BriefingResponse(BaseModel):
+    date: str
+    briefing_text: str
+    generated_at: str | None = None
+    sections: BriefingSections | None = None
+
+
+# ============== SETTINGS SCHEMAS ==============
+
+class SettingsResponse(BaseModel):
+    bankroll: float
+    min_edge: float
+    min_confidence: float
+    kelly_fraction: float
+    max_exposure: float
+    default_bet_size: float
+    bet_size_type: str
+    max_bets_per_day: int
+
+class SettingsUpdateRequest(BaseModel):
+    bankroll: float | None = None
+    min_edge: float | None = None
+    min_confidence: float | None = None
+    kelly_fraction: float | None = None
+    max_exposure: float | None = None
+    default_bet_size: float | None = None
+    bet_size_type: str | None = None
+    max_bets_per_day: int | None = None

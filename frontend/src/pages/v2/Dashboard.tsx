@@ -6,7 +6,6 @@ import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
 import { BetCard } from '../../components/v2/BetCard';
 import type { BetCardData } from '../../components/v2/BetCard';
 import { BankrollSummary, PnLTicker } from '../../components/v2/BankrollSummary';
-import type { BankrollData } from '../../components/v2/BankrollSummary';
 import { Card } from '../../components/v2/Card';
 import { Button } from '../../components/v2/Button';
 import { Badge } from '../../components/v2/Badge';
@@ -14,6 +13,7 @@ import { BetCardSkeleton, GameCardSkeleton } from '../../components/v2/LoadingSk
 import { getGames, getBestBets } from '../../lib/api';
 import type { Game } from '../../lib/types';
 import { getTodayDate } from '../../components/game/DateSelector';
+import { useBankroll } from '../../hooks/useBankroll';
 
 /**
  * Check if a game has started based on its status
@@ -66,17 +66,8 @@ export function Dashboard() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Mock bankroll data (in production, this would come from a backend/local storage)
-  const bankrollData: BankrollData = {
-    totalBankroll: 5000,
-    todayPnL: 245.50,
-    weekPnL: 892.00,
-    monthPnL: 2150.00,
-    allTimeROI: 12.5,
-    winRate: 58.3,
-    activeBets: 3,
-    pendingBets: 2,
-  };
+  // Real bankroll data from /api/bankroll
+  const { bankrollData } = useBankroll();
 
   const games = gamesData?.games || [];
   const bestBets = bestBetsData?.best_bets || [];

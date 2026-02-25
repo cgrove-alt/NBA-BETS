@@ -7,13 +7,15 @@ import {
   Settings,
   Zap,
   ChevronRight,
+  Activity,
+  FileText,
 } from 'lucide-react';
 import type { BankrollData } from './BankrollSummary';
 
 interface DesktopLayoutProps {
   children: ReactNode;
   bankroll?: BankrollData;
-  activePage?: 'dashboard' | 'predictions' | 'performance' | 'settings';
+  activePage?: 'dashboard' | 'predictions' | 'performance' | 'health' | 'briefing' | 'settings';
 }
 
 // Format currency for display
@@ -37,6 +39,8 @@ const PAGE_TITLES: Record<string, string> = {
   dashboard: 'Dashboard',
   predictions: 'Predictions',
   performance: 'Performance',
+  health: 'System Health',
+  briefing: 'Daily Briefing',
   settings: 'Settings',
 };
 
@@ -70,6 +74,8 @@ const navItems = [
   { to: '/', icon: Home, label: 'Dashboard' },
   { to: '/predictions', icon: TrendingUp, label: 'Predictions' },
   { to: '/performance', icon: BarChart3, label: 'Performance' },
+  { to: '/health', icon: Activity, label: 'System Health' },
+  { to: '/briefing', icon: FileText, label: 'Briefing' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

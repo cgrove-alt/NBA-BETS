@@ -83,6 +83,19 @@ from backend.schemas import (
     BacktestMetrics,
     BacktestBettingMetrics,
     BacktestByProp,
+    BankrollResponse,
+    PerformanceResponse,
+    DailyRecord,
+    PropTypeStats,
+    ConfidenceTierStats,
+    CalibrationSummaryResponse,
+    SystemHealthResponse,
+    AgentStatus,
+    ModelStatus,
+    BriefingResponse,
+    BriefingSections,
+    SettingsResponse,
+    SettingsUpdateRequest,
 )
 
 # Singleton data service instance
@@ -1436,6 +1449,539 @@ def get_latest_backtest():
         available_backtests=[f.stem for f in backtest_files],
         count=len(backtest_files),
     )
+
+
+# ============== BANKROLL & P&L ENDPOINT ==============
+
+_settings_path = Path(__file__).parent.parent / "data" / "settings.json"
+
+def _load_settings() -> dict:
+    """Load settings from JSON file."""
+    import json
+    defaults = {
+        "bankroll": 5000.0,
+        "min_edge": 5.0,
+        "min_confidence": 55.0,
+        "kelly_fraction": 0.25,
+        "max_exposure": 10.0,
+        "default_bet_size": 100.0,
+        "bet_size_type": "fixed",
+        "max_bets_per_day": 10,
+    }
+    if _settings_path.exists():
+        try:
+            with open(_settings_path) as f:
+                stored = json.load(f)
+            defaults.update(stored)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return defaults
+
+
+@app.get("/api/bankroll", response_model=BankrollResponse)
+def get_bankroll():
+    """Get bankroll state and P&L summary.
+
+    Data sourced from bet_tracking.db (tracked_bets table) and settings.json.
+    """
+    import sqlite3
+    from datetime import datetime, timedelta
+
+    settings = _load_settings()
+    initial_bankroll = settings["bankroll"]
+
+    db_path = Path("data/bet_tracking.db")
+
+    # Default empty response
+    result = {
+        "current_bankroll": initial_bankroll,
+        "initial_bankroll": initial_bankroll,
+        "daily_pnl": 0.0,
+        "weekly_pnl": 0.0,
+        "monthly_pnl": 0.0,
+        "season_pnl": 0.0,
+        "season_roi": 0.0,
+        "total_exposure_today": 0.0,
+        "total_bets": 0,
+        "win_rate": 0.0,
+        "active_bets": 0,
+    }
+
+    if not db_path.exists():
+        return BankrollResponse(**result)
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        now = datetime.now(ET)
+        today = now.strftime("%Y-%m-%d")
+        week_ago = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+        month_ago = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+        # NBA season start (approximate)
+        season_start = f"{now.year - (1 if now.month < 10 else 0)}-10-01"
+
+        # The bet_tracker stores bets in a 'bets' table (SQLite)
+        # Check table name
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        bet_table = "tracked_bets" if "tracked_bets" in tables else "bets"
+
+        # Get settled bets with profit info
+        # The bet_tracker has: status, profit, event_date, stake
+        rows = conn.execute(f"""
+            SELECT status, profit, event_date, stake
+            FROM {bet_table}
+            WHERE status IN ('won', 'lost', 'push')
+        """).fetchall()
+
+        total_bets = len(rows)
+        wins = sum(1 for r in rows if r["status"] == "won")
+        season_pnl = sum(float(r["profit"] or 0) for r in rows
+                         if r["event_date"] and r["event_date"] >= season_start)
+        monthly_pnl = sum(float(r["profit"] or 0) for r in rows
+                          if r["event_date"] and r["event_date"] >= month_ago)
+        weekly_pnl = sum(float(r["profit"] or 0) for r in rows
+                         if r["event_date"] and r["event_date"] >= week_ago)
+        daily_pnl = sum(float(r["profit"] or 0) for r in rows
+                        if r["event_date"] and r["event_date"] == today)
+
+        # Active (pending) bets
+        pending = conn.execute(f"SELECT COUNT(*) FROM {bet_table} WHERE status = 'pending'").fetchone()
+        active_bets = pending[0] if pending else 0
+
+        # Today's exposure
+        exposure_row = conn.execute(f"""
+            SELECT COALESCE(SUM(stake), 0) FROM {bet_table}
+            WHERE status = 'pending' AND event_date = ?
+        """, (today,)).fetchone()
+        total_exposure = float(exposure_row[0]) if exposure_row else 0.0
+
+        conn.close()
+
+        win_rate = (wins / total_bets * 100) if total_bets > 0 else 0.0
+        current_bankroll = initial_bankroll + season_pnl
+        season_roi = (season_pnl / initial_bankroll * 100) if initial_bankroll > 0 else 0.0
+
+        result.update({
+            "current_bankroll": round(current_bankroll, 2),
+            "daily_pnl": round(daily_pnl, 2),
+            "weekly_pnl": round(weekly_pnl, 2),
+            "monthly_pnl": round(monthly_pnl, 2),
+            "season_pnl": round(season_pnl, 2),
+            "season_roi": round(season_roi, 1),
+            "total_bets": total_bets,
+            "win_rate": round(win_rate, 1),
+            "active_bets": active_bets,
+            "total_exposure_today": round(total_exposure, 2),
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Bankroll query failed: {e}")
+
+    return BankrollResponse(**result)
+
+
+# ============== PERFORMANCE HISTORY ENDPOINT ==============
+
+@app.get("/api/performance", response_model=PerformanceResponse)
+def get_performance(days: int = Query(30, ge=1, le=365)):
+    """Get performance history over a time range.
+
+    Args:
+        days: Number of days to look back (default 30)
+    """
+    import sqlite3
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+
+    now = datetime.now(ET)
+    start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    daily_records = []
+    by_prop_type: dict[str, dict] = defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0})
+    by_confidence: dict[str, dict] = defaultdict(lambda: {"total": 0, "wins": 0})
+    total_bets = 0
+    total_wins = 0
+    total_losses = 0
+
+    # Try calibration DB first (richer data)
+    cal_db_path = Path("data/calibration.db")
+    if cal_db_path.exists():
+        try:
+            conn = sqlite3.connect(str(cal_db_path))
+            conn.row_factory = sqlite3.Row
+
+            rows = conn.execute("""
+                SELECT p.game_date, p.prop_type, p.confidence, p.edge,
+                       o.hit, o.clv, o.error
+                FROM predictions p
+                JOIN outcomes o ON p.id = o.prediction_id
+                WHERE p.game_date >= ?
+                ORDER BY p.game_date DESC
+            """, (start_date,)).fetchall()
+
+            # Group by date
+            date_groups: dict[str, list] = defaultdict(list)
+            for r in rows:
+                date_groups[r["game_date"]].append(r)
+
+            for date_str in sorted(date_groups.keys(), reverse=True):
+                group = date_groups[date_str]
+                wins = sum(1 for r in group if r["hit"])
+                losses = sum(1 for r in group if not r["hit"])
+                clvs = [r["clv"] for r in group if r["clv"] is not None]
+                profit = (wins * 91 - losses * 100)  # Approximate at -110
+                daily_records.append(DailyRecord(
+                    date=date_str,
+                    wins=wins,
+                    losses=losses,
+                    pushes=0,
+                    roi=round(profit / max(len(group) * 100, 1) * 100, 1),
+                    clv_avg=round(sum(clvs) / len(clvs), 2) if clvs else None,
+                    profit=round(profit, 2),
+                ))
+
+                total_bets += len(group)
+                total_wins += wins
+                total_losses += losses
+
+                for r in group:
+                    pt = r["prop_type"] or "Unknown"
+                    by_prop_type[pt]["total"] += 1
+                    if r["hit"]:
+                        by_prop_type[pt]["wins"] += 1
+                    else:
+                        by_prop_type[pt]["losses"] += 1
+
+                    conf = r["confidence"] or 0
+                    if conf >= 60:
+                        tier = "high"
+                    elif conf >= 55:
+                        tier = "medium"
+                    else:
+                        tier = "low"
+                    by_confidence[tier]["total"] += 1
+                    if r["hit"]:
+                        by_confidence[tier]["wins"] += 1
+
+            conn.close()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Calibration DB query failed: {e}")
+
+    # Fall back to bet_tracking.db if no calibration data
+    if total_bets == 0:
+        bt_db_path = Path("data/bet_tracking.db")
+        if bt_db_path.exists():
+            try:
+                conn = sqlite3.connect(str(bt_db_path))
+                conn.row_factory = sqlite3.Row
+                tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                bet_table = "tracked_bets" if "tracked_bets" in tables else "bets"
+
+                rows = conn.execute(f"""
+                    SELECT event_date, status, profit, tags
+                    FROM {bet_table}
+                    WHERE status IN ('won', 'lost', 'push')
+                    AND event_date >= ?
+                    ORDER BY event_date DESC
+                """, (start_date,)).fetchall()
+
+                date_groups = defaultdict(list)
+                for r in rows:
+                    date_groups[r["event_date"]].append(r)
+
+                for date_str in sorted(date_groups.keys(), reverse=True):
+                    group = date_groups[date_str]
+                    wins = sum(1 for r in group if r["status"] == "won")
+                    losses = sum(1 for r in group if r["status"] == "lost")
+                    pushes = sum(1 for r in group if r["status"] == "push")
+                    profit = sum(float(r["profit"] or 0) for r in group)
+                    daily_records.append(DailyRecord(
+                        date=date_str,
+                        wins=wins,
+                        losses=losses,
+                        pushes=pushes,
+                        roi=round(profit / max(len(group) * 100, 1) * 100, 1),
+                        clv_avg=None,
+                        profit=round(profit, 2),
+                    ))
+                    total_bets += len(group)
+                    total_wins += wins
+                    total_losses += losses
+
+                conn.close()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Bet tracking DB query failed: {e}")
+
+    # Calibration summary from weekly reports
+    calibration_summary = None
+    if cal_db_path.exists():
+        try:
+            conn = sqlite3.connect(str(cal_db_path))
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM weekly_reports ORDER BY week_ending DESC LIMIT 1").fetchone()
+            if row:
+                calibration_summary = CalibrationSummaryResponse(
+                    total_predictions=row["total_predictions"] or 0,
+                    matched_predictions=row["matched_predictions"] or 0,
+                    overall_hit_rate=row["overall_hit_rate"],
+                    overall_clv=row["overall_clv"],
+                    ece=row["ece"],
+                )
+            conn.close()
+        except Exception:
+            pass
+
+    overall_hit_rate = (total_wins / total_bets * 100) if total_bets > 0 else 0.0
+    total_profit = sum(r.profit for r in daily_records)
+    overall_roi = (total_profit / max(total_bets * 100, 1) * 100) if total_bets > 0 else 0.0
+
+    return PerformanceResponse(
+        daily_records=daily_records,
+        by_prop_type={
+            k: PropTypeStats(
+                total=v["total"], wins=v["wins"], losses=v["losses"],
+                hit_rate=round(v["wins"] / max(v["total"], 1) * 100, 1),
+            ) for k, v in by_prop_type.items()
+        },
+        by_confidence_tier={
+            k: ConfidenceTierStats(
+                total=v["total"], wins=v["wins"],
+                hit_rate=round(v["wins"] / max(v["total"], 1) * 100, 1),
+            ) for k, v in by_confidence.items()
+        },
+        calibration_summary=calibration_summary,
+        total_bets=total_bets,
+        total_wins=total_wins,
+        total_losses=total_losses,
+        overall_hit_rate=round(overall_hit_rate, 1),
+        overall_roi=round(overall_roi, 1),
+    )
+
+
+# ============== SYSTEM HEALTH ENDPOINT ==============
+
+@app.get("/api/system-health", response_model=SystemHealthResponse)
+def get_system_health():
+    """Get system health status including agent runs, model freshness, and data freshness."""
+    import sqlite3
+    from datetime import datetime
+    import glob as glob_mod
+
+    agents_status: dict[str, AgentStatus] = {}
+    agent_names = ["pregame", "postgame", "odds_monitor", "orchestrator", "watchdog", "briefing"]
+
+    # Query agent runs from guardrails DB
+    guardrails_path = Path("data/agent_guardrails.db")
+    if guardrails_path.exists():
+        try:
+            conn = sqlite3.connect(str(guardrails_path))
+            conn.row_factory = sqlite3.Row
+
+            for agent_name in agent_names:
+                # Last run
+                row = conn.execute("""
+                    SELECT started_at, status, success FROM agent_runs
+                    WHERE agent_name = ?
+                    ORDER BY started_at DESC LIMIT 1
+                """, (agent_name,)).fetchone()
+
+                # Consecutive failures
+                recent = conn.execute("""
+                    SELECT success FROM agent_runs
+                    WHERE agent_name = ?
+                    ORDER BY started_at DESC LIMIT 5
+                """, (agent_name,)).fetchall()
+
+                consecutive_failures = 0
+                for r in recent:
+                    if r["success"] == 0:
+                        consecutive_failures += 1
+                    else:
+                        break
+
+                # Token usage
+                budget = conn.execute("""
+                    SELECT used_today FROM agent_token_budgets
+                    WHERE agent_name = ?
+                """, (agent_name,)).fetchone()
+
+                agents_status[agent_name] = AgentStatus(
+                    last_run=row["started_at"] if row else None,
+                    last_status=row["status"] if row else None,
+                    consecutive_failures=consecutive_failures,
+                    tokens_used_today=budget["used_today"] if budget else 0,
+                )
+
+            conn.close()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Guardrails DB query failed: {e}")
+
+    # Fill in agents with no data
+    for name in agent_names:
+        if name not in agents_status:
+            agents_status[name] = AgentStatus()
+
+    # Model freshness
+    models_list = []
+    models_dir = Path("models")
+    if models_dir.exists():
+        for pkl_file in sorted(models_dir.glob("*.pkl")):
+            try:
+                mtime = datetime.fromtimestamp(pkl_file.stat().st_mtime)
+                age_days = (datetime.now() - mtime).days
+                models_list.append(ModelStatus(
+                    filename=pkl_file.name,
+                    last_modified=mtime.isoformat(),
+                    age_days=age_days,
+                ))
+            except OSError:
+                pass
+
+    # Data freshness
+    data_freshness: dict[str, str | None] = {
+        "last_predictions": None,
+        "last_odds_fetch": None,
+        "last_bdl_call": None,
+    }
+
+    # Check latest prediction CSV
+    pred_csvs = sorted(Path(".").glob("predictions_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if pred_csvs:
+        data_freshness["last_predictions"] = datetime.fromtimestamp(pred_csvs[0].stat().st_mtime).isoformat()
+
+    # Check odds cache
+    odds_cache_dir = Path(".odds_cache")
+    if odds_cache_dir.exists():
+        odds_files = sorted(odds_cache_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if odds_files:
+            data_freshness["last_odds_fetch"] = datetime.fromtimestamp(odds_files[0].stat().st_mtime).isoformat()
+
+    # Check player impact cache for BDL freshness
+    bdl_cache = Path("player_impact_cache")
+    if bdl_cache.exists():
+        cache_files = sorted(bdl_cache.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if cache_files:
+            data_freshness["last_bdl_call"] = datetime.fromtimestamp(cache_files[0].stat().st_mtime).isoformat()
+
+    # Determine overall status
+    overall_status = "healthy"
+    # Check for critical: any agent with 3+ consecutive failures
+    if any(a.consecutive_failures >= 3 for a in agents_status.values()):
+        overall_status = "critical"
+    # Check for degraded: stale models (>30 days) or any agent failures
+    elif (models_list and any(m.age_days > 30 for m in models_list)) or \
+         any(a.consecutive_failures >= 1 for a in agents_status.values()):
+        overall_status = "degraded"
+
+    return SystemHealthResponse(
+        agents=agents_status,
+        models=models_list,
+        data_freshness=data_freshness,
+        overall_status=overall_status,
+    )
+
+
+# ============== DAILY BRIEFING ENDPOINT ==============
+
+@app.get("/api/briefing", response_model=BriefingResponse)
+def get_briefing(date: str = Query(None, description="Date in YYYY-MM-DD format")):
+    """Get the daily briefing for a specific date (defaults to today)."""
+    import sqlite3
+    import json
+    from datetime import datetime
+
+    if date is None:
+        date = datetime.now(ET).strftime("%Y-%m-%d")
+
+    # Try to find a briefing from agent_runs
+    briefing_text = ""
+    generated_at = None
+    sections = None
+
+    guardrails_path = Path("data/agent_guardrails.db")
+    if guardrails_path.exists():
+        try:
+            conn = sqlite3.connect(str(guardrails_path))
+            conn.row_factory = sqlite3.Row
+
+            # Find briefing agent run for the requested date
+            row = conn.execute("""
+                SELECT payload, completed_at FROM agent_runs
+                WHERE agent_name = 'briefing'
+                AND started_at LIKE ?
+                AND success = 1
+                ORDER BY started_at DESC LIMIT 1
+            """, (f"{date}%",)).fetchone()
+
+            if row and row["payload"]:
+                payload = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
+                briefing_text = payload.get("briefing_text", "")
+                generated_at = row["completed_at"]
+
+                # Try to extract sections
+                if "sections" in payload:
+                    sections = BriefingSections(**payload["sections"])
+
+            conn.close()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Briefing query failed: {e}")
+
+    # If no agent briefing, generate a simple one from available data
+    if not briefing_text:
+        try:
+            bankroll = get_bankroll()
+            briefing_lines = [
+                f"Daily Briefing - {date}",
+                "",
+                f"Bankroll: ${bankroll.current_bankroll:,.0f}",
+                f"Today's P&L: ${bankroll.daily_pnl:+,.0f}",
+                f"Season ROI: {bankroll.season_roi:+.1f}%",
+                f"Win Rate: {bankroll.win_rate:.1f}%",
+                f"Active Bets: {bankroll.active_bets}",
+            ]
+            briefing_text = "\n".join(briefing_lines)
+            generated_at = datetime.now(ET).isoformat()
+        except Exception:
+            briefing_text = f"Briefing unavailable for {date}. No data found."
+            generated_at = datetime.now(ET).isoformat()
+
+    return BriefingResponse(
+        date=date,
+        briefing_text=briefing_text,
+        generated_at=generated_at,
+        sections=sections,
+    )
+
+
+# ============== SETTINGS ENDPOINTS ==============
+
+@app.get("/api/settings", response_model=SettingsResponse)
+def get_settings():
+    """Get current application settings."""
+    s = _load_settings()
+    return SettingsResponse(**s)
+
+
+@app.put("/api/settings", response_model=SettingsResponse)
+def update_settings(req: SettingsUpdateRequest):
+    """Update application settings."""
+    import json
+
+    current = _load_settings()
+
+    # Merge only provided fields
+    updates = req.model_dump(exclude_none=True)
+    current.update(updates)
+
+    # Persist
+    _settings_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(_settings_path, "w") as f:
+        json.dump(current, f, indent=2)
+
+    return SettingsResponse(**current)
 
 
 # ============== RUN SERVER ==============

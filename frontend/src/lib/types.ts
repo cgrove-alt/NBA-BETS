@@ -220,6 +220,119 @@ export interface LiveStatsResponse {
   timestamp: string;
 }
 
+// ============== BANKROLL TYPES ==============
+
+export interface BankrollResponse {
+  current_bankroll: number;
+  initial_bankroll: number;
+  daily_pnl: number;
+  weekly_pnl: number;
+  monthly_pnl: number;
+  season_pnl: number;
+  season_roi: number;
+  total_exposure_today: number;
+  total_bets: number;
+  win_rate: number;
+  active_bets: number;
+}
+
+// ============== PERFORMANCE TYPES ==============
+
+export interface DailyRecordData {
+  date: string;
+  wins: number;
+  losses: number;
+  pushes: number;
+  roi: number;
+  clv_avg: number | null;
+  profit: number;
+}
+
+export interface PropTypeStatsData {
+  total: number;
+  wins: number;
+  losses: number;
+  hit_rate: number;
+}
+
+export interface ConfidenceTierStatsData {
+  total: number;
+  wins: number;
+  hit_rate: number;
+}
+
+export interface CalibrationSummary {
+  total_predictions: number;
+  matched_predictions: number;
+  overall_hit_rate: number | null;
+  overall_clv: number | null;
+  ece: number | null;
+}
+
+export interface PerformanceResponse {
+  daily_records: DailyRecordData[];
+  by_prop_type: Record<string, PropTypeStatsData>;
+  by_confidence_tier: Record<string, ConfidenceTierStatsData>;
+  calibration_summary: CalibrationSummary | null;
+  total_bets: number;
+  total_wins: number;
+  total_losses: number;
+  overall_hit_rate: number;
+  overall_roi: number;
+}
+
+// ============== SYSTEM HEALTH TYPES ==============
+
+export interface AgentStatusData {
+  last_run: string | null;
+  last_status: string | null;
+  consecutive_failures: number;
+  tokens_used_today: number;
+}
+
+export interface ModelStatusData {
+  filename: string;
+  last_modified: string;
+  age_days: number;
+}
+
+export interface SystemHealthResponse {
+  agents: Record<string, AgentStatusData>;
+  models: ModelStatusData[];
+  data_freshness: Record<string, string | null>;
+  overall_status: 'healthy' | 'degraded' | 'critical';
+}
+
+// ============== BRIEFING TYPES ==============
+
+export interface BriefingSections {
+  yesterday_results?: string;
+  today_plays?: string;
+  bankroll?: string;
+  alerts?: string;
+  market_intel?: string;
+}
+
+export interface BriefingResponseData {
+  date: string;
+  briefing_text: string;
+  generated_at: string | null;
+  sections: BriefingSections | null;
+}
+
+// ============== SETTINGS TYPES ==============
+
+export interface SettingsData {
+  bankroll: number;
+  min_edge: number;
+  min_confidence: number;
+  kelly_fraction: number;
+  max_exposure: number;
+  default_bet_size: number;
+  bet_size_type: string;
+  max_bets_per_day: number;
+}
+
 // Prop types constant
 export const PROP_TYPES = ['Points', 'Rebounds', 'Assists', '3PM', 'PRA'] as const;
 export type PropType = (typeof PROP_TYPES)[number];
