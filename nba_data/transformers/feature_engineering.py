@@ -125,12 +125,17 @@ def load_selected_features(filepath: str | Path | None = None) -> set | None:
     return None
 
 
-def filter_features(features: dict, selected: set | None = None) -> dict:
+_UNSET = object()  # sentinel to distinguish "not provided" from explicit None
+
+def filter_features(features: dict, selected: set | None = _UNSET) -> dict:
     """
     Filter a feature dict to only include selected features.
-    If no selection is loaded (or selection is empty), returns features unchanged.
+
+    - selected omitted: use the module-level _SELECTED_FEATURES (loaded from JSON).
+    - selected=None or selected=set(): no filtering, return features unchanged.
+    - selected={...}: filter to only those keys.
     """
-    sel = selected if selected is not None else _SELECTED_FEATURES
+    sel = _SELECTED_FEATURES if selected is _UNSET else selected
     if not sel:  # None or empty set → no filtering
         return features
     return {k: v for k, v in features.items() if k in sel}
