@@ -203,18 +203,30 @@ except ImportError:
     def get_kelly_multiplier_for_tier(*args, **kwargs):
         return 0.0
 
-# Helper function to map confidence score to edge quality tier
-def get_tier_from_confidence(confidence_score: float) -> str:
-    """Map confidence score (0-100) to edge quality tier."""
-    if confidence_score >= 90:
+# Helper function to map confidence + edge to quality tier
+def get_edge_quality_tier(confidence_score: float, edge: float) -> str:
+    """Map confidence score (0-100) + edge magnitude to edge quality tier."""
+    abs_edge = abs(edge)
+    if abs_edge >= 20 and confidence_score >= 40:
         return 'elite'
-    if confidence_score >= 75:
+    if abs_edge >= 12 and confidence_score >= 40:
         return 'strong'
-    if confidence_score >= 60:
+    if abs_edge >= 6 and confidence_score >= 40:
         return 'moderate'
-    if confidence_score >= 40:
+    if confidence_score >= 80 and abs_edge >= 3:
+        return 'strong'
+    if confidence_score >= 60 and abs_edge >= 3:
+        return 'moderate'
+    if abs_edge >= 3:
         return 'weak'
     return 'avoid'
+
+
+def american_to_decimal(odds: int) -> float:
+    """Convert American odds to decimal odds."""
+    if odds >= 100:
+        return (odds / 100) + 1
+    return (100 / abs(odds)) + 1
 
 # Phase 4: Edge-focused prop edge calculation
 def _calculate_prop_edge(over_prob: float, american_odds: int = -110) -> dict:
@@ -1684,6 +1696,11 @@ def get_player_props_for_game(api: BalldontlieAPI, game_id: int) -> dict[int, di
             if key not in props_by_player[player_id] or vendor in ['draftkings', 'fanduel']:
                 props_by_player[player_id][key] = line
                 props_by_player[player_id][f'{prop_type}_vendor'] = vendor
+                # Extract actual sportsbook odds from market data
+                market_data = prop.get('market', {})
+                if isinstance(market_data, dict):
+                    props_by_player[player_id][f'{prop_type}_over_odds'] = market_data.get('over_odds', -110)
+                    props_by_player[player_id][f'{prop_type}_under_odds'] = market_data.get('under_odds', -110)
 
             accepted += 1
 
@@ -2167,8 +2184,8 @@ def predict_player_prop(
         except Exception:
             pass  # Never block predictions on calibration failure
 
-    # Calculate edge quality tier based on confidence score (Task 2.4)
-    edge_quality_tier = get_tier_from_confidence(confidence_score)
+    # Calculate edge quality tier based on confidence + edge magnitude (Task 2.4)
+    edge_quality_tier = get_edge_quality_tier(confidence_score, edge)
 
     # Calculate Kelly bet size (Task 3.4)
     if HAS_KELLY_SIZING and abs(edge) > 2.0:  # Only bet if edge > 2%
@@ -2177,8 +2194,8 @@ def predict_player_prop(
             # over_prob already accounts for our edge
             win_prob = over_prob if over_prob > 0.5 else (1 - over_prob)
 
-            # Assume -110 odds (decimal 1.909)
-            decimal_odds = 1.909
+            # Use actual odds from sportsbook
+            decimal_odds = american_to_decimal(american_odds)
 
             # Use a default $1000 bankroll for bet sizing (user can scale)
             default_bankroll = 1000.0
@@ -2195,11 +2212,18 @@ def predict_player_prop(
             )
 
             # Calculate bet size as percentage of bankroll for display
-            (suggested_bet_size / default_bankroll) * 100
+            suggested_bet_size = (suggested_bet_size / default_bankroll) * 100
 
         except Exception:
             # Fall back to defaults
             pass
+    elif not HAS_KELLY_SIZING and abs(edge) > 2.0:
+        # Simple quarter-Kelly fallback when kelly_sizing module unavailable
+        win_prob = over_prob if over_prob > 0.5 else (1 - over_prob)
+        b = american_to_decimal(american_odds) - 1
+        q = 1 - win_prob
+        kelly_full = max(0, (b * win_prob - q) / b) if b > 0 else 0
+        suggested_bet_size = min(kelly_full * 0.25 * 100, 5.0)  # % of bankroll, cap 5%
 
     # Phase 4: Signal classification using edge magnitude
     bet_recommendation = get_signal_from_edge(edge, edge_info.get('edge_quality'))
@@ -2598,6 +2622,9 @@ def main():
                             opponent_injured = home_injured_names
                             teammate_injured = away_injured_names
 
+                        # Determine player's team abbreviation
+                        team_abbrev = analysis['home_team'] if player_team_id == home_team_id else analysis['away_team']
+
                         # Add tasks for each prop type
                         for prop_type in ['points', 'rebounds', 'assists']:
                             line_key = f'{prop_type}_line'
@@ -2615,6 +2642,9 @@ def main():
                                     'teammate_injured': teammate_injured,
                                     'uncertainty_flag': uncertainty_flag,
                                     'team_id': player_team_id,
+                                    'team_abbrev': team_abbrev,
+                                    'over_odds': props.get(f'{prop_type}_over_odds', -110),
+                                    'under_odds': props.get(f'{prop_type}_under_odds', -110),
                                     'game_context': {
                                         'spread': odds.get('spread', 0),
                                         'total': odds.get('total', 220),
@@ -2644,9 +2674,20 @@ def main():
                                 teammate_injured=task['teammate_injured'],
                                 team_id=task.get('team_id'),
                                 game_context=task.get('game_context'),
+                                american_odds=task.get('over_odds', -110),
                             )
+                            # Fix 1: Pass through team abbreviation
+                            pred['team_abbrev'] = task.get('team_abbrev', '')
+                            # Fix 4: Pass through actual sportsbook odds
+                            pred['over_odds'] = task.get('over_odds', -110)
+                            pred['under_odds'] = task.get('under_odds', -110)
+                            # Fix 5: Expand uncertainty_flag beyond just injury status
                             if task['uncertainty_flag']:
                                 pred['uncertainty_flag'] = task['uncertainty_flag']
+                            elif pred.get('minutes_uncertainty') == 'high':
+                                pred['uncertainty_flag'] = 'HIGH_MINUTES_UNCERTAINTY'
+                            elif pred.get('confidence_score', 100) < 35:
+                                pred['uncertainty_flag'] = 'LOW_CONFIDENCE'
                             return pred
 
                         # Execute in parallel
@@ -2692,7 +2733,7 @@ def main():
                     _cal_service.log_prediction(
                         player_id=prop.get('player_id', 0),
                         player_name=prop.get('player', ''),
-                        team='',
+                        team=prop.get('team_abbrev', ''),
                         opponent=opponent,
                         game_date=target_date,
                         prop_type=prop.get('stat', ''),
@@ -2794,25 +2835,25 @@ def main():
             # Build DataFrame with all enhanced columns
             csv_data = []
             for prop in all_player_props:
-                # Extract team from game string (format: "AWAY@HOME")
                 game_str = prop.get('game', '')
-                team = ''
-                if '@' in game_str:
-                    # We don't know which team this player is on from the prop alone
-                    # We'll need to extract it from context or leave empty
-                    # For now, leave empty - frontend doesn't strictly need it
-                    team = ''
+                team = prop.get('team_abbrev', '')
 
                 # Phase 4: Use pick directly from prediction output
                 over_prob = prop.get('over_prob', 0.5)
                 bet_rec = prop.get('bet_recommendation', 'PASS')
                 pick = prop.get('pick', 'OVER' if over_prob > 0.5 else 'UNDER')
 
+                # Use pick-appropriate odds (over_odds for OVER, under_odds for UNDER)
+                if pick == 'OVER':
+                    display_odds = prop.get('over_odds', prop.get('american_odds', -110))
+                else:
+                    display_odds = prop.get('under_odds', prop.get('american_odds', -110))
+
                 row = {
                     'date': target_date,
                     'game': game_str,
                     'player_name': prop.get('player', ''),
-                    'team': team,  # Added for API compatibility
+                    'team': team,
                     'prop_type': prop.get('stat', ''),
                     'line': prop.get('line', 0),
                     'prediction': prop.get('predicted_value', ''),
@@ -2831,7 +2872,7 @@ def main():
                     'bet_recommendation': bet_rec,
                     'signal': prop.get('signal', bet_rec),
                     'pick': pick,
-                    'american_odds': prop.get('american_odds', -110),
+                    'american_odds': display_odds,
                     'ev_per_dollar': prop.get('ev_per_dollar', 0),
                     'has_edge': prop.get('has_edge', False),
                     'uncertainty_flag': prop.get('uncertainty_flag', ''),

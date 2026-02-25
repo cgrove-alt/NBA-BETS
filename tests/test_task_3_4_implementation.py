@@ -29,7 +29,7 @@ try:
     from daily_predictions import (
         load_models,
         predict_player_prop,
-        get_tier_from_confidence,
+        get_edge_quality_tier,
     )
     from risk_management import calculate_kelly_bet_size
     print("✓ All required imports successful")
@@ -37,19 +37,20 @@ except ImportError as e:
     print(f"✗ Import failed: {e}")
     sys.exit(1)
 
-# Test 2: Edge Quality Tier Mapping
+# Test 2: Edge Quality Tier Mapping (now uses confidence + edge)
 print("\n[TEST 2] Testing edge quality tier mapping...")
 tier_tests = [
-    (95, 'elite'),
-    (85, 'strong'),
-    (70, 'moderate'),
-    (50, 'weak'),
-    (30, 'avoid'),
+    # (confidence, edge, expected_tier)
+    (50, 25.0, 'elite'),
+    (50, 15.0, 'strong'),
+    (50, 8.0, 'moderate'),
+    (50, 4.0, 'weak'),
+    (50, 1.0, 'avoid'),
 ]
-for score, expected_tier in tier_tests:
-    tier = get_tier_from_confidence(score)
+for score, edge, expected_tier in tier_tests:
+    tier = get_edge_quality_tier(score, edge)
     status = "✓" if tier == expected_tier else "✗"
-    print(f"  {status} Score {score:3d} → {tier:8s} (expected: {expected_tier})")
+    print(f"  {status} Score {score:3d}, Edge {edge:5.1f} → {tier:8s} (expected: {expected_tier})")
 
 # Test 3: Kelly Bet Sizing
 print("\n[TEST 3] Testing Kelly bet sizing...")
