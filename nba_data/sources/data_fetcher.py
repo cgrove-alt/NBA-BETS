@@ -1042,6 +1042,279 @@ def _aggregate_box_scores_bdl(bdl_team_id: int, season: int) -> dict:
         return {}
 
 
+def _nba_team_id_to_bdl_team_id(nba_team_id: int, season: str = "2025-26") -> int | None:
+    """Convert an nba_api team ID to a BDL team ID via abbreviation + standings lookup."""
+    team_abbrev = _get_team_abbrev_from_nba_id(nba_team_id)
+    if not team_abbrev:
+        return None
+    bdl_season = _bdl_season_from_nba_season(season)
+    standings = _fetch_standings_bdl(bdl_season)
+    if not standings:
+        return None
+    return _get_bdl_team_id_from_standings(standings, team_abbrev)
+
+
+def _fetch_head_to_head_bdl(team1_id, team2_id, season="2025-26", last_n_games=10, date_to=None):
+    """
+    Fetch head-to-head games between two teams using BallDontLie.
+
+    Uses _fetch_team_games_bdl() (already cached) and filters for matchups
+    between the two teams.
+
+    Args:
+        team1_id: First team NBA API ID (1610612xxx)
+        team2_id: Second team NBA API ID (1610612xxx)
+        season: NBA season string, can include multiple seasons ("2024-25,2025-26")
+        last_n_games: Maximum number of games to return
+        date_to: Optional date cutoff (YYYY-MM-DD). Only returns games BEFORE this date.
+
+    Returns:
+        List of H2H game dicts matching fetch_head_to_head() format, or None on failure.
+    """
+    # Parse multiple seasons if provided
+    seasons_list = [s.strip() for s in season.split(",")]
+
+    # Convert team IDs
+    team1_abbrev = _get_team_abbrev_from_nba_id(team1_id)
+    team2_abbrev = _get_team_abbrev_from_nba_id(team2_id)
+    if not team1_abbrev or not team2_abbrev:
+        return None
+
+    # Parse date_to for filtering
+    date_cutoff = None
+    if date_to:
+        try:
+            if "-" in str(date_to) and len(str(date_to)) == 10:
+                date_cutoff = str(date_to)
+            else:
+                date_obj = datetime.strptime(str(date_to), "%m/%d/%Y")
+                date_cutoff = date_obj.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    all_h2h = []
+    for s in seasons_list:
+        bdl_season = _bdl_season_from_nba_season(s)
+        # Get BDL team ID for team1
+        standings = _fetch_standings_bdl(bdl_season)
+        if not standings:
+            continue
+        bdl_team1_id = _get_bdl_team_id_from_standings(standings, team1_abbrev)
+        bdl_team2_id = _get_bdl_team_id_from_standings(standings, team2_abbrev)
+        if not bdl_team1_id or not bdl_team2_id:
+            continue
+
+        # Fetch team1's games (already cached)
+        games = _fetch_team_games_bdl(bdl_team1_id, bdl_season)
+
+        for game in games:
+            home_team = game.get("home_team", {})
+            visitor_team = game.get("visitor_team", {})
+            home_id = home_team.get("id")
+            visitor_id = visitor_team.get("id")
+
+            # Filter: only games where team2 is the opponent
+            is_h2h = (
+                (home_id == bdl_team1_id and visitor_id == bdl_team2_id) or
+                (home_id == bdl_team2_id and visitor_id == bdl_team1_id)
+            )
+            if not is_h2h:
+                continue
+
+            # Parse game date
+            game_date_raw = game.get("date", "")
+            game_date = str(game_date_raw)[:10] if game_date_raw else ""
+
+            # Temporal discipline: filter by date_to
+            if date_cutoff and game_date >= date_cutoff:
+                continue
+
+            # Determine team1's perspective
+            home_score = game.get("home_team_score") or 0
+            visitor_score = game.get("visitor_team_score") or 0
+
+            if home_id == bdl_team1_id:
+                team1_pts = home_score
+                wl = "W" if home_score > visitor_score else "L"
+                plus_minus = home_score - visitor_score
+                matchup = f"{team1_abbrev} vs. {team2_abbrev}"
+            else:
+                team1_pts = visitor_score
+                wl = "W" if visitor_score > home_score else "L"
+                plus_minus = visitor_score - home_score
+                matchup = f"{team1_abbrev} @ {team2_abbrev}"
+
+            all_h2h.append({
+                "game_id": game.get("id"),
+                "game_date": game_date,
+                "matchup": matchup,
+                "team_id": team1_id,
+                "wl": wl,
+                "pts": team1_pts,
+                "fg_pct": None,  # Not available from game-level BDL data
+                "fg3_pct": None,
+                "reb": None,
+                "ast": None,
+                "plus_minus": plus_minus,
+            })
+
+    # Sort by date descending (most recent first)
+    all_h2h.sort(key=lambda x: x.get("game_date", ""), reverse=True)
+
+    if last_n_games:
+        all_h2h = all_h2h[:last_n_games]
+
+    return all_h2h
+
+
+def _fetch_team_roster_bdl(team_id, season="2025-26"):
+    """
+    Fetch team roster using BallDontLie API.
+
+    Uses api.get_players_paginated(team_ids=[bdl_team_id]).
+
+    Args:
+        team_id: NBA API team ID (1610612xxx)
+        season: NBA season string
+
+    Returns:
+        List of player dicts matching fetch_team_roster() format, or None on failure.
+    """
+    bdl_team_id = _nba_team_id_to_bdl_team_id(team_id, season)
+    if not bdl_team_id:
+        return None
+
+    api = _get_balldontlie_api()
+    if not api:
+        return None
+
+    try:
+        players = api.get_players_paginated(team_ids=[bdl_team_id], max_pages=3)
+        if not players:
+            return None
+
+        roster = []
+        for p in players:
+            # Map BDL position to standard format
+            position = p.get("position", "") or ""
+
+            roster.append({
+                "player_id": p.get("id"),
+                "player_name": f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
+                "position": position,
+                "height": p.get("height", ""),
+                "weight": p.get("weight", ""),
+                "age": None,  # Not directly available from BDL players endpoint
+                "experience": None,
+            })
+
+        return roster
+    except Exception as e:
+        logger.warning(f"BDL roster fetch failed for team {team_id}: {type(e).__name__}: {e}")
+        return None
+
+
+def _fetch_player_vs_team_bdl(player_id, opponent_team_id, season="2025-26", last_n_games=10):
+    """
+    Fetch player's game log vs a specific opponent using BallDontLie.
+
+    Uses api.get_player_stats_paginated() and filters for games against the opponent.
+
+    Args:
+        player_id: BDL or nba_api player ID (will attempt ID mapping)
+        opponent_team_id: Opponent NBA API team ID (1610612xxx)
+        season: NBA season string
+        last_n_games: Maximum games to return
+
+    Returns:
+        List of game dicts matching fetch_player_vs_team() format, or None on failure.
+    """
+    api = _get_balldontlie_api()
+    if not api:
+        return None
+
+    # Convert opponent team ID to BDL team ID
+    opp_bdl_id = _nba_team_id_to_bdl_team_id(opponent_team_id, season)
+    if not opp_bdl_id:
+        return None
+
+    # Try to get BDL player ID — player_id might already be a BDL ID or an nba_api ID
+    bdl_player_id = player_id
+    mapper = _get_id_mapper()
+    if mapper:
+        # If player_id looks like an nba_api ID (large number), try to map it
+        try:
+            if int(player_id) > 100000:
+                # Likely nba_api ID — try reverse lookup
+                bdl_id = mapper.get_bdl_id_from_nba_id(int(player_id))
+                if bdl_id:
+                    bdl_player_id = bdl_id
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+    bdl_season = _bdl_season_from_nba_season(season)
+
+    try:
+        all_stats = api.get_player_stats_paginated(bdl_player_id, bdl_season)
+        if not all_stats:
+            return None
+
+        # Filter for games against the opponent
+        vs_games = []
+        for stat in all_stats:
+            game = stat.get("game", {})
+            home_team_id = game.get("home_team", {}).get("id")
+            visitor_team_id = game.get("visitor_team", {}).get("id")
+
+            # Check if opponent is in this game
+            if opp_bdl_id not in (home_team_id, visitor_team_id):
+                continue
+
+            game_date_raw = game.get("date", "")
+            game_date = str(game_date_raw)[:10] if game_date_raw else ""
+
+            home_abbrev = game.get("home_team", {}).get("abbreviation", "")
+            visitor_abbrev = game.get("visitor_team", {}).get("abbreviation", "")
+            matchup = f"{visitor_abbrev} @ {home_abbrev}"
+
+            # Determine W/L from scores
+            home_score = game.get("home_team_score") or 0
+            visitor_score = game.get("visitor_team_score") or 0
+            player_team_id = stat.get("team", {}).get("id")
+            if player_team_id == home_team_id:
+                wl = "W" if home_score > visitor_score else "L"
+            else:
+                wl = "W" if visitor_score > home_score else "L"
+
+            vs_games.append({
+                "game_id": game.get("id"),
+                "game_date": game_date,
+                "matchup": matchup,
+                "wl": wl,
+                "min": _parse_minutes(stat.get("min")),
+                "pts": stat.get("pts"),
+                "reb": stat.get("reb"),
+                "ast": stat.get("ast"),
+                "stl": stat.get("stl"),
+                "blk": stat.get("blk"),
+                "fg_pct": stat.get("fg_pct"),
+                "fg3_made": stat.get("fg3m"),
+                "fg3_pct": stat.get("fg3_pct"),
+                "plus_minus": None,
+            })
+
+        # Sort by date descending
+        vs_games.sort(key=lambda x: x.get("game_date", ""), reverse=True)
+
+        if last_n_games and len(vs_games) > last_n_games:
+            vs_games = vs_games[:last_n_games]
+
+        return vs_games
+    except Exception as e:
+        logger.warning(f"BDL player vs team fetch failed for player {player_id}: {type(e).__name__}: {e}")
+        return None
+
+
 def _fetch_team_statistics_bdl(team_id, season="2025-26"):
     """
     Build team statistics using only BallDontLie data.
@@ -1979,17 +2252,8 @@ def fetch_player_stats_before_date(player_id, season="2025-26", before_date=None
     }
 
 
-def fetch_team_roster(team_id, season="2025-26"):
-    """
-    Fetch team roster with player IDs.
-
-    Args:
-        team_id: NBA team ID
-        season: NBA season
-
-    Returns:
-        List of player dictionaries
-    """
+def _fetch_team_roster_nba_api(team_id, season="2025-26"):
+    """Fetch team roster via stats.nba.com (fallback). Slow and unreliable."""
     _rate_limiter.wait()
 
     roster = commonteamroster.CommonTeamRoster(
@@ -2011,6 +2275,37 @@ def fetch_team_roster(team_id, season="2025-26"):
         })
 
     return players_list
+
+
+def fetch_team_roster(team_id, season="2025-26"):
+    """
+    Fetch team roster with player IDs.
+
+    PRIMARY: BallDontLie (fast, reliable)
+    FALLBACK: stats.nba.com (slow, often times out)
+
+    Args:
+        team_id: NBA team ID
+        season: NBA season
+
+    Returns:
+        List of player dictionaries
+    """
+    # Try BDL first
+    try:
+        result = _fetch_team_roster_bdl(team_id, season)
+        if result:
+            logger.info(f"Roster for team {team_id}: fetched from BDL ({len(result)} players)")
+            return result
+    except Exception as e:
+        logger.warning(f"BDL roster failed for team {team_id}, falling back to nba_api: {e}")
+
+    # Fallback to nba_api
+    try:
+        return _fetch_team_roster_nba_api(team_id, season)
+    except Exception as e:
+        logger.warning(f"nba_api roster also failed for team {team_id}: {type(e).__name__}: {e}")
+        return []
 
 
 def fetch_player_info(player_id):
@@ -2050,24 +2345,8 @@ def fetch_player_info(player_id):
     }
 
 
-def fetch_head_to_head(team1_id, team2_id, season="2025-26", last_n_games=10, date_to=None):
-    """
-    Fetch head-to-head game history between two teams.
-
-    TEMPORAL DISCIPLINE: Use date_to parameter to prevent temporal leakage
-    when computing H2H features for historical games.
-
-    Args:
-        team1_id: First team NBA ID
-        team2_id: Second team NBA ID
-        season: NBA season (can include multiple seasons like "2023-24,2025-26")
-        last_n_games: Maximum number of games to return
-        date_to: Optional date cutoff (MM/DD/YYYY or YYYY-MM-DD format).
-                 Only returns games BEFORE this date.
-
-    Returns:
-        List of head-to-head game results
-    """
+def _fetch_head_to_head_nba_api(team1_id, team2_id, season="2025-26", last_n_games=10, date_to=None):
+    """Fetch H2H via stats.nba.com LeagueGameFinder (fallback). Slow and unreliable."""
     _rate_limiter.wait()
 
     # Convert date format if needed (YYYY-MM-DD -> MM/DD/YYYY)
@@ -2076,15 +2355,13 @@ def fetch_head_to_head(team1_id, team2_id, season="2025-26", last_n_games=10, da
         try:
             if "-" in date_to and len(date_to) == 10:  # YYYY-MM-DD format
                 date_obj = datetime.strptime(date_to, "%Y-%m-%d")
-                # Use day before to get games STRICTLY before this date
                 day_before = date_obj - timedelta(days=1)
                 date_to_api = day_before.strftime("%m/%d/%Y")
             else:
                 date_to_api = date_to
         except ValueError:
-            pass  # Use None if parsing fails
+            pass
 
-    # Get team1's games
     game_finder = leaguegamefinder.LeagueGameFinder(
         team_id_nullable=team1_id,
         vs_team_id_nullable=team2_id,
@@ -2117,19 +2394,46 @@ def fetch_head_to_head(team1_id, team2_id, season="2025-26", last_n_games=10, da
     return h2h_games
 
 
-def fetch_player_vs_team(player_id, opponent_team_id, season="2025-26", last_n_games=10):
+def fetch_head_to_head(team1_id, team2_id, season="2025-26", last_n_games=10, date_to=None):
     """
-    Fetch player's performance history against a specific team.
+    Fetch head-to-head game history between two teams.
+
+    PRIMARY: BallDontLie (fast, uses cached team games)
+    FALLBACK: stats.nba.com LeagueGameFinder (slow, often times out)
+
+    TEMPORAL DISCIPLINE: Use date_to parameter to prevent temporal leakage
+    when computing H2H features for historical games.
 
     Args:
-        player_id: NBA player ID
-        opponent_team_id: Opponent team NBA ID
-        season: NBA season
-        last_n_games: Maximum games to return
+        team1_id: First team NBA ID
+        team2_id: Second team NBA ID
+        season: NBA season (can include multiple seasons like "2023-24,2025-26")
+        last_n_games: Maximum number of games to return
+        date_to: Optional date cutoff (MM/DD/YYYY or YYYY-MM-DD format).
+                 Only returns games BEFORE this date.
 
     Returns:
-        List of player game logs against the opponent
+        List of head-to-head game results
     """
+    # Try BDL first
+    try:
+        result = _fetch_head_to_head_bdl(team1_id, team2_id, season, last_n_games, date_to)
+        if result is not None:
+            logger.info(f"H2H {team1_id} vs {team2_id}: fetched from BDL ({len(result)} games)")
+            return result
+    except Exception as e:
+        logger.warning(f"BDL H2H failed for {team1_id} vs {team2_id}, falling back to nba_api: {e}")
+
+    # Fallback to nba_api
+    try:
+        return _fetch_head_to_head_nba_api(team1_id, team2_id, season, last_n_games, date_to)
+    except Exception as e:
+        logger.warning(f"nba_api H2H also failed for {team1_id} vs {team2_id}: {type(e).__name__}: {e}")
+        return []
+
+
+def _fetch_player_vs_team_nba_api(player_id, opponent_team_id, season="2025-26", last_n_games=10):
+    """Fetch player vs team via stats.nba.com PlayerGameLog (fallback). Slow and unreliable."""
     _rate_limiter.wait()
 
     game_log = playergamelog.PlayerGameLog(
@@ -2140,8 +2444,6 @@ def fetch_player_vs_team(player_id, opponent_team_id, season="2025-26", last_n_g
     log_dict = game_log.get_normalized_dict()
     all_games = log_dict.get("PlayerGameLog", [])
 
-    # Filter for games against the specific opponent
-    # Get opponent abbreviation
     nba_teams = teams.get_teams()
     opp_abbrev = None
     for team in nba_teams:
@@ -2173,6 +2475,39 @@ def fetch_player_vs_team(player_id, opponent_team_id, season="2025-26", last_n_g
                 break
 
     return vs_games
+
+
+def fetch_player_vs_team(player_id, opponent_team_id, season="2025-26", last_n_games=10):
+    """
+    Fetch player's performance history against a specific team.
+
+    PRIMARY: BallDontLie (fast, reliable)
+    FALLBACK: stats.nba.com PlayerGameLog (slow, often times out)
+
+    Args:
+        player_id: NBA player ID
+        opponent_team_id: Opponent team NBA ID
+        season: NBA season
+        last_n_games: Maximum games to return
+
+    Returns:
+        List of player game logs against the opponent
+    """
+    # Try BDL first
+    try:
+        result = _fetch_player_vs_team_bdl(player_id, opponent_team_id, season, last_n_games)
+        if result is not None:
+            logger.info(f"Player {player_id} vs team {opponent_team_id}: fetched from BDL ({len(result)} games)")
+            return result
+    except Exception as e:
+        logger.warning(f"BDL player vs team failed for {player_id}, falling back to nba_api: {e}")
+
+    # Fallback to nba_api
+    try:
+        return _fetch_player_vs_team_nba_api(player_id, opponent_team_id, season, last_n_games)
+    except Exception as e:
+        logger.warning(f"nba_api player vs team also failed for {player_id}: {type(e).__name__}: {e}")
+        return []
 
 
 def save_schedule_to_json(schedule, date, output_dir="."):
