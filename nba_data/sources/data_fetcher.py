@@ -1962,26 +1962,44 @@ def _player_stats_cache_key(player_id, season="2025-26", last_n_games=None):
 @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
 def _fetch_player_game_log_api(player_id, season="2025-26"):
     """Raw API call for player game log with retry logic."""
+    _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
-    game_log = playergamelog.PlayerGameLog(
-        player_id=player_id,
-        season=season,
-        season_type_all_star="Regular Season"
-    )
-    return game_log.get_normalized_dict()
+    try:
+        game_log = playergamelog.PlayerGameLog(
+            player_id=player_id,
+            season=season,
+            season_type_all_star="Regular Season"
+        )
+        result = game_log.get_normalized_dict()
+        _nba_stats_circuit_breaker.record_success()
+        return result
+    except CircuitBreakerOpenError:
+        raise
+    except Exception as e:
+        _nba_stats_circuit_breaker.record_failure()
+        raise
 
 
 @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
 def _fetch_player_dashboard_api(player_id, season="2025-26"):
     """Raw API call for player dashboard with retry logic."""
+    _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
-    player_dashboard = playerdashboardbygeneralsplits.PlayerDashboardByGeneralSplits(
-        player_id=player_id,
-        season=season,
-        season_type_playoffs="Regular Season",
-        per_mode_detailed="PerGame"
-    )
-    return player_dashboard.get_normalized_dict()
+    try:
+        player_dashboard = playerdashboardbygeneralsplits.PlayerDashboardByGeneralSplits(
+            player_id=player_id,
+            season=season,
+            season_type_playoffs="Regular Season",
+            per_mode_detailed="PerGame"
+        )
+        result = player_dashboard.get_normalized_dict()
+        _nba_stats_circuit_breaker.record_success()
+        return result
+    except CircuitBreakerOpenError:
+        raise
+    except Exception as e:
+        _nba_stats_circuit_breaker.record_failure()
+        raise
 
 
 def fetch_player_stats(player_id, season="2025-26", last_n_games=None):
