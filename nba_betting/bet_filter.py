@@ -25,6 +25,18 @@ MIN_EDGE_THRESHOLDS = {
     'moneyline': 0.05, # Need 5% probability edge
 }
 
+# EV-based thresholds (used when real odds are available)
+# These take priority over stat-based edge thresholds
+MIN_EV_THRESHOLDS = {
+    'points': 0.03,     # 3% minimum EV
+    'rebounds': 0.03,
+    'assists': 0.03,
+    'threes': 999,      # Still disabled
+    'pra': 0.03,
+    'spread': 0.04,     # Higher threshold — model is weaker here
+    'moneyline': 0.04,
+}
+
 MIN_GAMES_PLAYED = 10  # Minimum games for reliable player predictions
 MIN_CONFIDENCE = 0.58  # Minimum calibrated probability to bet
 
@@ -37,7 +49,7 @@ DISABLED_PROPS = ['threes']  # Props where model has no demonstrated edge
 
 def should_bet(prop_type: str, predicted_value: float, line_value: float,
                confidence: float = None, games_played: int = None,
-               is_over: bool = True):
+               is_over: bool = True, true_ev: float = None):
     """
     Determine if a prediction warrants a bet.
 
@@ -52,6 +64,8 @@ def should_bet(prop_type: str, predicted_value: float, line_value: float,
                          If None, sample size check is skipped.
         is_over:         True  → we are betting the OVER / home ATS.
                          False → we are betting the UNDER / away ATS.
+        true_ev:         True expected value from devigged odds (0-1 scale).
+                         If provided, EV gate takes priority over stat-based edge.
 
     Returns:
         Tuple of (should_bet: bool, reason: str, edge: float)
@@ -71,6 +85,14 @@ def should_bet(prop_type: str, predicted_value: float, line_value: float,
         edge = predicted_value - line_value
     else:
         edge = line_value - predicted_value
+
+    # When EV is available, it takes priority over stat-based edge
+    if true_ev is not None:
+        ev_threshold = MIN_EV_THRESHOLDS.get(prop_type, 0.03)
+        if true_ev < ev_threshold:
+            return False, (
+                f"True EV {true_ev:.1%} below minimum {ev_threshold:.0%} for {prop_type}"
+            ), edge
 
     # Check minimum edge threshold
     threshold = MIN_EDGE_THRESHOLDS.get(prop_type, 2.0)

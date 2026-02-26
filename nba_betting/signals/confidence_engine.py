@@ -8,6 +8,8 @@ Key principle: Confidence = f(model_probability, edge_size, model_agreement, dat
 NOT independently computed from edge.
 """
 
+from __future__ import annotations
+
 import numpy as np
 from typing import Optional
 
