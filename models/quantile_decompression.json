@@ -1,0 +1,22 @@
+{
+  "points": {
+    "slope": 0.7,
+    "mean_gap": -2.0
+  },
+  "rebounds": {
+    "slope": 0.7,
+    "mean_gap": -2.0
+  },
+  "assists": {
+    "slope": 0.7,
+    "mean_gap": -2.0
+  },
+  "threes": {
+    "slope": 0.7,
+    "mean_gap": -2.0
+  },
+  "pra": {
+    "slope": 0.7,
+    "mean_gap": -2.0
+  }
+}

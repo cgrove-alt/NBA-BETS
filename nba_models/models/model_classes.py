@@ -20,6 +20,34 @@ import contextlib
 
 
 # =============================================================================
+# PROBABILITY CALIBRATION (IMPROVEMENT 1)
+# =============================================================================
+
+def calibrate_probability(raw_prob: float, temperature: float = 2.0) -> float:
+    """
+    Calibrate raw classifier probability with temperature scaling.
+
+    Temperature scaling softens extreme probabilities (0.0 or 1.0)
+    that over_under_classifier produces.  temperature=2.0 pulls
+    probabilities toward 0.5, preventing Kelly blow-ups.
+
+    Args:
+        raw_prob:    Raw output from classifier.predict_proba() (0-1).
+        temperature: Scaling factor. >1 softens extremes, <1 sharpens.
+
+    Returns:
+        Calibrated probability clipped to [0.05, 0.95].
+    """
+    if raw_prob <= 0 or raw_prob >= 1:
+        raw_prob = np.clip(raw_prob, 0.05, 0.95)
+    # Temperature scaling
+    logit = np.log(raw_prob / (1 - raw_prob))
+    calibrated_logit = logit / temperature
+    calibrated = 1 / (1 + np.exp(-calibrated_logit))
+    return float(np.clip(calibrated, 0.05, 0.95))
+
+
+# =============================================================================
 # SMART FILLNA FOR INFERENCE
 # =============================================================================
 
@@ -156,8 +184,12 @@ class PropEnsembleModel:
                 try:
                     residual_features = np.array([[ensemble_pred, abs(ensemble_pred - prop_line)]])
                     proba = self.over_under_classifier.predict_proba(residual_features)[0]
-                    result['over_probability'] = float(proba[1])
-                    result['under_probability'] = float(proba[0])
+                    # IMPROVEMENT 1: Apply temperature scaling to fix extreme probabilities
+                    # (classifier was returning 0.0 or 1.0, breaking Kelly sizing)
+                    raw_over_prob = float(proba[1])
+                    result['over_probability'] = calibrate_probability(raw_over_prob)
+                    result['under_probability'] = 1 - result['over_probability']
+                    result['over_probability_raw'] = raw_over_prob  # Keep raw for diagnostics
                 except Exception:
                     result['over_probability'] = 0.5 + (result['edge_pct'] * 2)
                     result['over_probability'] = max(0.3, min(0.7, result['over_probability']))

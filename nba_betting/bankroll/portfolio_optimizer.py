@@ -210,6 +210,11 @@ class CovarianceCalculator:
         if bet1.id == bet2.id:
             return 1.0
 
+        # Check simulation-derived custom correlations first
+        custom_key = self._make_pair_key(bet1, bet2)
+        if custom_key in self.custom_correlations:
+            return self.custom_correlations[custom_key]
+
         # Determine relationship
         same_game = bet1.game_id == bet2.game_id
         same_team = bet1.team and bet2.team and bet1.team == bet2.team
@@ -281,12 +286,53 @@ class CovarianceCalculator:
         """
         Update correlation estimate from simulation results.
 
-        This can be called after running GameSimulator to get more
-        accurate correlations for same-game bets.
+        Args:
+            sim_results: Dict with keys:
+                - 'outcomes_1': np.ndarray of simulated outcomes for bet1 (0/1 or continuous)
+                - 'outcomes_2': np.ndarray of simulated outcomes for bet2 (0/1 or continuous)
+                OR
+                - 'joint_outcomes': np.ndarray of shape (n_sims, 2) with paired outcomes
+                OR
+                - 'correlation': float — pre-computed correlation
+            bet1: First bet
+            bet2: Second bet
         """
-        # Extract joint outcomes from simulation
-        # Would integrate with simulation_engine.py
-        pass
+        correlation = None
+
+        if 'correlation' in sim_results:
+            # Pre-computed correlation provided directly
+            correlation = float(sim_results['correlation'])
+        elif 'joint_outcomes' in sim_results:
+            joint = np.asarray(sim_results['joint_outcomes'])
+            if joint.shape[0] >= 30 and joint.shape[1] == 2:
+                # Need sufficient samples for meaningful correlation
+                std1 = np.std(joint[:, 0])
+                std2 = np.std(joint[:, 1])
+                if std1 > 1e-10 and std2 > 1e-10:
+                    correlation = float(np.corrcoef(joint[:, 0], joint[:, 1])[0, 1])
+        elif 'outcomes_1' in sim_results and 'outcomes_2' in sim_results:
+            o1 = np.asarray(sim_results['outcomes_1'])
+            o2 = np.asarray(sim_results['outcomes_2'])
+            if len(o1) >= 30 and len(o1) == len(o2):
+                std1 = np.std(o1)
+                std2 = np.std(o2)
+                if std1 > 1e-10 and std2 > 1e-10:
+                    correlation = float(np.corrcoef(o1, o2)[0, 1])
+
+        if correlation is not None:
+            # Clamp to valid range
+            correlation = float(np.clip(correlation, -1.0, 1.0))
+
+            # Build a canonical key for this bet pair
+            key = self._make_pair_key(bet1, bet2)
+            self.custom_correlations[key] = correlation
+
+    def _make_pair_key(self, bet1: Bet, bet2: Bet) -> tuple:
+        """Create a canonical lookup key for a bet pair."""
+        # Sort by id to ensure consistent key regardless of argument order
+        if bet1.id <= bet2.id:
+            return (bet1.id, bet2.id)
+        return (bet2.id, bet1.id)
 
 
 # =============================================================================

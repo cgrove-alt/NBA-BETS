@@ -125,6 +125,7 @@ class BettingPortfolio:
     initial_bankroll: float = 1000.0
     current_bankroll: float = 1000.0
     peak_bankroll: float = 1000.0
+    max_drawdown_seen: float = 0.0  # Bug #5 fix: track max drawdown over full backtest
 
     total_bets: int = 0
     total_wagered: float = 0.0
@@ -224,6 +225,10 @@ class BettingPortfolio:
             self.daily_loss += bet_size
             self.weekly_loss += bet_size
 
+        # Bug #5 fix: track max drawdown BEFORE updating peak
+        current_dd = (self.peak_bankroll - self.current_bankroll) / self.peak_bankroll if self.peak_bankroll > 0 else 0
+        self.max_drawdown_seen = max(self.max_drawdown_seen, current_dd)
+
         # Update peak
         if self.current_bankroll > self.peak_bankroll:
             self.peak_bankroll = self.current_bankroll
@@ -264,10 +269,9 @@ class BettingPortfolio:
         return (mean_return / std_return) * np.sqrt(250)
 
     def get_max_drawdown(self) -> float:
-        """Get maximum drawdown as percentage."""
-        if self.peak_bankroll == 0:
-            return 0.0
-        return ((self.peak_bankroll - self.current_bankroll) / self.peak_bankroll) * 100
+        """Get maximum drawdown as percentage (over entire backtest)."""
+        # Bug #5 fix: return the historically tracked max drawdown, not current drawdown
+        return self.max_drawdown_seen * 100
 
 
 class Phase3Backtester(SeasonBacktester):
@@ -371,8 +375,10 @@ class Phase3Backtester(SeasonBacktester):
             if std_dev > 0:
                 from scipy.stats import norm
                 over_prob = 1 - norm.cdf(line, loc=pred_mean, scale=std_dev)
-                # Edge = our prob - implied prob from -110 odds (52.4%)
-                edge = (over_prob - 0.524) * 100
+                # Bug fix: use proper odds-based break-even instead of hardcoded 0.524
+                # Standard -110/-110 line: no-vig probability = 0.50
+                implied_prob = 0.50  # Standard -110/-110 no-vig
+                edge = (over_prob - implied_prob) * 100
 
         # Create prediction object
         return QuantilePrediction(
@@ -678,6 +684,11 @@ class Phase3Backtester(SeasonBacktester):
                     'bias': np.mean(errors) if errors else 0.0,
                 }
 
+                # Bug #11 fix: guard against NaN from empty means
+                for k, v in tier_metrics[tier].items():
+                    if isinstance(v, float) and np.isnan(v):
+                        tier_metrics[tier][k] = 0.0
+
         # By prop type
         prop_metrics = {}
         for prop_type in ['points', 'rebounds', 'assists', 'threes', 'pra']:
@@ -761,10 +772,13 @@ class Phase3Backtester(SeasonBacktester):
             except:
                 pass
 
+        # Bug #11 fix: pre-compute elite-only confidences to guard against empty-mean NaN
+        elite_only_confs = [p.confidence for p in self.predictions if p.tier == 'elite']
+
         calibration_metrics = {
             'confidence_accuracy_correlation': confidence_correlation,
-            'avg_confidence_elite': np.mean([p.confidence for p in self.predictions if p.tier == 'elite']) if elite_strong_preds else 0,
-            'avg_confidence_all': np.mean(confidences) if confidences else 0,
+            'avg_confidence_elite': float(np.mean(elite_only_confs)) if elite_only_confs else 0.0,
+            'avg_confidence_all': float(np.mean(confidences)) if confidences else 0.0,
         }
 
         # Sample predictions
@@ -885,8 +899,10 @@ def main():
     print("SEASON 1: 2024-25")
     print("="*80)
 
-    backtester_2324 = Phase3Backtester(season=2024)
-    results_2324 = backtester_2324.run_comprehensive_backtest(
+    # Bug #6 fix: season=2025 loads games_2025_full.json for the 2024-25 season
+    # (SeasonBacktester uses season as the ending year: 2024-25 → season=2025)
+    backtester_s1 = Phase3Backtester(season=2025)
+    results_s1 = backtester_s1.run_comprehensive_backtest(
         start_date="2024-10-22",
         end_date="2025-01-13",  # Use actual data range we have
         enable_stop_loss=False  # Disable for validation - want to see full performance
@@ -895,7 +911,7 @@ def main():
     # Save results
     output_file_2324 = RESULTS_DIR / "phase3_backtest_2024-25_season1.json"
     with open(output_file_2324, 'w') as f:
-        json.dump(results_2324, f, indent=2)
+        json.dump(results_s1, f, indent=2)
     print(f"\n✓ Saved Season 1 results to: {output_file_2324}")
 
     # Season 2: 2025-26 (actual dates in data: Oct 21, 2025 - Jan 13, 2026)
@@ -903,7 +919,9 @@ def main():
     print("SEASON 2: 2025-26")
     print("="*80)
 
-    backtester_2425 = Phase3Backtester(season=2025)
+    # Bug #6 fix: season=2026 loads games_2026_full.json for the 2025-26 season
+    # (SeasonBacktester uses season as the ending year: 2025-26 → season=2026)
+    backtester_2425 = Phase3Backtester(season=2026)
     results_2425 = backtester_2425.run_comprehensive_backtest(
         start_date="2025-10-21",
         end_date="2026-01-13",  # Use actual data range we have
@@ -922,11 +940,11 @@ def main():
     print("="*80)
 
     # Handle case where no predictions were made
-    total_preds_1 = results_2324.get('total_predictions', 0) if isinstance(results_2324, dict) else 0
+    total_preds_1 = results_s1.get('total_predictions', 0) if isinstance(results_s1, dict) else 0
     total_preds_2 = results_2425.get('total_predictions', 0) if isinstance(results_2425, dict) else 0
 
     combined_results = {
-        'season_2024_25': results_2324,
+        'season_2024_25': results_s1,
         'season_2025_26': results_2425,
         'combined_summary': {
             'total_predictions': total_preds_1 + total_preds_2,
@@ -939,9 +957,9 @@ def main():
     if total_preds_1 > 0 and total_preds_2 > 0:
         try:
             combined_results['combined_summary'].update({
-                'avg_rmse': (results_2324['overall_performance']['rmse'] + results_2425['overall_performance']['rmse']) / 2,
-                'avg_roi': (results_2324['betting_performance']['roi'] + results_2425['betting_performance']['roi']) / 2,
-                'avg_sharpe': (results_2324['betting_performance']['sharpe_ratio'] + results_2425['betting_performance']['sharpe_ratio']) / 2,
+                'avg_rmse': (results_s1['overall_performance']['rmse'] + results_2425['overall_performance']['rmse']) / 2,
+                'avg_roi': (results_s1['betting_performance']['roi'] + results_2425['betting_performance']['roi']) / 2,
+                'avg_sharpe': (results_s1['betting_performance']['sharpe_ratio'] + results_2425['betting_performance']['sharpe_ratio']) / 2,
             })
         except KeyError as e:
             print(f"Warning: Could not calculate combined metrics: {e}")

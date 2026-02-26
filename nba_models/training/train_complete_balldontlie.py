@@ -3898,11 +3898,18 @@ class MinutesPredictionModel:
         # Get probability of playing
         if self.will_play_classifier is not None:
             play_prob = self.will_play_classifier.predict_proba(X_scaled)[0, 1]
-            # Blend: if low play probability, reduce predicted minutes
-            predicted_minutes = raw_minutes * min(play_prob * 1.5, 1.0)
+            # Calibrated sigmoid mapping: play_prob → minutes scaling factor
+            # sigmoid(x) centered at 0.5 with steepness 6 gives:
+            #   play_prob=0.1 → factor≈0.08, play_prob=0.5 → factor=0.50
+            #   play_prob=0.7 → factor≈0.77, play_prob=0.9 → factor≈0.95
+            # This replaces the ad-hoc `min(play_prob * 1.5, 1.0)` which had a
+            # cliff at play_prob=0.67 and inflated minutes for borderline players.
+            steepness = 6.0
+            midpoint = 0.5
+            scaling_factor = 1.0 / (1.0 + np.exp(-steepness * (play_prob - midpoint)))
+            predicted_minutes = raw_minutes * scaling_factor
         else:
             # No classifier trained - use minutes threshold heuristic
-            # If predicted minutes < 5, set low play probability
             play_prob = 1.0 if raw_minutes >= 5 else raw_minutes / 5.0
             predicted_minutes = raw_minutes
 
@@ -3926,8 +3933,11 @@ class MinutesPredictionModel:
 
         if self.will_play_classifier is not None:
             play_probs = self.will_play_classifier.predict_proba(X_scaled)[:, 1]
-            # Blend based on play probability
-            predicted_minutes = raw_minutes * np.minimum(play_probs * 1.5, 1.0)
+            # Calibrated sigmoid mapping (see predict() for rationale)
+            steepness = 6.0
+            midpoint = 0.5
+            scaling_factors = 1.0 / (1.0 + np.exp(-steepness * (play_probs - midpoint)))
+            predicted_minutes = raw_minutes * scaling_factors
         else:
             # No classifier - use minutes threshold heuristic
             play_probs = np.where(raw_minutes >= 5, 1.0, raw_minutes / 5.0)
@@ -4300,8 +4310,16 @@ class PropEnsembleModel:
                 try:
                     residual_features = np.array([[ensemble_pred, abs(ensemble_pred - prop_line)]])
                     proba = self.over_under_classifier.predict_proba(residual_features)[0]
-                    result['over_probability'] = float(proba[1])
-                    result['under_probability'] = float(proba[0])
+                    # IMPROVEMENT 1: Apply temperature scaling to fix extreme probabilities
+                    raw_over_prob = float(proba[1])
+                    if raw_over_prob <= 0 or raw_over_prob >= 1:
+                        raw_over_prob = float(np.clip(raw_over_prob, 0.05, 0.95))
+                    logit = float(np.log(raw_over_prob / (1 - raw_over_prob)))
+                    cal_logit = logit / 2.0  # temperature = 2.0
+                    calibrated = float(1 / (1 + np.exp(-cal_logit)))
+                    result['over_probability'] = float(np.clip(calibrated, 0.05, 0.95))
+                    result['under_probability'] = 1 - result['over_probability']
+                    result['over_probability_raw'] = raw_over_prob  # Keep raw for diagnostics
                 except:
                     result['over_probability'] = 0.5 + (result['edge_pct'] * 2)  # Simple estimate
                     result['over_probability'] = max(0.3, min(0.7, result['over_probability']))
@@ -5559,15 +5577,16 @@ def train_all_models(
     # Add XGBoost regressor if available
     if HAS_XGBOOST:
         spread_models['xgb'] = XGBRegressor(
-            n_estimators=200,
-            max_depth=6,
-            learning_rate=0.1,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            min_child_weight=3,
+            # IMPROVEMENT 4: Increased regularization to reduce RMSE from 14.2
+            n_estimators=500,          # More trees with lower learning rate
+            max_depth=4,               # Shallower trees to prevent overfitting
+            learning_rate=0.03,        # Slower learning rate
+            subsample=0.7,             # Subsample rows to reduce variance
+            colsample_bytree=0.7,      # Subsample features per tree
+            min_child_weight=10,       # Larger min leaf size → more regularization
             gamma=0.1,
-            reg_alpha=0.1,
-            reg_lambda=1.0,
+            reg_alpha=1.0,             # L1 regularization (was 0.1)
+            reg_lambda=5.0,            # L2 regularization (was 1.0)
             random_state=42,
             n_jobs=-1
         )
@@ -5575,15 +5594,16 @@ def train_all_models(
     # Add LightGBM regressor if available
     if HAS_LIGHTGBM:
         spread_models['lgb'] = LGBMRegressor(
-            n_estimators=200,
-            max_depth=8,
-            learning_rate=0.1,
-            num_leaves=31,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            min_child_samples=20,
-            reg_alpha=0.1,
-            reg_lambda=0.1,
+            # IMPROVEMENT 4: Increased regularization to reduce RMSE from 14.2
+            n_estimators=500,          # More trees with lower learning rate
+            max_depth=4,               # Shallower trees
+            learning_rate=0.03,        # Slower learning rate
+            num_leaves=15,             # Fewer leaves (was 31)
+            subsample=0.7,             # Row subsampling
+            colsample_bytree=0.7,      # Feature subsampling
+            min_child_samples=30,      # Larger min leaf (was 20)
+            reg_alpha=1.0,             # L1 regularization (was 0.1)
+            reg_lambda=5.0,            # L2 regularization (was 0.1)
             random_state=42,
             n_jobs=-1,
             verbose=-1

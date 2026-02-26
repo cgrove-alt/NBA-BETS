@@ -52,11 +52,11 @@ from nba_models.models.model_trainer import QuantilePropModel  # noqa: F401
 # - Points (line ~25): std=5.0 → Z-scores reasonable → 56.4% avg over_prob
 # Fix: Use empirically-derived prop-specific constants from NBA historical data
 PROP_STD_DEVS = {
-    'points': 5.5,      # Calibrated: 54.7% ✓ (target: 50±5%)
-    'rebounds': 7.0,    # Tuned: 6.5 → 7.0 (was 55.2%, target: 50-55%)
-    'assists': 2.5,     # Calibrated: 48.7% ✓ (target: 50±5%)
-    'threes': 1.8,      # Calibrated from empirical data
-    'pra': 9.0,         # Points + Rebounds + Assists combined variance
+    'points': 6.5,      # Empirically-derived from NBA historical data
+    'rebounds': 3.1,    # FIX: Corrected from 7.0 (was inflating Z-scores ~2x for rebounds)
+    'assists': 2.2,     # Calibrated from empirical data
+    'threes': 1.6,      # Calibrated from empirical data
+    'pra': 8.5,         # Points + Rebounds + Assists combined variance
 }
 
 # Quantile model regression-to-mean decompression parameters.
@@ -66,15 +66,35 @@ PROP_STD_DEVS = {
 # Correction: pred += slope_fix * (line - mean_line) + level_fix
 # where slope_fix = target_slope - measured_slope, level_fix = -mean_gap
 # Re-measure these after every model retrain.
-QUANTILE_DECOMPRESSION = {
-    # mean_gap is the END-TO-END gap (after minutes oracle + injury + calibration),
-    # not just the raw quantile median gap. Measured from production prediction run.
-    'points':   {'slope': 0.724, 'mean_gap': -3.15, 'mean_line': 19.9},
-    'rebounds':  {'slope': 0.805, 'mean_gap':  0.00, 'mean_line':  5.1},
-    'assists':   {'slope': 0.644, 'mean_gap':  0.38, 'mean_line':  4.1},
-    'threes':    {'slope': 0.85,  'mean_gap':  0.00, 'mean_line':  2.5},  # assumed ~balanced
-    'pra':       {'slope': 0.80,  'mean_gap': -1.00, 'mean_line': 30.0},  # estimated
-}
+def load_quantile_decompression():
+    """Load quantile decompression constants from model artifact, falling back to defaults.
+
+    Looks for models/quantile_decompression.json alongside the model files.
+    Falls back to hardcoded defaults if the file is not found.
+    Re-run calibration and regenerate the JSON after every model retrain.
+    """
+    import json
+    from pathlib import Path
+    filepath = Path("models/quantile_decompression.json")
+    if filepath.exists():
+        try:
+            with open(filepath) as f:
+                return json.load(f)
+        except Exception:
+            pass  # Fall through to defaults on any read/parse error
+    # Fallback defaults (should be updated after each retrain)
+    return {
+        # mean_gap is the END-TO-END gap (after minutes oracle + injury + calibration),
+        # not just the raw quantile median gap. Measured from production prediction run.
+        'points':   {'slope': 0.724, 'mean_gap': -3.15, 'mean_line': 19.9},
+        'rebounds':  {'slope': 0.805, 'mean_gap':  0.00, 'mean_line':  5.1},
+        'assists':   {'slope': 0.644, 'mean_gap':  0.38, 'mean_line':  4.1},
+        'threes':    {'slope': 0.85,  'mean_gap':  0.00, 'mean_line':  2.5},  # assumed ~balanced
+        'pra':       {'slope': 0.80,  'mean_gap': -1.00, 'mean_line': 30.0},  # estimated
+    }
+
+
+QUANTILE_DECOMPRESSION = load_quantile_decompression()
 QUANTILE_TARGET_SLOPE = 0.85
 
 def get_prop_std_dev(prop_type: str) -> float:
@@ -203,6 +223,20 @@ except ImportError:
     def get_kelly_multiplier_for_tier(*args, **kwargs):
         return 0.0
 
+# IMPROVEMENT 6: Import smart bet filter and prediction pipeline
+try:
+    from nba_betting.bet_filter import should_bet as _should_bet, calculate_bet_size as _calc_bet_size
+    from nba_betting.prediction_pipeline import evaluate_bet as _evaluate_bet
+    HAS_BET_FILTER = True
+except ImportError:
+    HAS_BET_FILTER = False
+    def _should_bet(*args, **kwargs):
+        return True, 'filter unavailable', 0.0
+    def _calc_bet_size(*args, **kwargs):
+        return 0.0
+    def _evaluate_bet(*args, **kwargs):
+        return {'should_bet': True, 'tier': 'moderate', 'reason': 'filter unavailable'}
+
 # Helper function to map confidence + edge to quality tier
 def get_edge_quality_tier(confidence_score: float, edge: float) -> str:
     """Map confidence score (0-100) + edge magnitude to edge quality tier."""
@@ -229,15 +263,18 @@ def american_to_decimal(odds: int) -> float:
     return (100 / abs(odds)) + 1
 
 # Phase 4: Edge-focused prop edge calculation
-def _calculate_prop_edge(over_prob: float, american_odds: int = -110) -> dict:
+def _calculate_prop_edge(over_prob: float, american_odds: int = -110, under_odds: int = None) -> dict:
     """
     Calculate edge for both OVER and UNDER sides of a prop bet.
 
     Uses EdgeCalculator when available, falls back to legacy formula.
+    When both over_odds and under_odds are provided, uses no-vig devigging
+    to compute edges against the true (vig-free) market probabilities.
 
     Args:
         over_prob: Model's probability of the OVER hitting (0-1)
-        american_odds: American odds for the bet (default -110)
+        american_odds: American odds for the over (default -110)
+        under_odds: American odds for the under (optional; enables devigging)
 
     Returns:
         Dict with over_edge, under_edge, pick, edge, edge_quality, ev_per_dollar,
@@ -248,8 +285,51 @@ def _calculate_prop_edge(over_prob: float, american_odds: int = -110) -> dict:
     if HAS_EDGE_CALCULATOR:
         calc = EdgeCalculator(min_edge_threshold=0.02)
 
+        # Use devigged probabilities as the implied benchmark when both sides are known
+        if under_odds is not None and under_odds != american_odds:
+            try:
+                from edge_calculator import devig_probability
+                nv_over, nv_under = devig_probability(american_odds, under_odds)
+                # Compute edge vs no-vig probability directly
+                over_edge_val = (over_prob - nv_over) * 100
+                under_edge_val = (under_prob - nv_under) * 100
+
+                if over_edge_val >= under_edge_val:
+                    pick = 'OVER'
+                    edge = over_edge_val
+                    best_odds = american_odds
+                    model_prob = over_prob
+                    implied_prob = nv_over
+                else:
+                    pick = 'UNDER'
+                    edge = under_edge_val
+                    best_odds = under_odds
+                    model_prob = under_prob
+                    implied_prob = nv_under
+
+                # Compute EV using decimal odds
+                decimal_odds = calc.american_to_decimal(best_odds)
+                ev_per_dollar = (model_prob * (decimal_odds - 1)) - (1 - model_prob)
+                has_edge = edge / 100 >= calc.min_edge_threshold
+                edge_quality = calc.classify_edge(edge / 100)
+
+                return {
+                    'over_edge': over_edge_val,
+                    'under_edge': under_edge_val,
+                    'pick': pick,
+                    'edge': edge,
+                    'edge_quality': edge_quality,
+                    'ev_per_dollar': ev_per_dollar,
+                    'implied_probability': implied_prob,
+                    'model_probability': model_prob,
+                    'has_edge': has_edge,
+                }
+            except Exception:
+                pass  # Fall through to EdgeCalculator path
+
         over_result = calc.calculate_edge(over_prob, american_odds)
-        under_result = calc.calculate_edge(under_prob, american_odds)
+        _under_odds = under_odds if under_odds is not None else american_odds
+        under_result = calc.calculate_edge(under_prob, _under_odds)
 
         # Pick the side with more edge
         if over_result.edge >= under_result.edge:
@@ -271,9 +351,33 @@ def _calculate_prop_edge(over_prob: float, american_odds: int = -110) -> dict:
             'has_edge': best.has_edge,
         }
     else:
-        # Legacy fallback: assumes -110 odds (implied 52.4%)
-        over_edge = (over_prob - 0.524) * 100
-        under_edge = (under_prob - 0.524) * 100
+        # Legacy fallback: devig both sides using the actual odds provided
+        if under_odds is not None:
+            # Proper devig when both sides are available
+            def _american_to_raw(odds):
+                if odds > 0:
+                    return 100 / (odds + 100)
+                return abs(odds) / (abs(odds) + 100)
+            raw_over_implied = _american_to_raw(american_odds)
+            raw_under_implied = _american_to_raw(under_odds)
+            total_implied = raw_over_implied + raw_under_implied
+            if total_implied > 0:
+                nv_over_implied = raw_over_implied / total_implied
+                nv_under_implied = raw_under_implied / total_implied
+            else:
+                nv_over_implied = 0.5
+                nv_under_implied = 0.5
+            over_edge = (over_prob - nv_over_implied) * 100
+            under_edge = (under_prob - nv_under_implied) * 100
+        else:
+            # Single-side fallback: use raw implied probability of the over side
+            def _american_to_raw_single(odds):
+                if odds > 0:
+                    return 100 / (odds + 100)
+                return abs(odds) / (abs(odds) + 100)
+            over_implied = _american_to_raw_single(american_odds)
+            over_edge = (over_prob - over_implied) * 100
+            under_edge = (under_prob - (1.0 - over_implied)) * 100
 
         if over_edge >= under_edge:
             pick = 'OVER'
@@ -289,7 +393,7 @@ def _calculate_prop_edge(over_prob: float, american_odds: int = -110) -> dict:
             'edge': edge,
             'edge_quality': 'strong' if edge >= 5 else 'moderate' if edge >= 3 else 'marginal' if edge >= 2 else 'none',
             'ev_per_dollar': edge / 100,
-            'implied_probability': 0.524,
+            'implied_probability': over_edge / 100 + over_prob if pick == 'OVER' else under_edge / 100 + under_prob,
             'model_probability': over_prob if pick == 'OVER' else under_prob,
             'has_edge': edge >= 2,
         }
@@ -1741,6 +1845,7 @@ def predict_player_prop(
     team_id: int = None,  # Player's team ID (Phase 3: minutes oracle)
     game_context: dict = None,  # Game context for minutes oracle
     american_odds: int = -110,  # Phase 4: actual odds for edge calc
+    under_odds: int = None,  # Phase 4: under side odds for devigging
 ) -> dict:
     """
     Predict over/under probability for a player prop.
@@ -1763,8 +1868,13 @@ def predict_player_prop(
     """
     import pandas as pd
 
+    # FIX 5: Hard DNP guard — injury checks happen at the call-site loop, but this
+    # second layer ensures no prediction is generated if the player name is empty
+    # or clearly a placeholder (e.g., from a fallback path that bypassed the loop filter).
+    if not player_name or player_name.strip() == '':
+        return None
+
     over_prob = 0.5
-    edge = 0.0
     predicted_value = None
     ensemble_predicted_value = None
     features = None  # Initialize for quantile model usage later
@@ -2111,7 +2221,7 @@ def predict_player_prop(
             over_prob = float(norm.cdf(z_score))
 
     # Phase 4: Single edge computation after all adjustments (minutes + injury + calibration)
-    edge_info = _calculate_prop_edge(over_prob, american_odds)
+    edge_info = _calculate_prop_edge(over_prob, american_odds, under_odds=under_odds)
     edge = edge_info['edge']
     pick = edge_info['pick']
 
@@ -2228,6 +2338,38 @@ def predict_player_prop(
     # Phase 4: Signal classification using edge magnitude
     bet_recommendation = get_signal_from_edge(edge, edge_info.get('edge_quality'))
 
+    # IMPROVEMENT 6: Apply smart bet filter (bet_filter.py / prediction_pipeline.py)
+    # This overrides legacy bet sizing and adds filter metadata to the result.
+    bet_filter_result = {}
+    if HAS_BET_FILTER and predicted_value is not None:
+        try:
+            # Estimate games_played from season averages in features (if available)
+            _season_games = None
+            if features is not None and isinstance(features, dict):
+                _season_games = features.get('season_games')
+
+            # over_prob is calibrated at this point (temperature scaling applied in
+            # model_classes.py), so pass it directly as raw_confidence.
+            bet_filter_result = _evaluate_bet(
+                prop_type=prop_type.lower(),
+                predicted=predicted_value,
+                line=line,
+                raw_confidence=over_prob,
+                games_played=_season_games,
+                bankroll=1000.0,
+            )
+
+            # Override bet recommendation when filter says no-bet
+            if not bet_filter_result.get('should_bet', True):
+                bet_recommendation = 'PASS'
+                # Override suggested_bet_size to 0 when filter rejects
+                suggested_bet_size = 0.0
+            elif bet_filter_result.get('bet_size', 0) > 0:
+                # Use pipeline bet size (% of $1000 bankroll, same as legacy)
+                suggested_bet_size = (bet_filter_result['bet_size'] / 1000.0) * 100
+        except Exception:
+            pass  # Never block predictions on filter failure
+
     return {
         'player': player_name,
         'player_id': player_id,
@@ -2267,6 +2409,11 @@ def predict_player_prop(
         # Sigma diagnostics
         'effective_sigma': effective_sigma,
         'quantile_sigma': quantile_sigma,
+        # IMPROVEMENT 6: Bet filter metadata
+        'bet_filter': bet_filter_result,
+        'bet_filter_passed': bet_filter_result.get('should_bet', True),
+        'bet_filter_tier': bet_filter_result.get('tier', 'unknown'),
+        'bet_filter_reason': bet_filter_result.get('reason', ''),
     }
 
 
@@ -2589,12 +2736,14 @@ def main():
                         player_team_id = props.get('team_id')
 
                         # CHECK INJURY STATUS using injury_tracker_v3 (Task 1.4)
+                        # FIX 5: Hard DNP filter — skip OUT/DOUBTFUL players before
+                        # any prediction generation to avoid contaminating edge stats.
                         uncertainty_flag = None
                         if player_id in injury_lookup:
                             status = injury_lookup[player_id]
                             if status in [InjuryStatus.OUT, InjuryStatus.DOUBTFUL]:
                                 # Skip prediction for OUT or DOUBTFUL players
-                                print(f"    Skipping {player_name} ({status})")
+                                print(f"    Skipping {player_name} ({status}) [DNP filter]")
                                 continue
                             if status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
                                 uncertainty_flag = "HIGH_UNCERTAINTY"
@@ -2675,6 +2824,7 @@ def main():
                                 team_id=task.get('team_id'),
                                 game_context=task.get('game_context'),
                                 american_odds=task.get('over_odds', -110),
+                                under_odds=task.get('under_odds'),
                             )
                             # Fix 1: Pass through team abbreviation
                             pred['team_abbrev'] = task.get('team_abbrev', '')

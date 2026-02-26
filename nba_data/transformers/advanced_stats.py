@@ -42,6 +42,49 @@ LEAGUE_AVERAGES = {
 }
 
 
+def compute_dynamic_league_averages(games_data: list) -> dict:
+    """Compute current-season league averages from game data.
+
+    Falls back to hardcoded defaults if no data provided.
+
+    Args:
+        games_data: List of game dicts with stat keys
+            (pts, reb, ast, stl, blk, tov, fgm, fga, fg3m, fg3a, ftm, fta)
+
+    Returns:
+        Dict of league averages, suitable for use with AdvancedStatsCalculator
+    """
+    if not games_data:
+        return LEAGUE_AVERAGES  # Fall back to defaults
+
+    # Compute averages from actual game data
+    stats_keys = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fgm', 'fga', 'fg3m', 'fg3a', 'ftm', 'fta']
+    averages = {}
+    for key in stats_keys:
+        values = [g.get(key, 0) for g in games_data if g.get(key) is not None]
+        if values:
+            averages[key] = float(np.mean(values))
+
+    # Map computed stats to LEAGUE_AVERAGES format
+    if 'pts' in averages:
+        averages['ppg'] = averages['pts']  # ppg is the key used by LEAGUE_AVERAGES
+
+    # Derived metrics
+    if averages.get('fga', 0) > 0:
+        averages['fg_pct'] = averages.get('fgm', 0) / averages['fga']
+    if averages.get('fg3a', 0) > 0:
+        averages['fg3_pct'] = averages.get('fg3m', 0) / averages['fg3a']
+    if averages.get('fta', 0) > 0:
+        averages['ft_pct'] = averages.get('ftm', 0) / averages['fta']
+
+    # Carry over keys from LEAGUE_AVERAGES that were not computed from game data
+    for key, val in LEAGUE_AVERAGES.items():
+        if key not in averages:
+            averages[key] = val
+
+    return averages
+
+
 @dataclass
 class PlayerStats:
     """Container for player box score statistics."""

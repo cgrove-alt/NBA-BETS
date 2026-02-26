@@ -358,6 +358,31 @@ class EdgeCalculator:
         return required
 
 
+def devig_probability(over_odds: float, under_odds: float) -> tuple[float, float]:
+    """Remove vig from odds to get true implied probabilities.
+
+    Args:
+        over_odds: American odds for over (e.g., -110)
+        under_odds: American odds for under (e.g., -110)
+
+    Returns:
+        Tuple of (no_vig_over_prob, no_vig_under_prob)
+    """
+    def american_to_implied(odds):
+        if odds > 0:
+            return 100 / (odds + 100)
+        return abs(odds) / (abs(odds) + 100)
+
+    raw_over = american_to_implied(over_odds)
+    raw_under = american_to_implied(under_odds)
+    total = raw_over + raw_under  # This is > 1.0 due to vig
+
+    if total == 0:
+        return 0.5, 0.5
+
+    return raw_over / total, raw_under / total
+
+
 # Convenience function
 def calculate_edge(
     model_probability: float,

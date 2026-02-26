@@ -91,9 +91,12 @@ except ImportError:
         from nba_api.stats.static import teams, players
         HAS_CLUTCH_ENDPOINTS = False
     except ImportError:
-        print("Error: nba_api package not installed.")
-        print("Install it with: pip install nba_api")
-        exit(1)
+        print("Note: nba_api not installed. Install with: pip install nba_api")
+        print("  → data_fetcher will be unavailable; training can still proceed.")
+        HAS_CLUTCH_ENDPOINTS = False
+        # Set sentinel so downstream code can check
+        teams = None
+        players = None
 
 # Rate limiting to avoid API throttling
 API_DELAY = 0.4  # seconds between API calls (reduced from 0.6 for faster props loading)

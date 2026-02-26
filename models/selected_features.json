@@ -1,346 +1,378 @@
 {
   "selected_features": [
     "season_win_pct_diff",
+    "recent_win_pct_diff",
+    "recent_pts_diff",
+    "def_rating_diff",
     "net_rating_diff",
     "location_win_pct_diff",
     "home_advantage_factor",
     "home_season_win_pct",
+    "away_season_win_pct",
     "home_net_rating",
-    "home_pts_avg",
+    "away_net_rating",
+    "home_off_rating",
+    "away_off_rating",
+    "home_def_rating",
+    "away_def_rating",
     "away_pts_avg",
-    "home_games_played",
     "away_games_played",
     "expected_point_diff",
     "home_elo",
     "away_elo",
     "elo_diff",
+    "home_days_rest",
+    "away_days_rest",
     "rest_advantage",
+    "home_travel_distance",
     "away_travel_distance",
+    "travel_distance_diff",
+    "timezone_advantage",
+    "home_altitude_disadvantage",
+    "home_travel_fatigue",
+    "away_travel_fatigue",
     "fatigue_advantage",
     "home_pace",
     "away_pace",
-    "expected_pace"
+    "expected_pace",
+    "pace_diff"
   ],
   "feature_importances": {
-    "season_win_pct_diff": 0.04255855083465576,
-    "net_rating_diff": 0.15253031253814697,
-    "location_win_pct_diff": 0.035248395055532455,
-    "home_advantage_factor": 0.034075330942869186,
-    "home_season_win_pct": 0.03907797113060951,
-    "home_net_rating": 0.03621263802051544,
-    "home_pts_avg": 0.035183459520339966,
-    "away_pts_avg": 0.029790839180350304,
-    "home_games_played": 0.031477417796850204,
-    "away_games_played": 0.041757792234420776,
-    "expected_point_diff": 0.030700771138072014,
-    "home_elo": 0.049121566116809845,
-    "away_elo": 0.030796684324741364,
-    "elo_diff": 0.1976660192012787,
-    "rest_advantage": 0.04912939667701721,
-    "away_travel_distance": 0.03273659199476242,
-    "fatigue_advantage": 0.0316450372338295,
-    "home_pace": 0.03228108584880829,
-    "away_pace": 0.031884197145700455,
-    "expected_pace": 0.03612596169114113
+    "season_win_pct_diff": 0.020871130749583244,
+    "recent_win_pct_diff": 0.0284312441945076,
+    "recent_pts_diff": 0.02260458469390869,
+    "def_rating_diff": 0.022153666242957115,
+    "net_rating_diff": 0.03369893506169319,
+    "location_win_pct_diff": 0.022971661761403084,
+    "home_advantage_factor": 0.021680179983377457,
+    "home_season_win_pct": 0.023508237674832344,
+    "away_season_win_pct": 0.01721355691552162,
+    "home_net_rating": 0.02119242399930954,
+    "away_net_rating": 0.025820845738053322,
+    "home_off_rating": 0.026013480499386787,
+    "away_off_rating": 0.02303338795900345,
+    "home_def_rating": 0.020804837346076965,
+    "away_def_rating": 0.02405829355120659,
+    "away_pts_avg": 0.022074362263083458,
+    "away_games_played": 0.0215776227414608,
+    "expected_point_diff": 0.021433155983686447,
+    "home_elo": 0.03861553221940994,
+    "away_elo": 0.026712512597441673,
+    "elo_diff": 0.18720905482769012,
+    "home_days_rest": 0.032514963299036026,
+    "away_days_rest": 0.02498648874461651,
+    "rest_advantage": 0.023695968091487885,
+    "home_travel_distance": 0.023723088204860687,
+    "away_travel_distance": 0.023388907313346863,
+    "travel_distance_diff": 0.02402382344007492,
+    "timezone_advantage": 0.017404060810804367,
+    "home_altitude_disadvantage": 0.0,
+    "home_travel_fatigue": 0.025961199775338173,
+    "away_travel_fatigue": 0.023696590214967728,
+    "fatigue_advantage": 0.029781399294734,
+    "home_pace": 0.021107017993927002,
+    "away_pace": 0.0200925525277853,
+    "expected_pace": 0.017522985115647316,
+    "pace_diff": 0.020422250032424927
   },
-  "n_original_features": 94,
+  "n_original_features": 110,
   "elimination_history": [
     {
       "n_features": 83,
-      "cv_score": 0.6353284671532846
+      "cv_score": 0.6351920693928129
     },
     {
       "n_features": 82,
-      "cv_score": 0.6367883211678832
+      "cv_score": 0.636183395291202
     },
     {
       "n_features": 81,
-      "cv_score": 0.6356204379562044
+      "cv_score": 0.6329615861214374
     },
     {
       "n_features": 80,
-      "cv_score": 0.6341605839416058
+      "cv_score": 0.628004956629492
     },
     {
       "n_features": 79,
-      "cv_score": 0.637080291970803
+      "cv_score": 0.6267657992565056
     },
     {
       "n_features": 78,
-      "cv_score": 0.6382481751824818
+      "cv_score": 0.6282527881040891
     },
     {
       "n_features": 77,
-      "cv_score": 0.6385401459854014
+      "cv_score": 0.6282527881040891
     },
     {
       "n_features": 76,
-      "cv_score": 0.6321167883211679
+      "cv_score": 0.6280049566294921
     },
     {
       "n_features": 75,
-      "cv_score": 0.6370802919708028
+      "cv_score": 0.6297397769516728
     },
     {
       "n_features": 74,
-      "cv_score": 0.6341605839416058
+      "cv_score": 0.6339529120198265
     },
     {
       "n_features": 73,
-      "cv_score": 0.6435036496350366
+      "cv_score": 0.6247831474597275
     },
     {
       "n_features": 72,
-      "cv_score": 0.6405839416058393
+      "cv_score": 0.6267657992565056
     },
     {
       "n_features": 71,
-      "cv_score": 0.6426277372262774
+      "cv_score": 0.6332094175960348
     },
     {
       "n_features": 70,
-      "cv_score": 0.6356204379562044
+      "cv_score": 0.6257744733581164
     },
     {
       "n_features": 69,
-      "cv_score": 0.6353284671532846
+      "cv_score": 0.6324659231722428
     },
     {
       "n_features": 68,
-      "cv_score": 0.6382481751824818
+      "cv_score": 0.625278810408922
     },
     {
       "n_features": 67,
-      "cv_score": 0.641167883211679
+      "cv_score": 0.6299876084262701
     },
     {
       "n_features": 66,
-      "cv_score": 0.6338686131386861
+      "cv_score": 0.6287484510532837
     },
     {
       "n_features": 65,
-      "cv_score": 0.6356204379562044
+      "cv_score": 0.6327137546468402
     },
     {
       "n_features": 64,
-      "cv_score": 0.6283211678832117
+      "cv_score": 0.6257744733581164
     },
     {
       "n_features": 63,
-      "cv_score": 0.6359124087591241
+      "cv_score": 0.6329615861214374
     },
     {
       "n_features": 62,
-      "cv_score": 0.6426277372262774
+      "cv_score": 0.6324659231722428
     },
     {
       "n_features": 61,
-      "cv_score": 0.6397080291970803
+      "cv_score": 0.6356877323420075
     },
     {
       "n_features": 60,
-      "cv_score": 0.639124087591241
+      "cv_score": 0.6327137546468402
     },
     {
       "n_features": 59,
-      "cv_score": 0.631824817518248
+      "cv_score": 0.6334572490706318
     },
     {
       "n_features": 58,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6312267657992565
     },
     {
       "n_features": 57,
-      "cv_score": 0.6373722627737226
+      "cv_score": 0.6364312267657993
     },
     {
       "n_features": 56,
-      "cv_score": 0.6332846715328467
+      "cv_score": 0.6282527881040891
     },
     {
       "n_features": 55,
-      "cv_score": 0.6312408759124087
+      "cv_score": 0.6314745972738538
     },
     {
       "n_features": 54,
-      "cv_score": 0.6397080291970803
+      "cv_score": 0.6280049566294919
     },
     {
       "n_features": 53,
-      "cv_score": 0.6379562043795619
+      "cv_score": 0.6322180916976455
     },
     {
       "n_features": 52,
-      "cv_score": 0.6394160583941606
+      "cv_score": 0.6280049566294921
     },
     {
       "n_features": 51,
-      "cv_score": 0.6364963503649634
+      "cv_score": 0.6272614622057002
     },
     {
       "n_features": 50,
-      "cv_score": 0.6364963503649635
+      "cv_score": 0.6265179677819084
     },
     {
       "n_features": 49,
-      "cv_score": 0.6347445255474453
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 48,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 47,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 46,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 45,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 44,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 43,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 42,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 41,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 40,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 39,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 38,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 37,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 36,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 35,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 34,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 33,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 32,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 31,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 30,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 29,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 28,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 27,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 26,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 25,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 24,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 23,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 22,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 21,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 20,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 19,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 18,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 17,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 16,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 15,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 14,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 13,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 12,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 11,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     },
     {
       "n_features": 10,
-      "cv_score": 0.632992700729927
+      "cv_score": 0.6270136307311029
     }
   ],
-  "saved_at": "2026-02-24T17:28:33.768567"
+  "saved_at": "2026-02-26T01:57:20.879123"
 }

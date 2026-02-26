@@ -2480,6 +2480,8 @@ class LineAwarePropClassifier(BaseModelTrainer):
         Returns:
             Tuple of (features DataFrame with 'prop_line' column, binary labels)
         """
+        rng = np.random.default_rng(seed=42)
+
         stat_key_map = {
             "points": "pts",
             "rebounds": "reb",
@@ -2563,7 +2565,7 @@ class LineAwarePropClassifier(BaseModelTrainer):
                     lines_to_sample.add(round(line * 2) / 2)
 
             # Add some random lines in the range
-            random_lines = np.random.uniform(line_range[0], line_range[1], n_lines_per_game)
+            random_lines = rng.uniform(line_range[0], line_range[1], n_lines_per_game)
             for line in random_lines:
                 lines_to_sample.add(round(line * 2) / 2)
 
@@ -3793,36 +3795,9 @@ class EnsembleMoneylineModel(BaseModelTrainer):
                 n_estimators=100, max_depth=6, random_state=42, verbose=-1
             ))
 
-        # For backward compatibility: also create sklearn StackingClassifier
-        estimators = [
-            ('lr', LogisticRegression(max_iter=1000, random_state=42)),
-            ('rf', RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)),
-            ('gb', GradientBoostingClassifier(n_estimators=100, max_depth=5, random_state=42)),
-            ('mlp', MLPClassifier(
-                hidden_layer_sizes=(64, 32), activation='relu', solver='adam',
-                alpha=0.0001, max_iter=500, early_stopping=True,
-                validation_fraction=0.1, n_iter_no_change=10, random_state=42
-            )),
-            ('nb', GaussianNB()),
-            ('qda', QuadraticDiscriminantAnalysis(reg_param=0.1)),
-        ]
-        if HAS_XGBOOST:
-            estimators.append(('xgb', xgb.XGBClassifier(
-                n_estimators=100, max_depth=6, random_state=42,
-                use_label_encoder=False, eval_metric='logloss'
-            )))
-        if HAS_LIGHTGBM:
-            estimators.append(('lgb', lgb.LGBMClassifier(
-                n_estimators=100, max_depth=6, random_state=42, verbose=-1
-            )))
-
-        # Stacking classifier with logistic regression as final estimator
-        self.model = StackingClassifier(
-            estimators=estimators,
-            final_estimator=LogisticRegression(max_iter=1000),
-            cv=5,
-            n_jobs=-1,
-        )
+        # self.model is created on-the-fly in train() only as a fallback when
+        # StackingMetaLearner is unavailable (see train() else-branch).
+        self.model = None
 
     def prepare_training_data(self, games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data - SORTED CHRONOLOGICALLY."""
@@ -3959,14 +3934,20 @@ class EnsembleMoneylineModel(BaseModelTrainer):
             y_pred = (y_prob > 0.5).astype(int)
 
         else:
-            # Use standard StackingClassifier
-            print("Training ensemble model (this may take a few minutes)...")
+            # Fallback: simple stacking (no context features)
+            print("Training with standard StackingClassifier (no context features)...")
+            estimators = [(f'model_{i}', model) for i, model in enumerate(self.base_models)]
+            self.model = StackingClassifier(
+                estimators=estimators,
+                final_estimator=LogisticRegression(max_iter=1000),
+                cv=5,
+                n_jobs=-1,
+            )
             if weights_train is not None:
                 self.model.fit(X_train_scaled, y_train, sample_weight=weights_train)
             else:
                 self.model.fit(X_train_scaled, y_train)
             self.is_fitted = True
-
             y_pred = self.model.predict(X_test_scaled)
             y_prob = self.model.predict_proba(X_test_scaled)[:, 1]
 

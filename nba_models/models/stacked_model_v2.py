@@ -23,7 +23,7 @@ import pandas as pd
 import pickle
 from pathlib import Path
 from typing import Any
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge, Lasso, ElasticNet
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
@@ -230,7 +230,7 @@ class StackedPropModel:
         n_models = len(self.base_models)
         oof_predictions = np.zeros((n_samples, n_models))
 
-        kfold = KFold(n_splits=self.n_folds, shuffle=True, random_state=42)
+        kfold = TimeSeriesSplit(n_splits=self.n_folds)
 
         for model_idx, (name, model) in enumerate(self.base_models.items()):
             if self.verbose:
@@ -238,7 +238,7 @@ class StackedPropModel:
 
             oof_pred = np.zeros(n_samples)
 
-            for _fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled)):
+            for _fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled, y)):
                 X_train_fold = X_scaled[train_idx]
                 y_train_fold = y[train_idx]
                 X_val_fold = X_scaled[val_idx]

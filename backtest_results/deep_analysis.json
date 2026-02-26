@@ -1,0 +1,80 @@
+{
+  "spread_model": {
+    "rmse": 14.2,
+    "market_rmse": "12-13",
+    "edge": "negative",
+    "verdict": "NEEDS MAJOR WORK"
+  },
+  "moneyline_model": {
+    "accuracy": 0.633,
+    "verdict": "DECENT - 63.3% but need odds data to determine profitability"
+  },
+  "player_props": {
+    "points": {
+      "model_rmse": 6.216387124434113,
+      "season_avg_rmse": 6.330732093704125,
+      "last5_rmse": 6.621931903415608,
+      "pct_improve_vs_avg": 1.8061887247404957,
+      "pct_improve_vs_l5": 6.124266828722813
+    },
+    "rebounds": {
+      "model_rmse": 2.5517416468965064,
+      "season_avg_rmse": 2.5979919522156947,
+      "last5_rmse": 2.7092019289746685,
+      "pct_improve_vs_avg": 1.780232817108758,
+      "pct_improve_vs_l5": 5.812054110627144
+    },
+    "assists": {
+      "model_rmse": 1.9439723760817027,
+      "season_avg_rmse": 1.9680767204062197,
+      "last5_rmse": 2.047503638779307,
+      "pct_improve_vs_avg": 1.2247664979006399,
+      "pct_improve_vs_l5": 5.056462940370072
+    },
+    "threes": {
+      "model_rmse": 1.2904472644785712,
+      "season_avg_rmse": 1.2897610534316157,
+      "last5_rmse": 1.3702131121379346,
+      "pct_improve_vs_avg": -0.053204509868681284,
+      "pct_improve_vs_l5": 5.8214190882252845
+    }
+  },
+  "improvements": [
+    {
+      "priority": 1,
+      "name": "Fix spread model overfit / Add closing line value (CLV)",
+      "impact": "HIGH - Spread is currently WORSE than market. Either fix it or disable ATS betting",
+      "details": "RMSE 14.2 vs market 12-13. Need: (1) More features (injuries, schedule, travel), (2) Regularization tuning, (3) Or pivot to using closing line value as a feature"
+    },
+    {
+      "priority": 2,
+      "name": "Improve player props confidence calibration",
+      "impact": "HIGH - The win_prob=1.0 issue means Kelly sizing is broken",
+      "details": "During backtest, many predictions output win_prob=1.0 which is clearly wrong. The over/under classifier needs recalibration with Platt scaling or isotonic regression"
+    },
+    {
+      "priority": 3,
+      "name": "Add opponent-adjusted player prop features",
+      "impact": "MEDIUM - Current features are player-centric only",
+      "details": "Need: (1) Opponent defensive rating vs position, (2) Opponent pace, (3) Game total/spread as context features, (4) Matchup history"
+    },
+    {
+      "priority": 4,
+      "name": "Improve three-point model or disable threes betting",
+      "impact": "MEDIUM - Model has no edge on threes (too random)",
+      "details": "R\u00b2=0.31 and zero improvement over baseline. Either add shot selection/attempt features or disable threes prop betting"
+    },
+    {
+      "priority": 5,
+      "name": "Implement bet selection filter",
+      "impact": "HIGH - Only bet when edge is strongest",
+      "details": "Even a 51% accurate model is profitable if you only bet the top 10% most confident predictions. Need: confidence thresholds, bet sizing based on edge"
+    },
+    {
+      "priority": 6,
+      "name": "Add line shopping / market odds integration",
+      "impact": "HIGH - Finding -105 vs -110 doubles ROI",
+      "details": "Integrate real odds from The Odds API. Only bet when our predicted value significantly exceeds the market line"
+    }
+  ]
+}

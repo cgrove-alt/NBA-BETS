@@ -87,6 +87,34 @@ PREDICTION_FEATURE_DEFAULTS = {
 }
 
 
+# =============================================================================
+# PROBABILITY CALIBRATION (IMPROVEMENT 1)
+# =============================================================================
+
+def calibrate_probability(raw_prob: float, temperature: float = 2.0) -> float:
+    """
+    Calibrate raw over/under classifier probability with temperature scaling.
+
+    The over_under_classifier stored in player_*_ensemble.pkl returns extreme
+    probabilities (0.0 or 1.0), causing Kelly sizing to bet max on every game.
+    Temperature scaling (temperature=2.0) softens these extremes toward 0.5.
+
+    Args:
+        raw_prob:    Raw output from classifier.predict_proba() in range [0, 1].
+        temperature: Scaling divisor applied in logit space. >1 softens.
+
+    Returns:
+        Calibrated probability clipped to [0.05, 0.95].
+    """
+    if raw_prob <= 0 or raw_prob >= 1:
+        raw_prob = np.clip(raw_prob, 0.05, 0.95)
+    # Apply temperature scaling
+    logit = np.log(raw_prob / (1 - raw_prob))
+    calibrated_logit = logit / temperature
+    calibrated = 1 / (1 + np.exp(-calibrated_logit))
+    return float(np.clip(calibrated, 0.05, 0.95))
+
+
 def smart_fillna_prediction(df: pd.DataFrame) -> pd.DataFrame:
     """
     Apply smart default values for missing features at prediction time.
@@ -925,6 +953,59 @@ class SeasonBacktester:
             games_played=games_played
         )
         features.update(regression_features)
+
+        # ---- OPPONENT ADJUSTMENT FEATURES (IMPROVEMENT 3) ----
+        # Calculate opponent's defensive stats from recent games.
+        # These are extra features; currently-trained models ignore unknown columns,
+        # but future retrains will incorporate them for better accuracy.
+        opp_pts_allowed = []
+        opp_reb_allowed = []
+        opp_ast_allowed = []
+
+        if opponent_id:
+            # Scan all players' historical stats to find games against this opponent
+            for pid, stat_list in self.player_stats.items():
+                for d, s in stat_list:
+                    if d >= game_date:
+                        continue  # Strict point-in-time: only use past data
+                    opp_team = s.get('team', {}).get('id')
+                    if opp_team == opponent_id:
+                        opp_pts_allowed.append(s.get('pts', 0) or 0)
+                        opp_reb_allowed.append(s.get('reb', 0) or 0)
+                        opp_ast_allowed.append(s.get('ast', 0) or 0)
+
+        # Approximate league-average stats per player per game
+        league_pts_avg = 15.0
+        league_reb_avg = 5.5
+        league_ast_avg = 3.5
+
+        # Use league avg as fallback when insufficient data (< 10 data points)
+        features['opp_pts_allowed_avg'] = (
+            np.mean(opp_pts_allowed[-50:]) if len(opp_pts_allowed) > 10
+            else season_pts_avg
+        )
+        features['opp_reb_allowed_avg'] = (
+            np.mean(opp_reb_allowed[-50:]) if len(opp_reb_allowed) > 10
+            else season_reb_avg
+        )
+        features['opp_ast_allowed_avg'] = (
+            np.mean(opp_ast_allowed[-50:]) if len(opp_ast_allowed) > 10
+            else season_ast_avg
+        )
+
+        # Opponent adjustment ratios (> 1.0 = opponent allows more than league avg)
+        features['opp_pts_factor'] = (
+            features['opp_pts_allowed_avg'] / league_pts_avg
+            if league_pts_avg > 0 else 1.0
+        )
+        features['opp_reb_factor'] = (
+            features['opp_reb_allowed_avg'] / league_reb_avg
+            if league_reb_avg > 0 else 1.0
+        )
+        features['opp_ast_factor'] = (
+            features['opp_ast_allowed_avg'] / league_ast_avg
+            if league_ast_avg > 0 else 1.0
+        )
 
         return features
 
