@@ -33,7 +33,7 @@ jobs:
         env:
           BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
         run: |
-          python scheduled_retrain.py --quick 2>&1 | tee logs/retrain_output.log
+          python scheduled_retrain.py --quick --force 2>&1 | tee logs/retrain_output.log
 
       - name: Update retrain history
         if: success()

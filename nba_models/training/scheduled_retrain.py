@@ -28,7 +28,13 @@ from datetime import datetime
 from pathlib import Path
 
 # Configuration
-PROJECT_DIR = Path(__file__).parent
+# Resolve repo root: walk up from this file until we find .git
+_this_dir = Path(__file__).resolve().parent
+PROJECT_DIR = _this_dir
+for _parent in [_this_dir] + list(_this_dir.parents):
+    if (_parent / ".git").exists():
+        PROJECT_DIR = _parent
+        break
 MODELS_DIR = PROJECT_DIR / "models"
 LOGS_DIR = PROJECT_DIR / "logs"
 DATA_DIR = PROJECT_DIR / "data" / "balldontlie_cache"
@@ -116,21 +122,20 @@ def should_retrain(force: bool = False) -> tuple[bool, str]:
 
     # Check minimum time between retrains
     last_retrain = get_last_retrain_info()
-    if last_retrain:
-        last_date = datetime.fromisoformat(last_retrain.get('timestamp', '2000-01-01'))
-        days_since = (datetime.now() - last_date).days
-        if days_since < MIN_DAYS_BETWEEN_RETRAINS:
-            return False, f"Only {days_since} days since last retrain (min: {MIN_DAYS_BETWEEN_RETRAINS})"
+    if not last_retrain:
+        return True, "No retrain history found — first run"
 
-        # Check for new games
-        last_game_count = last_retrain.get('game_count', 0)
-        current_game_count = count_cached_games()
-        new_games = current_game_count - last_game_count
-        if new_games >= MIN_NEW_GAMES_FOR_RETRAIN:
-            return True, f"{new_games} new games since last retrain"
+    last_date = datetime.fromisoformat(last_retrain.get('timestamp', '2000-01-01'))
+    days_since = (datetime.now() - last_date).days
+    if days_since < MIN_DAYS_BETWEEN_RETRAINS:
+        return False, f"Only {days_since} days since last retrain (min: {MIN_DAYS_BETWEEN_RETRAINS})"
 
-    # Check for R2 degradation (would need live monitoring)
-    # This is a placeholder - in production you'd track live accuracy
+    # Check for new games
+    last_game_count = last_retrain.get('game_count', 0)
+    current_game_count = count_cached_games()
+    new_games = current_game_count - last_game_count
+    if new_games >= MIN_NEW_GAMES_FOR_RETRAIN:
+        return True, f"{new_games} new games since last retrain"
 
     return False, "No retrain needed"
 
