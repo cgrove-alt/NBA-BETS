@@ -17,6 +17,8 @@ Features:
 Supports PostgreSQL (primary, via Railway) with SQLite fallback.
 """
 
+from __future__ import annotations
+
 import json
 import sqlite3
 import logging
@@ -29,7 +31,7 @@ import numpy as np
 # PostgreSQL connection (optional — falls back to SQLite)
 try:
     from agents.core.connections import get_postgres_connection
-except ImportError:
+except (ImportError, TypeError):
     def get_postgres_connection():
         return None
 
@@ -45,7 +47,7 @@ try:
         optimize_portfolio_kelly,
     )
     HAS_PORTFOLIO_OPTIMIZER = True
-except ImportError:
+except (ImportError, TypeError):
     HAS_PORTFOLIO_OPTIMIZER = False
     logger.info("Portfolio optimizer not available. Bet sizing will use simple Kelly.")
 
@@ -378,9 +380,11 @@ class BetTracker:
         else:
             bet.potential_payout = bet.stake + bet.stake * (100 / abs(bet.odds))
 
-        # Calculate implied probability
-        bet.implied_probability = bet._odds_to_prob(bet.odds)
-        bet.edge = bet.model_probability - bet.implied_probability
+        # Calculate implied probability (skip if already set with devigged value)
+        raw_implied = bet._odds_to_prob(bet.odds)
+        if bet.implied_probability == 0.5 and bet.edge == 0.0:
+            bet.implied_probability = raw_implied
+            bet.edge = bet.model_probability - bet.implied_probability
 
         if self._use_postgres:
             self._record_bet_pg(bet)

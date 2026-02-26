@@ -13,6 +13,8 @@ Python tries to find these classes in `uvicorn.__main__` which fails.
 This module provides the class definitions so unpickling works correctly.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler

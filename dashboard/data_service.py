@@ -46,7 +46,7 @@ except ImportError:
 try:
     import train_complete_balldontlie as training_module
     TRAINING_MODULE_AVAILABLE = True
-except ImportError:
+except (ImportError, Exception):
     training_module = None
     TRAINING_MODULE_AVAILABLE = False
 

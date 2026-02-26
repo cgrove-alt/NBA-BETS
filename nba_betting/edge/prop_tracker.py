@@ -17,7 +17,7 @@ import uuid
 
 try:
     from agents.core.connections import get_postgres_connection
-except ImportError:
+except (ImportError, TypeError):
     def get_postgres_connection():
         return None
 

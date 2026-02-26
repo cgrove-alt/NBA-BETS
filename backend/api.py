@@ -1982,6 +1982,34 @@ def update_settings(req: SettingsUpdateRequest):
     return SettingsResponse(**current)
 
 
+# ============== CLV ANALYSIS ENDPOINT ==============
+
+
+@app.get("/api/clv/summary")
+def get_clv_summary(days: int = None):
+    """Get CLV analysis summary.
+
+    Args:
+        days: Optional — limit to last N days.
+
+    Returns:
+        CLV summary dict with avg_clv, sharp_rating, etc.
+    """
+    try:
+        from nba_betting.edge.clv_analyzer import CLVAnalyzer
+        analyzer = CLVAnalyzer()
+        return analyzer.get_clv_summary(days=days)
+    except Exception as e:
+        return {
+            "total_bets": 0, "settled_bets": 0, "avg_clv": 0.0,
+            "avg_clv_7d": 0.0, "avg_clv_30d": 0.0, "median_clv": 0.0,
+            "positive_clv_rate": 0.0, "clv_by_prop_type": {},
+            "clv_by_direction": {}, "win_rate_positive_clv": 0.0,
+            "win_rate_negative_clv": 0.0, "sharp_rating": "insufficient_data",
+            "error": str(e),
+        }
+
+
 # ============== RUN SERVER ==============
 
 if __name__ == "__main__":

@@ -5,6 +5,9 @@ Records BET/LEAN signals as TrackedBets so closing odds can be captured
 and Closing Line Value computed. This is the #1 metric for long-term
 model quality per CLAUDE.md.
 
+Now computes and stores devigged implied probabilities at record time
+so CLV analysis can use true market-implied probabilities.
+
 Usage:
     from nba_betting.edge.clv_bridge import record_predictions_as_bets
 
@@ -14,6 +17,8 @@ Usage:
 import logging
 import os
 from datetime import datetime
+
+from nba_betting.odds.devig import american_to_implied, multiplicative_devig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,9 +71,28 @@ def record_predictions_as_bets(
         pick = pred.get('pick', 'OVER')
         american_odds = pred.get('american_odds', -110)
         over_prob = pred.get('over_prob', 0.5)
-        model_prob = pred.get('model_probability', over_prob if pick == 'OVER' else 1.0 - over_prob)
-        edge = pred.get('edge', 0)
         game = pred.get('game', '')
+
+        # Correct model probability based on pick direction
+        if pick == 'OVER':
+            model_prob = over_prob
+        else:
+            model_prob = 1.0 - over_prob
+
+        # Compute devigged implied probability when both sides are available
+        over_odds = pred.get('over_odds', None)
+        under_odds = pred.get('under_odds', None)
+        implied_prob = american_to_implied(float(american_odds))
+        if over_odds is not None and under_odds is not None:
+            raw_over = american_to_implied(float(over_odds))
+            raw_under = american_to_implied(float(under_odds))
+            devigged_over, devigged_under = multiplicative_devig(raw_over, raw_under)
+            if pick == 'OVER':
+                implied_prob = devigged_over
+            else:
+                implied_prob = devigged_under
+
+        edge = model_prob - implied_prob
 
         # Generate unique bet ID
         bet_id = f"{game_date}_{player[:15]}_{stat}_{pick}".replace(' ', '_')
@@ -85,14 +109,16 @@ def record_predictions_as_bets(
                 odds=float(american_odds),
                 stake=0.0,  # No actual stake — tracking for CLV only
                 model_probability=model_prob,
+                implied_probability=implied_prob,
+                edge=edge,
                 opening_odds=float(american_odds),
-                notes=f"signal={signal} edge={edge:.1f}%",
+                notes=f"signal={signal} edge={edge:.4f}",
                 tags=[signal, stat.lower(), pick.lower()],
             )
             tracker.record_bet(bet)
             recorded += 1
         except Exception as e:
-            logger.debug(f"Failed to record bet for {player} {stat}: {e}")
+            logger.debug("Failed to record bet for %s %s: %s", player, stat, e)
             continue
 
     return recorded
