@@ -207,7 +207,7 @@ def run_training():
             cwd=PROJECT_DIR,
             capture_output=True,
             text=True,
-            timeout=3600  # 60 minute timeout for CSV-based training
+            timeout=6000  # 100 minute timeout for CSV-based training
         )
 
         # Log output regardless

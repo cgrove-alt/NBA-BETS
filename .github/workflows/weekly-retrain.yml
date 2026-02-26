@@ -9,7 +9,7 @@ on:
 jobs:
   retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # Training can take 30-45 minutes
+    timeout-minutes: 120  # CSV-based training can take 60+ minutes
 
     steps:
       - name: Checkout repository
