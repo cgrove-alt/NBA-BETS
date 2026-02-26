@@ -184,18 +184,30 @@ def run_training():
     """Run the model training script."""
     log("Starting model training...")
 
-    train_script = PROJECT_DIR / "train_complete_balldontlie.py"
+    # Prefer train_from_csv.py (uses local CSV data, no API needed)
+    # Fall back to train_complete_balldontlie.py (requires Balldontlie API)
+    train_script = PROJECT_DIR / "train_from_csv.py"
+    if not train_script.exists():
+        train_script = PROJECT_DIR / "train_complete_balldontlie.py"
     if not train_script.exists():
         log("ERROR: Training script not found!")
         return False
 
+    log(f"Using training script: {train_script.name}")
+    log(f"Working directory: {PROJECT_DIR}")
+
+    # Build command: train_from_csv accepts --seasons, train_complete does not
+    cmd = [sys.executable, str(train_script)]
+    if train_script.name == 'train_from_csv.py':
+        cmd += ['--seasons', '2021', '2022', '2023', '2024']
+
     try:
         result = subprocess.run(
-            [sys.executable, str(train_script)],
+            cmd,
             cwd=PROJECT_DIR,
             capture_output=True,
             text=True,
-            timeout=1800  # 30 minute timeout
+            timeout=3600  # 60 minute timeout for CSV-based training
         )
 
         # Log output regardless
