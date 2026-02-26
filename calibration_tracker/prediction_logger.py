@@ -37,34 +37,34 @@ class PredictionRecord:
     prop_line: float
 
     # Prediction confidence
-    predicted_over_prob: Optional[float] = None
-    confidence: Optional[float] = None
-    edge: Optional[float] = None
+    predicted_over_prob: float | None = None
+    confidence: float | None = None
+    edge: float | None = None
 
     # Minutes prediction
-    minutes_predicted: Optional[float] = None
-    minutes_p10: Optional[float] = None
-    minutes_p90: Optional[float] = None
-    minutes_uncertainty: Optional[str] = None  # low/medium/high
+    minutes_predicted: float | None = None
+    minutes_p10: float | None = None
+    minutes_p90: float | None = None
+    minutes_uncertainty: str | None = None  # low/medium/high
 
     # Player info
-    position: Optional[str] = None
-    season_avg: Optional[float] = None
-    recent_avg: Optional[float] = None
-    vs_opponent_avg: Optional[float] = None
+    position: str | None = None
+    season_avg: float | None = None
+    recent_avg: float | None = None
+    vs_opponent_avg: float | None = None
 
     # Game context
-    game_id: Optional[int] = None
-    is_home: Optional[bool] = None
-    spread: Optional[float] = None
-    total: Optional[float] = None
-    is_favorite: Optional[bool] = None
-    is_back_to_back: Optional[bool] = None
-    days_rest: Optional[int] = None
+    game_id: int | None = None
+    is_home: bool | None = None
+    spread: float | None = None
+    total: float | None = None
+    is_favorite: bool | None = None
+    is_back_to_back: bool | None = None
+    days_rest: int | None = None
 
     # Model metadata
-    model_version: Optional[str] = None
-    features_hash: Optional[str] = None
+    model_version: str | None = None
+    features_hash: str | None = None
 
     # Timestamps
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -324,7 +324,7 @@ class PredictionLogger:
         """
         return self.db.get_pending_predictions(game_date)
 
-    def get_prediction(self, prediction_id: int) -> Optional[dict]:
+    def get_prediction(self, prediction_id: int) -> dict | None:
         """Get a specific prediction by ID."""
         return self.db.get_prediction(prediction_id)
 
@@ -369,7 +369,7 @@ if __name__ == "__main__":
 
     # Retrieve it
     pred = logger_instance.get_prediction(pred_id)
-    print(f"\nRetrieved prediction:")
+    print("\nRetrieved prediction:")
     print(f"  Player: {pred['player_name']}")
     print(f"  Prop: {pred['prop_type']} = {pred['predicted_value']}")
     print(f"  Line: {pred['prop_line']}")

@@ -185,13 +185,11 @@ class AgentBase(ABC):
         """Core agent logic. Subclasses must implement."""
         raise NotImplementedError
 
-    def report(self, run_output: dict):
+    def report(self, run_output: dict):  # noqa: B027
         """Send messages to the bus based on run output. Override in subclasses."""
-        pass
 
-    def cleanup(self):
+    def cleanup(self):  # noqa: B027
         """Optional cleanup after run. Override in subclasses."""
-        pass
 
     def call_llm(
         self,

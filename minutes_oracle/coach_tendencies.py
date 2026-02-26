@@ -6,7 +6,7 @@ Contains:
 2. CoachTendencyLearner - Class to learn/update tendencies from historical data
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Optional, Any
 from dataclasses import dataclass, field
 from collections import defaultdict
 import numpy as np
@@ -27,7 +27,7 @@ class CoachTendency:
     overtime_usage: str  # 'ride_starters', 'rotate', 'matchup_dependent'
     back_to_back_reduction: float  # Minutes reduction on B2B (0.0 to 0.15)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             'name': self.name,
             'team_id': self.team_id,
@@ -61,7 +61,7 @@ TEAM_ID_TO_ABBREV = {v: k for k, v in TEAM_IDS.items()}
 
 # Manual lookup table for all 30 NBA coaches (2025-26 season)
 # Research-based estimates, will be updated from data
-COACH_TENDENCIES: Dict[str, CoachTendency] = {
+COACH_TENDENCIES: dict[str, CoachTendency] = {
     # Tom Thibodeau - Known for riding starters hard
     'Tom Thibodeau': CoachTendency(
         name='Tom Thibodeau',
@@ -514,7 +514,7 @@ COACH_TENDENCIES: Dict[str, CoachTendency] = {
 }
 
 # Lookup by team ID
-COACH_BY_TEAM_ID: Dict[int, CoachTendency] = {
+COACH_BY_TEAM_ID: dict[int, CoachTendency] = {
     coach.team_id: coach for coach in COACH_TENDENCIES.values()
 }
 
@@ -534,8 +534,8 @@ DEFAULT_COACH_TENDENCY = CoachTendency(
 )
 
 
-def get_coach_tendency(team_id: Optional[int] = None,
-                       coach_name: Optional[str] = None) -> CoachTendency:
+def get_coach_tendency(team_id: int | None = None,
+                       coach_name: str | None = None) -> CoachTendency:
     """
     Get coach tendency by team ID or coach name.
 
@@ -567,7 +567,7 @@ class CoachTendencyLearner:
     """
 
     def __init__(self):
-        self.coach_data: Dict[str, Dict[str, List[float]]] = defaultdict(
+        self.coach_data: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list)
         )
         self.games_processed = 0
@@ -575,7 +575,7 @@ class CoachTendencyLearner:
     def add_game(self,
                  coach_name: str,
                  team_id: int,
-                 player_minutes: List[Dict],
+                 player_minutes: list[dict],
                  final_margin: int,
                  is_back_to_back: bool,
                  went_to_overtime: bool):
@@ -625,7 +625,7 @@ class CoachTendencyLearner:
 
         self.games_processed += 1
 
-    def calculate_tendencies(self, min_games: int = 20) -> Dict[str, CoachTendency]:
+    def calculate_tendencies(self, min_games: int = 20) -> dict[str, CoachTendency]:
         """
         Calculate coach tendencies from accumulated data.
 
@@ -745,7 +745,7 @@ class CoachTendencyLearner:
 
     def get_summary(self) -> str:
         """Get a summary of learned data."""
-        lines = [f"Coach Tendency Learner Summary:",
+        lines = ["Coach Tendency Learner Summary:",
                  f"  Games processed: {self.games_processed}",
                  f"  Coaches tracked: {len(self.coach_data)}",
                  ""]

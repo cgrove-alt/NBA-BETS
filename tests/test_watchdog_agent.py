@@ -115,14 +115,13 @@ def sqlite_guardrails(tmp_path):
 
 @pytest.fixture
 def watchdog_agent(memory_bus, sqlite_guardrails):
-    agent = ModelWatchdogAgent(
+    return ModelWatchdogAgent(
         target_date='2026-02-24',
         lookback_days=7,
         message_bus=memory_bus,
         guardrails=sqlite_guardrails,
         shadow_mode=False,
     )
-    return agent
 
 
 # =============================================================================

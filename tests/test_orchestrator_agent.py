@@ -108,13 +108,12 @@ def sqlite_guardrails(tmp_path):
 
 @pytest.fixture
 def orchestrator_agent(memory_bus, sqlite_guardrails):
-    agent = PredictionOrchestratorAgent(
+    return PredictionOrchestratorAgent(
         target_date='2026-02-24',
         message_bus=memory_bus,
         guardrails=sqlite_guardrails,
         shadow_mode=False,
     )
-    return agent
 
 
 # =============================================================================

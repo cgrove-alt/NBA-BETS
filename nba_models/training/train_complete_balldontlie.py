@@ -5801,7 +5801,7 @@ def train_all_models(
 
     # Prepare player data
     X_player = pd.DataFrame([d['features'] for d in player_data])
-    player_feature_names = list(X_player.columns)
+    list(X_player.columns)
 
     # Calculate player-specific sample weights
     # Combines: 1) Time decay (recent games weighted more)

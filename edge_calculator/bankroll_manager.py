@@ -36,14 +36,14 @@ class PendingBet:
     bet_id: str
     timestamp: str
     player_name: str
-    player_id: Optional[int]
+    player_id: int | None
     prop_type: str
     pick: str  # OVER or UNDER
     line: float
     odds: int
     stake: float
     units: float
-    game_id: Optional[int] = None
+    game_id: int | None = None
     game_date: str = ""
     team: str = ""
     opponent: str = ""
@@ -289,12 +289,12 @@ class BankrollManager:
     # _load_bankroll
     # =========================================================================
 
-    def _load_bankroll(self) -> Optional[float]:
+    def _load_bankroll(self) -> float | None:
         if self._use_postgres:
             return self._load_bankroll_pg()
         return self._load_bankroll_sqlite()
 
-    def _load_bankroll_pg(self) -> Optional[float]:
+    def _load_bankroll_pg(self) -> float | None:
         try:
             cur = self._pg_conn.cursor()
             cur.execute("SELECT amount FROM bankroll_state ORDER BY id DESC LIMIT 1")
@@ -305,7 +305,7 @@ class BankrollManager:
             logger.error(f"PG _load_bankroll failed: {e}")
             return None
 
-    def _load_bankroll_sqlite(self) -> Optional[float]:
+    def _load_bankroll_sqlite(self) -> float | None:
         with self._get_sqlite_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT amount FROM bankroll ORDER BY id DESC LIMIT 1")
@@ -355,7 +355,7 @@ class BankrollManager:
             cur.execute("SELECT * FROM bankroll_pending_bets")
             columns = [desc[0] for desc in cur.description]
             for row in cur.fetchall():
-                r = dict(zip(columns, row))
+                r = dict(zip(columns, row, strict=False))
                 bet = PendingBet(
                     bet_id=r['bet_id'],
                     timestamp=r['timestamp'].isoformat() if hasattr(r['timestamp'], 'isoformat') else str(r['timestamp']),
@@ -491,7 +491,7 @@ class BankrollManager:
         team: str = "",
         opponent: str = "",
         force: bool = False,
-    ) -> tuple[Optional[str], list[str]]:
+    ) -> tuple[str | None, list[str]]:
         game_date = game_date or datetime.now().strftime('%Y-%m-%d')
         game_key = f"{game_date}_{team}_{opponent}"
         player_key = str(player_id or player_name)
@@ -572,7 +572,7 @@ class BankrollManager:
     # settle_bet
     # =========================================================================
 
-    def settle_bet(self, bet_id: str, actual_value: float) -> Optional[SettledBet]:
+    def settle_bet(self, bet_id: str, actual_value: float) -> SettledBet | None:
         pending = None
         for bet in self.exposure.pending_bets:
             if bet.bet_id == bet_id:
@@ -679,7 +679,7 @@ class BankrollManager:
             cur = self._pg_conn.cursor()
             cur.execute("SELECT * FROM bankroll_settled_bets WHERE game_date = %s", (date,))
             columns = [desc[0] for desc in cur.description]
-            bets = [dict(zip(columns, row)) for row in cur.fetchall()]
+            bets = [dict(zip(columns, row, strict=False)) for row in cur.fetchall()]
             cur.close()
         except Exception as e:
             logger.error(f"PG _get_daily_stats failed: {e}")
@@ -808,7 +808,7 @@ if __name__ == "__main__":
     print(f"Bet 2 placed: {bet2_id}")
 
     status = manager.get_status()
-    print(f"\nExposure Summary:")
+    print("\nExposure Summary:")
     print(f"  Total exposure: ${status['total_exposure']:.2f} ({status['exposure_pct']:.1%})")
     print(f"  Pending bets: {status['pending_bets']}")
 

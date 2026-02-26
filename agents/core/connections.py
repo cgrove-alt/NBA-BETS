@@ -113,7 +113,7 @@ def ensure_agent_schema(conn) -> bool:
             cur.close()
             return False
 
-        with open(migration_path, 'r') as f:
+        with open(migration_path) as f:
             sql = f.read()
 
         cur.execute(sql)

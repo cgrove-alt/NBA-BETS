@@ -94,13 +94,12 @@ def sqlite_guardrails(tmp_path):
 @pytest.fixture
 def pregame_agent(memory_bus, sqlite_guardrails):
     """Create a PreGameIntelAgent with mocked dependencies."""
-    agent = PreGameIntelAgent(
+    return PreGameIntelAgent(
         target_date='2026-02-24',
         message_bus=memory_bus,
         guardrails=sqlite_guardrails,
         shadow_mode=False,
     )
-    return agent
 
 
 # =============================================================================

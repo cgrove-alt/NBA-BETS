@@ -361,7 +361,7 @@ class PropTracker:
                 columns = [desc[0] for desc in cur.description]
                 rows = cur.fetchall()
                 cur.close()
-                return [dict(zip(columns, row)) for row in rows]
+                return [dict(zip(columns, row, strict=False)) for row in rows]
             except Exception as e:
                 logger.error(f"PostgreSQL get_unsettled_predictions failed: {e}")
                 raise
@@ -401,7 +401,7 @@ class PropTracker:
                 columns = [desc[0] for desc in cur.description]
                 rows = cur.fetchall()
                 cur.close()
-                return [dict(zip(columns, row)) for row in rows]
+                return [dict(zip(columns, row, strict=False)) for row in rows]
             except Exception as e:
                 logger.error(f"PostgreSQL get_predictions_for_game failed: {e}")
                 raise

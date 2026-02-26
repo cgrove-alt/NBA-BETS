@@ -32,9 +32,9 @@ class CalibrationAdjustment:
 
     # Evidence
     sample_size: int = 0
-    hit_rate: Optional[float] = None
-    avg_error: Optional[float] = None
-    std_error: Optional[float] = None
+    hit_rate: float | None = None
+    avg_error: float | None = None
+    std_error: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -77,7 +77,7 @@ class CalibrationAdjuster:
         self.db = db or CalibrationDatabase()
         self.analyzer = BiasAnalyzer(db)
         self._adjustment_cache: dict[str, CalibrationAdjustment] = {}
-        self._cache_loaded_at: Optional[datetime] = None
+        self._cache_loaded_at: datetime | None = None
 
     def _load_adjustments(self, force: bool = False):
         """Load active adjustments from database."""
@@ -190,7 +190,7 @@ class CalibrationAdjuster:
 
         return adjustments
 
-    def get_adjustment(self, dimension: str, value: str) -> Optional[CalibrationAdjustment]:
+    def get_adjustment(self, dimension: str, value: str) -> CalibrationAdjustment | None:
         """
         Get adjustment for a specific dimension/value.
 

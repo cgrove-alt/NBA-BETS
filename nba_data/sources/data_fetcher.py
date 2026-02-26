@@ -157,8 +157,8 @@ class NbaStatsCircuitBreaker:
                     f"{self._consecutive_failures} consecutive failures."
                 )
                 print(
-                    f"  [Circuit Breaker] Skipping all NBA stats API calls "
-                    f"for this session. BallDontLie data will be used.\n"
+                    "  [Circuit Breaker] Skipping all NBA stats API calls "
+                    "for this session. BallDontLie data will be used.\n"
                 )
 
     def record_success(self):
@@ -1440,7 +1440,7 @@ def _fetch_team_statistics_bdl(team_id, season="2025-26"):
     # 4) Advanced ratings from game scores
     advanced = _compute_advanced_ratings(games, team_abbrev)
 
-    result = {
+    return {
         "team_id": team_id,
         "season": season,
         "overall": {
@@ -1481,7 +1481,6 @@ def _fetch_team_statistics_bdl(team_id, season="2025-26"):
         },
     }
 
-    return result
 
 
 def _fetch_historical_games_bdl(team_id, season="2025-26", last_n_games=None, date_from=None, date_to=None):
@@ -1978,7 +1977,7 @@ def _fetch_player_game_log_api(player_id, season="2025-26"):
         return result
     except CircuitBreakerOpenError:
         raise
-    except Exception as e:
+    except Exception:
         _nba_stats_circuit_breaker.record_failure()
         raise
 
@@ -2000,7 +1999,7 @@ def _fetch_player_dashboard_api(player_id, season="2025-26"):
         return result
     except CircuitBreakerOpenError:
         raise
-    except Exception as e:
+    except Exception:
         _nba_stats_circuit_breaker.record_failure()
         raise
 

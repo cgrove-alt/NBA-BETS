@@ -290,7 +290,7 @@ class CalibrationService:
 
     # ========== DAILY REPORT ==========
 
-    def get_daily_report(self, report_date: str) -> Optional[dict]:
+    def get_daily_report(self, report_date: str) -> dict | None:
         """
         Get a daily calibration report.
 
@@ -527,12 +527,12 @@ if __name__ == "__main__":
     if result.get('prediction_id'):
         print(f"Logged as prediction ID: {result['prediction_id']}")
 
-    print(f"\nClassification:")
+    print("\nClassification:")
     for k, v in result['classification'].items():
         print(f"  {k}: {v}")
 
     if result['adjustments_applied']:
-        print(f"\nAdjustments applied:")
+        print("\nAdjustments applied:")
         for adj in result['adjustments_applied']:
             print(f"  {adj['dimension']}:{adj['value']}")
 

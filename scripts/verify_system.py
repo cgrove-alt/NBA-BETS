@@ -12,7 +12,7 @@ FALLBACK means the primary service is unavailable but a local fallback works.
 import os
 import sys
 import importlib
-import glob
+from pathlib import Path
 
 # Ensure project root is in path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -112,7 +112,7 @@ def check_database():
         conn = sqlite3.connect(db_path)
         conn.execute("SELECT 1")
         conn.close()
-        return fallback_msg("SQLite", f"available at data/calibration.db")
+        return fallback_msg("SQLite", "available at data/calibration.db")
     except Exception as e:
         return fail_msg("Database", f"no database available: {e}")
 
@@ -136,7 +136,7 @@ def check_redis():
     # Verify InMemory fallback works
     try:
         from agents.core.message_bus import InMemoryMessageBus
-        bus = InMemoryMessageBus()
+        InMemoryMessageBus()
         return fallback_msg("InMemoryMessageBus", "available as fallback")
     except Exception as e:
         return fail_msg("Message Bus", f"no message bus available: {e}")
@@ -171,13 +171,13 @@ def check_model_files():
     print(f"\n{Colors.BOLD}5. Model Files{Colors.END}")
 
     models_dir = os.path.join(PROJECT_ROOT, 'models')
-    pkl_files = glob.glob(os.path.join(models_dir, '*.pkl'))
+    pkl_files = list(Path(models_dir).glob('*.pkl'))
 
     if not pkl_files:
         return fail_msg("Model files", "no .pkl files found in models/")
 
     # Check key model categories
-    filenames = [os.path.basename(f) for f in pkl_files]
+    filenames = [p.name for p in pkl_files]
 
     categories = {
         'spread': [f for f in filenames if 'spread' in f],

@@ -99,14 +99,14 @@ class InjuryStatus(Enum):
 class PlayerInjury:
     """Individual player injury report."""
     player_name: str
-    player_id: Optional[str] = None
+    player_id: str | None = None
     team: str = ""
-    team_id: Optional[str] = None
+    team_id: str | None = None
     status: InjuryStatus = InjuryStatus.UNKNOWN
     injury_type: str = ""  # e.g., "Knee", "Ankle", "Illness"
     injury_detail: str = ""  # e.g., "Left knee soreness"
-    report_date: Optional[datetime] = None
-    expected_return: Optional[str] = None
+    report_date: datetime | None = None
+    expected_return: str | None = None
     source: str = ""
     confidence: float = 1.0  # How confident we are in this report
 
@@ -198,7 +198,7 @@ class InjuryScraper:
         cached_time, _ = self._cache[cache_key]
         return datetime.now() - cached_time < self.cache_duration
 
-    def _get_cached(self, cache_key: str) -> Optional[list[PlayerInjury]]:
+    def _get_cached(self, cache_key: str) -> list[PlayerInjury] | None:
         """Get cached data if valid."""
         if self._is_cache_valid(cache_key):
             return self._cache[cache_key][1]
@@ -424,7 +424,7 @@ class InjuryScraper:
             if inj.team.upper() == team_upper or inj.team.upper() == team_abbrev
         ]
 
-    def get_player_injury(self, player_name: str) -> Optional[PlayerInjury]:
+    def get_player_injury(self, player_name: str) -> PlayerInjury | None:
         """
         Get injury status for a specific player.
 
@@ -474,7 +474,7 @@ class InjuryScraper:
 
 
 # Singleton instance for convenience
-_scraper_instance: Optional[InjuryScraper] = None
+_scraper_instance: InjuryScraper | None = None
 
 
 def get_injury_scraper() -> InjuryScraper:

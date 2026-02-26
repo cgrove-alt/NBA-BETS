@@ -22,7 +22,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Optional, Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -65,12 +65,12 @@ class MinutesTrainingDataExtractor:
         self.min_minutes_threshold = min_minutes_threshold
 
         # Player history tracking
-        self.player_game_logs: Dict[int, List[Dict]] = defaultdict(list)
-        self.player_info: Dict[int, Dict] = {}
+        self.player_game_logs: dict[int, list[dict]] = defaultdict(list)
+        self.player_info: dict[int, dict] = {}
 
         # Team tracking
-        self.team_rosters: Dict[int, List[Dict]] = defaultdict(list)
-        self.team_schedules: Dict[int, List[Dict]] = defaultdict(list)
+        self.team_rosters: dict[int, list[dict]] = defaultdict(list)
+        self.team_schedules: dict[int, list[dict]] = defaultdict(list)
 
         # Coach tendency learner
         self.coach_learner = CoachTendencyLearner()
@@ -79,9 +79,9 @@ class MinutesTrainingDataExtractor:
         self.feature_gen = MinutesFeatureGenerator()
 
     def process_games(self,
-                      games: List[Dict],
-                      player_stats_by_game: Dict[int, List[Dict]],
-                      vegas_data: Optional[Dict[int, Dict]] = None) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+                      games: list[dict],
+                      player_stats_by_game: dict[int, list[dict]],
+                      vegas_data: dict[int, dict] | None = None) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
         """
         Process games into training data.
 
@@ -259,7 +259,7 @@ class MinutesTrainingDataExtractor:
                     went_to_overtime=went_to_overtime
                 )
 
-        print(f"\nExtraction complete:")
+        print("\nExtraction complete:")
         print(f"  Training examples: {len(training_examples)}")
         print(f"  Skipped (no history): {skipped_no_history}")
         print(f"  Skipped (low minutes): {skipped_low_minutes}")
@@ -315,7 +315,7 @@ class MinutesTrainingDataExtractor:
 
         return 0.0
 
-    def _add_to_player_history(self, player_id: int, game_stats: Dict, game_date: str):
+    def _add_to_player_history(self, player_id: int, game_stats: dict, game_date: str):
         """Add a game to player's history."""
         log_entry = {
             'min': game_stats.get('min'),
@@ -337,7 +337,7 @@ class MinutesTrainingDataExtractor:
                 'position': player_info.get('position', 'F'),
             }
 
-    def _update_team_schedule(self, team_id: int, game: Dict):
+    def _update_team_schedule(self, team_id: int, game: dict):
         """Update team's schedule history."""
         self.team_schedules[team_id].append({
             'date': game.get('date', ''),
@@ -371,7 +371,7 @@ class MinutesTrainingDataExtractor:
             return (current_date - last_game).days
         return 2
 
-    def _get_coach_name(self, team_id: int) -> Optional[str]:
+    def _get_coach_name(self, team_id: int) -> str | None:
         """Get coach name for a team."""
         from minutes_oracle.coach_tendencies import COACH_BY_TEAM_ID
         coach = COACH_BY_TEAM_ID.get(team_id)
@@ -423,12 +423,12 @@ class MinutesTrainingDataExtractor:
 # =============================================================================
 
 def train_minutes_oracle(
-    seasons: List[int] = None,
+    seasons: list[int] = None,
     output_path: str = 'models/minutes_oracle.pkl',
     validation_split: float = 0.2,
     min_games_history: int = 5,
     verbose: bool = True
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Train the Minutes Oracle model.
 
@@ -521,7 +521,7 @@ def train_minutes_oracle(
     print("=" * 60)
     print(f"\nModel saved to: {output_path}")
     print(f"Training samples: {predictor.training_samples}")
-    print(f"\nValidation Metrics:")
+    print("\nValidation Metrics:")
     print(f"  Median RMSE: {metrics['median_rmse']:.2f} minutes")
     print(f"  Median MAE: {metrics['median_mae']:.2f} minutes")
     print(f"  P10-P90 Coverage: {metrics['p10_p90_coverage']:.1%}")
@@ -536,9 +536,9 @@ def train_minutes_oracle(
 
 def validate_minutes_oracle(
     model_path: str = 'models/minutes_oracle.pkl',
-    test_seasons: List[int] = None,
+    test_seasons: list[int] = None,
     verbose: bool = True
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Validate the trained Minutes Oracle on test data.
 
@@ -634,20 +634,20 @@ def validate_minutes_oracle(
         print("VALIDATION RESULTS")
         print("=" * 60)
         print(f"\nSamples: {metrics['n_samples']}")
-        print(f"\nMedian Prediction:")
+        print("\nMedian Prediction:")
         print(f"  RMSE: {metrics['median_rmse']:.2f} minutes")
         print(f"  MAE: {metrics['median_mae']:.2f} minutes")
         if 'baseline_rmse' in metrics:
             print(f"  Baseline RMSE: {metrics['baseline_rmse']:.2f} minutes")
             print(f"  Improvement: {metrics['rmse_improvement']:.1%}")
-        print(f"\nCalibration:")
+        print("\nCalibration:")
         print(f"  P10: {metrics['p10_calibration']:.1%} (target: 10%)")
         print(f"  P50: {metrics['p50_calibration']:.1%} (target: 50%)")
         print(f"  P90: {metrics['p90_calibration']:.1%} (target: 90%)")
-        print(f"\nCoverage:")
+        print("\nCoverage:")
         print(f"  P10-P90: {metrics['p10_p90_coverage']:.1%} (target: 80%)")
         if 'rmse_close' in metrics:
-            print(f"\nBy Game Type:")
+            print("\nBy Game Type:")
             print(f"  Close (spread < 5): {metrics.get('rmse_close', 0):.2f} RMSE")
             print(f"  Medium (5-10): {metrics.get('rmse_medium', 0):.2f} RMSE")
             print(f"  Blowout (10+): {metrics.get('rmse_blowout', 0):.2f} RMSE")

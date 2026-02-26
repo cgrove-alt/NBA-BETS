@@ -168,9 +168,8 @@ class KellyCriterion:
         if b <= 0:
             return 0.0
 
-        kelly = (b * p - q) / b
+        return (b * p - q) / b
 
-        return kelly
 
     def calculate(
         self,

@@ -254,7 +254,6 @@ class TestPerMinuteRateAdjustment:
     def test_adjustment_skipped_with_low_avg_minutes(self):
         """No adjustment when avg_minutes <= 10 (bench player)."""
         avg_minutes = 8.0  # Bench player
-        predicted_value = 5.0
 
         # The code checks `if avg_minutes > 10`
         assert avg_minutes <= 10  # Confirms adjustment would be skipped

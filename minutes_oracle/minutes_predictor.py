@@ -37,7 +37,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Optional, Any, Union
 from dataclasses import dataclass, field
 import warnings
 
@@ -75,9 +75,9 @@ class MinutesDistribution:
     expected: float  # Weighted mean
     uncertainty: str  # 'low', 'medium', 'high'
     spread: float  # p90 - p10
-    player_id: Optional[int] = None
+    player_id: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             'p10': round(self.p10, 1),
             'p25': round(self.p25, 1),
@@ -107,9 +107,9 @@ class MinutesPredictor:
     INTERVAL_SCALE_FACTOR = 1.15  # Widen by 15% to improve coverage from 75% to ~80%
 
     def __init__(self,
-                 feature_names: Optional[List[str]] = None,
-                 model_params: Optional[Dict] = None,
-                 interval_scale: Optional[float] = None):
+                 feature_names: list[str] | None = None,
+                 model_params: dict | None = None,
+                 interval_scale: float | None = None):
         """
         Initialize the predictor.
 
@@ -123,18 +123,18 @@ class MinutesPredictor:
         self.interval_scale = interval_scale if interval_scale is not None else self.INTERVAL_SCALE_FACTOR
 
         # One model per quantile
-        self.models: Dict[str, Any] = {}
+        self.models: dict[str, Any] = {}
 
         # Training metadata
         self.trained = False
         self.training_samples = 0
         self.training_date = None
-        self.feature_importances: Dict[str, float] = {}
+        self.feature_importances: dict[str, float] = {}
 
         # Feature generator (optional, for convenience methods)
-        self._feature_generator: Optional[MinutesFeatureGenerator] = None
+        self._feature_generator: MinutesFeatureGenerator | None = None
 
-    def _default_params(self) -> Dict:
+    def _default_params(self) -> dict:
         """Default model parameters optimized for minutes prediction."""
         if HAS_LIGHTGBM:
             return {
@@ -164,9 +164,9 @@ class MinutesPredictor:
     def train(self,
               X: Union[np.ndarray, pd.DataFrame],
               y: Union[np.ndarray, pd.Series],
-              sample_weights: Optional[np.ndarray] = None,
+              sample_weights: np.ndarray | None = None,
               validation_split: float = 0.2,
-              verbose: bool = True) -> Dict[str, float]:
+              verbose: bool = True) -> dict[str, float]:
         """
         Train quantile regression models.
 
@@ -214,7 +214,7 @@ class MinutesPredictor:
         metrics = {}
 
         # Train a model for each quantile
-        for q, q_name in zip(self.QUANTILES, self.QUANTILE_NAMES):
+        for q, q_name in zip(self.QUANTILES, self.QUANTILE_NAMES, strict=False):
             if verbose:
                 print(f"  Training {q_name} ({q:.0%}) model...")
 
@@ -266,7 +266,7 @@ class MinutesPredictor:
         # Feature importances (from median model)
         if HAS_LIGHTGBM and hasattr(self.models['p50'], 'feature_importances_'):
             importances = self.models['p50'].feature_importances_
-            self.feature_importances = dict(zip(self.feature_names, importances))
+            self.feature_importances = dict(zip(self.feature_names, importances, strict=False))
 
         # Update metadata
         self.trained = True
@@ -274,7 +274,7 @@ class MinutesPredictor:
         self.training_date = datetime.now().isoformat()
 
         if verbose:
-            print(f"\nTraining complete!")
+            print("\nTraining complete!")
             print(f"  Median RMSE: {metrics['median_rmse']:.2f} minutes")
             print(f"  Median MAE: {metrics['median_mae']:.2f} minutes")
             print(f"  P10-P90 Coverage: {metrics['p10_p90_coverage']:.1%}")
@@ -283,8 +283,8 @@ class MinutesPredictor:
         return metrics
 
     def predict(self,
-                features: Union[Dict, np.ndarray, pd.DataFrame],
-                player_id: Optional[int] = None) -> MinutesDistribution:
+                features: Union[dict, np.ndarray, pd.DataFrame],
+                player_id: int | None = None) -> MinutesDistribution:
         """
         Predict minutes distribution for a single player.
 
@@ -343,7 +343,7 @@ class MinutesPredictor:
 
     def predict_batch(self,
                       X: Union[np.ndarray, pd.DataFrame],
-                      player_ids: Optional[List[int]] = None) -> List[MinutesDistribution]:
+                      player_ids: list[int] | None = None) -> list[MinutesDistribution]:
         """
         Predict minutes distribution for multiple players.
 
@@ -394,7 +394,7 @@ class MinutesPredictor:
 
         return results
 
-    def _apply_interval_scaling(self, preds: Dict[str, float]) -> Dict[str, float]:
+    def _apply_interval_scaling(self, preds: dict[str, float]) -> dict[str, float]:
         """
         Apply interval scaling to widen prediction intervals for better coverage.
 
@@ -423,7 +423,7 @@ class MinutesPredictor:
 
         return scaled
 
-    def _ensure_monotonic(self, preds: Dict[str, float]) -> Dict[str, float]:
+    def _ensure_monotonic(self, preds: dict[str, float]) -> dict[str, float]:
         """Ensure quantile predictions are monotonically increasing."""
         sorted_vals = sorted([preds['p10'], preds['p25'], preds['p50'], preds['p75'], preds['p90']])
         return {
@@ -434,7 +434,7 @@ class MinutesPredictor:
             'p90': sorted_vals[4],
         }
 
-    def _calculate_expected(self, preds: Dict[str, float]) -> float:
+    def _calculate_expected(self, preds: dict[str, float]) -> float:
         """
         Calculate expected minutes as weighted average of quantiles.
 
@@ -450,8 +450,7 @@ class MinutesPredictor:
             'p90': 0.15,
         }
 
-        expected = sum(preds[q] * w for q, w in weights.items())
-        return expected
+        return sum(preds[q] * w for q, w in weights.items())
 
     def _classify_uncertainty(self, spread: float) -> str:
         """
@@ -517,7 +516,7 @@ class MinutesPredictor:
 
         return predictor
 
-    def get_feature_importance(self, top_n: int = 20) -> List[tuple]:
+    def get_feature_importance(self, top_n: int = 20) -> list[tuple]:
         """Get top N most important features."""
         if not self.feature_importances:
             return []
@@ -529,7 +528,7 @@ class MinutesPredictor:
         )
         return sorted_features[:top_n]
 
-    def get_model_info(self) -> Dict[str, Any]:
+    def get_model_info(self) -> dict[str, Any]:
         """Get model metadata and configuration."""
         return {
             'trained': self.trained,
@@ -544,8 +543,8 @@ class MinutesPredictor:
 
 # Convenience function for quick predictions
 def predict_minutes(player_id: int,
-                    game_context: Dict,
-                    model_path: str = 'models/minutes_oracle.pkl') -> Dict:
+                    game_context: dict,
+                    model_path: str = 'models/minutes_oracle.pkl') -> dict:
     """
     Quick prediction function.
 

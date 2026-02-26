@@ -35,7 +35,7 @@ class BetRecommendation:
 
     # Player and prop info
     player_name: str
-    player_id: Optional[int]
+    player_id: int | None
     team: str
     opponent: str
     prop_type: str
@@ -467,7 +467,7 @@ class BetRecommender:
         )
 
         # Create recommendation
-        recommendation = BetRecommendation(
+        return BetRecommendation(
             player_name=player_name,
             player_id=player_id,
             team=team,
@@ -494,7 +494,6 @@ class BetRecommender:
             game_date=game_date,
         )
 
-        return recommendation
 
     def analyze_props(
         self,
@@ -693,12 +692,12 @@ if __name__ == "__main__":
     print(f"  Tier: {rec.confidence_tier.value}")
     print(f"  Suggested: {rec.suggested_units:.1f}u (${rec.suggested_stake:.2f})")
 
-    print(f"\n  Reasoning:")
+    print("\n  Reasoning:")
     for r in rec.reasoning:
         print(f"    - {r}")
 
     if rec.risks:
-        print(f"\n  Risks:")
+        print("\n  Risks:")
         for r in rec.risks:
             print(f"    - {r}")
 

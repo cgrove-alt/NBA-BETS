@@ -300,12 +300,12 @@ class CalibrationDatabase:
             ))
             return cursor.lastrowid
 
-    def get_prediction(self, prediction_id: int) -> Optional[dict]:
+    def get_prediction(self, prediction_id: int) -> dict | None:
         if self._use_postgres:
             return self._get_prediction_pg(prediction_id)
         return self._get_prediction_sqlite(prediction_id)
 
-    def _get_prediction_pg(self, prediction_id: int) -> Optional[dict]:
+    def _get_prediction_pg(self, prediction_id: int) -> dict | None:
         cur = self._pg_conn.cursor()
         cur.execute("SELECT * FROM calibration_predictions WHERE id = %s", (prediction_id,))
         row = cur.fetchone()
@@ -314,9 +314,9 @@ class CalibrationDatabase:
             return None
         cols = [desc[0] for desc in cur.description]
         cur.close()
-        return dict(zip(cols, row))
+        return dict(zip(cols, row, strict=False))
 
-    def _get_prediction_sqlite(self, prediction_id: int) -> Optional[dict]:
+    def _get_prediction_sqlite(self, prediction_id: int) -> dict | None:
         with self._get_sqlite_conn() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM predictions WHERE id = ?", (prediction_id,))
@@ -334,7 +334,7 @@ class CalibrationDatabase:
         cols = [desc[0] for desc in cur.description]
         rows = cur.fetchall()
         cur.close()
-        return [dict(zip(cols, row)) for row in rows]
+        return [dict(zip(cols, row, strict=False)) for row in rows]
 
     def _get_pending_predictions_sqlite(self, game_date: str) -> list[dict]:
         with self._get_sqlite_conn() as conn:
@@ -415,7 +415,7 @@ class CalibrationDatabase:
             cursor.execute("UPDATE predictions SET status = 'matched' WHERE id = ?", (outcome['prediction_id'],))
             return cursor.lastrowid
 
-    def get_outcome(self, prediction_id: int) -> Optional[dict]:
+    def get_outcome(self, prediction_id: int) -> dict | None:
         if self._use_postgres:
             cur = self._pg_conn.cursor()
             cur.execute("SELECT * FROM calibration_outcomes WHERE prediction_id = %s", (prediction_id,))
@@ -425,7 +425,7 @@ class CalibrationDatabase:
                 return None
             cols = [desc[0] for desc in cur.description]
             cur.close()
-            return dict(zip(cols, row))
+            return dict(zip(cols, row, strict=False))
         else:
             with self._get_sqlite_conn() as conn:
                 cursor = conn.cursor()
@@ -467,7 +467,7 @@ class CalibrationDatabase:
         cols = [desc[0] for desc in cur.description]
         rows = cur.fetchall()
         cur.close()
-        return [dict(zip(cols, row)) for row in rows]
+        return [dict(zip(cols, row, strict=False)) for row in rows]
 
     def _get_pwo_sqlite(self, start_date, end_date, prop_type, min_confidence) -> list[dict]:
         with self._get_sqlite_conn() as conn:
@@ -521,7 +521,7 @@ class CalibrationDatabase:
         row = cur.fetchone()
         cols = [desc[0] for desc in cur.description]
         cur.close()
-        return dict(zip(cols, row)) if row else {}
+        return dict(zip(cols, row, strict=False)) if row else {}
 
     def _get_summary_sqlite(self, start_date, end_date) -> dict:
         with self._get_sqlite_conn() as conn:
@@ -608,14 +608,14 @@ class CalibrationDatabase:
             cols = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
             cur.close()
-            return [dict(zip(cols, row)) for row in rows]
+            return [dict(zip(cols, row, strict=False)) for row in rows]
         else:
             with self._get_sqlite_conn() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT * FROM calibration_adjustments WHERE is_active = 1")
                 return [dict(row) for row in cursor.fetchall()]
 
-    def get_adjustment(self, dimension: str, dimension_value: str) -> Optional[dict]:
+    def get_adjustment(self, dimension: str, dimension_value: str) -> dict | None:
         if self._use_postgres:
             cur = self._pg_conn.cursor()
             cur.execute("""
@@ -628,7 +628,7 @@ class CalibrationDatabase:
                 return None
             cols = [desc[0] for desc in cur.description]
             cur.close()
-            return dict(zip(cols, row))
+            return dict(zip(cols, row, strict=False))
         else:
             with self._get_sqlite_conn() as conn:
                 cursor = conn.cursor()
@@ -687,7 +687,7 @@ class CalibrationDatabase:
             ))
             return cursor.lastrowid
 
-    def get_daily_report(self, report_date: str) -> Optional[dict]:
+    def get_daily_report(self, report_date: str) -> dict | None:
         if self._use_postgres:
             cur = self._pg_conn.cursor()
             cur.execute("SELECT * FROM calibration_daily_reports WHERE report_date = %s", (report_date,))
@@ -696,7 +696,7 @@ class CalibrationDatabase:
                 cur.close()
                 return None
             cols = [desc[0] for desc in cur.description]
-            result = dict(zip(cols, row))
+            result = dict(zip(cols, row, strict=False))
             cur.close()
             rj = result.get('report_json')
             result['report'] = json.loads(rj) if isinstance(rj, str) else rj
@@ -719,7 +719,7 @@ class CalibrationDatabase:
             cols = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
             cur.close()
-            return [dict(zip(cols, row)) for row in rows]
+            return [dict(zip(cols, row, strict=False)) for row in rows]
         else:
             with self._get_sqlite_conn() as conn:
                 cursor = conn.cursor()
@@ -778,7 +778,7 @@ class CalibrationDatabase:
             ))
             return cursor.lastrowid
 
-    def get_weekly_report(self, week_ending: str) -> Optional[dict]:
+    def get_weekly_report(self, week_ending: str) -> dict | None:
         if self._use_postgres:
             cur = self._pg_conn.cursor()
             cur.execute("SELECT * FROM calibration_weekly_reports WHERE week_ending = %s", (week_ending,))
@@ -787,7 +787,7 @@ class CalibrationDatabase:
                 cur.close()
                 return None
             cols = [desc[0] for desc in cur.description]
-            result = dict(zip(cols, row))
+            result = dict(zip(cols, row, strict=False))
             cur.close()
             rj = result.get('report_json')
             result['report'] = json.loads(rj) if isinstance(rj, str) else rj
@@ -810,7 +810,7 @@ class CalibrationDatabase:
             cols = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
             cur.close()
-            return [dict(zip(cols, row)) for row in rows]
+            return [dict(zip(cols, row, strict=False)) for row in rows]
         else:
             with self._get_sqlite_conn() as conn:
                 cursor = conn.cursor()

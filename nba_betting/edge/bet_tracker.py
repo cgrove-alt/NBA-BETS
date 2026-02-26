@@ -715,7 +715,7 @@ class BetTracker:
 
     def _row_to_bet_pg(self, columns: list[str], row: tuple) -> TrackedBet:
         """Convert a PostgreSQL row (tuple + column names) to TrackedBet."""
-        d = dict(zip(columns, row))
+        d = dict(zip(columns, row, strict=False))
 
         # PG returns datetime objects directly for TIMESTAMP columns, but
         # placed_at / event_date / settled_at may also come back as strings

@@ -128,7 +128,7 @@ class NewsMonitor:
         """
         self.lookback = timedelta(hours=lookback_hours)
         self._cache: list[NewsAlert] = []
-        self._last_fetch: Optional[datetime] = None
+        self._last_fetch: datetime | None = None
         self._fetch_interval = timedelta(minutes=5)  # Minimum time between fetches
 
     def _classify_severity(self, player_name: str, alert_type: AlertType) -> AlertSeverity:
@@ -207,7 +207,7 @@ class NewsMonitor:
         headline: str,
         detail: str = "",
         source: str = ""
-    ) -> Optional[NewsAlert]:
+    ) -> NewsAlert | None:
         """
         Parse a news headline into a structured alert.
 
@@ -468,7 +468,7 @@ class NewsMonitor:
 
 
 # Singleton instance
-_monitor_instance: Optional[NewsMonitor] = None
+_monitor_instance: NewsMonitor | None = None
 
 
 def get_news_monitor() -> NewsMonitor:

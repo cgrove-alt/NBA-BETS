@@ -32,22 +32,22 @@ class OutcomeRecord:
 
     prediction_id: int
     actual_value: float
-    actual_minutes: Optional[float] = None
+    actual_minutes: float | None = None
 
     # Result classification
     result: str = ""  # over, under, push
     hit: int = 0  # 1 if correct, 0 if wrong
 
     # Error metrics
-    error: Optional[float] = None  # predicted - actual
+    error: float | None = None  # predicted - actual
 
     # Line movement
-    closing_line: Optional[float] = None
-    clv: Optional[float] = None  # Closing line value
+    closing_line: float | None = None
+    clv: float | None = None  # Closing line value
 
     # Game context
-    game_score_diff: Optional[int] = None  # Final margin
-    player_started: Optional[bool] = None
+    game_score_diff: int | None = None  # Final margin
+    player_started: bool | None = None
 
     # Timestamps
     recorded_at: str = ""
@@ -347,7 +347,7 @@ class OutcomeTracker:
         logger.info(f"Outcome processing complete: {results}")
         return results
 
-    def get_outcome(self, prediction_id: int) -> Optional[dict]:
+    def get_outcome(self, prediction_id: int) -> dict | None:
         """Get outcome for a prediction."""
         return self.db.get_outcome(prediction_id)
 
@@ -409,7 +409,7 @@ if __name__ == "__main__":
 
     # Get outcome
     outcome = tracker.get_outcome(pred_id)
-    print(f"\nOutcome details:")
+    print("\nOutcome details:")
     print(f"  Actual: {outcome['actual_value']}")
     print(f"  Result: {outcome['result']}")
     print(f"  Hit: {outcome['hit']}")

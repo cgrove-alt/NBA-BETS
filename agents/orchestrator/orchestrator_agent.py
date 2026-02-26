@@ -56,7 +56,7 @@ class PredictionOrchestratorAgent(AgentBase):
             'prompts', 'orchestrator.md'
         )
         try:
-            with open(prompt_path, 'r') as f:
+            with open(prompt_path) as f:
                 return f.read()
         except FileNotFoundError:
             logger.warning(f"System prompt not found at {prompt_path}, using default")
@@ -343,8 +343,7 @@ class PredictionOrchestratorAgent(AgentBase):
             }
 
         try:
-            parsed = json.loads(response)
-            return parsed
+            return json.loads(response)
         except json.JSONDecodeError:
             return {
                 'conflict_resolutions': [],

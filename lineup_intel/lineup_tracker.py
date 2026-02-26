@@ -48,7 +48,7 @@ NBA_TEAMS = {
 class StarterInfo:
     """Information about a starting player."""
     player_name: str
-    player_id: Optional[str] = None
+    player_id: str | None = None
     team: str = ""
     position: str = ""  # PG, SG, SF, PF, C
     avg_minutes: float = 0.0
@@ -77,12 +77,12 @@ class StarterInfo:
 class LineupConfirmation:
     """Confirmed starting lineup for a team."""
     team: str
-    team_id: Optional[str] = None
+    team_id: str | None = None
     game_date: str = ""
     opponent: str = ""
     starters: list[StarterInfo] = field(default_factory=list)
     is_confirmed: bool = False
-    confirmation_time: Optional[datetime] = None
+    confirmation_time: datetime | None = None
     source: str = ""
     last_updated: datetime = field(default_factory=datetime.now)
 
@@ -355,8 +355,8 @@ class LineupTracker:
     def get_lineup(
         self,
         team: str,
-        game_date: Optional[str] = None,
-        opponent: Optional[str] = None,
+        game_date: str | None = None,
+        opponent: str | None = None,
         force_refresh: bool = False
     ) -> LineupConfirmation:
         """
@@ -454,7 +454,7 @@ class LineupTracker:
 
 
 # Singleton instance
-_tracker_instance: Optional[LineupTracker] = None
+_tracker_instance: LineupTracker | None = None
 
 
 def get_lineup_tracker() -> LineupTracker:
@@ -479,7 +479,7 @@ if __name__ == "__main__":
         lineup = tracker.get_lineup(team)
         print(f"Confirmed: {lineup.is_confirmed}")
         print(f"Source: {lineup.source}")
-        print(f"\nExpected Starters:")
+        print("\nExpected Starters:")
 
         for starter in lineup.starters:
             print(f"  {starter.position:3} {starter.player_name:25} "

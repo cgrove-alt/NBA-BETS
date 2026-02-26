@@ -402,7 +402,7 @@ class InjuryTrackerV3:
             columns = [desc[0] for desc in cur.description]
             records = []
             for row in cur.fetchall():
-                row_dict = dict(zip(columns, row))
+                row_dict = dict(zip(columns, row, strict=False))
                 records.append({
                     "game_date": str(row_dict["game_date"]),
                     "status": row_dict["status"],

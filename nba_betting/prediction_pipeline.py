@@ -85,8 +85,8 @@ def evaluate_bet(
     prop_type: str,
     predicted: float,
     line: float,
-    raw_confidence: Optional[float] = None,
-    games_played: Optional[int] = None,
+    raw_confidence: float | None = None,
+    games_played: int | None = None,
     bankroll: float = 1000.0,
 ) -> dict:
     """

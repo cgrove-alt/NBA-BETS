@@ -58,7 +58,7 @@ class ModelWatchdogAgent(AgentBase):
             'prompts', 'watchdog.md'
         )
         try:
-            with open(prompt_path, 'r') as f:
+            with open(prompt_path) as f:
                 return f.read()
         except FileNotFoundError:
             logger.warning(f"System prompt not found at {prompt_path}, using default")
@@ -148,8 +148,7 @@ class ModelWatchdogAgent(AgentBase):
             return {}
 
         try:
-            parsed = json.loads(response)
-            return parsed
+            return json.loads(response)
         except json.JSONDecodeError:
             logger.warning(f"[{self.AGENT_NAME}] LLM returned invalid JSON")
             return {}

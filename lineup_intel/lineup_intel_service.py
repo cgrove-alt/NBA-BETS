@@ -30,7 +30,7 @@ class PlayerIntel:
     """Complete intelligence about a single player."""
     player_name: str
     team: str
-    player_id: Optional[str] = None
+    player_id: str | None = None
 
     # Status
     injury_status: InjuryStatus = InjuryStatus.AVAILABLE
@@ -50,7 +50,7 @@ class PlayerIntel:
 
     # Alerts
     has_recent_alert: bool = False
-    alert_severity: Optional[AlertSeverity] = None
+    alert_severity: AlertSeverity | None = None
     alert_detail: str = ""
 
     # Metadata
@@ -88,13 +88,13 @@ class GameIntel:
     game_date: str
 
     # Home team
-    home_lineup: Optional[LineupConfirmation] = None
+    home_lineup: LineupConfirmation | None = None
     home_injuries: list[PlayerInjury] = field(default_factory=list)
     home_alerts: list[NewsAlert] = field(default_factory=list)
     home_players: list[PlayerIntel] = field(default_factory=list)
 
     # Away team
-    away_lineup: Optional[LineupConfirmation] = None
+    away_lineup: LineupConfirmation | None = None
     away_injuries: list[PlayerInjury] = field(default_factory=list)
     away_alerts: list[NewsAlert] = field(default_factory=list)
     away_players: list[PlayerIntel] = field(default_factory=list)
@@ -213,8 +213,8 @@ class LineupIntelService:
         self,
         player_name: str,
         team: str,
-        injury: Optional[PlayerInjury],
-        lineup: Optional[LineupConfirmation],
+        injury: PlayerInjury | None,
+        lineup: LineupConfirmation | None,
         alerts: list[NewsAlert]
     ) -> PlayerIntel:
         """
@@ -321,7 +321,7 @@ class LineupIntelService:
         self,
         home_team: str,
         away_team: str,
-        game_date: Optional[str] = None,
+        game_date: str | None = None,
         force_refresh: bool = False
     ) -> GameIntel:
         """
@@ -606,6 +606,6 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("Testing minutes adjustment...")
     adj = service.get_minutes_adjustment("LeBron James", "LAL", base_minutes=35.0)
-    print(f"  Base: 35.0 min")
+    print("  Base: 35.0 min")
     print(f"  Adjusted: {adj['adjusted_minutes']:.1f} min")
     print(f"  Uncertainty: {adj['uncertainty']}")

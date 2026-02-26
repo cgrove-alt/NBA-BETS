@@ -123,7 +123,7 @@ class TestMessageBus:
         redis_bus.send(msg_b)
 
         msgs_a = redis_bus.receive('agent_a')
-        msgs_b = redis_bus.receive('agent_b')
+        redis_bus.receive('agent_b')
 
         assert any(m.message_id == msg_a.message_id for m in msgs_a)
         assert not any(m.message_id == msg_b.message_id for m in msgs_a)

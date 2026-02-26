@@ -48,7 +48,7 @@ class ConfidenceEngine:
         model_agreement: float = 1.0,
         data_quality_score: float = 1.0,
         historical_accuracy: float = 0.5,
-        prop_type: Optional[str] = None,
+        prop_type: str | None = None,
     ) -> dict:
         """
         Compute unified confidence score.

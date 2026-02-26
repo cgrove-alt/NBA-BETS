@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Optional, Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,7 +55,7 @@ class ValidationResult:
     n_medium: int
     n_blowout: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             'overall': {
                 'median_rmse': round(self.median_rmse, 2),
@@ -104,23 +104,23 @@ class ValidationResult:
         print(f"  Baseline RMSE: {self.baseline_rmse:.2f} min")
         print(f"  Improvement: {self.rmse_improvement_pct:.1%}")
 
-        print(f"\nCalibration (actual % <= predicted quantile):")
+        print("\nCalibration (actual % <= predicted quantile):")
         print(f"  P10: {self.p10_calibration:.1%} (target: 10%)")
         print(f"  P25: {self.p25_calibration:.1%} (target: 25%)")
         print(f"  P50: {self.p50_calibration:.1%} (target: 50%)")
         print(f"  P75: {self.p75_calibration:.1%} (target: 75%)")
         print(f"  P90: {self.p90_calibration:.1%} (target: 90%)")
 
-        print(f"\nInterval Coverage:")
+        print("\nInterval Coverage:")
         print(f"  P10-P90: {self.p10_p90_coverage:.1%} (target: 80%)")
         print(f"  P25-P75: {self.p25_p75_coverage:.1%} (target: 50%)")
 
-        print(f"\nBy Game Type:")
+        print("\nBy Game Type:")
         print(f"  Close (spread < 5):  {self.rmse_close_games:.2f} RMSE ({self.n_close} games)")
         print(f"  Medium (spread 5-10): {self.rmse_medium_games:.2f} RMSE ({self.n_medium} games)")
         print(f"  Blowout (spread > 10): {self.rmse_blowout_games:.2f} RMSE ({self.n_blowout} games)")
 
-        print(f"\nBy Player Type:")
+        print("\nBy Player Type:")
         print(f"  Starters (30+ min): {self.rmse_starters:.2f} RMSE")
         print(f"  Rotation (20-30 min): {self.rmse_rotation:.2f} RMSE")
         print(f"  Bench (10-20 min): {self.rmse_bench:.2f} RMSE")
@@ -152,7 +152,7 @@ class MinutesOracleValidator:
     Validates Minutes Oracle predictions against actual outcomes.
     """
 
-    def __init__(self, predictor: Optional[MinutesPredictor] = None):
+    def __init__(self, predictor: MinutesPredictor | None = None):
         """
         Initialize validator.
 
@@ -168,8 +168,8 @@ class MinutesOracleValidator:
     def validate(self,
                  features: pd.DataFrame,
                  actuals: np.ndarray,
-                 spreads: Optional[np.ndarray] = None,
-                 player_avg_mins: Optional[np.ndarray] = None) -> ValidationResult:
+                 spreads: np.ndarray | None = None,
+                 player_avg_mins: np.ndarray | None = None) -> ValidationResult:
         """
         Run full validation on test data.
 
@@ -278,7 +278,7 @@ class MinutesOracleValidator:
     def validate_calibration_curve(self,
                                     features: pd.DataFrame,
                                     actuals: np.ndarray,
-                                    n_bins: int = 10) -> Dict[str, List[float]]:
+                                    n_bins: int = 10) -> dict[str, list[float]]:
         """
         Calculate calibration curve data for plotting.
 
@@ -294,7 +294,7 @@ class MinutesOracleValidator:
             raise RuntimeError("No model loaded.")
 
         predictions = self.predictor.predict_batch(features)
-        p50 = np.array([p.p50 for p in predictions])
+        np.array([p.p50 for p in predictions])
 
         # Calculate quantile bins
         quantiles = np.linspace(0, 1, n_bins + 1)

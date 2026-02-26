@@ -158,9 +158,8 @@ class EdgeCalculator:
         total_implied = implied_this + implied_other
 
         # Remove vig by normalizing
-        no_vig_prob = implied_this / total_implied
+        return implied_this / total_implied
 
-        return no_vig_prob
 
     @staticmethod
     def calculate_vig(
@@ -186,9 +185,8 @@ class EdgeCalculator:
         implied_b = EdgeCalculator.american_to_implied_probability(odds_side_b)
 
         total = implied_a + implied_b
-        vig = total - 1.0
+        return total - 1.0
 
-        return vig
 
     def classify_edge(self, edge: float) -> str:
         """
@@ -235,7 +233,7 @@ class EdgeCalculator:
 
         # Calculate edge
         edge = model_probability - implied_prob
-        edge_no_vig = model_probability - no_vig_prob
+        model_probability - no_vig_prob
 
         # Calculate potential profit
         potential_profit = stake * (decimal_odds - 1)
@@ -354,8 +352,7 @@ class EdgeCalculator:
         # ROI = Win% * Decimal - 1
         # Win% = (ROI + 1) / Decimal
 
-        required = (target_roi + 1) / decimal_odds
-        return required
+        return (target_roi + 1) / decimal_odds
 
 
 def devig_probability(over_odds: float, under_odds: float) -> tuple[float, float]:
@@ -452,7 +449,7 @@ if __name__ == "__main__":
         american_odds=-110,
         model_confidence=65,
     )
-    print(f"  Predicted: 28.2 vs Line: 26.5")
+    print("  Predicted: 28.2 vs Line: 26.5")
     print(f"  Model Probability: {result.model_probability:.1%}")
     print(f"  Edge: {result.edge_percentage:+.1f}%")
     print(f"  EV/dollar: ${result.ev_per_dollar:+.3f}")

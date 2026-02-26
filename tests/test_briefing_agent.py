@@ -159,13 +159,12 @@ def sqlite_guardrails(tmp_path):
 
 @pytest.fixture
 def briefing_agent(memory_bus, sqlite_guardrails):
-    agent = DailyBriefingAgent(
+    return DailyBriefingAgent(
         target_date='2026-02-24',
         message_bus=memory_bus,
         guardrails=sqlite_guardrails,
         shadow_mode=False,
     )
-    return agent
 
 
 # =============================================================================

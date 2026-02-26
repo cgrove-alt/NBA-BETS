@@ -43,7 +43,7 @@ class DailyBriefingAgent(AgentBase):
             'prompts', 'briefing.md'
         )
         try:
-            with open(prompt_path, 'r') as f:
+            with open(prompt_path) as f:
                 return f.read()
         except FileNotFoundError:
             logger.warning(f"System prompt not found at {prompt_path}, using default")
@@ -97,14 +97,13 @@ class DailyBriefingAgent(AgentBase):
 
     def _build_sections_from_context(self, context: dict) -> dict:
         """Build briefing sections from available context (deterministic fallback)."""
-        sections = {
+        return {
             'yesterday_recap': self._build_yesterday_section(context.get('yesterday_results')),
             'today_plays': self._build_today_section(context.get('predictions')),
             'bankroll': self._build_bankroll_section(context.get('predictions')),
             'alerts': self._build_alerts_section(context.get('health_check')),
             'market_intel': self._build_market_section(context.get('odds_intel')),
         }
-        return sections
 
     def _build_yesterday_section(self, results: dict) -> dict:
         """Build yesterday's recap section."""

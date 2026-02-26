@@ -153,8 +153,7 @@ def decompress_quantile_prediction(predicted_value: float, line: float, prop_typ
         return predicted_value
 
     level_fix = -mean_gap
-    corrected = predicted_value + slope_fix * (line - mean_line) + level_fix
-    return corrected
+    return predicted_value + slope_fix * (line - mean_line) + level_fix
 
 
 # Import performance optimizations (Task 4.1)
@@ -1056,7 +1055,7 @@ def load_models() -> dict:
             try:
                 models['minutes_oracle'] = MinutesPredictor.load(minutes_path)
                 models['minutes_feature_gen'] = MinutesFeatureGenerator()
-                print(f"    Loaded Minutes Oracle")
+                print("    Loaded Minutes Oracle")
             except Exception as e:
                 print(f"    Warning: Could not load Minutes Oracle: {e}")
 
@@ -1177,7 +1176,7 @@ def predict_moneyline(features: dict, models: dict) -> tuple[float, float]:
                     pred = model.predict(X)[0]
                     home_prob = 1 / (1 + np.exp(-pred))
         else:
-            print(f"    WARNING: moneyline model has no feature_names, using fallback")
+            print("    WARNING: moneyline model has no feature_names, using fallback")
             net_rating_diff = features.get('net_rating_diff', 0)
             home_prob = 0.5 + (net_rating_diff * 0.02)
     except Exception as e:
@@ -1214,7 +1213,7 @@ def predict_spread(features: dict, models: dict) -> float:
                 else:
                     print(f"    WARNING: spread prediction {pred:.1f} outside [-30, 30], using fallback")
             else:
-                print(f"    WARNING: spread model has no feature_names, using fallback")
+                print("    WARNING: spread model has no feature_names, using fallback")
         except Exception as e:
             print(f"    WARNING: spread model predict failed: {type(e).__name__}: {e}")
 
@@ -2490,7 +2489,7 @@ def main():
     # Fetch current injuries BEFORE generating predictions (Task 1.4)
     print("\n  Fetching injury reports...")
     try:
-        target_date_dt = datetime.strptime(target_date, "%Y-%m-%d")
+        datetime.strptime(target_date, "%Y-%m-%d")
         current_injuries = fetch_current_injuries()
 
         # Build lookup dict: {player_id: status}
@@ -2862,7 +2861,7 @@ def main():
                     edges = [p['edge'] for p in analysis['player_props'] if abs(p['edge']) > 3]
                     print(f" {prop_count} props analyzed, {len(edges)} edges found")
             else:
-                print(f" no props available")
+                print(" no props available")
 
         all_analyses.append(analysis)
         print_game_analysis(analysis)

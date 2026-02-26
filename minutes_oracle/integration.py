@@ -19,7 +19,7 @@ Usage:
 from __future__ import annotations
 
 import numpy as np
-from typing import Dict, List, Optional, Any
+from typing import Optional, Any
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -32,7 +32,7 @@ class MinutesAwarePropPrediction:
     """Prop prediction with minutes distribution context."""
     prop_type: str
     predicted_value: float
-    prop_line: Optional[float]
+    prop_line: float | None
     prediction: str  # 'over' or 'under'
     confidence: float
     edge: float
@@ -45,7 +45,7 @@ class MinutesAwarePropPrediction:
     # Original prediction (without minutes adjustment)
     original_predicted_value: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             'prop_type': self.prop_type,
             'predicted_value': round(self.predicted_value, 1),
@@ -92,8 +92,8 @@ class MinutesAwarePropPredictor:
         self.minutes_model_path = minutes_model_path
         self.prop_models_dir = Path(prop_models_dir)
 
-        self.minutes_predictor: Optional[MinutesPredictor] = None
-        self.prop_models: Dict[str, Any] = {}
+        self.minutes_predictor: MinutesPredictor | None = None
+        self.prop_models: dict[str, Any] = {}
         self.feature_gen = MinutesFeatureGenerator()
 
         self._loaded = False
@@ -128,8 +128,8 @@ class MinutesAwarePropPredictor:
                         team_id: int,
                         opponent_team_id: int,
                         game_date: str,
-                        game_context: Dict,
-                        player_game_logs: Optional[List[Dict]] = None) -> MinutesDistribution:
+                        game_context: dict,
+                        player_game_logs: list[dict] | None = None) -> MinutesDistribution:
         """
         Predict minutes distribution for a player.
 
@@ -170,10 +170,10 @@ class MinutesAwarePropPredictor:
                               team_id: int,
                               opponent_team_id: int,
                               game_date: str,
-                              game_context: Dict,
-                              prop_lines: Optional[Dict[str, float]] = None,
-                              player_game_logs: Optional[List[Dict]] = None,
-                              prop_features: Optional[Dict[str, Dict]] = None) -> Dict[str, MinutesAwarePropPrediction]:
+                              game_context: dict,
+                              prop_lines: dict[str, float] | None = None,
+                              player_game_logs: list[dict] | None = None,
+                              prop_features: dict[str, dict] | None = None) -> dict[str, MinutesAwarePropPrediction]:
         """
         Generate prop predictions with minutes-aware adjustments.
 
@@ -288,8 +288,8 @@ class MinutesAwarePropPredictor:
     def _create_minimal_prop_features(self,
                                        player_id: int,
                                        prop_type: str,
-                                       game_context: Dict,
-                                       game_logs: Optional[List[Dict]]) -> Dict:
+                                       game_context: dict,
+                                       game_logs: list[dict] | None) -> dict:
         """Create minimal features for a prop prediction."""
         features = {
             'player_id': player_id,
@@ -331,7 +331,7 @@ class MinutesAwarePropPredictor:
 
         return features
 
-    def _get_stat_baseline(self, prop_type: str, game_logs: Optional[List[Dict]]) -> float:
+    def _get_stat_baseline(self, prop_type: str, game_logs: list[dict] | None) -> float:
         """Get baseline stat value from game logs."""
         if not game_logs:
             return {'points': 15.0, 'rebounds': 5.0, 'assists': 3.0, 'threes': 1.5, 'pra': 23.0}.get(prop_type, 10.0)
@@ -442,7 +442,7 @@ def example_integration():
     if results:
         first_result = list(results.values())[0]
         mins = first_result.minutes_distribution
-        print(f"\nMinutes Distribution:")
+        print("\nMinutes Distribution:")
         print(f"  P10 (floor): {mins.p10:.1f}")
         print(f"  P50 (median): {mins.p50:.1f}")
         print(f"  P90 (ceiling): {mins.p90:.1f}")

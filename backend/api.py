@@ -227,9 +227,7 @@ def health_check():
     # 4. Determine overall status
     if db_connected and models_loaded:
         status = "healthy"
-    elif models_loaded and not db_connected and os.environ.get("DATABASE_URL"):
-        status = "unhealthy"
-    elif not models_loaded:
+    elif models_loaded and not db_connected and os.environ.get("DATABASE_URL") or not models_loaded:
         status = "unhealthy"
     else:
         # Redis down or DATABASE_URL not set (local dev) — degraded at worst
@@ -1847,7 +1845,7 @@ def get_system_health():
     }
 
     # Check latest prediction CSV
-    pred_csvs = sorted(Path(".").glob("predictions_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+    pred_csvs = sorted(Path().glob("predictions_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
     if pred_csvs:
         data_freshness["last_predictions"] = datetime.fromtimestamp(pred_csvs[0].stat().st_mtime).isoformat()
 

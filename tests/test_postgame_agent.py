@@ -76,13 +76,12 @@ def sqlite_guardrails(tmp_path):
 @pytest.fixture
 def postgame_agent(memory_bus, sqlite_guardrails):
     """Create a PostGameAnalysisAgent with mocked dependencies."""
-    agent = PostGameAnalysisAgent(
+    return PostGameAnalysisAgent(
         target_date='2026-02-23',
         message_bus=memory_bus,
         guardrails=sqlite_guardrails,
         shadow_mode=False,
     )
-    return agent
 
 
 def _make_mock_service(predictions=None):
@@ -121,7 +120,7 @@ class TestPostGameAgent:
         postgame_agent._calibration_service = mock_service
 
         with patch.object(postgame_agent, 'call_llm', return_value=VALID_MISS_ANALYSIS):
-            result = postgame_agent.run()
+            postgame_agent.run()
 
         mock_service.run_nightly_job.assert_called_once_with(game_date='2026-02-23')
 

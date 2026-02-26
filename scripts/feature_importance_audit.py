@@ -59,7 +59,7 @@ def get_tree_model_importances(model_data: dict, model_name: str) -> dict[str, f
         if model_obj and hasattr(model_obj, 'feature_importances_'):
             imp = model_obj.feature_importances_
             if len(imp) == len(feature_names):
-                return dict(zip(feature_names, imp.astype(float)))
+                return dict(zip(feature_names, imp.astype(float), strict=False))
         return importances
 
     # Aggregate importances across ensemble members
@@ -68,7 +68,7 @@ def get_tree_model_importances(model_data: dict, model_name: str) -> dict[str, f
         if hasattr(model_obj, 'feature_importances_'):
             imp = model_obj.feature_importances_
             if len(imp) == len(feature_names):
-                for feat, val in zip(feature_names, imp):
+                for feat, val in zip(feature_names, imp, strict=False):
                     importances[feat] = importances.get(feat, 0.0) + float(val)
                 n_models += 1
 
@@ -127,7 +127,7 @@ def run_shap_analysis(model_data: dict, model_name: str, n_samples: int = 200) -
 
             mean_abs_shap = shap_values.mean(axis=0)
             if len(mean_abs_shap) == n_features:
-                for feat, val in zip(feature_names, mean_abs_shap):
+                for feat, val in zip(feature_names, mean_abs_shap, strict=False):
                     shap_importances[feat] = shap_importances.get(feat, 0.0) + float(val)
                 n_analyzed += 1
                 logger.info(f"  {model_name}/{name} ({model_type}): SHAP analysis complete")
@@ -243,14 +243,14 @@ def main():
             prune_features.append(entry)
 
     logger.info(f"\n{'=' * 60}")
-    logger.info(f"RESULTS")
+    logger.info("RESULTS")
     logger.info(f"{'=' * 60}")
     logger.info(f"Total features analyzed: {len(ranked)}")
     logger.info(f"Features to KEEP: {len(keep_features)} (>= {args.threshold*100}% cumulative importance)")
     logger.info(f"Features to PRUNE: {len(prune_features)}")
 
     # Print top 20 features
-    logger.info(f"\nTop 20 features:")
+    logger.info("\nTop 20 features:")
     for entry in ranked[:20]:
         logger.info(f"  {entry['feature']:40s} {entry['pct']:6.2f}%  (cum: {entry['cumulative_pct']:.1f}%)")
 
@@ -290,8 +290,8 @@ def main():
         f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d')}\n")
         f.write(f"**Method:** {'SHAP TreeExplainer' if avg_shap else 'Built-in tree importances'}\n")
         f.write(f"**Threshold:** {args.threshold*100}% cumulative importance\n\n")
-        f.write(f"## Summary\n\n")
-        f.write(f"| Metric | Value |\n|---|---|\n")
+        f.write("## Summary\n\n")
+        f.write("| Metric | Value |\n|---|---|\n")
         f.write(f"| Original features | {len(ranked)} |\n")
         f.write(f"| Selected features | {len(keep_features)} |\n")
         f.write(f"| Pruned features | {len(prune_features)} |\n\n")

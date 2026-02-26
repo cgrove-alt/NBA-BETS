@@ -65,7 +65,7 @@ class PostGameAnalysisAgent(AgentBase):
             'prompts', 'postgame.md'
         )
         try:
-            with open(prompt_path, 'r') as f:
+            with open(prompt_path) as f:
                 return f.read()
         except FileNotFoundError:
             logger.warning(f"System prompt not found at {prompt_path}, using default")

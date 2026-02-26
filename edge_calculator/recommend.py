@@ -71,7 +71,7 @@ def load_props_from_predictions(date: str) -> list[dict]:
     # Sample data for demonstration
     logger.warning("Using sample data - integrate with your prediction pipeline")
 
-    sample_props = [
+    return [
         {
             'player_name': 'LeBron James',
             'player_id': 2544,
@@ -196,7 +196,6 @@ def load_props_from_predictions(date: str) -> list[dict]:
         },
     ]
 
-    return sample_props
 
 
 def print_detailed_pick(rec: BetRecommendation):

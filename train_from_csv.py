@@ -111,8 +111,7 @@ def build_team_id_map() -> dict[int, int]:
     function is forward-compatible.
     """
     known = sorted(set(_KNOWN_NBA_IDS))
-    mapping = {nba_id: idx + 1 for idx, nba_id in enumerate(known)}
-    return mapping
+    return {nba_id: idx + 1 for idx, nba_id in enumerate(known)}
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +223,7 @@ def load_team_games(seasons: list[str],
     #    Only include seasons NOT already covered by the historical CSV
     #    to avoid duplicates (historical has player box scores too).
     # ------------------------------------------------------------------
-    historical_seasons = set(totals['SEASON_YEAR'].unique()) if len(totals) else set()
+    set(totals['SEASON_YEAR'].unique()) if len(totals) else set()
     live_seasons_needed = season_set - {'2023-24'}   # 2023-24 is in both; prefer historical
     # Keep any season in live CSV that the user requested and that ISN'T
     # fully covered by the historical totals
@@ -238,7 +237,7 @@ def load_team_games(seasons: list[str],
         live = pd.read_csv(LIVE_CSV)
         live = live[live['SEASON_YEAR'].isin(live_extra)].copy()
         # Align column names to the historical format where they differ
-        live.rename(columns={'SEASON_ID': 'SEASON_ID_ORIG'}, inplace=True)
+        live = live.rename(columns={'SEASON_ID': 'SEASON_ID_ORIG'})
         # live CSV already has SEASON_YEAR; GAME_DATE is already "YYYY-MM-DD"
         live_rows = live
         print(f"  → {len(live_rows):,} live rows added")
@@ -360,7 +359,7 @@ def load_player_stats(game_ids: set[int],
     dict mapping game_id (int) → list of player stat dicts
     """
     season_set = set(seasons)
-    print(f"\n[load_player_stats] Reading box score parts ...")
+    print("\n[load_player_stats] Reading box score parts ...")
 
     parts = []
     for path in BOX_PARTS:

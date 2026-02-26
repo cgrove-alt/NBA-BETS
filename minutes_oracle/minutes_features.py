@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Optional, Any
 from collections import defaultdict
 
 from .coach_tendencies import (
@@ -77,19 +77,19 @@ class MinutesFeatureGenerator:
         self.api_client = api_client
 
         # Cache for expensive lookups
-        self._player_cache: Dict[int, Dict] = {}
-        self._team_cache: Dict[int, Dict] = {}
-        self._roster_cache: Dict[Tuple[int, str], List[Dict]] = {}
+        self._player_cache: dict[int, dict] = {}
+        self._team_cache: dict[int, dict] = {}
+        self._roster_cache: dict[tuple[int, str], list[dict]] = {}
 
     def generate_features(self,
                           player_id: int,
                           team_id: int,
                           opponent_team_id: int,
                           game_date: str,
-                          game_context: Optional[Dict] = None,
-                          player_game_logs: Optional[List[Dict]] = None,
-                          team_roster: Optional[List[Dict]] = None,
-                          injured_players: Optional[List[int]] = None) -> Dict[str, float]:
+                          game_context: dict | None = None,
+                          player_game_logs: list[dict] | None = None,
+                          team_roster: list[dict] | None = None,
+                          injured_players: list[int] | None = None) -> dict[str, float]:
         """
         Generate all features for minutes prediction.
 
@@ -170,8 +170,8 @@ class MinutesFeatureGenerator:
         return features
 
     def _generate_baseline_features(self,
-                                    game_logs: List[Dict],
-                                    game_date: str) -> Dict[str, float]:
+                                    game_logs: list[dict],
+                                    game_date: str) -> dict[str, float]:
         """
         Generate historical baseline features.
 
@@ -269,7 +269,7 @@ class MinutesFeatureGenerator:
                                    is_home: bool,
                                    is_back_to_back: bool,
                                    days_rest: int,
-                                   opponent_team_id: int) -> Dict[str, float]:
+                                   opponent_team_id: int) -> dict[str, float]:
         """
         Generate game context features.
 
@@ -320,9 +320,9 @@ class MinutesFeatureGenerator:
     def _generate_rotation_features(self,
                                     player_id: int,
                                     team_id: int,
-                                    team_roster: List[Dict],
-                                    injured_players: List[int],
-                                    player_game_logs: List[Dict]) -> Dict[str, float]:
+                                    team_roster: list[dict],
+                                    injured_players: list[int],
+                                    player_game_logs: list[dict]) -> dict[str, float]:
         """
         Generate rotation context features.
 
@@ -421,7 +421,7 @@ class MinutesFeatureGenerator:
                                  team_id: int,
                                  vegas_spread: float,
                                  is_back_to_back: bool,
-                                 is_starter: int) -> Dict[str, float]:
+                                 is_starter: int) -> dict[str, float]:
         """
         Generate coach tendency features.
 
@@ -468,10 +468,10 @@ class MinutesFeatureGenerator:
         return features
 
     def _generate_situational_features(self,
-                                       player_game_logs: List[Dict],
+                                       player_game_logs: list[dict],
                                        vegas_spread: float,
                                        vegas_total: float,
-                                       is_starter: int) -> Dict[str, float]:
+                                       is_starter: int) -> dict[str, float]:
         """
         Generate situational features.
 
@@ -536,7 +536,7 @@ class MinutesFeatureGenerator:
 
         return features
 
-    def _extract_minutes(self, game_log: Dict) -> Optional[float]:
+    def _extract_minutes(self, game_log: dict) -> float | None:
         """Extract minutes from a game log dict, handling various formats."""
         # Try common field names
         for field in ['min', 'mins', 'minutes', 'mp', 'time_played']:
@@ -546,7 +546,7 @@ class MinutesFeatureGenerator:
 
         return None
 
-    def _parse_minutes(self, value: Any) -> Optional[float]:
+    def _parse_minutes(self, value: Any) -> float | None:
         """Parse minutes from various formats (int, float, string 'MM:SS')."""
         if value is None:
             return None
@@ -578,9 +578,9 @@ class MinutesFeatureGenerator:
         return None
 
     def generate_features_batch(self,
-                                 players: List[Dict],
-                                 game_context: Dict,
-                                 game_date: str) -> List[Dict]:
+                                 players: list[dict],
+                                 game_context: dict,
+                                 game_date: str) -> list[dict]:
         """
         Generate features for multiple players efficiently.
 
@@ -661,14 +661,14 @@ MINUTES_FEATURE_NAMES = [
 ]
 
 
-def features_to_array(features: Dict[str, float],
-                      feature_names: List[str] = MINUTES_FEATURE_NAMES) -> np.ndarray:
+def features_to_array(features: dict[str, float],
+                      feature_names: list[str] = MINUTES_FEATURE_NAMES) -> np.ndarray:
     """Convert feature dict to numpy array in correct order."""
     return np.array([features.get(name, 0.0) for name in feature_names])
 
 
-def features_to_dataframe(features_list: List[Dict[str, float]],
-                          feature_names: List[str] = MINUTES_FEATURE_NAMES):
+def features_to_dataframe(features_list: list[dict[str, float]],
+                          feature_names: list[str] = MINUTES_FEATURE_NAMES):
     """Convert list of feature dicts to pandas DataFrame."""
     import pandas as pd
     return pd.DataFrame(features_list)[feature_names]

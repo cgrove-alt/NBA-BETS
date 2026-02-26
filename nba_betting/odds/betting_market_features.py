@@ -350,7 +350,7 @@ class OddsHistoryDB:
             cur.close()
             return None
         columns = [desc[0] for desc in cur.description]
-        result = dict(zip(columns, row))
+        result = dict(zip(columns, row, strict=False))
         cur.close()
         return result
 
@@ -389,7 +389,7 @@ class OddsHistoryDB:
             cur.close()
             return None
         columns = [desc[0] for desc in cur.description]
-        result = dict(zip(columns, row))
+        result = dict(zip(columns, row, strict=False))
         cur.close()
         return result
 
@@ -430,7 +430,7 @@ class OddsHistoryDB:
             cur.close()
             return []
         columns = [desc[0] for desc in cur.description]
-        results = [dict(zip(columns, row)) for row in rows]
+        results = [dict(zip(columns, row, strict=False)) for row in rows]
         cur.close()
         return results
 
@@ -532,7 +532,7 @@ class OddsHistoryDB:
             cur.close()
             return None
         columns = [desc[0] for desc in cur.description]
-        result = dict(zip(columns, row))
+        result = dict(zip(columns, row, strict=False))
         cur.close()
         return result
 

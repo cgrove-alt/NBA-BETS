@@ -36,7 +36,7 @@ def run_comprehensive_validation(model_path: str = 'models/minutes_oracle.pkl'):
         from train_complete_balldontlie import ComprehensiveDataCollector
     except ImportError as e:
         print(f"Error importing: {e}")
-        return
+        return None
 
     from minutes_oracle.minutes_trainer import MinutesTrainingDataExtractor
 
@@ -101,7 +101,7 @@ def run_comprehensive_validation(model_path: str = 'models/minutes_oracle.pkl'):
     print(f"  Improvement: {improvement:+.1f}%")
 
     # Calibration
-    print(f"\nCalibration (% of actuals <= predicted quantile):")
+    print("\nCalibration (% of actuals <= predicted quantile):")
     print(f"  P10: {np.mean(y_val <= p10)*100:.1f}% (target: 10%)")
     print(f"  P25: {np.mean(y_val <= p25)*100:.1f}% (target: 25%)")
     print(f"  P50: {np.mean(y_val <= p50)*100:.1f}% (target: 50%)")
@@ -111,7 +111,7 @@ def run_comprehensive_validation(model_path: str = 'models/minutes_oracle.pkl'):
     # Coverage
     p10_p90_cov = np.mean((y_val >= p10) & (y_val <= p90))
     p25_p75_cov = np.mean((y_val >= p25) & (y_val <= p75))
-    print(f"\nInterval Coverage:")
+    print("\nInterval Coverage:")
     print(f"  P10-P90: {p10_p90_cov*100:.1f}% (target: 80%)")
     print(f"  P25-P75: {p25_p75_cov*100:.1f}% (target: 50%)")
 
@@ -122,7 +122,7 @@ def run_comprehensive_validation(model_path: str = 'models/minutes_oracle.pkl'):
     medium_mask = (spreads >= 5) & (spreads < 10)
     blowout_mask = spreads >= 10
 
-    print(f"\nBy Game Type (Vegas Spread):")
+    print("\nBy Game Type (Vegas Spread):")
 
     if close_mask.sum() > 10:
         close_rmse = np.sqrt(np.mean((y_val[close_mask] - p50[close_mask]) ** 2))
@@ -146,7 +146,7 @@ def run_comprehensive_validation(model_path: str = 'models/minutes_oracle.pkl'):
         print(f"  Blowout (spread > 10): Insufficient samples ({blowout_mask.sum()})")
 
     # By player type (based on actual minutes)
-    print(f"\nBy Player Type (Actual Minutes):")
+    print("\nBy Player Type (Actual Minutes):")
 
     starter_mask = y_val >= 30
     rotation_mask = (y_val >= 20) & (y_val < 30)
@@ -168,7 +168,7 @@ def run_comprehensive_validation(model_path: str = 'models/minutes_oracle.pkl'):
         print(f"  Bench (10-20 min): {bench_rmse:.2f} RMSE, {bench_cov*100:.1f}% coverage ({bench_mask.sum()} samples)")
 
     # By uncertainty level
-    print(f"\nBy Predicted Uncertainty:")
+    print("\nBy Predicted Uncertainty:")
     uncertainties = [p.uncertainty for p in predictions]
     for level in ['low', 'medium', 'high']:
         mask = np.array([u == level for u in uncertainties])
@@ -179,7 +179,7 @@ def run_comprehensive_validation(model_path: str = 'models/minutes_oracle.pkl'):
 
     # Prediction interval width
     avg_spread = np.mean(p90 - p10)
-    print(f"\nPrediction Interval Width:")
+    print("\nPrediction Interval Width:")
     print(f"  Average P10-P90 spread: {avg_spread:.1f} min")
 
     print("\n" + "=" * 60)

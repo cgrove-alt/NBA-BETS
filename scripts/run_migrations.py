@@ -15,10 +15,10 @@ Called automatically by the API on startup (see backend/api.py lifespan).
 
 import load_env  # noqa: F401  — load .env before any code reads os.environ
 import argparse
-import glob
 import logging
 import os
 import sys
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +29,7 @@ MIGRATIONS_DIR = os.path.join(PROJECT_ROOT, 'migrations')
 
 def get_migration_files() -> list[str]:
     """Return sorted list of migration SQL files."""
-    pattern = os.path.join(MIGRATIONS_DIR, '*.sql')
-    files = sorted(glob.glob(pattern))
-    return files
+    return sorted(str(p) for p in Path(MIGRATIONS_DIR).glob('*.sql'))
 
 
 def run_migrations(database_url: str = None, check_only: bool = False) -> bool:
@@ -90,7 +88,7 @@ def run_migrations(database_url: str = None, check_only: bool = False) -> bool:
 
     pending = []
     for filepath in migration_files:
-        filename = os.path.basename(filepath)
+        filename = Path(filepath).name
         if filename not in applied:
             pending.append((filename, filepath))
 
@@ -111,7 +109,7 @@ def run_migrations(database_url: str = None, check_only: bool = False) -> bool:
     for filename, filepath in pending:
         logger.info(f"Applying migration: {filename}")
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath) as f:
                 sql = f.read()
             cur.execute(sql)
             cur.execute(
@@ -143,7 +141,7 @@ def main():
     files = get_migration_files()
     print(f"Found {len(files)} migration file(s) in {MIGRATIONS_DIR}:")
     for f in files:
-        print(f"  - {os.path.basename(f)}")
+        print(f"  - {Path(f).name}")
 
     if args.check:
         needed = not run_migrations(database_url=args.url, check_only=True)

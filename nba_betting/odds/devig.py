@@ -12,7 +12,7 @@ Methods:
 """
 
 import numpy as np
-from typing import Tuple, Optional
+from typing import Optional
 
 
 def american_to_implied(odds: float) -> float:
@@ -40,7 +40,7 @@ def implied_to_american(prob: float) -> float:
     return 100 * (1 - prob) / prob
 
 
-def multiplicative_devig(prob_a: float, prob_b: float) -> Tuple[float, float]:
+def multiplicative_devig(prob_a: float, prob_b: float) -> tuple[float, float]:
     """
     Basic multiplicative devig — divide each probability by the overround.
 
@@ -59,7 +59,7 @@ def multiplicative_devig(prob_a: float, prob_b: float) -> Tuple[float, float]:
     return prob_a / total, prob_b / total
 
 
-def power_devig(prob_a: float, prob_b: float, max_iter: int = 100) -> Tuple[float, float]:
+def power_devig(prob_a: float, prob_b: float, max_iter: int = 100) -> tuple[float, float]:
     """
     Power method devig — finds the exponent k such that prob_a^k + prob_b^k = 1.
 
@@ -92,7 +92,7 @@ def power_devig(prob_a: float, prob_b: float, max_iter: int = 100) -> Tuple[floa
     return prob_a ** k, prob_b ** k
 
 
-def shin_devig(prob_a: float, prob_b: float) -> Tuple[float, float]:
+def shin_devig(prob_a: float, prob_b: float) -> tuple[float, float]:
     """
     Shin method devig — accounts for the favorite-longshot bias.
 
@@ -134,7 +134,7 @@ def devig_american_odds(
     odds_a: float,
     odds_b: float,
     method: str = "multiplicative",
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Remove vig from a pair of American odds.
 
