@@ -198,18 +198,27 @@ def run_training():
             timeout=1800  # 30 minute timeout
         )
 
-        # Check for success indicators in output
-        if "Training complete" in result.stdout or result.returncode == 0:
-            log("Training completed successfully")
-            # Log last few lines of output
-            lines = result.stdout.strip().split('\n')[-10:]
-            for line in lines:
-                if line.strip():
-                    log(f"  {line}")
-            return True
-        log(f"Training may have failed. Return code: {result.returncode}")
+        # Log output regardless
+        lines = result.stdout.strip().split('\n')[-15:]
+        for line in lines:
+            if line.strip():
+                log(f"  {line}")
         if result.stderr:
-            log(f"Errors: {result.stderr[:500]}")
+            log(f"  STDERR: {result.stderr[:500]}")
+
+        # Check for success: must have both return code 0 AND training output
+        training_ran = (
+            "TRAINING COMPLETE" in result.stdout.upper()
+            or "Models saved to" in result.stdout
+            or "All models saved" in result.stdout
+        )
+        if result.returncode == 0 and training_ran:
+            log("Training completed successfully")
+            return True
+        if result.returncode != 0:
+            log(f"Training failed with return code: {result.returncode}")
+        else:
+            log("Training script exited 0 but no training output detected")
         return False
 
     except subprocess.TimeoutExpired:
