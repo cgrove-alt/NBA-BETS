@@ -325,8 +325,9 @@ class TestEdgeCalculatorFallback:
             assert 'edge_quality' in result
             assert result['pick'] == 'OVER'  # 0.58 > 0.5
 
-            # Legacy formula: (0.58 - 0.524) * 100 = 5.6
-            assert abs(result['over_edge'] - 5.6) < 0.01
+            # Legacy formula: (0.58 - 110/210) * 100 = 5.619...
+            # (110/210 = 0.52381, not 0.524 as previously rounded)
+            assert abs(result['over_edge'] - 5.619) < 0.05
 
         finally:
             dp.HAS_EDGE_CALCULATOR = original_flag

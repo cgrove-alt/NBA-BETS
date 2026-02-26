@@ -36,14 +36,21 @@ from passlib.context import CryptContext
 AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "false").lower() == "true"
 
 # JWT Configuration
-JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+# When AUTH_ENABLED is false (dev/test/CI), use a default key so jwt.encode()
+# doesn't receive None.  Production MUST set AUTH_ENABLED=true + a real secret.
+JWT_SECRET_KEY = os.environ.get(
+    "JWT_SECRET_KEY",
+    "dev-insecure-key-do-not-use-in-production",
+)
 JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
-# CRITICAL: JWT_SECRET_KEY must be set when authentication is enabled
-if AUTH_ENABLED and not JWT_SECRET_KEY:
+# CRITICAL: JWT_SECRET_KEY must be a real secret when authentication is enabled
+_DEV_DEFAULT_KEY = "dev-insecure-key-do-not-use-in-production"
+if AUTH_ENABLED and JWT_SECRET_KEY == _DEV_DEFAULT_KEY:
     raise ValueError(
-        "CRITICAL SECURITY ERROR: JWT_SECRET_KEY environment variable must be set when AUTH_ENABLED=true. "
+        "CRITICAL SECURITY ERROR: JWT_SECRET_KEY environment variable must be set "
+        "to a unique secret when AUTH_ENABLED=true. Do NOT use the default dev key. "
         "Generate a secure key with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
     )
 
