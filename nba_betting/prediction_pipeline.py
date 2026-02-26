@@ -54,12 +54,12 @@ MIN_EDGE = {
     'assists': 0.8,
     'threes': 999,     # Disabled — no demonstrated model edge
     'pra': 3.0,
-    'spread': 2.5,
+    'spread': 999,      # Disabled — RMSE 14.2, above market baseline ~12-13
     'moneyline': 0.05,
 }
 
 # Disabled prop types (Improvement 2)
-DISABLED_PROPS = ['threes']
+DISABLED_PROPS = ['threes', 'spread']
 
 # Bet sizing constraints (Improvement 2)
 MIN_GAMES = 10          # Minimum player sample size

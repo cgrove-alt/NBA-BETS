@@ -55,6 +55,9 @@ logs/
 .coverage
 htmlcov/
 
+# Model backups (local only)
+models_backup_*/
+
 # Claude plans (local only)
 .claude/
 .vercel

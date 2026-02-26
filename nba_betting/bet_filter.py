@@ -1,3 +1,7 @@
+# SPREAD MODEL STATUS: DISABLED
+# Last evaluation: 2026-02-26
+# Spread RMSE: 14.2 (market baseline: ~12-13)
+# Decision: Disabled — RMSE above market, no positive ATS edge
 """
 Smart bet selection filter for NBA-BETS.
 Only recommends bets where the model has a meaningful edge.
@@ -21,7 +25,7 @@ MIN_EDGE_THRESHOLDS = {
     'assists': 0.8,    # Need 0.8+ assist edge
     'threes': 999,     # Effectively disabled (R²=0.31, no edge vs naive baseline)
     'pra': 3.0,        # Need 3+ PRA edge
-    'spread': 2.5,     # Need 2.5+ point spread edge
+    'spread': 999,      # Effectively disabled (RMSE 14.2, above market ~12-13)
     'moneyline': 0.05, # Need 5% probability edge
 }
 
@@ -40,7 +44,7 @@ MIN_EV_THRESHOLDS = {
 MIN_GAMES_PLAYED = 10  # Minimum games for reliable player predictions
 MIN_CONFIDENCE = 0.58  # Minimum calibrated probability to bet
 
-DISABLED_PROPS = ['threes']  # Props where model has no demonstrated edge
+DISABLED_PROPS = ['threes', 'spread']  # Props where model has no demonstrated edge
 
 
 # ---------------------------------------------------------------------------

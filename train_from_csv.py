@@ -21,7 +21,7 @@ from collections import defaultdict
 # ---------------------------------------------------------------------------
 # Path setup — must happen before any project imports
 # ---------------------------------------------------------------------------
-ROOT = '/home/user/workspace/NBA-BETS'
+ROOT = os.environ.get('NBA_BETS_ROOT', os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 sys.path.insert(0, os.path.join(ROOT, 'nba_models', 'training'))
 sys.path.insert(0, ROOT)

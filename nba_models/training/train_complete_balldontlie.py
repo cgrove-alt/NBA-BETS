@@ -2967,6 +2967,11 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
     elo_system = EloRatingSystem(k_factor=20.0, home_advantage=100.0)  # NEW: Elo ratings
     travel_calc = TravelFatigueCalculator()  # PHASE 2: Travel fatigue features
 
+    # IMPROVEMENT 3: Track per-team player performances for opponent-adjusted features
+    # (ported from nba_models/backtesting/comprehensive_backtest.py)
+    # Each entry is (pts, reb, ast) from a single player in a single game.
+    team_player_perf = defaultdict(list)  # team_id -> [(pts, reb, ast), ...]
+
     team_data = []
     player_data = []
     skipped = 0
@@ -3250,6 +3255,38 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
                 )
                 enhanced_features.update(regression_features)
 
+                # IMPROVEMENT 3: Opponent-adjusted features
+                # (ported from nba_models/backtesting/comprehensive_backtest.py)
+                # Collect historical per-player stats from the opponent team.
+                # Only contains games already processed (strict point-in-time).
+                opp_perf = team_player_perf.get(opponent_team_id, [])
+                opp_league_pts_avg = 15.0
+                opp_league_reb_avg = 5.5
+                opp_league_ast_avg = 3.5
+
+                if len(opp_perf) > 10:
+                    recent_opp = opp_perf[-50:]
+                    enhanced_features['opp_pts_allowed_avg'] = np.mean([p[0] for p in recent_opp])
+                    enhanced_features['opp_reb_allowed_avg'] = np.mean([p[1] for p in recent_opp])
+                    enhanced_features['opp_ast_allowed_avg'] = np.mean([p[2] for p in recent_opp])
+                else:
+                    enhanced_features['opp_pts_allowed_avg'] = enhanced_features.get('season_pts_avg', opp_league_pts_avg)
+                    enhanced_features['opp_reb_allowed_avg'] = enhanced_features.get('season_reb_avg', opp_league_reb_avg)
+                    enhanced_features['opp_ast_allowed_avg'] = enhanced_features.get('season_ast_avg', opp_league_ast_avg)
+
+                enhanced_features['opp_pts_factor'] = (
+                    enhanced_features['opp_pts_allowed_avg'] / opp_league_pts_avg
+                    if opp_league_pts_avg > 0 else 1.0
+                )
+                enhanced_features['opp_reb_factor'] = (
+                    enhanced_features['opp_reb_allowed_avg'] / opp_league_reb_avg
+                    if opp_league_reb_avg > 0 else 1.0
+                )
+                enhanced_features['opp_ast_factor'] = (
+                    enhanced_features['opp_ast_allowed_avg'] / opp_league_ast_avg
+                    if opp_league_ast_avg > 0 else 1.0
+                )
+
                 player_data.append({
                     'player_id': player_id,
                     'player_name': f"{ps.get('player', {}).get('first_name', '')} {ps.get('player', {}).get('last_name', '')}",
@@ -3265,6 +3302,17 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
                     'actual_min': actual_min,  # TIER 2.3: For minutes model
                     'sample_weight': example_sample_weight,  # NEW: For weighted training
                 })
+
+        # IMPROVEMENT 3: Update team player performance tracker
+        # (AFTER building features to ensure no data leakage)
+        for ps_track in game_player_stats:
+            track_team_id = ps_track.get('team', {}).get('id')
+            if track_team_id:
+                team_player_perf[track_team_id].append((
+                    ps_track.get('pts', 0) or 0,
+                    ps_track.get('reb', 0) or 0,
+                    ps_track.get('ast', 0) or 0,
+                ))
 
         # Skip team example if insufficient history
         if not home_stats or not away_stats:

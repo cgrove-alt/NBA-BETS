@@ -742,7 +742,6 @@ def generate_complete_prop_features(
         'opp_pace': 100.0,
         'opp_pace_season': 100.0,
         'opp_def_strength': 0.0,
-        'opp_reb_factor': 1.0,
         'opp_location_def': 0.0,
         'opp_win_pct': 0.5,
         'opp_recent_win_pct': 0.5,
@@ -767,6 +766,14 @@ def generate_complete_prop_features(
         'opp_reb_vs_pos_diff': 0.0,
         'opp_ast_vs_pos_diff': 0.0,
         'opp_fg3m_vs_pos_diff': 0.0,
+        # Opponent-adjusted features (IMPROVEMENT 3, from comprehensive_backtest)
+        # Defaults to league averages (factor=1.0); live API can override
+        'opp_pts_allowed_avg': 15.0,
+        'opp_reb_allowed_avg': 5.5,
+        'opp_ast_allowed_avg': 3.5,
+        'opp_pts_factor': 1.0,
+        'opp_reb_factor': 1.0,
+        'opp_ast_factor': 1.0,
     }
     base_features.update(opponent_features)
 
