@@ -314,9 +314,9 @@ def main():
     print(f'  {"-"*12} {"------"} {"--------"} {"--------"} {"--------"} {"--------"} {"--------"}')
 
     for c in calibration['calibration_curve']:
-        print(f'  {c['confidence_range']:12s} {c['count']:6d} {c['avg_confidence']:9.2f} '
-              f'{c['avg_error']:9.3f} {c['expected_accuracy']:9.3f} '
-              f'{c['actual_accuracy']:9.3f} {c['calibration_gap']:+9.3f}')
+        print(f"  {c['confidence_range']:12s} {c['count']:6d} {c['avg_confidence']:9.2f} "
+              f"{c['avg_error']:9.3f} {c['expected_accuracy']:9.3f} "
+              f"{c['actual_accuracy']:9.3f} {c['calibration_gap']:+9.3f}")
 
     # 3. Tier Analysis
     print('\n' + '='*70)
@@ -330,9 +330,9 @@ def main():
     for tier in ['elite', 'strong', 'moderate', 'weak', 'avoid']:
         if tier in tier_stats:
             s = tier_stats[tier]
-            print(f'{tier:10s} {s['count']:7d} {s['avg_confidence']:9.2f} '
-                  f'{s['std_confidence']:9.2f} {s['avg_error']:9.3f} '
-                  f'{s['median_error']:9.3f} {s['90th_pct_error']:9.3f}')
+            print(f"{tier:10s} {s['count']:7d} {s['avg_confidence']:9.2f} "
+                  f"{s['std_confidence']:9.2f} {s['avg_error']:9.3f} "
+                  f"{s['median_error']:9.3f} {s['90th_pct_error']:9.3f}")
 
     # Generate plots
     print('\n' + '='*70)
@@ -357,13 +357,13 @@ def main():
     # Add recommendations
     if corr_result and corr_result['correlation'] < 0.5:
         output['summary']['recommendations'].append(
-            f'Confidence correlation ({corr_result['correlation']}) below target (0.5). '
+            f"Confidence correlation ({corr_result['correlation']}) below target (0.5). "
             'Consider recalibrating confidence thresholds or using different confidence metric.'
         )
 
     if calibration['expected_calibration_error'] > 0.1:
         output['summary']['recommendations'].append(
-            f'ECE ({calibration['expected_calibration_error']:.4f}) indicates poor calibration. '
+            f"ECE ({calibration['expected_calibration_error']:.4f}) indicates poor calibration. "
             'Model is over/under-confident. Consider calibration methods like Platt scaling or isotonic regression.'
         )
 
@@ -380,10 +380,10 @@ def main():
 
     if corr_result:
         status = '✅ MET' if corr_result['status'] == 'MET' else '❌ NOT MET'
-        print(f'\nConfidence Correlation: {corr_result['correlation']} {status}')
+        print(f"\nConfidence Correlation: {corr_result['correlation']} {status}")
 
     cal_status = '✅ Good' if calibration['expected_calibration_error'] < 0.1 else '❌ Poor'
-    print(f'Calibration (ECE): {calibration['expected_calibration_error']:.4f} {cal_status}')
+    print(f"Calibration (ECE): {calibration['expected_calibration_error']:.4f} {cal_status}")
 
     if output['summary']['recommendations']:
         print('\nRecommendations:')
