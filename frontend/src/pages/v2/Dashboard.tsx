@@ -69,10 +69,8 @@ export function Dashboard() {
   // Real bankroll data from /api/bankroll
   const { bankrollData } = useBankroll();
 
-  const games = gamesData?.games || [];
-  const bestBets = bestBetsData?.best_bets || [];
-
   // Create a map of game_id -> game data for quick lookup
+  const games = useMemo(() => gamesData?.games || [], [gamesData]);
   const gamesMap = useMemo(() => {
     const map = new Map<string, Game>();
     games.forEach((game) => map.set(game.game_id, game));
@@ -82,6 +80,7 @@ export function Dashboard() {
   // Transform best bets to BetCardData format
   // CRITICAL: Lock bets for games that have already started (betting integrity)
   const topPicks: BetCardData[] = useMemo(() => {
+    const bestBets = bestBetsData?.best_bets || [];
     return bestBets.slice(0, 5).map((bet) => {
       const game = gamesMap.get(bet.game_id);
       const gameStatus = game?.status;
@@ -111,7 +110,7 @@ export function Dashboard() {
         locked: isLocked, // Lock betting for games in progress
       };
     });
-  }, [bestBets, gamesMap]);
+  }, [bestBetsData, gamesMap]);
 
   // Handle bet action
   const handleTakeBet = (bet: BetCardData) => {

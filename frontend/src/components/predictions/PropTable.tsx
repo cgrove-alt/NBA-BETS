@@ -190,18 +190,18 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
   const [sortField, setSortField] = useState<SortField>('confidence');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
-  // Get prop data for each player
-  const getProp = (player: PlayerProp): PropPrediction | undefined => {
-    if (propType === '3PM') {
-      return player['3PM'];
-    }
-    return player[propType as keyof PlayerProp] as PropPrediction | undefined;
-  };
-
   // Filter and sort players with enhanced filters
   const filteredPlayers = useMemo(() => {
+    // getProp inlined here so propType is captured inside the callback
+    const getPropForPlayer = (player: PlayerProp): PropPrediction | undefined => {
+      if (propType === '3PM') {
+        return player['3PM'];
+      }
+      return player[propType as keyof PlayerProp] as PropPrediction | undefined;
+    };
+
     return players
-      .map((player) => ({ player, prop: getProp(player) }))
+      .map((player) => ({ player, prop: getPropForPlayer(player) }))
       .filter(({ player, prop }) => {
         if (!prop || prop.pick === '-') return false;
 
@@ -258,7 +258,7 @@ export function PropTable({ propType, players, filters, liveStats, isLive = fals
 
         return sortOrder === 'desc' ? -comparison : comparison;
       });
-  }, [players, propType, filters, sortField, sortOrder, getProp]);
+  }, [players, propType, filters, sortField, sortOrder]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Settings as SettingsIcon,
@@ -49,37 +49,48 @@ export function Settings() {
     staleTime: 60 * 1000,
   });
 
-  const [settings, setSettings] = useState<StrategySettings>({
-    bankroll: 5000,
-    defaultBetSize: 100,
-    betSizeType: 'fixed',
-    minConfidence: 55,
-    minEdge: 5,
-    maxBetsPerDay: 10,
-    notifications: {
-      topPicks: true,
-      resultUpdates: true,
-      bankrollAlerts: true,
-    },
-  });
-
-  const [hasChanges, setHasChanges] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
-
-  // Sync server settings into local state
-  useEffect(() => {
+  // Derive default settings, merging server data when available.
+  // useMemo ensures we don't create a new object every render.
+  const defaultSettings = useMemo<StrategySettings>(() => {
+    const base: StrategySettings = {
+      bankroll: 5000,
+      defaultBetSize: 100,
+      betSizeType: 'fixed',
+      minConfidence: 55,
+      minEdge: 5,
+      maxBetsPerDay: 10,
+      notifications: {
+        topPicks: true,
+        resultUpdates: true,
+        bankrollAlerts: true,
+      },
+    };
     if (serverSettings) {
-      setSettings((prev) => ({
-        ...prev,
+      return {
+        ...base,
         bankroll: serverSettings.bankroll,
         defaultBetSize: serverSettings.default_bet_size,
         betSizeType: serverSettings.bet_size_type as 'fixed' | 'percentage' | 'kelly',
         minConfidence: serverSettings.min_confidence,
         minEdge: serverSettings.min_edge,
         maxBetsPerDay: serverSettings.max_bets_per_day,
-      }));
+      };
     }
+    return base;
   }, [serverSettings]);
+
+  // Local edits on top of server-derived defaults.
+  // Tracks only fields the user has changed since the last save.
+  const [localOverrides, setLocalOverrides] = useState<Partial<StrategySettings>>({});
+
+  // Effective settings = server defaults merged with any local edits
+  const settings: StrategySettings = useMemo(
+    () => ({ ...defaultSettings, ...localOverrides }),
+    [defaultSettings, localOverrides],
+  );
+
+  const [hasChanges, setHasChanges] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   // Save mutation
   const saveMutation = useMutation({
@@ -93,6 +104,7 @@ export function Settings() {
         max_bets_per_day: settings.maxBetsPerDay,
       }),
     onSuccess: () => {
+      setLocalOverrides({});
       setHasChanges(false);
       setSaveStatus('success');
       queryClient.invalidateQueries({ queryKey: ['settings'] });
@@ -105,20 +117,26 @@ export function Settings() {
     },
   });
 
-  const updateSetting = <K extends keyof StrategySettings>(
+  const updateSettingField = <K extends keyof StrategySettings>(
     key: K,
     value: StrategySettings[K]
   ) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
+    setLocalOverrides((prev) => ({ ...prev, [key]: value }));
     setHasChanges(true);
     setSaveStatus('idle');
   };
 
   const updateNotification = (key: keyof StrategySettings['notifications'], value: boolean) => {
-    setSettings((prev) => ({
-      ...prev,
-      notifications: { ...prev.notifications, [key]: value },
-    }));
+    setLocalOverrides((prev) => {
+      const currentNotifications = {
+        ...settings.notifications,
+        ...(prev.notifications || {}),
+      };
+      return {
+        ...prev,
+        notifications: { ...currentNotifications, [key]: value },
+      };
+    });
     setHasChanges(true);
   };
 
@@ -175,7 +193,7 @@ export function Settings() {
                 <input
                   type="number"
                   value={settings.bankroll}
-                  onChange={(e) => updateSetting('bankroll', Number(e.target.value))}
+                  onChange={(e) => updateSettingField('bankroll', Number(e.target.value))}
                   className="w-full bg-bg-tertiary border border-border rounded-lg px-8 py-3 text-text-primary focus:outline-none focus:border-[#00d4ff] focus:ring-1 focus:ring-[#00d4ff]"
                 />
               </div>
@@ -194,7 +212,7 @@ export function Settings() {
                 ].map((option) => (
                   <button
                     key={option.value}
-                    onClick={() => updateSetting('betSizeType', option.value as StrategySettings['betSizeType'])}
+                    onClick={() => updateSettingField('betSizeType', option.value as StrategySettings['betSizeType'])}
                     className={`p-3 rounded-lg border text-left transition-all ${
                       settings.betSizeType === option.value
                         ? 'border-[#00d4ff] bg-[rgba(0,212,255,0.1)]'
@@ -225,7 +243,7 @@ export function Settings() {
                 <input
                   type="number"
                   value={settings.defaultBetSize}
-                  onChange={(e) => updateSetting('defaultBetSize', Number(e.target.value))}
+                  onChange={(e) => updateSettingField('defaultBetSize', Number(e.target.value))}
                   className={`w-full bg-bg-tertiary border border-border rounded-lg py-3 text-text-primary focus:outline-none focus:border-[#00d4ff] focus:ring-1 focus:ring-[#00d4ff] ${
                     settings.betSizeType === 'percentage' ? 'px-4' : 'px-8'
                   }`}
@@ -246,7 +264,7 @@ export function Settings() {
               <input
                 type="number"
                 value={settings.maxBetsPerDay}
-                onChange={(e) => updateSetting('maxBetsPerDay', Number(e.target.value))}
+                onChange={(e) => updateSettingField('maxBetsPerDay', Number(e.target.value))}
                 className="w-full bg-bg-tertiary border border-border rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-[#00d4ff] focus:ring-1 focus:ring-[#00d4ff]"
               />
             </div>
@@ -273,7 +291,7 @@ export function Settings() {
                 max="80"
                 step="5"
                 value={settings.minConfidence}
-                onChange={(e) => updateSetting('minConfidence', Number(e.target.value))}
+                onChange={(e) => updateSettingField('minConfidence', Number(e.target.value))}
                 className="w-full accent-[#00d4ff]"
               />
               <div className="flex justify-between text-xs text-text-muted mt-1">
@@ -294,7 +312,7 @@ export function Settings() {
                 max="20"
                 step="1"
                 value={settings.minEdge}
-                onChange={(e) => updateSetting('minEdge', Number(e.target.value))}
+                onChange={(e) => updateSettingField('minEdge', Number(e.target.value))}
                 className="w-full accent-[#00d4ff]"
               />
               <div className="flex justify-between text-xs text-text-muted mt-1">

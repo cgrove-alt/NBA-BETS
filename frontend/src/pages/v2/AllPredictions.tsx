@@ -115,12 +115,12 @@ export function AllPredictions() {
     staleTime: 2 * 60 * 1000,
   });
 
-  const games = gamesData?.games || [];
   const gamesMap = useMemo(() => {
+    const games = gamesData?.games || [];
     const map = new Map<string, Game>();
     games.forEach((g) => map.set(g.game_id, g));
     return map;
-  }, [games]);
+  }, [gamesData]);
 
   // Transform and filter bets
   // CRITICAL: Lock bets for games that have already started (betting integrity)
