@@ -1759,6 +1759,90 @@ def get_performance(days: int = Query(30, ge=1, le=365)):
 
 # ============== SYSTEM HEALTH ENDPOINT ==============
 
+
+def _query_agent_status_pg(agent_names: list) -> dict:
+    """Query agent run history from PostgreSQL (production).
+
+    The Agent Scheduler writes run data to PostgreSQL via the Guardrails
+    class. This function reads it back so the API can report agent status.
+
+    Args:
+        agent_names: List of agent name strings to query.
+
+    Returns:
+        Dict mapping agent_name to AgentStatus, or empty dict if
+        PostgreSQL is unavailable.
+    """
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return {}
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+
+        # Verify the agent_runs table exists
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'agent_runs'
+            )
+        """)
+        if not cur.fetchone()[0]:
+            cur.close()
+            conn.close()
+            return {}
+
+        result: dict = {}
+        for agent_name in agent_names:
+            # Last run
+            cur.execute("""
+                SELECT started_at, status, success FROM agent_runs
+                WHERE agent_name = %s
+                ORDER BY started_at DESC LIMIT 1
+            """, (agent_name,))
+            row = cur.fetchone()
+
+            # Consecutive failures
+            cur.execute("""
+                SELECT success FROM agent_runs
+                WHERE agent_name = %s
+                ORDER BY started_at DESC LIMIT 5
+            """, (agent_name,))
+            recent = cur.fetchall()
+
+            consecutive_failures = 0
+            for r in recent:
+                if r[0] == 0:
+                    consecutive_failures += 1
+                else:
+                    break
+
+            # Token usage
+            cur.execute("""
+                SELECT used_today FROM agent_token_budgets
+                WHERE agent_name = %s
+            """, (agent_name,))
+            budget_row = cur.fetchone()
+
+            result[agent_name] = AgentStatus(
+                last_run=str(row[0]) if row else None,
+                last_status=row[1] if row else None,
+                consecutive_failures=consecutive_failures,
+                tokens_used_today=budget_row[0] if budget_row else 0,
+            )
+
+        cur.close()
+        conn.close()
+        return result
+
+    except ImportError:
+        return {}
+    except Exception:
+        return {}
+
+
 @app.get("/api/system-health", response_model=SystemHealthResponse)
 def get_system_health():
     """Get system health status including agent runs, model freshness, and data freshness."""
@@ -1769,52 +1853,55 @@ def get_system_health():
     agents_status: dict[str, AgentStatus] = {}
     agent_names = ["pregame", "postgame", "odds_monitor", "orchestrator", "watchdog", "briefing"]
 
-    # Query agent runs from guardrails DB
-    guardrails_path = Path("data/agent_guardrails.db")
-    if guardrails_path.exists():
-        try:
-            conn = sqlite3.connect(str(guardrails_path))
-            conn.row_factory = sqlite3.Row
+    # Query agent runs — try PostgreSQL first (production), fall back to SQLite (local)
+    try:
+        agents_status = _query_agent_status_pg(agent_names)
+    except Exception:
+        agents_status = {}
 
-            for agent_name in agent_names:
-                # Last run
-                row = conn.execute("""
-                    SELECT started_at, status, success FROM agent_runs
-                    WHERE agent_name = ?
-                    ORDER BY started_at DESC LIMIT 1
-                """, (agent_name,)).fetchone()
+    if not agents_status:
+        guardrails_path = Path("data/agent_guardrails.db")
+        if guardrails_path.exists():
+            try:
+                conn = sqlite3.connect(str(guardrails_path))
+                conn.row_factory = sqlite3.Row
 
-                # Consecutive failures
-                recent = conn.execute("""
-                    SELECT success FROM agent_runs
-                    WHERE agent_name = ?
-                    ORDER BY started_at DESC LIMIT 5
-                """, (agent_name,)).fetchall()
+                for agent_name in agent_names:
+                    row = conn.execute("""
+                        SELECT started_at, status, success FROM agent_runs
+                        WHERE agent_name = ?
+                        ORDER BY started_at DESC LIMIT 1
+                    """, (agent_name,)).fetchone()
 
-                consecutive_failures = 0
-                for r in recent:
-                    if r["success"] == 0:
-                        consecutive_failures += 1
-                    else:
-                        break
+                    recent = conn.execute("""
+                        SELECT success FROM agent_runs
+                        WHERE agent_name = ?
+                        ORDER BY started_at DESC LIMIT 5
+                    """, (agent_name,)).fetchall()
 
-                # Token usage
-                budget = conn.execute("""
-                    SELECT used_today FROM agent_token_budgets
-                    WHERE agent_name = ?
-                """, (agent_name,)).fetchone()
+                    consecutive_failures = 0
+                    for r in recent:
+                        if r["success"] == 0:
+                            consecutive_failures += 1
+                        else:
+                            break
 
-                agents_status[agent_name] = AgentStatus(
-                    last_run=row["started_at"] if row else None,
-                    last_status=row["status"] if row else None,
-                    consecutive_failures=consecutive_failures,
-                    tokens_used_today=budget["used_today"] if budget else 0,
-                )
+                    budget = conn.execute("""
+                        SELECT used_today FROM agent_token_budgets
+                        WHERE agent_name = ?
+                    """, (agent_name,)).fetchone()
 
-            conn.close()
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Guardrails DB query failed: {e}")
+                    agents_status[agent_name] = AgentStatus(
+                        last_run=row["started_at"] if row else None,
+                        last_status=row["status"] if row else None,
+                        consecutive_failures=consecutive_failures,
+                        tokens_used_today=budget["used_today"] if budget else 0,
+                    )
+
+                conn.close()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Guardrails DB query failed: {e}")
 
     # Fill in agents with no data
     for name in agent_names:
