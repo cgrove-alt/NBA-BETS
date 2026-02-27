@@ -279,13 +279,15 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
             # model's over_under_classifier outputs probabilities clustered
             # around 0.50 — too narrow to pass the 0.58 confidence gate.
             # Edge-based estimation: edge ≥ threshold → confidence ≥ 0.60.
+            # Use INITIAL_BANKROLL for sizing (not compounding bankroll)
+            # to avoid exponential growth from in-sample model advantage.
             ev_result = evaluate_bet(
                 prop_type=prop_type,
                 predicted=predicted_value,
                 line=prop_line,
                 raw_confidence=None,
                 games_played=games_played,
-                bankroll=bankroll,
+                bankroll=INITIAL_BANKROLL,
                 over_odds=STANDARD_ODDS,
                 under_odds=STANDARD_ODDS,
             )
