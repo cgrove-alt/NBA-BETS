@@ -235,6 +235,12 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
                 diag[f"predict_error_{prop_type}"] += 1
                 if diag[f"predict_error_{prop_type}"] <= 3:
                     logger.warning("Model predict error (%s): %s", prop_type, exc)
+                    import traceback
+                    diag[f"predict_error_msg_{prop_type}_{diag[f'predict_error_{prop_type}']}"] = (
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    if diag[f"predict_error_{prop_type}"] == 1:
+                        diag[f"predict_error_traceback_{prop_type}"] = traceback.format_exc()[-500:]
                 continue
 
             predicted_value = prediction.get("predicted_value", 0)
