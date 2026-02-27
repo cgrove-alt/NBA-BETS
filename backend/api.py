@@ -2350,41 +2350,51 @@ def get_agent_diagnostics():
 
 @app.post("/api/backtest/run-profitability")
 def run_profitability_backtest():
-    """Trigger the profitability backtest (runs in-process, may take 5-10 min).
+    """Trigger the profitability backtest in a background thread.
 
-    Returns the full results JSON when complete.
+    Returns immediately with status; poll GET /api/backtest/profitability-status
+    for results.
     """
     import threading
-    import time as _time
 
-    # Simple concurrency guard — only one backtest at a time
-    lock_attr = "_backtest_running"
-    if getattr(app.state, lock_attr, False):
+    if getattr(app.state, "_backtest_running", False):
         raise HTTPException(409, "Backtest already running")
 
-    try:
-        app.state._backtest_running = True
-
-        # Import inside handler so the module-level xgboost import only
-        # happens on Railway where libomp is available.
+    def _run():
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).parent.parent / "nba_models" / "training"))
+        try:
+            app.state._backtest_running = True
+            from nba_models.backtesting.profitability_backtest import run_backtest
+            import argparse
+            args = argparse.Namespace(bankroll=1000.0, season="2023-24")
+            results = run_backtest(args)
+            app.state._backtest_results = results or {"error": "Backtest returned None"}
+        except Exception as e:
+            import traceback
+            app.state._backtest_results = {
+                "error": f"{type(e).__name__}: {e}",
+                "traceback": traceback.format_exc()[-1000:],
+            }
+        finally:
+            app.state._backtest_running = False
 
-        from nba_models.backtesting.profitability_backtest import run_backtest
-        import argparse
+    app.state._backtest_results = None
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "message": "Backtest running in background. Poll GET /api/backtest/profitability-status for results."}
 
-        args = argparse.Namespace(bankroll=1000.0, season="2023-24")
-        results = run_backtest(args)
 
-        if results:
-            return results
-        raise HTTPException(500, "Backtest returned None")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"Backtest error: {e}")
-    finally:
-        app.state._backtest_running = False
+@app.get("/api/backtest/profitability-status")
+def get_profitability_backtest_status():
+    """Check status of the profitability backtest."""
+    running = getattr(app.state, "_backtest_running", False)
+    results = getattr(app.state, "_backtest_results", None)
+
+    if running:
+        return {"status": "running"}
+    if results is not None:
+        return {"status": "complete", "results": results}
+    return {"status": "idle", "message": "No backtest has been triggered yet. POST /api/backtest/run-profitability to start."}
 
 
 # ============== RUN SERVER ==============

@@ -56,8 +56,8 @@ INITIAL_BANKROLL = 1000.0
 PROP_TYPES = ["points", "rebounds", "assists", "pra"]
 STANDARD_ODDS = -110
 TEST_SEASON = "2023-24"
-# Need 2+ prior seasons for rolling-average features to stabilise
-CONTEXT_SEASONS = ["2021-22", "2022-23", "2023-24"]
+# Prior season provides rolling-average feature history
+CONTEXT_SEASONS = ["2022-23", "2023-24"]
 OUTPUT_DIR = os.path.join(ROOT, "data", "backtest_results")
 MIN_MINUTES = 15  # Skip garbage-time-only players
 
