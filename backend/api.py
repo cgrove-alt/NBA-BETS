@@ -2046,6 +2046,104 @@ def get_paper_trading_daily(date: str):
         return {"date": date, "predictions": [], "error": str(e)}
 
 
+# ============== MODEL HEALTH DASHBOARD ==============
+
+
+@app.get("/api/model-health")
+def get_model_health():
+    """Unified model health dashboard.
+
+    Aggregates paper trading performance, CLV analysis, model metrics,
+    and bet filter configuration into a single snapshot. Each section
+    is independently error-handled so partial data is always returned.
+
+    Returns:
+        Dict with keys: paper_trading, clv, models, bet_filter, last_updated.
+    """
+    from datetime import datetime, timezone
+
+    health: dict = {"last_updated": datetime.now(timezone.utc).isoformat()}
+
+    # Paper trading section
+    try:
+        from nba_betting.paper_trading import PaperTrader
+        pt = PaperTrader()
+        summary = pt.get_summary()
+        health["paper_trading"] = {
+            "total_predictions": summary.get("total_predictions", 0),
+            "recommended_bets": summary.get("recommended_bets", 0),
+            "overall_accuracy": summary.get("overall_accuracy", 0.0),
+            "recommended_accuracy": summary.get("recommended_accuracy", 0.0),
+            "roi": summary.get("roi", 0.0),
+            "brier_score": summary.get("brier_score", 0.0),
+        }
+    except Exception as e:
+        health["paper_trading"] = {
+            "total_predictions": 0, "recommended_bets": 0,
+            "overall_accuracy": 0.0, "recommended_accuracy": 0.0,
+            "roi": 0.0, "brier_score": 0.0, "error": str(e),
+        }
+
+    # CLV section
+    try:
+        from nba_betting.edge.clv_analyzer import CLVAnalyzer
+        analyzer = CLVAnalyzer()
+        clv_summary = analyzer.get_clv_summary()
+        health["clv"] = {
+            "avg_clv_7d": clv_summary.get("avg_clv_7d", 0.0),
+            "avg_clv_30d": clv_summary.get("avg_clv_30d", 0.0),
+            "avg_clv_all": clv_summary.get("avg_clv_all", 0.0),
+            "positive_clv_rate": clv_summary.get("positive_clv_rate", 0.0),
+            "sharp_rating": clv_summary.get("sharp_rating", "unknown"),
+        }
+    except Exception as e:
+        health["clv"] = {
+            "avg_clv_7d": 0.0, "avg_clv_30d": 0.0, "avg_clv_all": 0.0,
+            "positive_clv_rate": 0.0, "sharp_rating": "unknown", "error": str(e),
+        }
+
+    # Models section — read from bet_filter thresholds and known model states
+    try:
+        from nba_betting.bet_filter import MIN_EDGE_THRESHOLDS, DISABLED_PROPS
+        prop_types = ["spread", "points", "rebounds", "assists", "pra", "threes", "moneyline"]
+        models_data: dict = {}
+        for prop in prop_types:
+            entry: dict = {
+                "status": "disabled" if prop in DISABLED_PROPS else "enabled",
+                "threshold": MIN_EDGE_THRESHOLDS.get(prop, 0),
+            }
+            if prop in DISABLED_PROPS:
+                entry["reason"] = "no demonstrated edge"
+            models_data[prop] = entry
+        health["models"] = models_data
+    except Exception as e:
+        health["models"] = {"error": str(e)}
+
+    # Bet filter configuration section
+    try:
+        from nba_betting.bet_filter import (
+            MIN_EDGE_THRESHOLDS as thresholds,
+            DISABLED_PROPS as disabled,
+            MIN_CONFIDENCE,
+        )
+        kelly_fraction = 0.25
+        try:
+            from nba_betting.prediction_pipeline import KELLY_FRACTION
+            kelly_fraction = KELLY_FRACTION
+        except ImportError:
+            pass
+        health["bet_filter"] = {
+            "min_confidence": MIN_CONFIDENCE,
+            "disabled_props": list(disabled),
+            "kelly_fraction": kelly_fraction,
+            "thresholds": dict(thresholds),
+        }
+    except Exception as e:
+        health["bet_filter"] = {"error": str(e)}
+
+    return health
+
+
 # ============== RUN SERVER ==============
 
 if __name__ == "__main__":

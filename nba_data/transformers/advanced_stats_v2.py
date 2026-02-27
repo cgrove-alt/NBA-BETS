@@ -225,7 +225,7 @@ class FourFactorsCalculator:
             self.matchup_history[team_id][opponent_id].sort(key=lambda x: x[0])
 
     def get_four_factors_before_date(self, team_id: int, game_date: str,
-                                      window: int = 10, min_games: int = 3) -> dict | None:
+                                      window: int = 10, min_games: int = 3) -> "dict | None":
         """
         Get Four Factors features using only games BEFORE game_date.
 
@@ -309,7 +309,7 @@ class FourFactorsCalculator:
         return features
 
     def get_matchup_four_factors(self, team_id: int, opponent_id: int,
-                                  game_date: str, min_games: int = 1) -> dict | None:
+                                  game_date: str, min_games: int = 1) -> "dict | None":
         """
         Get Four Factors for head-to-head matchup history.
 
@@ -350,7 +350,7 @@ class FourFactorsCalculator:
         home_id: int,
         away_id: int,
         game_date: str
-    ) -> dict | None:
+    ) -> "dict | None":
         """
         Calculate Four Factor differential between two teams.
 
