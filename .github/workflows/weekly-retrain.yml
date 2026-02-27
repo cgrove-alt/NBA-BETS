@@ -6,6 +6,9 @@ on:
     - cron: '0 8 * * *'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
+permissions:
+  contents: write  # Needed to push retrained models back to repo
+
 jobs:
   retrain:
     runs-on: ubuntu-latest
@@ -88,8 +91,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Add model files and logs
-          git add models/*.pkl logs/retrain_history.json || true
+          # Add model files (logs/ is gitignored, so force-add retrain history)
+          git add models/*.pkl
+          git add -f logs/retrain_history.json || true
 
           # Check if there are changes to commit
           if git diff --staged --quiet; then
