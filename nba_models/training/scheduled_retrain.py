@@ -199,7 +199,7 @@ def run_training():
     # Build command: train_from_csv accepts --seasons, train_complete does not
     cmd = [sys.executable, str(train_script)]
     if train_script.name == 'train_from_csv.py':
-        cmd += ['--seasons', '2021', '2022', '2023', '2024']
+        cmd += ['--seasons', '2023', '2024']
 
     try:
         result = subprocess.run(
@@ -207,7 +207,7 @@ def run_training():
             cwd=PROJECT_DIR,
             capture_output=True,
             text=True,
-            timeout=6000  # 100 minute timeout for CSV-based training
+            timeout=7200  # 120 minute timeout for CSV-based training
         )
 
         # Log output regardless
@@ -234,7 +234,7 @@ def run_training():
         return False
 
     except subprocess.TimeoutExpired:
-        log("ERROR: Training timed out after 30 minutes")
+        log("ERROR: Training timed out after 120 minutes")
         return False
     except Exception as e:
         log(f"ERROR: Training failed: {e}")

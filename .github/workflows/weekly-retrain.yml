@@ -9,7 +9,7 @@ on:
 jobs:
   retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # CSV-based training can take 60+ minutes
+    timeout-minutes: 150  # CSV-based training can take 60-90 minutes
 
     steps:
       - name: Checkout repository
@@ -33,6 +33,7 @@ jobs:
         env:
           BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
         run: |
+          set -o pipefail
           python scheduled_retrain.py --quick --force 2>&1 | tee logs/retrain_output.log
 
       - name: Update retrain history
