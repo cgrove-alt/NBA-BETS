@@ -197,6 +197,9 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
     trades: list[dict] = []
     daily_bankroll: dict[str, float] = {}
 
+    # Diagnostic counters
+    diag = defaultdict(int)
+
     for i, sample in enumerate(test_data):
         game_date = sample["game_date"]
         features = sample["features"]
@@ -204,26 +207,53 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
         games_played = features.get("season_games", 0)
         actual_min = sample.get("actual_min", 0)
 
+        diag["total_samples"] += 1
+
         if actual_min < MIN_MINUTES:
+            diag["skipped_low_minutes"] += 1
             continue
+
+        diag["eligible_samples"] += 1
 
         for prop_type in PROP_TYPES:
             if prop_type not in models:
+                diag[f"skip_no_model_{prop_type}"] += 1
                 continue
 
             prop_line = simulate_prop_line(features, prop_type)
             if prop_line <= 0:
+                diag[f"skip_zero_line_{prop_type}"] += 1
                 continue
+
+            diag[f"predictions_attempted_{prop_type}"] += 1
 
             # Model prediction
             model = models[prop_type]
             try:
                 prediction = model.predict(features, prop_line=prop_line)
-            except Exception:
+            except Exception as exc:
+                diag[f"predict_error_{prop_type}"] += 1
+                if diag[f"predict_error_{prop_type}"] <= 3:
+                    logger.warning("Model predict error (%s): %s", prop_type, exc)
                 continue
 
             predicted_value = prediction.get("predicted_value", 0)
             over_prob = prediction.get("over_probability")
+            edge = abs(predicted_value - prop_line)
+
+            diag[f"predictions_ok_{prop_type}"] += 1
+            if edge > 0:
+                diag[f"nonzero_edge_{prop_type}"] += 1
+
+            # Log first 3 predictions per prop type for debugging
+            debug_key = f"_logged_{prop_type}"
+            if diag.get(debug_key, 0) < 3:
+                diag[debug_key] = diag.get(debug_key, 0) + 1
+                logger.info(
+                    "SAMPLE %s | %s %s | line=%.1f pred=%.1f edge=%.2f over_p=%s gp=%d",
+                    game_date, player_name, prop_type, prop_line,
+                    predicted_value, edge, over_prob, games_played,
+                )
 
             # Pipeline evaluation
             ev_result = evaluate_bet(
@@ -238,6 +268,22 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
             )
 
             if not ev_result["should_bet"]:
+                reason = ev_result.get("reason", "unknown")
+                # Categorise rejection
+                if "disabled" in reason.lower():
+                    diag[f"reject_disabled_{prop_type}"] += 1
+                elif "games played" in reason.lower() or "sample" in reason.lower():
+                    diag[f"reject_sample_size_{prop_type}"] += 1
+                elif "edge" in reason.lower() and "threshold" in reason.lower():
+                    diag[f"reject_low_edge_{prop_type}"] += 1
+                elif "confidence" in reason.lower():
+                    diag[f"reject_low_confidence_{prop_type}"] += 1
+                elif "ev" in reason.lower():
+                    diag[f"reject_low_ev_{prop_type}"] += 1
+                elif "kelly" in reason.lower():
+                    diag[f"reject_kelly_{prop_type}"] += 1
+                else:
+                    diag[f"reject_other_{prop_type}"] += 1
                 continue
 
             # Actual outcome
@@ -299,6 +345,11 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
                 bankroll,
             )
 
+    # Log diagnostics
+    logger.info("=== DIAGNOSTIC COUNTERS ===")
+    for key in sorted(diag):
+        logger.info("  %s: %d", key, diag[key])
+
     logger.info(
         "Simulation complete: %d trades, final bankroll=$%.2f",
         len(trades),
@@ -307,7 +358,10 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
 
     # ── 5. Report ─────────────────────────────────────────────────────────
     logger.info("Step 5/5: Generating report …")
-    return generate_report(trades, daily_bankroll)
+    results = generate_report(trades, daily_bankroll)
+    if results:
+        results["diagnostics"] = dict(diag)
+    return results
 
 
 # ---------------------------------------------------------------------------

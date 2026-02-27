@@ -2376,9 +2376,9 @@ def run_profitability_backtest():
         args = argparse.Namespace(bankroll=1000.0, season="2023-24")
         results = run_backtest(args)
 
-        if results and "error" not in results:
+        if results:
             return results
-        raise HTTPException(500, results.get("error", "Backtest failed"))
+        raise HTTPException(500, "Backtest returned None")
     except HTTPException:
         raise
     except Exception as e:
