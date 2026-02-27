@@ -2,10 +2,18 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python -m uvicorn backend.api:app --host 0.0.0.0 --port $PORT"
 restartPolicyType = "on_failure"
-healthcheckPath = "/api/health"
-healthcheckTimeout = 300
+
+# NOTE: startCommand, healthcheckPath, and healthcheckTimeout are intentionally
+# NOT set here. railway.toml applies to ALL services in the project, so setting
+# startCommand here would override every service's Custom Start Command in the
+# Railway dashboard. Each service must set its own start command in the dashboard:
+#
+#   nba-betting-api:       python -m uvicorn backend.api:app --host 0.0.0.0 --port $PORT
+#   Agent Scheduler:       python agent_scheduler.py --daemon
+#   Odds Tracker:          python odds_tracker_service.py --daemon
+#   Retraining Scheduler:  python scheduled_retraining.py --daemon
+#   Daily Predictions:     python daily_predictions.py  (cron service)
 
 # Environment variables (set in Railway dashboard)
 # Required:
