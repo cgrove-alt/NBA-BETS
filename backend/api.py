@@ -2345,6 +2345,48 @@ def get_agent_diagnostics():
     return diag
 
 
+# ============== BACKTEST TRIGGER ==============
+
+
+@app.post("/api/backtest/run-profitability")
+def run_profitability_backtest():
+    """Trigger the profitability backtest (runs in-process, may take 5-10 min).
+
+    Returns the full results JSON when complete.
+    """
+    import threading
+    import time as _time
+
+    # Simple concurrency guard — only one backtest at a time
+    lock_attr = "_backtest_running"
+    if getattr(app.state, lock_attr, False):
+        raise HTTPException(409, "Backtest already running")
+
+    try:
+        app.state._backtest_running = True
+
+        # Import inside handler so the module-level xgboost import only
+        # happens on Railway where libomp is available.
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "nba_models" / "training"))
+
+        from nba_models.backtesting.profitability_backtest import run_backtest
+        import argparse
+
+        args = argparse.Namespace(bankroll=1000.0, season="2023-24")
+        results = run_backtest(args)
+
+        if results and "error" not in results:
+            return results
+        raise HTTPException(500, results.get("error", "Backtest failed"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Backtest error: {e}")
+    finally:
+        app.state._backtest_running = False
+
+
 # ============== RUN SERVER ==============
 
 if __name__ == "__main__":
