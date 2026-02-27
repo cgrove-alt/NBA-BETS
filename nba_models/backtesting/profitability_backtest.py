@@ -66,23 +66,29 @@ MIN_MINUTES = 15  # Skip garbage-time-only players
 # Model loading
 # ---------------------------------------------------------------------------
 def load_models() -> dict:
-    """Load trained PropEnsembleModel (or fallback) for each prop type."""
+    """Load trained PropEnsembleModel (or fallback) for each prop type.
+
+    Models are saved as dicts by PropEnsembleModel.save(); we must use
+    PropEnsembleModel.load() (or the equivalent class) to reconstruct
+    the actual model object with a .predict() method.
+    """
+    from train_complete_balldontlie import PropEnsembleModel, QuantilePropModel
+
     models: dict = {}
     model_dir = Path(ROOT) / "models"
 
     for prop_type in PROP_TYPES:
-        # Prefer ensemble → quantile → standard
+        # Prefer ensemble → quantile
         candidates = [
-            model_dir / f"player_{prop_type}_ensemble.pkl",
-            model_dir / f"player_{prop_type}_quantile.pkl",
-            model_dir / f"player_{prop_type}.pkl",
+            (model_dir / f"player_{prop_type}_ensemble.pkl", PropEnsembleModel),
+            (model_dir / f"player_{prop_type}_quantile.pkl", QuantilePropModel),
         ]
-        for path in candidates:
+        for path, model_cls in candidates:
             if path.exists():
                 try:
-                    with open(path, "rb") as f:
-                        models[prop_type] = pickle.load(f)
-                    logger.info("Loaded %s for %s", path.name, prop_type)
+                    model = model_cls.load(path)
+                    models[prop_type] = model
+                    logger.info("Loaded %s for %s (%s)", path.name, prop_type, model_cls.__name__)
                     break
                 except Exception as exc:
                     logger.warning("Failed to load %s: %s", path, exc)
