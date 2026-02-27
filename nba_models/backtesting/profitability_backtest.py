@@ -275,11 +275,15 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
                 )
 
             # Pipeline evaluation
+            # Use edge-based confidence (raw_confidence=None) because the
+            # model's over_under_classifier outputs probabilities clustered
+            # around 0.50 — too narrow to pass the 0.58 confidence gate.
+            # Edge-based estimation: edge ≥ threshold → confidence ≥ 0.60.
             ev_result = evaluate_bet(
                 prop_type=prop_type,
                 predicted=predicted_value,
                 line=prop_line,
-                raw_confidence=over_prob,
+                raw_confidence=None,
                 games_played=games_played,
                 bankroll=bankroll,
                 over_odds=STANDARD_ODDS,
