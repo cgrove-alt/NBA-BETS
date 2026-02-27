@@ -49,6 +49,9 @@ sys.path.insert(0, ROOT)
 
 logger = logging.getLogger(__name__)
 
+# Module-level progress tracker (read by API status endpoint)
+_progress: dict = {}
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -206,6 +209,10 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
     # Diagnostic counters
     diag = defaultdict(int)
 
+    import time as _time
+    _sim_start = _time.time()
+    _progress.update({"phase": "simulation", "current": 0, "total": len(test_data), "trades": 0, "started": _sim_start})
+
     for i, sample in enumerate(test_data):
         game_date = sample["game_date"]
         features = sample["features"]
@@ -348,14 +355,17 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
         # Record end-of-day bankroll
         daily_bankroll[game_date] = round(bankroll, 2)
 
-        if (i + 1) % 5000 == 0:
+        if (i + 1) % 500 == 0:
+            elapsed = _time.time() - _sim_start
+            rate = (i + 1) / elapsed if elapsed > 0 else 0
+            eta = (len(test_data) - i - 1) / rate if rate > 0 else 0
             logger.info(
-                "  %d/%d samples | %d trades | bankroll=$%.2f",
-                i + 1,
-                len(test_data),
-                len(trades),
-                bankroll,
+                "  %d/%d samples | %d trades | bankroll=$%.2f | %.1f samples/s | ETA %.0fs",
+                i + 1, len(test_data), len(trades), bankroll, rate, eta,
             )
+            _progress.update({"current": i + 1, "trades": len(trades), "rate": round(rate, 1), "eta_sec": round(eta)})
+
+    _progress.update({"phase": "report", "current": len(test_data), "total": len(test_data), "trades": len(trades)})
 
     # Log diagnostics
     logger.info("=== DIAGNOSTIC COUNTERS ===")

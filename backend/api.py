@@ -2391,7 +2391,12 @@ def get_profitability_backtest_status():
     results = getattr(app.state, "_backtest_results", None)
 
     if running:
-        return {"status": "running"}
+        # Try to get progress from the backtest module
+        try:
+            from nba_models.backtesting.profitability_backtest import _progress
+            return {"status": "running", "progress": dict(_progress)}
+        except Exception:
+            return {"status": "running"}
     if results is not None:
         return {"status": "complete", "results": results}
     return {"status": "idle", "message": "No backtest has been triggered yet. POST /api/backtest/run-profitability to start."}
