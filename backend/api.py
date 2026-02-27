@@ -2231,6 +2231,120 @@ def get_model_health():
     return health
 
 
+# ============== AGENT DIAGNOSTICS ==============
+
+
+@app.get("/api/diagnostics/agents")
+def get_agent_diagnostics():
+    """Deep diagnostic of agent infrastructure on PostgreSQL.
+
+    Checks which agent-related tables exist, row counts, recent runs,
+    and the agent_registry status. Designed to debug why agents may
+    not be executing on Railway.
+
+    Returns:
+        Dict with tables, agent_registry rows, agent_runs rows,
+        and Python/environment info.
+    """
+    from datetime import datetime, timezone
+    import sys as _sys
+
+    diag: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "python_version": _sys.version,
+        "database_url_set": bool(os.environ.get("DATABASE_URL")),
+        "redis_url_set": bool(os.environ.get("REDIS_URL")),
+        "gemini_api_key_set": bool(os.environ.get("GEMINI_API_KEY")),
+    }
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        diag["error"] = "DATABASE_URL not set — cannot query PostgreSQL"
+        return diag
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+
+        # List all agent-related tables
+        cur.execute("""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name IN (
+                  'agent_runs', 'agent_registry', 'agent_token_budgets',
+                  'agent_messages', 'paper_trades', 'bet_tracking'
+              )
+            ORDER BY table_name
+        """)
+        existing_tables = [row[0] for row in cur.fetchall()]
+        diag["existing_tables"] = existing_tables
+
+        # agent_registry — shows if scheduler ever started and registered agents
+        if "agent_registry" in existing_tables:
+            cur.execute("""
+                SELECT agent_name, agent_class, status, enabled,
+                       last_run_at, schedule
+                FROM agent_registry
+                ORDER BY agent_name
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+            diag["agent_registry"] = [dict(zip(cols, r, strict=False)) for r in rows]
+            diag["agent_registry_count"] = len(rows)
+        else:
+            diag["agent_registry"] = "TABLE DOES NOT EXIST"
+
+        # agent_runs — shows actual executions
+        if "agent_runs" in existing_tables:
+            cur.execute("SELECT COUNT(*) FROM agent_runs")
+            total_runs = cur.fetchone()[0]
+            diag["agent_runs_total"] = total_runs
+
+            # Last 10 runs
+            cur.execute("""
+                SELECT agent_name, run_id, started_at, completed_at,
+                       status, success, tokens_used, execution_seconds,
+                       errors
+                FROM agent_runs
+                ORDER BY started_at DESC
+                LIMIT 10
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+            diag["agent_runs_recent"] = [dict(zip(cols, r, strict=False)) for r in rows]
+        else:
+            diag["agent_runs"] = "TABLE DOES NOT EXIST"
+
+        # agent_token_budgets
+        if "agent_token_budgets" in existing_tables:
+            cur.execute("SELECT * FROM agent_token_budgets ORDER BY agent_name")
+            cols = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+            diag["agent_token_budgets"] = [dict(zip(cols, r, strict=False)) for r in rows]
+        else:
+            diag["agent_token_budgets"] = "TABLE DOES NOT EXIST"
+
+        # Check if apscheduler is installed (needed by agent scheduler)
+        try:
+            import apscheduler
+            diag["apscheduler_version"] = apscheduler.__version__
+        except ImportError:
+            diag["apscheduler_version"] = "NOT INSTALLED"
+        except AttributeError:
+            diag["apscheduler_version"] = "installed (no __version__)"
+
+        cur.close()
+        conn.close()
+
+    except ImportError:
+        diag["error"] = "psycopg2 not installed"
+    except Exception as e:
+        diag["error"] = f"PostgreSQL query failed: {e}"
+
+    return diag
+
+
 # ============== RUN SERVER ==============
 
 if __name__ == "__main__":
