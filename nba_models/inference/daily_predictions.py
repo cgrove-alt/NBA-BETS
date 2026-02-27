@@ -2922,6 +2922,36 @@ def main():
     except Exception as e:
         print(f"  Warning: CLV recording failed: {e}")
 
+    # Paper trading: log all predictions for forward validation
+    try:
+        from nba_betting.paper_trading import PaperTrader
+        trader = PaperTrader()
+        paper_preds = []
+        for prop in all_player_props:
+            paper_preds.append({
+                "game_date": target_date,
+                "game_id": prop.get("game", ""),
+                "player_name": prop.get("player", ""),
+                "prop_type": prop.get("stat", ""),
+                "line": prop.get("line", 0),
+                "direction": prop.get("pick", "over"),
+                "predicted_value": prop.get("predicted_value"),
+                "over_prob": prop.get("over_prob"),
+                "edge": prop.get("edge"),
+                "ev": prop.get("ev_per_dollar"),
+                "should_bet": prop.get("signal", "PASS") == "BET",
+                "bet_size": prop.get("suggested_bet_size", 0),
+                "over_odds": prop.get("over_odds", -110),
+                "under_odds": prop.get("under_odds", -110),
+                "confidence": prop.get("confidence_score"),
+                "tier": prop.get("edge_quality_tier", ""),
+            })
+        if paper_preds:
+            paper_count = trader.log_predictions_batch(paper_preds, target_date)
+            print(f"  Paper trading: logged {paper_count} predictions for {target_date}")
+    except Exception as e:
+        print(f"  Warning: Paper trading log failed (non-blocking): {e}")
+
     # Summary of best bets
     print("\n" + "=" * 65)
     print("  TOP RECOMMENDATIONS (>5% edge)")

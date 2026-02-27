@@ -2010,6 +2010,42 @@ def get_clv_summary(days: int = None):
         }
 
 
+# ============== PAPER TRADING ENDPOINTS ==============
+
+
+@app.get("/api/paper-trading/summary")
+def get_paper_trading_summary(days: int = None):
+    """Get paper trading performance summary.
+
+    Args:
+        days: Optional — limit to last N days.
+    """
+    try:
+        from nba_betting.paper_trading import PaperTrader
+        trader = PaperTrader()
+        return trader.get_summary(days=days)
+    except Exception as e:
+        return {
+            "total_predictions": 0, "settled_predictions": 0,
+            "unsettled_predictions": 0, "overall_accuracy": 0.0,
+            "recommended_bets": 0, "recommended_accuracy": 0.0,
+            "total_wagered": 0.0, "total_profit": 0.0, "roi": 0.0,
+            "brier_score": 0.0, "by_prop_type": {},
+            "by_confidence_tier": {}, "by_edge_bucket": {},
+            "error": str(e),
+        }
+
+
+@app.get("/api/paper-trading/daily/{date}")
+def get_paper_trading_daily(date: str):
+    """Get paper trading results for a specific date."""
+    try:
+        from nba_betting.paper_trading import PaperTrader
+        return PaperTrader().get_daily_report(date)
+    except Exception as e:
+        return {"date": date, "predictions": [], "error": str(e)}
+
+
 # ============== RUN SERVER ==============
 
 if __name__ == "__main__":
