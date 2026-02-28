@@ -1,0 +1,379 @@
+{
+  "date": "2025-01-24",
+  "games": [
+    {
+      "bdl_game_id": 22400631,
+      "odds_api_event_id": "8be88b659b096322958a52c9b586c399",
+      "home_team": "Philadelphia 76ers",
+      "away_team": "Cleveland Cavaliers",
+      "home_abbrev": "PHI",
+      "away_abbrev": "CLE",
+      "commence_time": "2025-01-25T00:10:00Z",
+      "snapshot_timestamp": "2025-01-24T23:10:00Z",
+      "player_props": [
+        {
+          "player_name": "Paul George",
+          "prop_type": "assists",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "under_odds": 114,
+          "over_odds": -145
+        },
+        {
+          "player_name": "Guerschon Yabusele",
+          "prop_type": "assists",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "under_odds": -125,
+          "over_odds": -105
+        },
+        {
+          "player_name": "Eric Gordon",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "draftkings",
+          "under_odds": 145,
+          "over_odds": -188
+        },
+        {
+          "player_name": "Tyrese Maxey",
+          "prop_type": "assists",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Tyrese Maxey",
+          "prop_type": "points",
+          "line": 27.5,
+          "bookmaker": "draftkings",
+          "under_odds": -110,
+          "over_odds": -120
+        },
+        {
+          "player_name": "Guerschon Yabusele",
+          "prop_type": "points",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "under_odds": 100,
+          "over_odds": -130
+        },
+        {
+          "player_name": "Paul George",
+          "prop_type": "points",
+          "line": 19.5,
+          "bookmaker": "draftkings",
+          "under_odds": -105,
+          "over_odds": -125
+        },
+        {
+          "player_name": "Eric Gordon",
+          "prop_type": "points",
+          "line": 8.5,
+          "bookmaker": "draftkings",
+          "under_odds": -120,
+          "over_odds": -110
+        },
+        {
+          "player_name": "Kelly Oubre Jr",
+          "prop_type": "points",
+          "line": 13.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Tyrese Maxey",
+          "prop_type": "pra",
+          "line": 38.5,
+          "bookmaker": "draftkings",
+          "under_odds": -115,
+          "over_odds": -115
+        },
+        {
+          "player_name": "Kelly Oubre Jr",
+          "prop_type": "pra",
+          "line": 22.5,
+          "bookmaker": "draftkings",
+          "under_odds": -125,
+          "over_odds": -105
+        },
+        {
+          "player_name": "Eric Gordon",
+          "prop_type": "pra",
+          "line": 12.5,
+          "bookmaker": "draftkings",
+          "under_odds": -120,
+          "over_odds": -110
+        },
+        {
+          "player_name": "Paul George",
+          "prop_type": "pra",
+          "line": 31.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Guerschon Yabusele",
+          "prop_type": "pra",
+          "line": 20.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Paul George",
+          "prop_type": "rebounds",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Kelly Oubre Jr",
+          "prop_type": "rebounds",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": 105,
+          "under_odds": -135
+        },
+        {
+          "player_name": "Guerschon Yabusele",
+          "prop_type": "rebounds",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": -145,
+          "under_odds": 114
+        },
+        {
+          "player_name": "Tyrese Maxey",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -154,
+          "under_odds": 120
+        },
+        {
+          "player_name": "Eric Gordon",
+          "prop_type": "rebounds",
+          "line": 1.5,
+          "bookmaker": "draftkings",
+          "under_odds": 100,
+          "over_odds": -130
+        },
+        {
+          "player_name": "Donovan Mitchell",
+          "prop_type": "assists",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": 105,
+          "under_odds": -135
+        },
+        {
+          "player_name": "Darius Garland",
+          "prop_type": "assists",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Max Strus",
+          "prop_type": "assists",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "under_odds": 105,
+          "over_odds": -135
+        },
+        {
+          "player_name": "Jarrett Allen",
+          "prop_type": "points",
+          "line": 14.5,
+          "bookmaker": "draftkings",
+          "under_odds": -115,
+          "over_odds": -115
+        },
+        {
+          "player_name": "Max Strus",
+          "prop_type": "points",
+          "line": 8.5,
+          "bookmaker": "draftkings",
+          "under_odds": 100,
+          "over_odds": -130
+        },
+        {
+          "player_name": "Dean Wade",
+          "prop_type": "points",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Ricky Council IV",
+          "prop_type": "points",
+          "line": 7.5,
+          "bookmaker": "fanduel",
+          "over_odds": -115,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Donovan Mitchell",
+          "prop_type": "points",
+          "line": 24.5,
+          "bookmaker": "draftkings",
+          "under_odds": -110,
+          "over_odds": -120
+        },
+        {
+          "player_name": "Darius Garland",
+          "prop_type": "points",
+          "line": 21.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Max Strus",
+          "prop_type": "pra",
+          "line": 15.5,
+          "bookmaker": "draftkings",
+          "under_odds": -105,
+          "over_odds": -125
+        },
+        {
+          "player_name": "Darius Garland",
+          "prop_type": "pra",
+          "line": 31.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Donovan Mitchell",
+          "prop_type": "pra",
+          "line": 33.5,
+          "bookmaker": "draftkings",
+          "under_odds": -110,
+          "over_odds": -120
+        },
+        {
+          "player_name": "Max Strus",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "under_odds": 124,
+          "over_odds": -160
+        },
+        {
+          "player_name": "Jarrett Allen",
+          "prop_type": "rebounds",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "under_odds": -110,
+          "over_odds": -120
+        },
+        {
+          "player_name": "Dean Wade",
+          "prop_type": "rebounds",
+          "line": 5.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Donovan Mitchell",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Darius Garland",
+          "prop_type": "rebounds",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Jarrett Allen",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "draftkings",
+          "over_odds": -175,
+          "under_odds": 135
+        },
+        {
+          "player_name": "Kelly Oubre Jr",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Jarrett Allen",
+          "prop_type": "pra",
+          "line": 27.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Dean Wade",
+          "prop_type": "pra",
+          "line": 13.5,
+          "bookmaker": "draftkings",
+          "under_odds": 100,
+          "over_odds": -130
+        },
+        {
+          "player_name": "Dean Wade",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": 116,
+          "under_odds": -160
+        },
+        {
+          "player_name": "Caris LeVert",
+          "prop_type": "assists",
+          "line": 2.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -184,
+          "under_odds": 133
+        },
+        {
+          "player_name": "Caris LeVert",
+          "prop_type": "points",
+          "line": 10.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -133,
+          "under_odds": -103
+        },
+        {
+          "player_name": "Caris LeVert",
+          "prop_type": "pra",
+          "line": 17.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -129,
+          "under_odds": -106
+        },
+        {
+          "player_name": "Caris LeVert",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -154,
+          "under_odds": 112
+        }
+      ]
+    }
+  ],
+  "api_credits_used": 41,
+  "fetched_at": "2026-02-28T18:36:33.038818+00:00"
+}

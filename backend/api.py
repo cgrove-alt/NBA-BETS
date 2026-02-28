@@ -2478,6 +2478,70 @@ def get_oos_backtest_status():
     }
 
 
+# ============== REAL-LINES BACKTEST ==============
+
+
+@app.post("/api/backtest/run-real-lines")
+def run_real_lines_backtest():
+    """Trigger the real-lines profitability backtest in a background thread.
+
+    Uses actual sportsbook lines from The Odds API and real player outcomes
+    from BallDontLie for the 2024-25 season.
+
+    Returns immediately; poll GET /api/backtest/real-lines-status for results.
+    """
+    import threading
+
+    if getattr(app.state, "_real_lines_running", False):
+        raise HTTPException(409, "Real-lines backtest already running")
+
+    def _run():
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "nba_models" / "training"))
+        try:
+            app.state._real_lines_running = True
+            from nba_models.backtesting.real_lines_backtest import run_backtest
+            import argparse
+            args = argparse.Namespace(bankroll=1000.0, model_dir=None)
+            results = run_backtest(args)
+            app.state._real_lines_results = results or {"error": "Real-lines backtest returned None"}
+        except Exception as e:
+            import traceback
+            app.state._real_lines_results = {
+                "error": f"{type(e).__name__}: {e}",
+                "traceback": traceback.format_exc()[-2000:],
+            }
+        finally:
+            app.state._real_lines_running = False
+
+    app.state._real_lines_results = None
+    threading.Thread(target=_run, daemon=True).start()
+    return {
+        "status": "started",
+        "message": "Real-lines backtest running in background. Poll GET /api/backtest/real-lines-status for results.",
+    }
+
+
+@app.get("/api/backtest/real-lines-status")
+def get_real_lines_backtest_status():
+    """Check status of the real-lines backtest."""
+    running = getattr(app.state, "_real_lines_running", False)
+    results = getattr(app.state, "_real_lines_results", None)
+
+    if running:
+        try:
+            from nba_models.backtesting.real_lines_backtest import _progress
+            return {"status": "running", "progress": dict(_progress)}
+        except Exception:
+            return {"status": "running"}
+    if results is not None:
+        return {"status": "complete", "results": results}
+    return {
+        "status": "idle",
+        "message": "No real-lines backtest triggered. POST /api/backtest/run-real-lines to start.",
+    }
+
+
 # ============== RUN SERVER ==============
 
 if __name__ == "__main__":
