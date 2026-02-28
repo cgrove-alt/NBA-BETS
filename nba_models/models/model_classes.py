@@ -181,21 +181,12 @@ class PropEnsembleModel:
             result['edge'] = ensemble_pred - prop_line
             result['edge_pct'] = (ensemble_pred - prop_line) / prop_line if prop_line > 0 else 0
 
-            # Over/under probability
-            if self.over_under_classifier is not None:
-                try:
-                    residual_features = np.array([[ensemble_pred, abs(ensemble_pred - prop_line)]])
-                    proba = self.over_under_classifier.predict_proba(residual_features)[0]
-                    # IMPROVEMENT 1: Apply temperature scaling to fix extreme probabilities
-                    # (classifier was returning 0.0 or 1.0, breaking Kelly sizing)
-                    raw_over_prob = float(proba[1])
-                    result['over_probability'] = calibrate_probability(raw_over_prob)
-                    result['under_probability'] = 1 - result['over_probability']
-                    result['over_probability_raw'] = raw_over_prob  # Keep raw for diagnostics
-                except Exception:
-                    result['over_probability'] = 0.5 + (result['edge_pct'] * 2)
-                    result['over_probability'] = max(0.3, min(0.7, result['over_probability']))
-                    result['under_probability'] = 1 - result['over_probability']
+            # Over/under probability: edge-based estimate
+            # (Classifier disabled — superseded by quantile model probabilities
+            # in the prediction pipeline. This fallback is for direct model use.)
+            edge_pct = result['edge_pct']
+            result['over_probability'] = 0.5 + float(np.clip(edge_pct * 2, -0.20, 0.20))
+            result['under_probability'] = 1 - result['over_probability']
 
         return result
 

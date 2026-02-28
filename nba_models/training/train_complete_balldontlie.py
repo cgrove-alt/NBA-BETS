@@ -4261,42 +4261,14 @@ class PropEnsembleModel:
         return self.training_metrics
 
     def _train_over_under_classifier(self, X_train, y_train, X_test, y_test):
-        """Train a classifier for over/under probability estimates."""
-        # We'll train on residuals relative to various line values
-        # For now, use a simple approach: classify whether actual > predicted
+        """Disabled — superseded by QuantilePropModel.predict_over_probability().
 
-        # Get ensemble predictions on training data
-        base_preds_train = []
-        for _name, model in self.models.items():
-            try:
-                pred = model.predict(X_train)
-                base_preds_train.append(pred)
-            except:
-                pass
-
-        if not base_preds_train:
-            return
-
-        stacked_train = np.column_stack(base_preds_train)
-        ensemble_pred_train = self.meta_model.predict(stacked_train)
-
-        # Create binary labels: 1 if actual > predicted, 0 otherwise
-        # This helps calibrate confidence
-        residuals = y_train - ensemble_pred_train
-        binary_labels = (residuals > 0).astype(int)
-
-        # Simple logistic regression for probability calibration
-        try:
-            from sklearn.linear_model import LogisticRegression as LR
-            # Use residual magnitude as feature
-            residual_features = np.column_stack([
-                ensemble_pred_train,
-                np.abs(ensemble_pred_train - np.mean(y_train)),
-            ])
-            self.over_under_classifier = LR(random_state=42, max_iter=1000)
-            self.over_under_classifier.fit(residual_features, binary_labels)
-        except Exception as e:
-            print(f"      Warning: Could not train over/under classifier: {e}")
+        The old LogisticRegression classifier trained on (ensemble_pred, |pred - mean(y)|)
+        with target (actual > predicted) produced ~0.50 for all inputs because the
+        ensemble is accurate → ~50% base rate. Quantile-based interpolation gives
+        principled, well-calibrated P(X > line) probabilities instead.
+        """
+        self.over_under_classifier = None
 
     def predict(self, features: dict, prop_line: float = None) -> dict:
         """Make a prediction with the ensemble."""
@@ -4353,25 +4325,12 @@ class PropEnsembleModel:
             result['edge'] = ensemble_pred - prop_line
             result['edge_pct'] = (ensemble_pred - prop_line) / prop_line if prop_line > 0 else 0
 
-            # Over/under probability (if classifier available)
-            if self.over_under_classifier is not None:
-                try:
-                    residual_features = np.array([[ensemble_pred, abs(ensemble_pred - prop_line)]])
-                    proba = self.over_under_classifier.predict_proba(residual_features)[0]
-                    # IMPROVEMENT 1: Apply temperature scaling to fix extreme probabilities
-                    raw_over_prob = float(proba[1])
-                    if raw_over_prob <= 0 or raw_over_prob >= 1:
-                        raw_over_prob = float(np.clip(raw_over_prob, 0.05, 0.95))
-                    logit = float(np.log(raw_over_prob / (1 - raw_over_prob)))
-                    cal_logit = logit / 2.0  # temperature = 2.0
-                    calibrated = float(1 / (1 + np.exp(-cal_logit)))
-                    result['over_probability'] = float(np.clip(calibrated, 0.05, 0.95))
-                    result['under_probability'] = 1 - result['over_probability']
-                    result['over_probability_raw'] = raw_over_prob  # Keep raw for diagnostics
-                except:
-                    result['over_probability'] = 0.5 + (result['edge_pct'] * 2)  # Simple estimate
-                    result['over_probability'] = max(0.3, min(0.7, result['over_probability']))
-                    result['under_probability'] = 1 - result['over_probability']
+            # Over/under probability: edge-based estimate
+            # (Classifier disabled — superseded by quantile model probabilities
+            # in the prediction pipeline. This fallback is for direct model use.)
+            edge_pct = result['edge_pct']
+            result['over_probability'] = 0.5 + float(np.clip(edge_pct * 2, -0.20, 0.20))
+            result['under_probability'] = 1 - result['over_probability']
 
         return result
 
@@ -5201,6 +5160,7 @@ def train_all_models(
     optuna_trials: int = 50,  # Number of Optuna trials per model
     tune_team_models: bool = False,  # NEW: Use Optuna for team model tuning
     team_tune_trials: int = 50,  # Number of Optuna trials for team models
+    model_dir: Path = None,  # Custom save directory (default: models/)
 ) -> dict:
     """
     Train all models with the prepared data.
@@ -5214,10 +5174,14 @@ def train_all_models(
         optuna_trials: Number of trials per model for Optuna
         tune_team_models: Whether to tune moneyline/spread team models
         team_tune_trials: Number of Optuna trials for team model tuning
+        model_dir: Custom directory to save models. If None, uses default models/.
 
     Returns:
         Dictionary of training metrics
     """
+    save_dir = model_dir or MODEL_DIR
+    save_dir.mkdir(parents=True, exist_ok=True)
+
     results = {}
 
     # Calculate sample weights if using time decay
@@ -5247,7 +5211,7 @@ def train_all_models(
         print(f"\n[FeatureSelector] Running RFECV on {len(X_team.columns)} team features...")
         selector = FeatureSelector(min_features=10, cv_folds=5)
         selector.fit(X_team, y_ml, model_type='classification')
-        selector.save(str(MODEL_DIR / 'selected_features.json'))
+        selector.save(str(save_dir / 'selected_features.json'))
         X_team = selector.transform(X_team)
         print(f"[FeatureSelector] Training with {len(X_team.columns)} selected features")
     except Exception as e:
@@ -5579,7 +5543,7 @@ def train_all_models(
         feature_names=feature_names,
         training_metrics=ml_metrics,
     )
-    with open(MODEL_DIR / 'moneyline_ensemble.pkl', 'wb') as f:
+    with open(save_dir / 'moneyline_ensemble.pkl', 'wb') as f:
         pickle.dump({
             'model': wrapper,
             'scaler': scaler_ml,
@@ -5765,7 +5729,7 @@ def train_all_models(
         metrics=sp_metrics
     )
 
-    with open(MODEL_DIR / 'spread_ensemble.pkl', 'wb') as f:
+    with open(save_dir / 'spread_ensemble.pkl', 'wb') as f:
         pickle.dump({
             'model': spread_wrapper,
             'models': spread_models,
@@ -5777,7 +5741,7 @@ def train_all_models(
     print("  Saved: models/spread_ensemble.pkl")
 
     # Also save backwards-compatible single model file
-    with open(MODEL_DIR / 'spread_svm_regressor.pkl', 'wb') as f:
+    with open(save_dir / 'spread_svm_regressor.pkl', 'wb') as f:
         pickle.dump({
             'model': spread_wrapper,
             'scaler': scaler_sp,
@@ -5818,7 +5782,7 @@ def train_all_models(
         print(f"  Average Interval Width: {interval_width:.1f} points")
 
         # Save quantile models
-        with open(MODEL_DIR / 'spread_quantile.pkl', 'wb') as f:
+        with open(save_dir / 'spread_quantile.pkl', 'wb') as f:
             pickle.dump({
                 'quantile_models': quantile_models,
                 'scaler': scaler_sp,
@@ -5889,7 +5853,7 @@ def train_all_models(
     min_metrics = minutes_model.train(X_player, y_minutes, sample_weights=player_sample_weights)
 
     # Save minutes model
-    minutes_model.save(MODEL_DIR / 'player_minutes_model.pkl')
+    minutes_model.save(save_dir / 'player_minutes_model.pkl')
     print("  Saved: models/player_minutes_model.pkl")
 
     results['minutes_model'] = {
@@ -5983,14 +5947,14 @@ def train_all_models(
                 print(f"  Position-Aware R²: {metrics['ensemble_r2']:.4f}")
 
                 # Save as position-aware model
-                prop_model.save(MODEL_DIR / f'player_{prop_name}_position_aware.pkl')
-                print(f"  Saved: models/player_{prop_name}_position_aware.pkl")
+                prop_model.save(save_dir / f'player_{prop_name}_position_aware.pkl')
+                print(f"  Saved: {save_dir}/player_{prop_name}_position_aware.pkl")
 
                 # Also save regular ensemble for backward compatibility
                 print("  Also training general ensemble for backward compatibility...")
                 general_model = PropEnsembleModel(prop_name)
                 general_metrics = general_model.train(X_with_line, y, sample_weights=player_sample_weights)
-                general_model.save(MODEL_DIR / f'player_{prop_name}_ensemble.pkl')
+                general_model.save(save_dir / f'player_{prop_name}_ensemble.pkl')
 
                 results[f'prop_{prop_name}'] = {
                     'rmse': metrics['ensemble_rmse'],
@@ -6018,7 +5982,7 @@ def train_all_models(
                     optimized_params = tuner.tune_all_models(X_scaled, y, prop_name)
 
                     # Save optimized params for reproducibility
-                    params_path = MODEL_DIR / f'{prop_name}_optuna_params.json'
+                    params_path = save_dir / f'{prop_name}_optuna_params.json'
                     with open(params_path, 'w') as f:
                         json.dump(optimized_params, f, indent=2)
                     print(f"  Saved optimized params: {params_path}")
@@ -6032,8 +5996,8 @@ def train_all_models(
                 print(f"  Ensemble R²: {metrics['ensemble_r2']:.4f}")
 
                 # Save as ensemble model
-                prop_model.save(MODEL_DIR / f'player_{prop_name}_ensemble.pkl')
-                print(f"  Saved: models/player_{prop_name}_ensemble.pkl")
+                prop_model.save(save_dir / f'player_{prop_name}_ensemble.pkl')
+                print(f"  Saved: {save_dir}/player_{prop_name}_ensemble.pkl")
 
                 # Also save metrics for comparison
                 results[f'prop_{prop_name}'] = {
@@ -6054,8 +6018,8 @@ def train_all_models(
             print(f"  MAE: {metrics['mae']:.2f}")
             print(f"  R²: {metrics['r2']:.4f}")
 
-            prop_model.save(MODEL_DIR / f'player_{prop_name}.pkl')
-            print(f"  Saved: models/player_{prop_name}.pkl")
+            prop_model.save(save_dir / f'player_{prop_name}.pkl')
+            print(f"  Saved: {save_dir}/player_{prop_name}.pkl")
 
             results[f'prop_{prop_name}'] = metrics
 
@@ -6080,7 +6044,7 @@ def train_all_models(
             q_metrics = quantile_model.train(X_with_line, y, sample_weights=player_sample_weights)
 
             # Save quantile model with updated feature names
-            quantile_path = MODEL_DIR / f'player_{prop_name}_quantile.pkl'
+            quantile_path = save_dir / f'player_{prop_name}_quantile.pkl'
             with open(quantile_path, 'wb') as f:
                 pickle.dump({
                     'model': quantile_model,

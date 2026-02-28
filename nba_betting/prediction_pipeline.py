@@ -126,6 +126,7 @@ def evaluate_bet(
     bankroll: float = 1000.0,
     over_odds: int | None = None,
     under_odds: int | None = None,
+    pre_calibrated: bool = False,
 ) -> dict:
     """
     Full prediction pipeline: calibrate → filter → size.
@@ -144,6 +145,9 @@ def evaluate_bet(
                          If None, EV calculation is skipped.
         under_odds:      American odds for the under side (e.g., -105).
                          If None (but over_odds given), raw implied prob is used.
+        pre_calibrated:  If True, skip temperature scaling and use raw_confidence
+                         directly. Use when confidence comes from a well-calibrated
+                         source (e.g., quantile model interpolation).
 
     Returns:
         dict with keys:
@@ -204,7 +208,10 @@ def evaluate_bet(
         return result
 
     # ---------- Step: Calibrate probability ----------
-    if raw_confidence is not None:
+    if raw_confidence is not None and pre_calibrated:
+        # Already calibrated (e.g., from quantile model interpolation)
+        confidence = float(np.clip(raw_confidence, 0.05, 0.95))
+    elif raw_confidence is not None:
         confidence = calibrate_probability(raw_confidence)
     else:
         # Estimate confidence from edge when no classifier output available.

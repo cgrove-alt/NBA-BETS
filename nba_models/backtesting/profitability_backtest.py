@@ -68,38 +68,62 @@ MIN_MINUTES = 15  # Skip garbage-time-only players
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
-def load_models() -> dict:
-    """Load trained PropEnsembleModel (or fallback) for each prop type.
+def load_models(model_dir: Path | None = None) -> tuple[dict, dict]:
+    """Load ensemble + quantile models for each prop type.
 
-    Models are saved as dicts by PropEnsembleModel.save(); we must use
-    PropEnsembleModel.load() (or the equivalent class) to reconstruct
-    the actual model object with a .predict() method.
+    Returns:
+        (ensemble_models, quantile_models) — both keyed by prop type.
+        Quantile models are used for calibrated over-probabilities.
     """
     from train_complete_balldontlie import PropEnsembleModel, QuantilePropModel
 
-    models: dict = {}
-    model_dir = Path(ROOT) / "models"
+    ensemble_models: dict = {}
+    quantile_models: dict = {}
+    mdir = model_dir or Path(ROOT) / "models"
 
     for prop_type in PROP_TYPES:
-        # Prefer ensemble → quantile
-        candidates = [
-            (model_dir / f"player_{prop_type}_ensemble.pkl", PropEnsembleModel),
-            (model_dir / f"player_{prop_type}_quantile.pkl", QuantilePropModel),
+        # Load ensemble model (primary prediction)
+        ensemble_candidates = [
+            (mdir / f"player_{prop_type}_ensemble.pkl", PropEnsembleModel),
         ]
-        for path, model_cls in candidates:
+        for path, model_cls in ensemble_candidates:
             if path.exists():
                 try:
                     model = model_cls.load(path)
-                    models[prop_type] = model
-                    logger.info("Loaded %s for %s (%s)", path.name, prop_type, model_cls.__name__)
+                    ensemble_models[prop_type] = model
+                    logger.info("Loaded ensemble %s for %s", path.name, prop_type)
                     break
                 except Exception as exc:
-                    logger.warning("Failed to load %s: %s", path, exc)
+                    logger.warning("Failed to load ensemble %s: %s", path, exc)
 
-        if prop_type not in models:
-            logger.warning("No model found for %s — skipping", prop_type)
+        # Load quantile model (calibrated probabilities)
+        qpath = mdir / f"player_{prop_type}_quantile.pkl"
+        if qpath.exists():
+            try:
+                qmodel = QuantilePropModel.load(qpath)
+                quantile_models[prop_type] = qmodel
+                logger.info("Loaded quantile %s for %s", qpath.name, prop_type)
+            except Exception:
+                # train_all_models() saves quantile as {'model': obj, ...} wrapper
+                try:
+                    with open(qpath, "rb") as f:
+                        data = pickle.load(f)
+                    if isinstance(data, dict) and "model" in data:
+                        quantile_models[prop_type] = data["model"]
+                        logger.info("Loaded quantile (wrapped) %s for %s", qpath.name, prop_type)
+                    else:
+                        logger.warning("Unexpected quantile format for %s", prop_type)
+                except Exception as exc2:
+                    logger.warning("Failed to load quantile %s: %s", qpath, exc2)
 
-    return models
+        if prop_type not in ensemble_models:
+            # Fall back to quantile as prediction source
+            if prop_type in quantile_models:
+                logger.info("Using quantile model as primary for %s (no ensemble)", prop_type)
+            else:
+                logger.warning("No model found for %s — skipping", prop_type)
+
+    return ensemble_models, quantile_models
 
 
 # ---------------------------------------------------------------------------
@@ -141,8 +165,13 @@ def simulate_prop_line(features: dict, prop_type: str) -> float:
 # ---------------------------------------------------------------------------
 # Main backtest loop
 # ---------------------------------------------------------------------------
-def run_backtest(args: argparse.Namespace) -> dict | None:
-    """Execute the walk-forward backtest and return results dict."""
+def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dict | None:
+    """Execute the walk-forward backtest and return results dict.
+
+    Args:
+        args: Namespace with bankroll, season, etc.
+        model_dir: Custom model directory. If None, uses default models/.
+    """
 
     from train_from_csv import (
         build_team_id_map,
@@ -193,11 +222,12 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
 
     # ── 3. Load models ────────────────────────────────────────────────────
     logger.info("Step 3/5: Loading trained models …")
-    models = load_models()
-    if not models:
+    ensemble_models, quantile_models = load_models(model_dir=model_dir)
+    if not ensemble_models and not quantile_models:
         logger.error("No models loaded — cannot run backtest.")
         return None
-    logger.info("Models available: %s", list(models.keys()))
+    logger.info("Ensemble models: %s", list(ensemble_models.keys()))
+    logger.info("Quantile models: %s", list(quantile_models.keys()))
 
     # ── 4. Simulate trades ────────────────────────────────────────────────
     logger.info("Step 4/5: Running walk-forward P&L simulation …")
@@ -229,7 +259,7 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
         diag["eligible_samples"] += 1
 
         for prop_type in PROP_TYPES:
-            if prop_type not in models:
+            if prop_type not in ensemble_models:
                 diag[f"skip_no_model_{prop_type}"] += 1
                 continue
 
@@ -241,7 +271,7 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
             diag[f"predictions_attempted_{prop_type}"] += 1
 
             # Model prediction
-            model = models[prop_type]
+            model = ensemble_models[prop_type]
             try:
                 prediction = model.predict(features, prop_line=prop_line)
             except Exception as exc:
@@ -257,12 +287,24 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
                 continue
 
             predicted_value = prediction.get("predicted_value", 0)
-            over_prob = prediction.get("over_probability")
             edge = abs(predicted_value - prop_line)
 
             diag[f"predictions_ok_{prop_type}"] += 1
             if edge > 0:
                 diag[f"nonzero_edge_{prop_type}"] += 1
+
+            # Get calibrated over-probability from quantile model
+            over_prob = None
+            use_pre_calibrated = False
+            if prop_type in quantile_models:
+                try:
+                    over_prob = quantile_models[prop_type].predict_over_probability(
+                        features, prop_line
+                    )
+                    use_pre_calibrated = True
+                    diag[f"quantile_prob_ok_{prop_type}"] += 1
+                except Exception:
+                    diag[f"quantile_prob_err_{prop_type}"] += 1
 
             # Log first 3 predictions per prop type for debugging
             debug_key = f"_logged_{prop_type}"
@@ -275,21 +317,21 @@ def run_backtest(args: argparse.Namespace) -> dict | None:
                 )
 
             # Pipeline evaluation
-            # Use edge-based confidence (raw_confidence=None) because the
-            # model's over_under_classifier outputs probabilities clustered
-            # around 0.50 — too narrow to pass the 0.58 confidence gate.
-            # Edge-based estimation: edge ≥ threshold → confidence ≥ 0.60.
+            # Use quantile-based over-probability (pre_calibrated) when available.
+            # Quantile models interpolate P(X > line) from the predicted
+            # distribution (q10-q90), giving principled probabilities.
             # Use INITIAL_BANKROLL for sizing (not compounding bankroll)
             # to avoid exponential growth from in-sample model advantage.
             ev_result = evaluate_bet(
                 prop_type=prop_type,
                 predicted=predicted_value,
                 line=prop_line,
-                raw_confidence=None,
+                raw_confidence=over_prob,
                 games_played=games_played,
                 bankroll=INITIAL_BANKROLL,
                 over_odds=STANDARD_ODDS,
                 under_odds=STANDARD_ODDS,
+                pre_calibrated=use_pre_calibrated,
             )
 
             if not ev_result["should_bet"]:

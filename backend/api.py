@@ -2402,6 +2402,82 @@ def get_profitability_backtest_status():
     return {"status": "idle", "message": "No backtest has been triggered yet. POST /api/backtest/run-profitability to start."}
 
 
+# ============== OOS BACKTEST ==============
+
+
+@app.post("/api/backtest/run-oos")
+def run_oos_backtest(
+    train_seasons: list[str] | None = None,
+    test_season: str = "2023-24",
+    skip_retrain: bool = False,
+):
+    """Trigger an out-of-sample backtest in a background thread.
+
+    Trains models on train_seasons (default: 2020-2022), then tests on
+    test_season using those holdout models.
+
+    Returns immediately; poll GET /api/backtest/oos-status for results.
+    """
+    import threading
+
+    if getattr(app.state, "_oos_running", False):
+        raise HTTPException(409, "OOS backtest already running")
+
+    if train_seasons is None:
+        train_seasons = ["2020-21", "2021-22", "2022-23"]
+
+    def _run():
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "nba_models" / "training"))
+        try:
+            app.state._oos_running = True
+            from nba_models.backtesting.oos_backtest import run_oos_backtest as _run_oos
+            results = _run_oos(
+                train_seasons=train_seasons,
+                test_season=test_season,
+                skip_retrain=skip_retrain,
+            )
+            app.state._oos_results = results or {"error": "OOS backtest returned None"}
+        except Exception as e:
+            import traceback
+            app.state._oos_results = {
+                "error": f"{type(e).__name__}: {e}",
+                "traceback": traceback.format_exc()[-1000:],
+            }
+        finally:
+            app.state._oos_running = False
+
+    app.state._oos_results = None
+    threading.Thread(target=_run, daemon=True).start()
+    return {
+        "status": "started",
+        "train_seasons": train_seasons,
+        "test_season": test_season,
+        "skip_retrain": skip_retrain,
+        "message": "OOS backtest running in background. Poll GET /api/backtest/oos-status for results.",
+    }
+
+
+@app.get("/api/backtest/oos-status")
+def get_oos_backtest_status():
+    """Check status of the out-of-sample backtest."""
+    running = getattr(app.state, "_oos_running", False)
+    results = getattr(app.state, "_oos_results", None)
+
+    if running:
+        try:
+            from nba_models.backtesting.oos_backtest import _oos_progress
+            return {"status": "running", "progress": dict(_oos_progress)}
+        except Exception:
+            return {"status": "running"}
+    if results is not None:
+        return {"status": "complete", "results": results}
+    return {
+        "status": "idle",
+        "message": "No OOS backtest triggered. POST /api/backtest/run-oos to start.",
+    }
+
+
 # ============== RUN SERVER ==============
 
 if __name__ == "__main__":
