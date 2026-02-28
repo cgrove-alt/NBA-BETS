@@ -2133,6 +2133,194 @@ def get_paper_trading_daily(date: str):
         return {"date": date, "predictions": [], "error": str(e)}
 
 
+@app.post("/api/paper-trading/log-game/{game_id}")
+def log_game_predictions(game_id: str):
+    """Persist in-memory props for a game to the paper trading database.
+
+    Call this after props are generated (status=ready) but before games start,
+    so predictions can later be settled against actual outcomes.
+    """
+    from nba_betting.paper_trading import PaperTrader
+    from datetime import date as date_cls
+
+    service = get_service()
+    status_data = service.get_props_fetch_status(game_id)
+
+    if status_data.get("status") not in ("ready", "locked"):
+        return {"error": "Props not ready for this game", "status": status_data.get("status")}
+
+    all_players = status_data.get("home", []) + status_data.get("away", [])
+    if not all_players:
+        return {"error": "No player props found for this game"}
+
+    game_date = date_cls.today().isoformat()
+    trader = PaperTrader()
+    logged = 0
+
+    prop_key_map = {
+        "Points": "points", "Rebounds": "rebounds", "Assists": "assists",
+        "3PM": "3pm", "PRA": "pra",
+    }
+
+    for player in all_players:
+        player_name = player.get("player_name", "")
+        team = player.get("team", "")
+        for prop_type, prop_key in prop_key_map.items():
+            pred_key = f"{prop_key}_pred"
+            if pred_key not in player or player.get(pred_key) is None:
+                continue
+
+            prediction_val = player.get(pred_key, 0) or 0
+            line = player.get(f"{prop_key}_line", 0) or 0
+            confidence = player.get(f"{prop_key}_confidence", 0) or 0
+            pick = player.get(f"{prop_key}_pick", "-") or "-"
+            edge_pct = player.get(f"{prop_key}_edge", 0) or 0
+
+            if pick == "-" or line == 0:
+                continue
+
+            edge_raw = prediction_val - line
+            should_bet = confidence >= 55 and abs(edge_pct) >= 4.0
+
+            try:
+                trader.log_prediction({
+                    "game_date": game_date,
+                    "game_id": game_id,
+                    "player_name": player_name,
+                    "prop_type": prop_type,
+                    "line": line,
+                    "direction": pick.lower(),
+                    "predicted_value": prediction_val,
+                    "edge": edge_raw,
+                    "confidence": confidence,
+                    "should_bet": should_bet,
+                    "bet_size": 10.0 if should_bet else 0.0,
+                    "tier": "elite" if confidence >= 70 else "standard",
+                })
+                logged += 1
+            except Exception as e:
+                print(f"Failed to log {player_name} {prop_type}: {e}")
+
+    return {"logged": logged, "game_id": game_id, "game_date": game_date}
+
+
+@app.post("/api/paper-trading/settle/{date}")
+def settle_paper_trades(date: str):
+    """Settle all paper trades for a given date using actual box scores.
+
+    Fetches actual player stats from BallDontLie API, then grades
+    each unsettled prediction against the real outcomes.
+    """
+    try:
+        from nba_betting.settle_trades import settle_date
+        settled = settle_date(date)
+        return {"settled": settled, "date": date}
+    except Exception as e:
+        return {"error": str(e), "date": date, "settled": 0}
+
+
+@app.post("/api/paper-trading/generate-and-settle/{game_id}")
+def generate_and_settle_game(
+    game_id: str,
+    home_abbrev: str = Query(..., description="Home team abbreviation"),
+    away_abbrev: str = Query(..., description="Away team abbreviation"),
+):
+    """Generate predictions for a completed game, log them, and settle.
+
+    Bypasses the game-lock to allow retroactive settlement of completed games.
+    This is for tracking model accuracy — predictions are timestamped as post-hoc.
+    """
+    import threading
+    from datetime import date as date_cls
+
+    service = get_service()
+    game_date = date_cls.today().isoformat()
+
+    def _run():
+        try:
+            # Initialize status dict so _fetch_props_background can write to it
+            with service._prop_status_lock:
+                service._prop_fetch_status[game_id] = {
+                    'status': 'pending', 'home': [], 'away': []
+                }
+
+            # Force-generate props bypassing the game-started lock
+            service._fetch_props_background(
+                game_id, home_abbrev, away_abbrev,
+                ["Points", "Rebounds", "Assists", "3PM", "PRA"],
+            )
+
+            # Log predictions to paper trading DB
+            status_data = service.get_props_fetch_status(game_id)
+            all_players = status_data.get("home", []) + status_data.get("away", [])
+
+            from nba_betting.paper_trading import PaperTrader
+            trader = PaperTrader()
+            logged = 0
+
+            prop_key_map = {
+                "Points": "points", "Rebounds": "rebounds",
+                "Assists": "assists", "3PM": "3pm", "PRA": "pra",
+            }
+
+            for player in all_players:
+                player_name = player.get("player_name", "")
+                for prop_type, prop_key in prop_key_map.items():
+                    pred_key = f"{prop_key}_pred"
+                    if pred_key not in player or player.get(pred_key) is None:
+                        continue
+
+                    prediction_val = player.get(pred_key, 0) or 0
+                    line_val = player.get(f"{prop_key}_line", 0) or 0
+                    confidence = player.get(f"{prop_key}_confidence", 0) or 0
+                    pick = player.get(f"{prop_key}_pick", "-") or "-"
+                    edge_pct = player.get(f"{prop_key}_edge", 0) or 0
+
+                    if pick == "-" or line_val == 0:
+                        continue
+
+                    should_bet = confidence >= 55 and abs(edge_pct) >= 4.0
+                    try:
+                        trader.log_prediction({
+                            "game_date": game_date,
+                            "game_id": game_id,
+                            "player_name": player_name,
+                            "prop_type": prop_type,
+                            "line": line_val,
+                            "direction": pick.lower(),
+                            "predicted_value": prediction_val,
+                            "edge": prediction_val - line_val,
+                            "confidence": confidence,
+                            "should_bet": should_bet,
+                            "bet_size": 10.0 if should_bet else 0.0,
+                            "tier": "elite" if confidence >= 70 else "standard",
+                        })
+                        logged += 1
+                    except Exception:
+                        pass
+
+            # Now settle using actual stats
+            from nba_betting.settle_trades import settle_date
+            settled = settle_date(game_date)
+
+            print(f"Game {game_id}: logged {logged} predictions, settled {settled}")
+
+        except Exception as e:
+            print(f"Generate-and-settle failed for {game_id}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return {
+        "message": "Generate-and-settle started",
+        "game_id": game_id,
+        "game_date": game_date,
+        "note": "Predictions are post-hoc (game already completed)",
+    }
+
+
 # ============== MODEL HEALTH DASHBOARD ==============
 
 
