@@ -1,4 +1,4 @@
-const CACHE_NAME = 'oracle-v2';
+const CACHE_NAME = 'oracle-v3';
 const PRECACHE_URLS = ['/', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -42,8 +42,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Hashed assets (JS/CSS with content hash): cache-first (immutable)
-  if (event.request.url.match(/\/assets\/.+\.[a-f0-9]+\.(js|css)$/)) {
+  // Hashed assets (JS/CSS with Vite content hash): cache-first (immutable)
+  if (event.request.url.match(/\/assets\/.+[.\-][A-Za-z0-9_-]+\.(js|css)$/)) {
     event.respondWith(
       caches.match(event.request).then((cached) =>
         cached || fetch(event.request).then((response) => {

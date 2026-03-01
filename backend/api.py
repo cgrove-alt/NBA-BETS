@@ -40,6 +40,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 # Eastern Time for date-sensitive operations
 ET = ZoneInfo('America/New_York')
@@ -199,6 +201,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class CacheControlMiddleware(BaseHTTPMiddleware):
+    """Set Cache-Control headers based on response path."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+
+        if path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path == "/sw.js":
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        elif path == "/" or path.endswith(".html"):
+            response.headers["Cache-Control"] = "no-cache"
+        elif any(path.endswith(ext) for ext in (".json", ".png", ".svg", ".ico")):
+            response.headers["Cache-Control"] = "public, max-age=3600, stale-while-revalidate=86400"
+
+        return response
+
+
+app.add_middleware(CacheControlMiddleware)
 
 
 # ============== HEALTH CHECK ==============
@@ -2877,7 +2901,7 @@ if _frontend_dist.exists():
         file_path = _frontend_dist / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
-        return FileResponse(str(_frontend_dist / "index.html"))
+        return FileResponse(str(_frontend_dist / "index.html"), media_type="text/html")
 
 
 # ============== RUN SERVER ==============
