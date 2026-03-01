@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Calendar, Flame, TrendingUp } from 'lucide-react';
@@ -14,29 +14,7 @@ import { getGames, getBestBets } from '../../lib/api';
 import type { Game } from '../../lib/types';
 import { getTodayDate } from '../../components/game/DateSelector';
 import { useBankroll } from '../../hooks/useBankroll';
-
-/**
- * Check if a game has started based on its status
- * Games are locked once they start to prevent retroactive betting
- */
-function isGameStarted(status: string | undefined): boolean {
-  if (!status) return false;
-
-  // Game statuses that indicate the game has started or ended
-  const startedPatterns = [
-    'Qtr',           // "1st Qtr", "2nd Qtr", etc.
-    'Quarter',       // Alternative format
-    'Half',          // "Halftime", "1st Half", "2nd Half"
-    'OT',            // Overtime
-    'Final',         // Game ended
-    'In Progress',   // Generic in-progress
-    'Live',          // Live game
-  ];
-
-  return startedPatterns.some(pattern =>
-    status.toLowerCase().includes(pattern.toLowerCase())
-  );
-}
+import { isGameStarted, classifySignals } from '../../lib/utils';
 
 /**
  * Dashboard - The Oracle Home Page
@@ -65,13 +43,20 @@ export function Dashboard() {
     queryFn: () => getBestBets({ minConfidence: 50, minEdge: 3 }),
     staleTime: 5 * 60 * 1000,
     // After a deploy, props generate in the background. Retry every 5s
-    // until we have data (stops once bets arrive or no games exist).
+    // up to 6 times (30s max) until data arrives.
     refetchInterval: (query) => {
       const bets = query.state.data?.best_bets;
       const hasGames = (gamesData?.games?.length ?? 0) > 0;
-      return hasGames && (!bets || bets.length === 0) ? 5000 : false;
+      if (hasGames && (!bets || bets.length === 0)) {
+        emptyRetryCount.current++;
+        return emptyRetryCount.current <= 6 ? 5000 : false;
+      }
+      emptyRetryCount.current = 0;
+      return false;
     },
   });
+
+  const emptyRetryCount = useRef(0);
 
   // Real bankroll data from /api/bankroll
   const { bankrollData } = useBankroll();
@@ -100,17 +85,7 @@ export function Dashboard() {
       const gameStatus = game?.status;
       const isLocked = isGameStarted(gameStatus);
 
-      const signals: BetCardData['signals'] = (bet.signals || []).map((s) => ({
-        label: s,
-        type: (s.includes('Weak') || s.includes('ML Model') || s.includes('Real Line'))
-          ? 'positive' as const
-          : s.includes('Strong defense')
-            ? 'negative' as const
-            : 'neutral' as const,
-      }));
-      if (signals.length === 0) {
-        signals.push({ label: bet.prop_type, type: 'neutral' as const });
-      }
+      const signals = classifySignals(bet.signals || [], bet.prop_type);
 
       return {
         id: `${bet.game_id}-${bet.player_id}-${bet.prop_type}`,
@@ -150,7 +125,9 @@ export function Dashboard() {
   }, []);
 
   const handleExpandBet = useCallback((bet: BetCardData) => {
-    navigate(`/predictions?highlight=${bet.id}`);
+    // bet.id format is "gameId-playerId-propType" — extract the game_id
+    const gameId = bet.id.split('-')[0];
+    navigate(`/predictions?game=${gameId}`);
   }, [navigate]);
 
   return (

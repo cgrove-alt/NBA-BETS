@@ -22,16 +22,7 @@ import type { Game } from '../../lib/types';
 import { getTodayDate } from '../../components/game/DateSelector';
 import { useBankroll } from '../../hooks/useBankroll';
 import { useFilters } from '../../hooks/useFilters';
-
-function isGameStarted(status: string | undefined): boolean {
-  if (!status) return false;
-  const startedPatterns = [
-    'Qtr', 'Quarter', 'Half', 'OT', 'Final', 'In Progress', 'Live',
-  ];
-  return startedPatterns.some(pattern =>
-    status.toLowerCase().includes(pattern.toLowerCase())
-  );
-}
+import { isGameStarted, classifySignals } from '../../lib/utils';
 
 type QuickPreset = 'all' | 'safe' | 'high-reward' | 'whale' | 'custom';
 
@@ -76,6 +67,7 @@ export function AllPredictions() {
   const [sliderConfidence, setSliderConfidence] = useState(filters.minConfidence);
   const [sliderEdge, setSliderEdge] = useState(filters.minEdge);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emptyRetryCount = useRef(0);
 
   // For non-custom presets, derive the API values directly (no state needed)
   const presetConfidence = selectedPreset !== 'custom'
@@ -123,11 +115,16 @@ export function AllPredictions() {
       }),
     staleTime: 2 * 60 * 1000,
     // After a deploy, props generate in the background. Retry every 5s
-    // until we have data (stops once bets arrive or no games exist).
+    // up to 6 times (30s max) until data arrives.
     refetchInterval: (query) => {
       const bets = query.state.data?.best_bets;
       const hasGames = (gamesData?.games?.length ?? 0) > 0;
-      return hasGames && (!bets || bets.length === 0) ? 5000 : false;
+      if (hasGames && (!bets || bets.length === 0)) {
+        emptyRetryCount.current++;
+        return emptyRetryCount.current <= 6 ? 5000 : false;
+      }
+      emptyRetryCount.current = 0;
+      return false;
     },
   });
 
@@ -190,17 +187,7 @@ export function AllPredictions() {
       const gameStatus = game?.status;
       const isLocked = isGameStarted(gameStatus);
 
-      const signals: BetCardData['signals'] = (bet.signals || []).map((s) => ({
-        label: s,
-        type: (s.includes('Weak') || s.includes('ML Model') || s.includes('Real Line'))
-          ? 'positive' as const
-          : s.includes('Strong defense')
-            ? 'negative' as const
-            : 'neutral' as const,
-      }));
-      if (signals.length === 0) {
-        signals.push({ label: bet.prop_type, type: 'neutral' as const });
-      }
+      const signals = classifySignals(bet.signals || [], bet.prop_type);
 
       return {
         id: `${bet.game_id}-${bet.player_id}-${bet.prop_type}`,

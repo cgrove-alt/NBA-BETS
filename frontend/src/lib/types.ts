@@ -151,6 +151,7 @@ export interface BestBetsResponse {
     min_edge: number;
     prop_types?: string[];
     pick_type?: string;
+    sort_by?: string;
   };
 }
 

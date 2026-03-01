@@ -1,4 +1,4 @@
-const CACHE_NAME = 'oracle-v1';
+const CACHE_NAME = 'oracle-v2';
 const PRECACHE_URLS = ['/', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -18,21 +18,56 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+
+  // API calls: network-only, no caching
   if (event.request.url.includes('/api/')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  // Navigation (HTML): network-first so deploys take effect immediately
+  if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match('/'))
     );
     return;
   }
+
+  // Hashed assets (JS/CSS with content hash): cache-first (immutable)
+  if (event.request.url.match(/\/assets\/.+\.[a-f0-9]+\.(js|css)$/)) {
+    event.respondWith(
+      caches.match(event.request).then((cached) =>
+        cached || fetch(event.request).then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+      )
+    );
+    return;
+  }
+
+  // Everything else: network-first with cache fallback
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });

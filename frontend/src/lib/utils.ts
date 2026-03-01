@@ -131,3 +131,34 @@ export function formatMatchup(homeAbbrev: string, awayAbbrev: string): string {
 export function cn(...classes: (string | boolean | undefined)[]): string {
   return classes.filter(Boolean).join(' ');
 }
+
+// Check if a game has started based on its status
+// Games are locked once they start to prevent retroactive betting
+export function isGameStarted(status: string | undefined): boolean {
+  if (!status) return false;
+  const startedPatterns = [
+    'Qtr', 'Quarter', 'Half', 'OT', 'Final', 'In Progress', 'Live',
+  ];
+  return startedPatterns.some(pattern =>
+    status.toLowerCase().includes(pattern.toLowerCase())
+  );
+}
+
+// Convert backend signal strings to typed signal objects for BetCard
+export function classifySignals(
+  signals: string[],
+  fallbackLabel?: string
+): Array<{ label: string; type: 'positive' | 'negative' | 'neutral' }> {
+  const result = (signals || []).map((s) => ({
+    label: s,
+    type: (s.includes('Weak') || s.includes('ML Model') || s.includes('Real Line'))
+      ? 'positive' as const
+      : s.includes('Strong defense')
+        ? 'negative' as const
+        : 'neutral' as const,
+  }));
+  if (result.length === 0 && fallbackLabel) {
+    result.push({ label: fallbackLabel, type: 'neutral' as const });
+  }
+  return result;
+}
