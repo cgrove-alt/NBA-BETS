@@ -964,6 +964,70 @@ def get_best_bets(
                 if pick_type and pick != pick_type.upper():
                     continue
 
+                # --- Extract explanation data from player dict ---
+                injury_notes = player.get(f"{prop_key}_injury_notes", []) or []
+                matchup_notes = player.get(f"{prop_key}_matchup_notes", []) or []
+                opp_def = player.get(f"{prop_key}_opp_def", None)
+                used_real_line = player.get(f"{prop_key}_real_line", False)
+                used_ml_model = player.get(f"{prop_key}_ml_model", False)
+
+                # Get season and recent averages
+                season_avgs = player.get("season_averages", {}) or {}
+                recent_avgs = player.get("recent_averages", {}) or {}
+
+                # Map prop_key to the average dict keys
+                avg_key_map = {
+                    "points": "pts_avg",
+                    "rebounds": "reb_avg",
+                    "assists": "ast_avg",
+                    "3pm": "fg3_avg",
+                    "pra": None,
+                }
+                avg_key = avg_key_map.get(prop_key)
+                season_avg_val = None
+                recent_avg_val = None
+                if avg_key:
+                    season_avg_val = season_avgs.get(avg_key)
+                    recent_avg_val = recent_avgs.get(avg_key)
+                elif prop_key == "pra":
+                    s_pts = season_avgs.get("pts_avg", 0) or 0
+                    s_reb = season_avgs.get("reb_avg", 0) or 0
+                    s_ast = season_avgs.get("ast_avg", 0) or 0
+                    season_avg_val = s_pts + s_reb + s_ast if (s_pts + s_reb + s_ast) > 0 else None
+                    r_pts = recent_avgs.get("pts_avg", 0) or 0
+                    r_reb = recent_avgs.get("reb_avg", 0) or 0
+                    r_ast = recent_avgs.get("ast_avg", 0) or 0
+                    recent_avg_val = r_pts + r_reb + r_ast if (r_pts + r_reb + r_ast) > 0 else None
+
+                # Build signals list
+                signals = []
+                if used_ml_model:
+                    signals.append("ML Model")
+                if used_real_line:
+                    signals.append("Real Line")
+                for note in injury_notes:
+                    signals.append(note)
+                for note in matchup_notes:
+                    signals.append(note)
+                if opp_def is not None and opp_def > 112:
+                    signals.append(f"Weak defense ({opp_def:.0f} DEF RTG)")
+                elif opp_def is not None and opp_def < 108:
+                    signals.append(f"Strong defense ({opp_def:.0f} DEF RTG)")
+
+                # Build human-readable explanation
+                explanation_parts = []
+                explanation_parts.append(f"Model predicts {prediction:.1f} {prop_type.lower()} (line: {line})")
+                if season_avg_val:
+                    explanation_parts.append(f"Season avg: {season_avg_val:.1f}")
+                if recent_avg_val and season_avg_val and abs(recent_avg_val - season_avg_val) > 0.5:
+                    direction = "up" if recent_avg_val > season_avg_val else "down"
+                    explanation_parts.append(f"Trending {direction} (last 5: {recent_avg_val:.1f})")
+                for note in injury_notes:
+                    explanation_parts.append(note)
+                for note in matchup_notes:
+                    explanation_parts.append(note)
+                explanation = ". ".join(explanation_parts)
+
                 best_bets.append(BestBet(
                     player_name=player_name,
                     player_id=player_id,
@@ -976,6 +1040,12 @@ def get_best_bets(
                     edge_pct=edge_pct,
                     pick=pick,
                     confidence=confidence,
+                    season_avg=round(season_avg_val, 1) if season_avg_val else None,
+                    recent_avg=round(recent_avg_val, 1) if recent_avg_val else None,
+                    explanation=explanation,
+                    signals=signals,
+                    used_real_line=bool(used_real_line),
+                    used_ml_model=bool(used_ml_model),
                 ))
 
     # Sort based on user preference
@@ -985,6 +1055,10 @@ def get_best_bets(
         best_bets.sort(key=lambda x: abs(x.edge_pct), reverse=True)
     else:  # Default "quality" - composite score
         best_bets.sort(key=lambda x: (x.confidence - 50) * abs(x.edge_pct), reverse=True)
+
+    # Assign rank after sorting (1 = best)
+    for i, bet in enumerate(best_bets):
+        bet.rank = i + 1
 
     return BestBetsResponse(
         best_bets=best_bets,

@@ -159,6 +159,14 @@ class BestBet(BaseModel):
     edge_pct: float
     pick: str
     confidence: float
+    # Ranking and explanation fields
+    rank: int = 0
+    season_avg: float | None = None
+    recent_avg: float | None = None
+    explanation: str = ""
+    signals: list[str] = []
+    used_real_line: bool = False
+    used_ml_model: bool = False
 
 
 class BestBetsResponse(BaseModel):
