@@ -225,10 +225,50 @@ class PostGameAnalysisAgent(AgentBase):
 
         return patterns
 
+    def _settle_paper_trades(self) -> dict:
+        """Settle paper trades for target_date and the day before.
+
+        Settles two days to handle late-finishing games (e.g., overtime,
+        West Coast games ending after midnight ET).
+
+        Returns:
+            Dict with settlement counts per date.
+        """
+        from datetime import date as _date
+
+        results = {}
+        try:
+            from nba_betting.settle_trades import settle_date
+
+            # Settle target_date and the day before
+            target = datetime.strptime(self.target_date, '%Y-%m-%d').date()
+            dates_to_settle = [
+                (target - timedelta(days=1)).isoformat(),
+                target.isoformat(),
+            ]
+
+            for d in dates_to_settle:
+                try:
+                    count = settle_date(d)
+                    results[d] = count
+                    if count > 0:
+                        logger.info(f"[{self.AGENT_NAME}] Settled {count} paper trades for {d}")
+                except Exception as e:
+                    logger.warning(f"[{self.AGENT_NAME}] Settlement failed for {d}: {e}")
+                    results[d] = 0
+
+        except ImportError:
+            logger.warning(f"[{self.AGENT_NAME}] settle_trades module not available")
+        except Exception as e:
+            logger.error(f"[{self.AGENT_NAME}] Settlement error: {e}")
+
+        return results
+
     def run(self) -> dict:
         """
         Core post-game analysis.
 
+        0. Settle paper trades (grade predictions against actual outcomes)
         1. Run deterministic nightly job (outcome matching, adjustments)
         2. Identify large misses
         3. Analyze top misses with LLM
@@ -236,6 +276,9 @@ class PostGameAnalysisAgent(AgentBase):
         5. Return structured analysis
         """
         logger.info(f"[{self.AGENT_NAME}] Running for date: {self.target_date}")
+
+        # Step 0: Settle paper trades before analysis
+        settlement_results = self._settle_paper_trades()
 
         service = self._get_calibration_service()
 
@@ -342,6 +385,7 @@ class PostGameAnalysisAgent(AgentBase):
             'miss_analysis': miss_analyses,
             'pattern_flags': pattern_flags,
             'model_feedback': model_feedback,
+            'settlement_results': settlement_results,
             'nightly_job_results': nightly_results.get('steps', {}),
             'reasoning': (
                 f"Analyzed {total} predictions for {self.target_date}. "

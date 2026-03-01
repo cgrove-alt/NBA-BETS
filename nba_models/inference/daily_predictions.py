@@ -2354,8 +2354,8 @@ def predict_player_prop(
             if features is not None and isinstance(features, dict):
                 _season_games = features.get('season_games')
 
-            # over_prob is calibrated at this point (temperature scaling applied in
-            # model_classes.py), so pass it directly as raw_confidence.
+            # over_prob comes from quantile-derived CDF (norm.cdf(z_score))
+            # and is already calibrated — skip temperature scaling.
             bet_filter_result = _evaluate_bet(
                 prop_type=prop_type.lower(),
                 predicted=predicted_value,
@@ -2363,6 +2363,7 @@ def predict_player_prop(
                 raw_confidence=over_prob,
                 games_played=_season_games,
                 bankroll=1000.0,
+                pre_calibrated=True,
             )
 
             # Override bet recommendation when filter says no-bet

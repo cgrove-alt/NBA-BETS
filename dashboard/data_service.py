@@ -2487,6 +2487,9 @@ class DataService:
                     self._prop_fetch_status[game_id]['status'] = 'ready'
             print(f"Player props READY for game {game_id} (FAST method)", flush=True)
 
+            # Auto-log all predictions to paper trading for forward validation
+            self._log_props_to_paper_trading(game_id, home_props, away_props)
+
         except Exception as e:
             print(f"Error fetching player props: {e}", flush=True)
             import traceback
@@ -2498,6 +2501,74 @@ class DataService:
                 else:
                     self._prop_fetch_status[game_id]['status'] = 'error'
                     self._prop_fetch_status[game_id]['error'] = str(e)
+
+    def _log_props_to_paper_trading(self, game_id: str, home_props: list, away_props: list):
+        """Log all generated props to paper trading DB for forward validation.
+
+        Iterates home and away player props, extracts prediction data for each
+        prop type, and calls PaperTrader.log_prediction(). Never blocks the
+        prediction flow — all errors are caught and logged.
+        """
+        try:
+            from nba_betting.paper_trading import PaperTrader
+            trader = PaperTrader()
+        except Exception as e:
+            print(f"Paper trading import failed, skipping logging: {e}", flush=True)
+            return
+
+        game_date = datetime.now().strftime('%Y-%m-%d')
+        logged = 0
+        prop_keys = {
+            'points': 'points',
+            'rebounds': 'rebounds',
+            'assists': 'assists',
+            '3pm': 'threes',
+            'pra': 'pra',
+        }
+
+        for player_props in (home_props or []) + (away_props or []):
+            player_name = player_props.get('player_name', '')
+            if not player_name:
+                continue
+
+            for prop_label, prop_type in prop_keys.items():
+                pred_key = f"{prop_label}_pred"
+                line_key = f"{prop_label}_line"
+                pick_key = f"{prop_label}_pick"
+                edge_key = f"{prop_label}_edge"
+                conf_key = f"{prop_label}_confidence"
+
+                pred_value = player_props.get(pred_key)
+                line = player_props.get(line_key)
+                pick = player_props.get(pick_key, '-')
+
+                if pred_value is None or line is None or line <= 0 or pick == '-':
+                    continue
+
+                edge = player_props.get(edge_key, 0)
+                confidence = player_props.get(conf_key, 50)
+                direction = 'over' if pick == 'OVER' else 'under'
+
+                try:
+                    trader.log_prediction({
+                        'game_date': game_date,
+                        'game_id': str(game_id),
+                        'player_name': player_name,
+                        'prop_type': prop_type,
+                        'line': line,
+                        'direction': direction,
+                        'predicted_value': pred_value,
+                        'over_prob': confidence / 100.0 if direction == 'over' else 1 - confidence / 100.0,
+                        'edge': edge,
+                        'should_bet': edge >= 3.0,
+                        'confidence': confidence / 100.0,
+                    })
+                    logged += 1
+                except Exception:
+                    pass  # Never block on individual logging failures
+
+        if logged > 0:
+            print(f"Paper trading: logged {logged} predictions for game {game_id}", flush=True)
 
     def get_props_fetch_status(self, game_id: str) -> dict:
         """Check if player props have finished fetching (thread-safe)."""

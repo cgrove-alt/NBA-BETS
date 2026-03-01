@@ -92,16 +92,18 @@ def american_to_decimal(odds: int) -> float:
 
 def calibrate_probability(raw_prob: float, temperature: float = CALIBRATION_TEMPERATURE) -> float:
     """
-    Apply temperature scaling to a raw classifier probability.
+    Apply temperature scaling to a raw probability.
 
-    The over_under_classifier in player_*_ensemble.pkl returns extreme
-    values (0.0 or 1.0) because it was never calibrated after training.
-    Temperature scaling > 1 softens extremes toward 0.5, preventing
-    Kelly sizing from allocating max bankroll on every prop.
+    NOTE: The over_under_classifier is DISABLED. Quantile model probabilities
+    (from norm.cdf on quantile spread) are already calibrated — callers should
+    pass pre_calibrated=True to evaluate_bet() to skip this function.
+
+    This function is still used as a fallback when raw classifier output is
+    provided without pre-calibration.
 
     Args:
-        raw_prob:    Raw probability from classifier (0–1).
-        temperature: Softening factor.  2.0 is a sensible default.
+        raw_prob:    Raw probability (0–1).
+        temperature: Softening factor.  2.0 is the default.
 
     Returns:
         Calibrated probability clipped to [0.05, 0.95].
