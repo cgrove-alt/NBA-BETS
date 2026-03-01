@@ -69,13 +69,20 @@ export function Dashboard() {
   // Real bankroll data from /api/bankroll
   const { bankrollData } = useBankroll();
 
-  // Create a map of game_id -> game data for quick lookup
   const games = useMemo(() => gamesData?.games || [], [gamesData]);
   const gamesMap = useMemo(() => {
     const map = new Map<string, Game>();
     games.forEach((game) => map.set(game.game_id, game));
     return map;
   }, [games]);
+
+  // Count picks per game for display on game cards
+  const pickCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const bets = bestBetsData?.best_bets || [];
+    bets.forEach((b) => map.set(b.game_id, (map.get(b.game_id) || 0) + 1));
+    return map;
+  }, [bestBetsData]);
 
   // Transform best bets to BetCardData format
   // CRITICAL: Lock bets for games that have already started (betting integrity)
@@ -228,7 +235,8 @@ export function Dashboard() {
                 <div key={game.game_id} className={`animate-stagger-${Math.min(i + 1, 5)}`}>
                   <GameCard
                     game={game}
-                    onClick={() => navigate('/predictions')}
+                    pickCount={pickCountMap.get(game.game_id) || 0}
+                    onClick={() => navigate(`/predictions?game=${game.game_id}`)}
                   />
                 </div>
               ))}
@@ -272,7 +280,7 @@ export function Dashboard() {
 /**
  * Game Card - Shows a single game matchup
  */
-function GameCard({ game, onClick }: { game: Game; onClick?: () => void }) {
+function GameCard({ game, pickCount, onClick }: { game: Game; pickCount?: number; onClick?: () => void }) {
   const gameTime = game.game_time
     ? new Date(game.game_time).toLocaleTimeString('en-US', {
         hour: 'numeric',
@@ -300,11 +308,19 @@ function GameCard({ game, onClick }: { game: Game; onClick?: () => void }) {
             <div className="text-sm text-text-primary font-medium">
               {game.visitor_team.abbreviation} @ {game.home_team.abbreviation}
             </div>
+            {pickCount != null && pickCount > 0 && (
+              <div className="text-xs text-text-muted">{pickCount} pick{pickCount !== 1 ? 's' : ''}</div>
+            )}
           </div>
         </div>
 
         {/* Time/Status */}
         <div className="flex items-center gap-2">
+          {pickCount != null && pickCount > 0 && (
+            <span className="text-xs text-[#00d4ff] font-medium sm:hidden">
+              {pickCount} pick{pickCount !== 1 ? 's' : ''}
+            </span>
+          )}
           {isLive && (
             <Badge variant="danger" size="sm" glow>
               LIVE

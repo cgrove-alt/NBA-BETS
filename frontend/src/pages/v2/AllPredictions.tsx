@@ -1,5 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import {
   Filter,
   Shield,
@@ -8,6 +9,7 @@ import {
   Loader2,
   X,
   SlidersHorizontal,
+  Search,
 } from 'lucide-react';
 import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
 import { BetCard } from '../../components/v2/BetCard';
@@ -19,98 +21,105 @@ import { getBestBets, getGames } from '../../lib/api';
 import type { Game } from '../../lib/types';
 import { getTodayDate } from '../../components/game/DateSelector';
 import { useBankroll } from '../../hooks/useBankroll';
+import { useFilters } from '../../hooks/useFilters';
 
-/**
- * Check if a game has started based on its status
- * Games are locked once they start to prevent retroactive betting
- */
 function isGameStarted(status: string | undefined): boolean {
   if (!status) return false;
-
   const startedPatterns = [
     'Qtr', 'Quarter', 'Half', 'OT', 'Final', 'In Progress', 'Live',
   ];
-
   return startedPatterns.some(pattern =>
     status.toLowerCase().includes(pattern.toLowerCase())
   );
 }
 
-// Filter presets
-type FilterPreset = 'all' | 'safe' | 'high-reward' | 'whale';
+type QuickPreset = 'all' | 'safe' | 'high-reward' | 'whale' | 'custom';
 
-interface FilterConfig {
+interface PresetConfig {
   minConfidence: number;
   minEdge: number;
   label: string;
   icon: React.ReactNode;
-  description: string;
 }
 
-// Note: Model confidence outputs range 50-70%, adjust thresholds accordingly
-const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
-  all: {
-    minConfidence: 50,
-    minEdge: 0,
-    label: 'All Picks',
-    icon: <Filter className="w-4 h-4" />,
-    description: 'All available predictions',
-  },
-  safe: {
-    minConfidence: 58,
-    minEdge: 3,
-    label: 'Safe Bets',
-    icon: <Shield className="w-4 h-4" />,
-    description: 'Higher confidence picks',
-  },
-  'high-reward': {
-    minConfidence: 52,
-    minEdge: 8,
-    label: 'High Reward',
-    icon: <Flame className="w-4 h-4" />,
-    description: 'High edge value opportunities',
-  },
-  whale: {
-    minConfidence: 60,
-    minEdge: 10,
-    label: 'Whale Plays',
-    icon: <Zap className="w-4 h-4" />,
-    description: 'Best confidence + edge combo',
-  },
+const QUICK_PRESETS: Record<Exclude<QuickPreset, 'custom'>, PresetConfig> = {
+  all: { minConfidence: 50, minEdge: 0, label: 'All Picks', icon: <Filter className="w-4 h-4" /> },
+  safe: { minConfidence: 58, minEdge: 3, label: 'Safe Bets', icon: <Shield className="w-4 h-4" /> },
+  'high-reward': { minConfidence: 52, minEdge: 8, label: 'High Reward', icon: <Flame className="w-4 h-4" /> },
+  whale: { minConfidence: 60, minEdge: 10, label: 'Whale Plays', icon: <Zap className="w-4 h-4" /> },
 };
 
-/**
- * AllPredictions - Browse all betting predictions
- *
- * Features:
- * - Filter presets (Safe, High Reward, Whale Plays)
- * - Search and sort
- * - Grid/List view toggle
- * - Prop type filters
- */
+const SORT_OPTIONS = [
+  { value: 'quality' as const, label: 'Best Overall' },
+  { value: 'confidence' as const, label: 'Highest Confidence' },
+  { value: 'edge' as const, label: 'Highest Edge' },
+];
+
 export function AllPredictions() {
-  const [selectedPreset, setSelectedPreset] = useState<FilterPreset>('all');
+  const [searchParams] = useSearchParams();
+  const initialGameId = searchParams.get('game');
+
+  const { filters, updateFilters, resetFilters } = useFilters();
+
+  const [selectedPreset, setSelectedPreset] = useState<QuickPreset>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [propTypeFilter, setPropTypeFilter] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(initialGameId);
+  const [sortBy, setSortBy] = useState<'quality' | 'confidence' | 'edge'>(
+    (filters.sortBy as 'quality' | 'confidence' | 'edge') || 'quality'
+  );
+  const [pickType, setPickType] = useState<'ALL' | 'OVER' | 'UNDER'>('ALL');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Custom slider state (debounced)
+  const [sliderConfidence, setSliderConfidence] = useState(filters.minConfidence);
+  const [sliderEdge, setSliderEdge] = useState(filters.minEdge);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // For non-custom presets, derive the API values directly (no state needed)
+  const presetConfidence = selectedPreset !== 'custom'
+    ? QUICK_PRESETS[selectedPreset].minConfidence
+    : null;
+  const presetEdge = selectedPreset !== 'custom'
+    ? QUICK_PRESETS[selectedPreset].minEdge
+    : null;
+
+  // Debounced API filter values for custom sliders only
+  const [debouncedCustomConfidence, setDebouncedCustomConfidence] = useState(sliderConfidence);
+  const [debouncedCustomEdge, setDebouncedCustomEdge] = useState(sliderEdge);
+
+  useEffect(() => {
+    if (selectedPreset !== 'custom') return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedCustomConfidence(sliderConfidence);
+      setDebouncedCustomEdge(sliderEdge);
+      updateFilters({ minConfidence: sliderConfidence, minEdge: sliderEdge });
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [sliderConfidence, sliderEdge, selectedPreset, updateFilters]);
+
+  // Final effective values for API calls
+  const effectiveMinConfidence = presetConfidence ?? debouncedCustomConfidence;
+  const effectiveMinEdge = presetEdge ?? debouncedCustomEdge;
 
   const selectedDate = getTodayDate();
-  const filterConfig = FILTER_PRESETS[selectedPreset];
 
-  // Fetch games for context
   const { data: gamesData } = useQuery({
     queryKey: ['games', selectedDate],
     queryFn: () => getGames(selectedDate),
     staleTime: 5 * 60 * 1000,
   });
 
-  // Fetch best bets with current filter
   const { data: bestBetsData, isLoading } = useQuery({
-    queryKey: ['bestBets', filterConfig.minConfidence, filterConfig.minEdge],
+    queryKey: ['bestBets', effectiveMinConfidence, effectiveMinEdge, sortBy, pickType === 'ALL' ? undefined : pickType],
     queryFn: () =>
       getBestBets({
-        minConfidence: filterConfig.minConfidence,
-        minEdge: filterConfig.minEdge,
+        minConfidence: effectiveMinConfidence,
+        minEdge: effectiveMinEdge,
+        sortBy,
+        pickType: pickType === 'ALL' ? undefined : pickType,
       }),
     staleTime: 2 * 60 * 1000,
   });
@@ -122,17 +131,54 @@ export function AllPredictions() {
     return map;
   }, [gamesData]);
 
-  // Transform and filter bets
-  // CRITICAL: Lock bets for games that have already started (betting integrity)
-  const bets: BetCardData[] = useMemo(() => {
+  // Build game chips data: game_id -> { label, count }
+  const gameChips = useMemo(() => {
     const bestBets = bestBetsData?.best_bets || [];
+    const countMap = new Map<string, number>();
+    bestBets.forEach((b) => {
+      countMap.set(b.game_id, (countMap.get(b.game_id) || 0) + 1);
+    });
+    const chips: { gameId: string; label: string; count: number; time: string }[] = [];
+    for (const [gameId, count] of countMap) {
+      const game = gamesMap.get(gameId);
+      const away = game?.visitor_team?.abbreviation || '???';
+      const home = game?.home_team?.abbreviation || '???';
+      let time = '';
+      if (game?.game_time) {
+        try {
+          time = new Date(game.game_time).toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          });
+        } catch { /* ignore */ }
+      }
+      chips.push({ gameId, label: `${away} @ ${home}`, count, time });
+    }
+    return chips;
+  }, [bestBetsData, gamesMap]);
 
-    // Apply prop type filter
-    const filtered = propTypeFilter
-      ? bestBets.filter((b) => b.prop_type === propTypeFilter)
-      : bestBets;
+  // Transform and filter bets
+  const bets: BetCardData[] = useMemo(() => {
+    let bestBets = bestBetsData?.best_bets || [];
 
-    return filtered.map((bet) => {
+    // Game filter
+    if (selectedGameId) {
+      bestBets = bestBets.filter((b) => b.game_id === selectedGameId);
+    }
+
+    // Prop type filter
+    if (propTypeFilter) {
+      bestBets = bestBets.filter((b) => b.prop_type === propTypeFilter);
+    }
+
+    // Player search (client-side)
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase().trim();
+      bestBets = bestBets.filter((b) => b.player_name.toLowerCase().includes(term));
+    }
+
+    return bestBets.map((bet) => {
       const game = gamesMap.get(bet.game_id);
       const gameStatus = game?.status;
       const isLocked = isGameStarted(gameStatus);
@@ -174,7 +220,7 @@ export function AllPredictions() {
         recentAvg: bet.recent_avg,
       };
     });
-  }, [bestBetsData, gamesMap, propTypeFilter]);
+  }, [bestBetsData, gamesMap, propTypeFilter, selectedGameId, searchTerm]);
 
   // Get unique prop types for filter
   const propTypes = useMemo(() => {
@@ -183,9 +229,7 @@ export function AllPredictions() {
     return Array.from(types);
   }, [bestBetsData]);
 
-  // Real bankroll data from /api/bankroll
   const { bankrollData } = useBankroll();
-
   const [copiedBetId, setCopiedBetId] = useState<string | null>(null);
 
   const handleTakeBet = useCallback((bet: BetCardData) => {
@@ -195,67 +239,217 @@ export function AllPredictions() {
     setTimeout(() => setCopiedBetId(null), 2000);
   }, []);
 
-  const handleExpandBet = useCallback(() => {
-    // No-op: card already shows details inline
-  }, []);
+  const handleSelectPreset = (preset: QuickPreset) => {
+    setSelectedPreset(preset);
+    if (preset !== 'custom') {
+      const config = QUICK_PRESETS[preset];
+      setSliderConfidence(config.minConfidence);
+      setSliderEdge(config.minEdge);
+    }
+  };
+
+  // Count active filters for summary
+  const activeFilterParts: string[] = [];
+  if (selectedGameId) {
+    const chip = gameChips.find(c => c.gameId === selectedGameId);
+    if (chip) activeFilterParts.push(chip.label);
+  }
+  if (effectiveMinConfidence > 50) activeFilterParts.push(`Conf ≥ ${effectiveMinConfidence}%`);
+  if (effectiveMinEdge > 0) activeFilterParts.push(`Edge ≥ ${effectiveMinEdge}%`);
+  if (propTypeFilter) activeFilterParts.push(propTypeFilter);
+  if (pickType !== 'ALL') activeFilterParts.push(pickType);
+  if (searchTerm.trim()) activeFilterParts.push(`"${searchTerm.trim()}"`);
+
+  const handleClearAll = () => {
+    setSelectedPreset('all');
+    setSelectedGameId(null);
+    setPropTypeFilter(null);
+    setPickType('ALL');
+    setSearchTerm('');
+    setSortBy('quality');
+    setSliderConfidence(50);
+    setSliderEdge(0);
+    resetFilters();
+  };
 
   return (
     <ResponsiveLayout bankroll={bankrollData} activePage="predictions">
-      <div className="space-y-6 pb-20 md:pb-6">
+      <div className="space-y-4 pb-20 md:pb-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-text-primary">Predictions</h1>
             <p className="text-sm text-text-muted mt-1">
-              {bets.length} picks available
+              {bets.length} pick{bets.length !== 1 ? 's' : ''} available
             </p>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<SlidersHorizontal className="w-4 h-4" />}
-            onClick={() => setShowFilters(!showFilters)}
-          >
-            Filters
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Sort dropdown */}
+            <select
+              value={sortBy}
+              onChange={(e) => {
+                const val = e.target.value as typeof sortBy;
+                setSortBy(val);
+                updateFilters({ sortBy: val });
+              }}
+              className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-[#00d4ff]"
+            >
+              {SORT_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <Button
+              variant={showFilters ? 'primary' : 'secondary'}
+              size="sm"
+              icon={<SlidersHorizontal className="w-4 h-4" />}
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              Filters
+            </Button>
+          </div>
         </div>
 
-        {/* Filter Presets - Scrollable on mobile */}
-        <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-hide">
-          {(Object.entries(FILTER_PRESETS) as [FilterPreset, FilterConfig][]).map(
+        {/* Game Selector Bar */}
+        {gameChips.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-hide">
+            <button
+              onClick={() => setSelectedGameId(null)}
+              className={`whitespace-nowrap shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                selectedGameId === null
+                  ? 'bg-[#00d4ff] text-black'
+                  : 'bg-bg-tertiary text-text-muted hover:text-text-primary border border-border'
+              }`}
+            >
+              All Games ({bestBetsData?.best_bets?.length || 0})
+            </button>
+            {gameChips.map(chip => (
+              <button
+                key={chip.gameId}
+                onClick={() => setSelectedGameId(selectedGameId === chip.gameId ? null : chip.gameId)}
+                className={`whitespace-nowrap shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  selectedGameId === chip.gameId
+                    ? 'bg-[#00d4ff] text-black'
+                    : 'bg-bg-tertiary text-text-muted hover:text-text-primary border border-border'
+                }`}
+              >
+                {chip.label} {chip.time && <span className="text-xs opacity-75">{chip.time}</span>} ({chip.count})
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Search + Pick Type Row */}
+        <div className="flex gap-2">
+          {/* Player search */}
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Search player..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-bg-tertiary border border-border rounded-lg pl-9 pr-8 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-[#00d4ff]"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-primary"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Pick type toggle */}
+          <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+            {(['ALL', 'OVER', 'UNDER'] as const).map(pt => (
+              <button
+                key={pt}
+                onClick={() => setPickType(pt)}
+                className={`px-3 py-2 text-xs font-semibold transition-colors ${
+                  pickType === pt
+                    ? 'bg-[#00d4ff] text-black'
+                    : 'bg-bg-tertiary text-text-muted hover:text-text-primary'
+                }`}
+              >
+                {pt}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Filter Presets */}
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-hide">
+          {(Object.entries(QUICK_PRESETS) as [Exclude<QuickPreset, 'custom'>, PresetConfig][]).map(
             ([key, config]) => (
               <Button
                 key={key}
                 variant={selectedPreset === key ? 'primary' : 'ghost'}
                 size="sm"
                 icon={config.icon}
-                onClick={() => setSelectedPreset(key)}
+                onClick={() => handleSelectPreset(key)}
                 className="whitespace-nowrap shrink-0"
               >
                 {config.label}
               </Button>
             )
           )}
+          <Button
+            variant={selectedPreset === 'custom' ? 'primary' : 'ghost'}
+            size="sm"
+            icon={<SlidersHorizontal className="w-4 h-4" />}
+            onClick={() => handleSelectPreset('custom')}
+            className="whitespace-nowrap shrink-0"
+          >
+            Custom
+          </Button>
         </div>
 
-        {/* Filter Description */}
-        <Card variant="glass" className="p-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-[rgba(0,212,255,0.1)]">
-              {filterConfig.icon}
+        {/* Custom Sliders (when Custom preset active) */}
+        {selectedPreset === 'custom' && (
+          <Card className="p-4 space-y-4">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm text-text-primary">Min Confidence</label>
+                <span className="text-sm font-semibold text-[#00d4ff]">{sliderConfidence}%</span>
+              </div>
+              <input
+                type="range"
+                min="50"
+                max="70"
+                step="1"
+                value={sliderConfidence}
+                onChange={(e) => setSliderConfidence(Number(e.target.value))}
+                className="w-full accent-[#00d4ff]"
+              />
+              <div className="flex justify-between text-xs text-text-muted mt-1">
+                <span>50%</span>
+                <span>70%</span>
+              </div>
             </div>
             <div>
-              <div className="font-semibold text-text-primary">{filterConfig.label}</div>
-              <div className="text-sm text-text-muted">{filterConfig.description}</div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm text-text-primary">Min Edge</label>
+                <span className="text-sm font-semibold text-[#00d4ff]">{sliderEdge}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="20"
+                step="1"
+                value={sliderEdge}
+                onChange={(e) => setSliderEdge(Number(e.target.value))}
+                className="w-full accent-[#00d4ff]"
+              />
+              <div className="flex justify-between text-xs text-text-muted mt-1">
+                <span>0%</span>
+                <span>20%</span>
+              </div>
             </div>
-            <div className="ml-auto text-right hidden sm:block">
-              <div className="text-xs text-text-muted">Confidence ≥ {filterConfig.minConfidence}%</div>
-              <div className="text-xs text-text-muted">Edge ≥ {filterConfig.minEdge}%</div>
-            </div>
-          </div>
-        </Card>
+          </Card>
+        )}
 
-        {/* Advanced Filters (collapsible) */}
+        {/* Advanced Filters (collapsible) — prop type filter */}
         {showFilters && (
           <Card className="p-4">
             <div className="flex items-center justify-between mb-4">
@@ -287,6 +481,26 @@ export function AllPredictions() {
               ))}
             </div>
           </Card>
+        )}
+
+        {/* Active filter summary */}
+        {activeFilterParts.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            <span className="text-text-muted">
+              Showing {bets.length} pick{bets.length !== 1 ? 's' : ''} ·
+            </span>
+            {activeFilterParts.map((part, i) => (
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-bg-tertiary text-text-secondary border border-border">
+                {part}
+              </span>
+            ))}
+            <span className="text-text-muted">
+              · Sorted by {SORT_OPTIONS.find(o => o.value === sortBy)?.label?.toLowerCase()}
+            </span>
+            <button onClick={handleClearAll} className="text-[#00d4ff] hover:underline ml-1">
+              Clear all
+            </button>
+          </div>
         )}
 
         {/* View Mode Toggle (desktop only) */}
@@ -321,7 +535,6 @@ export function AllPredictions() {
                   bet={{ ...bet, copied: copiedBetId === bet.id }}
                   variant="compact"
                   onTake={handleTakeBet}
-                  onExpand={handleExpandBet}
                 />
               ))}
             </div>
@@ -333,7 +546,6 @@ export function AllPredictions() {
                   bet={{ ...bet, copied: copiedBetId === bet.id }}
                   variant="list"
                   onTake={handleTakeBet}
-                  onExpand={handleExpandBet}
                 />
               ))}
             </div>
@@ -344,10 +556,7 @@ export function AllPredictions() {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => {
-                setSelectedPreset('all');
-                setPropTypeFilter(null);
-              }}
+              onClick={handleClearAll}
             >
               Reset Filters
             </Button>

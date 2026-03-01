@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Card } from './Card';
 import { Badge, EdgeBadge } from './Badge';
 import { Button } from './Button';
@@ -6,7 +7,8 @@ import {
   Clock,
   TrendingUp,
   Zap,
-  ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Target,
   Lock,
   Radio,
@@ -52,17 +54,6 @@ interface BetCardProps {
   className?: string;
 }
 
-/**
- * BetCard - The Hero Component
- *
- * The primary UI element for displaying betting recommendations.
- * Designed to be visually striking with clear call-to-action.
- *
- * Variants:
- * - featured: Large, detailed card for top picks (hero section)
- * - compact: Medium card for carousel/grid display
- * - list: Slim row for dense lists
- */
 export function BetCard({
   bet,
   variant = 'compact',
@@ -75,7 +66,6 @@ export function BetCard({
   const isTopPick = bet.edge >= 15 && bet.confidence >= 60;
   const isLocked = bet.locked === true;
 
-  // Determine card variant based on edge/confidence (dimmed if locked)
   const cardVariant = isLocked ? 'default' : isTopPick ? 'gold' : isPositiveEdge ? 'success' : 'default';
 
   if (variant === 'featured') {
@@ -99,13 +89,11 @@ export function BetCard({
         isPositiveEdge={isPositiveEdge}
         isLocked={isLocked}
         onTake={onTake}
-        onExpand={onExpand}
         className={className}
       />
     );
   }
 
-  // Default: Compact variant
   return (
     <CompactBetCard
       bet={bet}
@@ -113,15 +101,11 @@ export function BetCard({
       isHighConfidence={isHighConfidence}
       isLocked={isLocked}
       onTake={onTake}
-      onExpand={onExpand}
       className={className}
     />
   );
 }
 
-/**
- * Featured BetCard - Large hero card for top picks
- */
 function FeaturedBetCard({
   bet,
   cardVariant,
@@ -146,12 +130,9 @@ function FeaturedBetCard({
       hover={false}
       className={`relative overflow-hidden ${isLocked ? 'opacity-75' : ''} ${className}`}
     >
-      {/* Top Pick Banner */}
       {isTopPick && !isLocked && (
         <div className="absolute top-0 left-0 right-0 h-1 gradient-gold" />
       )}
-
-      {/* Locked Banner for games in progress */}
       {isLocked && (
         <div className="absolute top-0 left-0 right-0 h-1 bg-[#ff3355]" />
       )}
@@ -160,7 +141,6 @@ function FeaturedBetCard({
         {/* Header: Matchup + Time */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
-            {/* Team Matchup */}
             <div className="flex items-center gap-3">
               <TeamLogo abbrev={bet.matchup.awayAbbrev} size="lg" />
               <span className="text-text-muted text-lg">@</span>
@@ -177,7 +157,6 @@ function FeaturedBetCard({
             </div>
           </div>
 
-          {/* Live Badge (when locked) or Top Pick Badge */}
           {isLocked ? (
             <Badge variant="danger" glow className="gap-1">
               <Radio className="w-3 h-3 animate-pulse" />
@@ -191,13 +170,13 @@ function FeaturedBetCard({
           ) : null}
         </div>
 
-        {/* Main Pick - THE BIG TEXT */}
+        {/* Main Pick */}
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-2">
             <span className="text-sm text-text-muted uppercase tracking-wide">
               {getPickTypeLabel(bet.pick.type)}
             </span>
-            {bet.rank && bet.rank <= 10 && (
+            {bet.rank != null && bet.rank <= 10 && (
               <Badge variant={bet.rank <= 3 ? 'premium' : 'default'} size="sm">
                 #{bet.rank}
               </Badge>
@@ -220,7 +199,7 @@ function FeaturedBetCard({
           )}
         </div>
 
-        {/* Explanation - WHY this bet */}
+        {/* Explanation */}
         {bet.explanation && (
           <div className="text-sm text-text-secondary leading-relaxed mb-4 bg-bg-tertiary rounded-lg p-3">
             {bet.explanation}
@@ -228,7 +207,7 @@ function FeaturedBetCard({
         )}
 
         {/* Season vs Recent averages */}
-        {(bet.seasonAvg || bet.recentAvg) && (
+        {(bet.seasonAvg != null || bet.recentAvg != null) && (
           <div className="flex items-center gap-4 mb-4 text-xs text-text-muted">
             {bet.seasonAvg != null && (
               <span>Season: <span className="text-text-primary font-semibold">{bet.seasonAvg}</span></span>
@@ -241,7 +220,6 @@ function FeaturedBetCard({
 
         {/* Stats Row */}
         <div className="flex items-center gap-6 mb-6">
-          {/* Confidence Meter */}
           <div className="flex items-center gap-3">
             <ConfidenceMeter value={bet.confidence} size="lg" />
             <div>
@@ -254,7 +232,6 @@ function FeaturedBetCard({
 
           <div className="w-px h-12 bg-border" />
 
-          {/* Edge */}
           <div>
             <div className="text-xs text-text-muted uppercase">Edge</div>
             <div className="flex items-center gap-2">
@@ -310,7 +287,7 @@ function FeaturedBetCard({
               variant="secondary"
               size="lg"
               onClick={() => onExpand(bet)}
-              icon={<ChevronRight className="w-5 h-5" />}
+              icon={<ChevronDown className="w-5 h-5" />}
             >
               Details
             </Button>
@@ -321,16 +298,12 @@ function FeaturedBetCard({
   );
 }
 
-/**
- * Compact BetCard - Medium card for grids/carousels
- */
 function CompactBetCard({
   bet,
   cardVariant,
   isHighConfidence,
   isLocked,
   onTake,
-  onExpand,
   className,
 }: {
   bet: BetCardData;
@@ -338,15 +311,16 @@ function CompactBetCard({
   isHighConfidence: boolean;
   isLocked: boolean;
   onTake?: (bet: BetCardData) => void;
-  onExpand?: (bet: BetCardData) => void;
   className?: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <Card
       variant={cardVariant}
       glow={isHighConfidence && !isLocked}
       className={`${isLocked ? 'opacity-75' : ''} ${className}`}
-      onClick={() => onExpand?.(bet)}
+      onClick={() => setExpanded(!expanded)}
     >
       <div className="p-4">
         {/* Header */}
@@ -356,17 +330,24 @@ function CompactBetCard({
             <span className="text-text-muted text-xs">@</span>
             <TeamLogo abbrev={bet.matchup.homeAbbrev} size="sm" />
           </div>
-          {isLocked ? (
-            <Badge variant="danger" size="sm" glow>
-              <Radio className="w-2.5 h-2.5 animate-pulse mr-1" />
-              LIVE
-            </Badge>
-          ) : (
-            <div className="flex items-center gap-1 text-xs text-text-muted">
-              <Clock className="w-3 h-3" />
-              {formatGameTime(bet.matchup.gameTime)}
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {isLocked ? (
+              <Badge variant="danger" size="sm" glow>
+                <Radio className="w-2.5 h-2.5 animate-pulse mr-1" />
+                LIVE
+              </Badge>
+            ) : (
+              <div className="flex items-center gap-1 text-xs text-text-muted">
+                <Clock className="w-3 h-3" />
+                {formatGameTime(bet.matchup.gameTime)}
+              </div>
+            )}
+            {expanded ? (
+              <ChevronUp className="w-4 h-4 text-text-muted" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-text-muted" />
+            )}
+          </div>
         </div>
 
         {/* Pick */}
@@ -375,10 +356,12 @@ function CompactBetCard({
             <span className="text-xs text-text-muted uppercase tracking-wide">
               {getPickTypeLabel(bet.pick.type)}
             </span>
-            {bet.rank && bet.rank <= 10 && (
-              <Badge variant={bet.rank <= 3 ? 'premium' : 'default'} size="sm">
+            {bet.rank != null && bet.rank <= 20 && (
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                bet.rank <= 3 ? 'bg-[rgba(255,215,0,0.2)] text-[#ffd700] border border-[rgba(255,215,0,0.4)]' : 'bg-bg-tertiary text-text-muted border border-border'
+              }`}>
                 #{bet.rank}
-              </Badge>
+              </div>
             )}
           </div>
           <div className="text-xl font-bold text-text-primary truncate">
@@ -389,7 +372,7 @@ function CompactBetCard({
               {formatOdds(bet.pick.odds)}
             </div>
           )}
-          {bet.explanation && (
+          {!expanded && bet.explanation && (
             <div className="text-xs text-text-muted truncate mt-1">
               {bet.explanation}
             </div>
@@ -404,6 +387,40 @@ function CompactBetCard({
           </div>
           <EdgeBadge edge={bet.edge} size="sm" />
         </div>
+
+        {/* Expanded Details */}
+        {expanded && (
+          <div className="border-t border-border mt-1 pt-3 space-y-2">
+            {bet.seasonAvg != null && (
+              <div className="flex justify-between text-sm">
+                <span className="text-text-muted">Season Avg</span>
+                <span className="text-text-primary font-semibold">{bet.seasonAvg}</span>
+              </div>
+            )}
+            {bet.recentAvg != null && (
+              <div className="flex justify-between text-sm">
+                <span className="text-text-muted">Last 5 Avg</span>
+                <span className="text-text-primary font-semibold">{bet.recentAvg}</span>
+              </div>
+            )}
+
+            {bet.explanation && (
+              <div className="text-xs text-text-secondary bg-bg-tertiary rounded p-2 mt-2">
+                {bet.explanation}
+              </div>
+            )}
+
+            {bet.signals && bet.signals.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {bet.signals.map((signal, i) => (
+                  <Badge key={i} variant={signal.type === 'positive' ? 'success' : signal.type === 'negative' ? 'danger' : 'default'} size="sm">
+                    {signal.label}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Action */}
         {isLocked ? (
@@ -435,102 +452,146 @@ function CompactBetCard({
   );
 }
 
-/**
- * List BetCard - Slim row for dense lists
- */
 function ListBetCard({
   bet,
   isPositiveEdge,
   isLocked,
   onTake,
-  onExpand,
   className,
 }: {
   bet: BetCardData;
   isPositiveEdge: boolean;
   isLocked: boolean;
   onTake?: (bet: BetCardData) => void;
-  onExpand?: (bet: BetCardData) => void;
   className?: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <div
       className={`
-        flex items-center gap-4 p-3 rounded-lg
-        bg-bg-card border border-border
+        rounded-lg bg-bg-card border border-border
         hover:bg-bg-card-hover hover:border-[rgba(255,255,255,0.1)]
         transition-all duration-200 cursor-pointer
         ${isLocked ? 'opacity-75' : ''}
         ${className}
       `}
-      onClick={() => onExpand?.(bet)}
+      onClick={() => setExpanded(!expanded)}
     >
-      {/* Teams */}
-      <div className="flex items-center gap-1.5 min-w-[80px]">
-        <TeamLogo abbrev={bet.matchup.awayAbbrev} size="xs" />
-        <span className="text-text-muted text-xs">@</span>
-        <TeamLogo abbrev={bet.matchup.homeAbbrev} size="xs" />
-      </div>
+      <div className="flex items-center gap-4 p-3">
+        {/* Rank */}
+        {bet.rank != null && bet.rank <= 20 && (
+          <span className={`text-xs font-bold w-6 text-center ${
+            bet.rank <= 3 ? 'text-[#ffd700]' : 'text-text-muted'
+          }`}>
+            #{bet.rank}
+          </span>
+        )}
 
-      {/* Pick */}
-      <div className="flex-1 min-w-0">
-        <div className="font-semibold text-text-primary truncate">
-          {bet.pick.selection}
+        {/* Teams */}
+        <div className="flex items-center gap-1.5 min-w-[80px]">
+          <TeamLogo abbrev={bet.matchup.awayAbbrev} size="xs" />
+          <span className="text-text-muted text-xs">@</span>
+          <TeamLogo abbrev={bet.matchup.homeAbbrev} size="xs" />
         </div>
-        {formatOdds(bet.pick.odds) && (
-          <div className="text-xs text-text-muted">
-            {formatOdds(bet.pick.odds)}
+
+        {/* Pick */}
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-text-primary truncate">
+            {bet.pick.selection}
           </div>
+          {!expanded && bet.explanation && (
+            <div className="text-xs text-text-muted truncate">
+              {bet.explanation}
+            </div>
+          )}
+        </div>
+
+        {isLocked && (
+          <Badge variant="danger" size="sm" glow>
+            <Radio className="w-2.5 h-2.5 animate-pulse mr-1" />
+            LIVE
+          </Badge>
+        )}
+
+        {/* Confidence */}
+        <div className="flex items-center gap-2">
+          <ConfidenceMeter value={bet.confidence} size="xs" />
+          <span className="text-sm font-mono w-10">{bet.confidence}%</span>
+        </div>
+
+        {/* Edge */}
+        <EdgeBadge edge={bet.edge} size="sm" />
+
+        {/* Action */}
+        {isLocked ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled
+            className="opacity-50 cursor-not-allowed"
+          >
+            <Lock className="w-3 h-3" />
+          </Button>
+        ) : (
+          <Button
+            variant={bet.copied ? 'success' : isPositiveEdge ? 'success' : 'secondary'}
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onTake?.(bet);
+            }}
+          >
+            {bet.copied ? 'COPIED' : 'TAKE'}
+          </Button>
+        )}
+
+        {expanded ? (
+          <ChevronUp className="w-4 h-4 text-text-muted shrink-0" />
+        ) : (
+          <ChevronDown className="w-4 h-4 text-text-muted shrink-0" />
         )}
       </div>
 
-      {/* Live Badge (when locked) */}
-      {isLocked && (
-        <Badge variant="danger" size="sm" glow>
-          <Radio className="w-2.5 h-2.5 animate-pulse mr-1" />
-          LIVE
-        </Badge>
-      )}
+      {/* Expanded Details */}
+      {expanded && (
+        <div className="border-t border-border px-3 pb-3 pt-2 space-y-2">
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            {bet.seasonAvg != null && (
+              <div className="flex justify-between">
+                <span className="text-text-muted">Season Avg</span>
+                <span className="text-text-primary font-semibold">{bet.seasonAvg}</span>
+              </div>
+            )}
+            {bet.recentAvg != null && (
+              <div className="flex justify-between">
+                <span className="text-text-muted">Last 5 Avg</span>
+                <span className="text-text-primary font-semibold">{bet.recentAvg}</span>
+              </div>
+            )}
+          </div>
 
-      {/* Confidence */}
-      <div className="flex items-center gap-2">
-        <ConfidenceMeter value={bet.confidence} size="xs" />
-        <span className="text-sm font-mono w-10">{bet.confidence}%</span>
-      </div>
+          {bet.explanation && (
+            <div className="text-xs text-text-secondary bg-bg-tertiary rounded p-2">
+              {bet.explanation}
+            </div>
+          )}
 
-      {/* Edge */}
-      <EdgeBadge edge={bet.edge} size="sm" />
-
-      {/* Action */}
-      {isLocked ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled
-          className="opacity-50 cursor-not-allowed"
-        >
-          <Lock className="w-3 h-3" />
-        </Button>
-      ) : (
-        <Button
-          variant={bet.copied ? 'success' : isPositiveEdge ? 'success' : 'secondary'}
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            onTake?.(bet);
-          }}
-        >
-          {bet.copied ? 'COPIED' : 'TAKE'}
-        </Button>
+          {bet.signals && bet.signals.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {bet.signals.map((signal, i) => (
+                <Badge key={i} variant={signal.type === 'positive' ? 'success' : signal.type === 'negative' ? 'danger' : 'default'} size="sm">
+                  {signal.label}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-/**
- * Team Logo Placeholder
- * In production, this would load actual team logos
- */
 function TeamLogo({ abbrev, size = 'md' }: { abbrev: string; size?: 'xs' | 'sm' | 'md' | 'lg' }) {
   const sizeClasses = {
     xs: 'w-6 h-6 text-[8px]',
@@ -553,7 +614,6 @@ function TeamLogo({ abbrev, size = 'md' }: { abbrev: string; size?: 'xs' | 'sm' 
   );
 }
 
-// Utility functions
 function formatGameTime(isoString: string): string {
   try {
     const date = new Date(isoString);

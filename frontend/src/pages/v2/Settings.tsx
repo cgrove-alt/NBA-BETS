@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DollarSign,
@@ -8,6 +9,9 @@ import {
   Zap,
   Check,
   AlertCircle,
+  Activity,
+  FileText,
+  ChevronRight,
 } from 'lucide-react';
 import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
 import { Card } from '../../components/v2/Card';
@@ -34,6 +38,7 @@ interface StrategySettings {
  * Settings - Configure betting strategy and preferences
  */
 export function Settings() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { bankrollData } = useBankroll();
 
@@ -344,6 +349,38 @@ export function Settings() {
             />
           </div>
         </SettingsSection>
+
+        {/* Quick Links */}
+        <Card>
+          <div className="divide-y divide-border">
+            <button
+              onClick={() => navigate('/health')}
+              className="flex items-center gap-3 w-full p-4 text-left hover:bg-bg-tertiary transition-colors"
+            >
+              <div className="p-2 rounded-lg bg-[rgba(0,212,255,0.1)]">
+                <Activity className="w-5 h-5 text-[#00d4ff]" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium text-text-primary">System Health</div>
+                <div className="text-xs text-text-muted">Model status and data freshness</div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-text-muted" />
+            </button>
+            <button
+              onClick={() => navigate('/briefing')}
+              className="flex items-center gap-3 w-full p-4 text-left hover:bg-bg-tertiary transition-colors"
+            >
+              <div className="p-2 rounded-lg bg-[rgba(255,136,0,0.1)]">
+                <FileText className="w-5 h-5 text-[#ff8800]" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium text-text-primary">Daily Briefing</div>
+                <div className="text-xs text-text-muted">Yesterday's results and today's outlook</div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-text-muted" />
+            </button>
+          </div>
+        </Card>
 
         {/* App Info */}
         <Card variant="glass" className="p-4">
