@@ -1199,9 +1199,9 @@ def get_injury_report(date: str):
             detail="Injury tracker module not available"
         )
 
-    # Fetch injuries for the date
+    # Fetch injuries (no date parameter — fetches all current injuries)
     try:
-        injuries_data = fetch_current_injuries(target_date)
+        injuries_data = fetch_current_injuries()
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -1209,17 +1209,18 @@ def get_injury_report(date: str):
         )
 
     # Convert to injury report objects
-    # fetch_current_injuries returns InjuryReport dataclass objects, not dicts
+    # fetch_current_injuries returns InjuryReport objects with fields:
+    #   player_id, player_name, status (str), team (str), injury_type, injury_detail, game_date
     injuries = []
     for injury_obj in injuries_data:
         injuries.append(InjuryReport(
             player_id=injury_obj.player_id or 0,
             player_name=injury_obj.player_name or 'Unknown',
-            team_id=injury_obj.team_id or 0,
-            team_abbrev=injury_obj.team_abbrev or '',
-            status=str(injury_obj.status.value) if injury_obj.status else 'UNKNOWN',
+            team_id=0,
+            team_abbrev=injury_obj.team or '',
+            status=str(injury_obj.status) if injury_obj.status else 'UNKNOWN',
             injury_type=injury_obj.injury_type or None,
-            detected_at=injury_obj.last_updated.isoformat() if injury_obj.last_updated else datetime.now().isoformat(),
+            detected_at=datetime.now().isoformat(),
         ))
 
     return InjuryReportResponse(
@@ -1368,10 +1369,11 @@ def get_latest_backtest():
             detail=f"Error reading backtest file: {str(e)}"
         )
 
-    # Parse backtest results
+    # Parse backtest results — handle both old keys (overall_performance, by_prop_type)
+    # and new keys (overall_metrics, prop_type_metrics)
     try:
-        # Extract overall metrics
-        overall = data.get('overall_performance', {})
+        # Extract overall metrics (try both key conventions)
+        overall = data.get('overall_metrics', data.get('overall_performance', {}))
         overall_metrics = BacktestMetrics(
             rmse=overall.get('rmse'),
             mae=overall.get('mae'),
@@ -1396,20 +1398,22 @@ def get_latest_backtest():
                 max_drawdown=betting.get('max_drawdown'),
             )
 
-        # Extract by prop type
+        # Extract by prop type (try both key conventions)
         by_prop = []
-        prop_metrics = data.get('by_prop_type', {})
-        for prop_type, metrics in prop_metrics.items():
-            by_prop.append(BacktestByProp(
-                prop_type=prop_type,
-                metrics=BacktestMetrics(
-                    rmse=metrics.get('rmse'),
-                    mae=metrics.get('mae'),
-                    r2=metrics.get('r2'),
-                    bias=metrics.get('bias'),
-                ),
-                count=metrics.get('count', 0),
-            ))
+        prop_metrics = data.get('prop_type_metrics', data.get('by_prop_type', {}))
+        if isinstance(prop_metrics, dict):
+            for prop_type, metrics in prop_metrics.items():
+                if isinstance(metrics, dict):
+                    by_prop.append(BacktestByProp(
+                        prop_type=prop_type,
+                        metrics=BacktestMetrics(
+                            rmse=metrics.get('rmse'),
+                            mae=metrics.get('mae'),
+                            r2=metrics.get('r2'),
+                            bias=metrics.get('bias'),
+                        ),
+                        count=metrics.get('count', 0),
+                    ))
 
         # Extract elite+strong metrics
         elite_strong = data.get('elite_strong_tier', {})
@@ -1425,7 +1429,7 @@ def get_latest_backtest():
         backtest_result = BacktestResults(
             backtest_id=latest_file.stem,
             date_range=data.get('date_range', 'unknown'),
-            games_analyzed=data.get('games_analyzed', 0),
+            games_analyzed=data.get('games_analyzed', data.get('games_processed', 0)),
             total_predictions=data.get('total_predictions', 0),
             overall_metrics=overall_metrics,
             betting_metrics=betting_metrics,
@@ -1523,23 +1527,23 @@ def get_bankroll():
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         bet_table = "tracked_bets" if "tracked_bets" in tables else "bets"
 
-        # Get settled bets with profit info
-        # The bet_tracker has: status, profit, event_date, stake
+        # Get settled bets with pnl info
+        # The bet_tracker has: status, pnl, event_date, stake
         rows = conn.execute(f"""
-            SELECT status, profit, event_date, stake
+            SELECT status, pnl, event_date, stake
             FROM {bet_table}
             WHERE status IN ('won', 'lost', 'push')
         """).fetchall()
 
         total_bets = len(rows)
         wins = sum(1 for r in rows if r["status"] == "won")
-        season_pnl = sum(float(r["profit"] or 0) for r in rows
+        season_pnl = sum(float(r["pnl"] or 0) for r in rows
                          if r["event_date"] and r["event_date"] >= season_start)
-        monthly_pnl = sum(float(r["profit"] or 0) for r in rows
+        monthly_pnl = sum(float(r["pnl"] or 0) for r in rows
                           if r["event_date"] and r["event_date"] >= month_ago)
-        weekly_pnl = sum(float(r["profit"] or 0) for r in rows
+        weekly_pnl = sum(float(r["pnl"] or 0) for r in rows
                          if r["event_date"] and r["event_date"] >= week_ago)
-        daily_pnl = sum(float(r["profit"] or 0) for r in rows
+        daily_pnl = sum(float(r["pnl"] or 0) for r in rows
                         if r["event_date"] and r["event_date"] == today)
 
         # Active (pending) bets
@@ -1676,7 +1680,7 @@ def get_performance(days: int = Query(30, ge=1, le=365)):
                 bet_table = "tracked_bets" if "tracked_bets" in tables else "bets"
 
                 rows = conn.execute(f"""
-                    SELECT event_date, status, profit, tags
+                    SELECT event_date, status, pnl, tags
                     FROM {bet_table}
                     WHERE status IN ('won', 'lost', 'push')
                     AND event_date >= ?
@@ -1692,7 +1696,7 @@ def get_performance(days: int = Query(30, ge=1, le=365)):
                     wins = sum(1 for r in group if r["status"] == "won")
                     losses = sum(1 for r in group if r["status"] == "lost")
                     pushes = sum(1 for r in group if r["status"] == "push")
-                    profit = sum(float(r["profit"] or 0) for r in group)
+                    profit = sum(float(r["pnl"] or 0) for r in group)
                     daily_records.append(DailyRecord(
                         date=date_str,
                         wins=wins,
