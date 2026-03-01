@@ -131,8 +131,33 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"WARNING: Could not run migrations: {e} — continuing with existing schema.")
 
-    get_service()
+    service = get_service()
     print("Data service ready.")
+
+    # Auto-generate props for today's games at startup so /api/best-bets
+    # returns data immediately instead of waiting for a /api/games call.
+    try:
+        games = service.get_todays_games()
+        triggered = 0
+        for game in games:
+            game_id = str(game.get("game_id", ""))
+            home_abbrev = game.get("home_team", {}).get("abbreviation", "")
+            away_abbrev = game.get("visitor_team", {}).get("abbreviation", "")
+            status_data = service.get_props_fetch_status(game_id)
+            if status_data.get("status") == "not_started" and home_abbrev and away_abbrev:
+                _game_teams_cache[game_id] = {"home": home_abbrev, "away": away_abbrev}
+                service.start_player_props_fetch(
+                    game_id=game_id,
+                    home_abbrev=home_abbrev,
+                    away_abbrev=away_abbrev,
+                    selected_props=None,
+                )
+                triggered += 1
+        if triggered:
+            print(f"Auto-generating props for {triggered} games...")
+    except Exception as e:
+        print(f"WARNING: Startup prop generation failed: {e}")
+
     yield
     print("Shutting down NBA Props API.")
 
@@ -901,6 +926,36 @@ def get_best_bets(
     # Get all games
     games = service.get_todays_games()
     best_bets = []
+
+    # Ensure prop generation is running — if no games have props,
+    # trigger generation so subsequent calls return data.
+    # This makes the endpoint self-sufficient instead of depending on
+    # /api/games being called first.
+    any_ready = False
+    for game in games:
+        gid = str(game.get("game_id", ""))
+        st = service.get_props_fetch_status(gid).get("status", "not_started")
+        if st == "ready":
+            any_ready = True
+            break
+    if not any_ready:
+        for game in games:
+            gid = str(game.get("game_id", ""))
+            status_data = service.get_props_fetch_status(gid)
+            if status_data.get("status") == "not_started":
+                home_abbrev = game.get("home_team", {}).get("abbreviation", "")
+                away_abbrev = game.get("visitor_team", {}).get("abbreviation", "")
+                if home_abbrev and away_abbrev:
+                    _game_teams_cache[gid] = {"home": home_abbrev, "away": away_abbrev}
+                    try:
+                        service.start_player_props_fetch(
+                            game_id=gid,
+                            home_abbrev=home_abbrev,
+                            away_abbrev=away_abbrev,
+                            selected_props=None,
+                        )
+                    except Exception:
+                        pass
 
     # Parse prop types filter
     prop_type_filter = None

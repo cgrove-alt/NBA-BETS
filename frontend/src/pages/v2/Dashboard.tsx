@@ -64,6 +64,13 @@ export function Dashboard() {
     queryKey: ['bestBets'],
     queryFn: () => getBestBets({ minConfidence: 50, minEdge: 3 }),
     staleTime: 5 * 60 * 1000,
+    // After a deploy, props generate in the background. Retry every 5s
+    // until we have data (stops once bets arrive or no games exist).
+    refetchInterval: (query) => {
+      const bets = query.state.data?.best_bets;
+      const hasGames = (gamesData?.games?.length ?? 0) > 0;
+      return hasGames && (!bets || bets.length === 0) ? 5000 : false;
+    },
   });
 
   // Real bankroll data from /api/bankroll
