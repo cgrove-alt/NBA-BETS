@@ -1,14 +1,9 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Settings as SettingsIcon,
   DollarSign,
   Target,
   Bell,
-  Shield,
-  Palette,
-  User,
-  ChevronRight,
   Save,
   Zap,
   Check,
@@ -350,18 +345,6 @@ export function Settings() {
           </div>
         </SettingsSection>
 
-        {/* Quick Links */}
-        <SettingsSection
-          title="More Options"
-          icon={<SettingsIcon className="w-5 h-5" />}
-        >
-          <div className="space-y-2">
-            <LinkButton icon={<Palette />} label="Appearance" />
-            <LinkButton icon={<User />} label="Account" />
-            <LinkButton icon={<Shield />} label="Privacy" />
-          </div>
-        </SettingsSection>
-
         {/* App Info */}
         <Card variant="glass" className="p-4">
           <div className="flex items-center gap-3">
@@ -438,17 +421,3 @@ function ToggleSetting({
   );
 }
 
-/**
- * Link Button - Navigation item
- */
-function LinkButton({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <button className="w-full flex items-center justify-between p-3 rounded-lg bg-bg-tertiary hover:bg-bg-card-hover transition-colors">
-      <div className="flex items-center gap-3">
-        <span className="text-text-muted">{icon}</span>
-        <span className="text-sm text-text-primary">{label}</span>
-      </div>
-      <ChevronRight className="w-4 h-4 text-text-muted" />
-    </button>
-  );
-}

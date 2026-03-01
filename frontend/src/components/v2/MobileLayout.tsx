@@ -10,6 +10,7 @@ import {
   FileText,
 } from 'lucide-react';
 import type { BankrollData } from './BankrollSummary';
+import { PullToRefresh } from './PullToRefresh';
 
 interface MobileLayoutProps {
   children: ReactNode;
@@ -46,8 +47,10 @@ export function MobileLayout({ children, bankroll }: MobileLayoutProps) {
       {/* Header */}
       <Header bankroll={bankroll} />
 
-      {/* Main Content - with bottom padding for nav */}
-      <main className="flex-1 pb-nav overflow-y-auto px-4 pt-4">{children}</main>
+      {/* Main Content - with pull-to-refresh on mobile */}
+      <PullToRefresh>
+        <main className="pb-nav px-4 pt-4">{children}</main>
+      </PullToRefresh>
 
       {/* Bottom Navigation - Mobile Only */}
       <BottomNav />

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Calendar, Flame, TrendingUp } from 'lucide-react';
@@ -86,6 +86,18 @@ export function Dashboard() {
       const gameStatus = game?.status;
       const isLocked = isGameStarted(gameStatus);
 
+      const signals: BetCardData['signals'] = (bet.signals || []).map((s) => ({
+        label: s,
+        type: (s.includes('Weak') || s.includes('ML Model') || s.includes('Real Line'))
+          ? 'positive' as const
+          : s.includes('Strong defense')
+            ? 'negative' as const
+            : 'neutral' as const,
+      }));
+      if (signals.length === 0) {
+        signals.push({ label: bet.prop_type, type: 'neutral' as const });
+      }
+
       return {
         id: `${bet.game_id}-${bet.player_id}-${bet.prop_type}`,
         matchup: {
@@ -99,29 +111,33 @@ export function Dashboard() {
         pick: {
           type: 'prop' as const,
           selection: `${bet.player_name} ${bet.pick} ${bet.line} ${bet.prop_type}`,
-          odds: -110, // Default odds
+          odds: 0,
         },
         edge: bet.edge_pct,
         confidence: bet.confidence,
-        signals: [
-          { label: `${bet.prop_type}`, type: 'neutral' as const },
-          bet.edge_pct > 10 ? { label: 'High Value', type: 'positive' as const } : null,
-        ].filter(Boolean) as BetCardData['signals'],
-        locked: isLocked, // Lock betting for games in progress
+        signals,
+        locked: isLocked,
+        rank: bet.rank,
+        explanation: bet.explanation,
+        seasonAvg: bet.season_avg,
+        recentAvg: bet.recent_avg,
       };
     });
   }, [bestBetsData, gamesMap]);
 
-  // Handle bet action
-  const handleTakeBet = (bet: BetCardData) => {
-    console.log('Taking bet:', bet);
-    // In production: add to bet slip, track analytics
-  };
+  // Copy bet details to clipboard on TAKE
+  const [copiedBetId, setCopiedBetId] = useState<string | null>(null);
 
-  const handleExpandBet = (bet: BetCardData) => {
-    console.log('Expanding bet:', bet);
-    // In production: navigate to detailed view
-  };
+  const handleTakeBet = useCallback((bet: BetCardData) => {
+    const text = `${bet.pick.selection} | Edge: ${bet.edge > 0 ? '+' : ''}${bet.edge.toFixed(1)}% | Conf: ${bet.confidence}%`;
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedBetId(bet.id);
+    setTimeout(() => setCopiedBetId(null), 2000);
+  }, []);
+
+  const handleExpandBet = useCallback((bet: BetCardData) => {
+    navigate(`/predictions?highlight=${bet.id}`);
+  }, [navigate]);
 
   return (
     <ResponsiveLayout bankroll={bankrollData} activePage="dashboard">
@@ -143,7 +159,7 @@ export function Dashboard() {
             <BetCardSkeleton variant="featured" />
           ) : topPicks.length > 0 ? (
             <BetCard
-              bet={topPicks[0]}
+              bet={{ ...topPicks[0], copied: copiedBetId === topPicks[0].id }}
               variant="featured"
               onTake={handleTakeBet}
               onExpand={handleExpandBet}
@@ -169,7 +185,7 @@ export function Dashboard() {
           <section>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-text-primary">More Picks</h2>
-              <Button variant="ghost" size="sm" icon={<ChevronRight className="w-4 h-4" />} iconPosition="right">
+              <Button variant="ghost" size="sm" icon={<ChevronRight className="w-4 h-4" />} iconPosition="right" onClick={() => navigate('/predictions')}>
                 View All
               </Button>
             </div>
@@ -178,7 +194,7 @@ export function Dashboard() {
               {topPicks.slice(1, 4).map((pick) => (
                 <BetCard
                   key={pick.id}
-                  bet={pick}
+                  bet={{ ...pick, copied: copiedBetId === pick.id }}
                   variant="compact"
                   onTake={handleTakeBet}
                   onExpand={handleExpandBet}

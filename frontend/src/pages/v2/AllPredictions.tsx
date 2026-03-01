@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Filter,
@@ -137,6 +137,18 @@ export function AllPredictions() {
       const gameStatus = game?.status;
       const isLocked = isGameStarted(gameStatus);
 
+      const signals: BetCardData['signals'] = (bet.signals || []).map((s) => ({
+        label: s,
+        type: (s.includes('Weak') || s.includes('ML Model') || s.includes('Real Line'))
+          ? 'positive' as const
+          : s.includes('Strong defense')
+            ? 'negative' as const
+            : 'neutral' as const,
+      }));
+      if (signals.length === 0) {
+        signals.push({ label: bet.prop_type, type: 'neutral' as const });
+      }
+
       return {
         id: `${bet.game_id}-${bet.player_id}-${bet.prop_type}`,
         matchup: {
@@ -150,16 +162,16 @@ export function AllPredictions() {
         pick: {
           type: 'prop' as const,
           selection: `${bet.player_name} ${bet.pick} ${bet.line} ${bet.prop_type}`,
-          odds: -110,
+          odds: 0,
         },
         edge: bet.edge_pct,
         confidence: bet.confidence,
-        signals: [
-          { label: bet.prop_type, type: 'neutral' as const },
-          bet.edge_pct > 10 ? { label: 'High Edge', type: 'positive' as const } : null,
-          bet.confidence > 70 ? { label: 'High Conf', type: 'positive' as const } : null,
-        ].filter(Boolean) as BetCardData['signals'],
-        locked: isLocked, // Lock betting for games in progress
+        signals,
+        locked: isLocked,
+        rank: bet.rank,
+        explanation: bet.explanation,
+        seasonAvg: bet.season_avg,
+        recentAvg: bet.recent_avg,
       };
     });
   }, [bestBetsData, gamesMap, propTypeFilter]);
@@ -174,13 +186,18 @@ export function AllPredictions() {
   // Real bankroll data from /api/bankroll
   const { bankrollData } = useBankroll();
 
-  const handleTakeBet = (bet: BetCardData) => {
-    console.log('Taking bet:', bet);
-  };
+  const [copiedBetId, setCopiedBetId] = useState<string | null>(null);
 
-  const handleExpandBet = (bet: BetCardData) => {
-    console.log('Expanding bet:', bet);
-  };
+  const handleTakeBet = useCallback((bet: BetCardData) => {
+    const text = `${bet.pick.selection} | Edge: ${bet.edge > 0 ? '+' : ''}${bet.edge.toFixed(1)}% | Conf: ${bet.confidence}%`;
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedBetId(bet.id);
+    setTimeout(() => setCopiedBetId(null), 2000);
+  }, []);
+
+  const handleExpandBet = useCallback(() => {
+    // No-op: card already shows details inline
+  }, []);
 
   return (
     <ResponsiveLayout bankroll={bankrollData} activePage="predictions">
@@ -301,7 +318,7 @@ export function AllPredictions() {
               {bets.map((bet) => (
                 <BetCard
                   key={bet.id}
-                  bet={bet}
+                  bet={{ ...bet, copied: copiedBetId === bet.id }}
                   variant="compact"
                   onTake={handleTakeBet}
                   onExpand={handleExpandBet}
@@ -313,7 +330,7 @@ export function AllPredictions() {
               {bets.map((bet) => (
                 <BetCard
                   key={bet.id}
-                  bet={bet}
+                  bet={{ ...bet, copied: copiedBetId === bet.id }}
                   variant="list"
                   onTake={handleTakeBet}
                   onExpand={handleExpandBet}

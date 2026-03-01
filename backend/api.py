@@ -38,6 +38,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 # Eastern Time for date-sensitive operations
 ET = ZoneInfo('America/New_York')
@@ -2806,6 +2808,21 @@ def get_real_lines_backtest_status():
         "status": "idle",
         "message": "No real-lines backtest triggered. POST /api/backtest/run-real-lines to start.",
     }
+
+
+# ============== SERVE FRONTEND STATIC FILES ==============
+
+_frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+if _frontend_dist.exists():
+    app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """Serve the React SPA for any non-API route."""
+        file_path = _frontend_dist / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(_frontend_dist / "index.html"))
 
 
 # ============== RUN SERVER ==============

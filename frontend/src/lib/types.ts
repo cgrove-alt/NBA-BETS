@@ -134,6 +134,13 @@ export interface BestBet {
   edge_pct: number;
   pick: string;
   confidence: number;
+  rank: number;
+  season_avg: number | null;
+  recent_avg: number | null;
+  explanation: string;
+  signals: string[];
+  used_real_line: boolean;
+  used_ml_model: boolean;
 }
 
 export interface BestBetsResponse {

@@ -10,6 +10,7 @@ import {
   Target,
   Lock,
   Radio,
+  Check,
 } from 'lucide-react';
 
 // Types
@@ -20,23 +21,27 @@ export interface BetCardData {
     homeAbbrev: string;
     awayTeam: string;
     awayAbbrev: string;
-    gameTime: string; // ISO string or formatted time
+    gameTime: string;
     status?: 'upcoming' | 'live' | 'final';
   };
   pick: {
     type: 'spread' | 'moneyline' | 'total' | 'prop';
-    selection: string; // e.g., "LAL -5.5", "Over 224.5", "LeBron Over 25.5 PTS"
-    odds: number; // American odds, e.g., -110
+    selection: string;
+    odds: number;
   };
-  edge: number; // Percentage, e.g., 15.5 for +15.5%
-  confidence: number; // 0-100
+  edge: number;
+  confidence: number;
   sportsbook?: string;
   signals?: Array<{
     label: string;
     type: 'positive' | 'negative' | 'neutral';
   }>;
-  /** If true, game has started - betting is locked for integrity */
   locked?: boolean;
+  rank?: number;
+  explanation?: string;
+  seasonAvg?: number | null;
+  recentAvg?: number | null;
+  copied?: boolean;
 }
 
 interface BetCardProps {
@@ -188,23 +193,51 @@ function FeaturedBetCard({
 
         {/* Main Pick - THE BIG TEXT */}
         <div className="mb-6">
-          <div className="text-sm text-text-muted uppercase tracking-wide mb-2">
-            {getPickTypeLabel(bet.pick.type)}
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-sm text-text-muted uppercase tracking-wide">
+              {getPickTypeLabel(bet.pick.type)}
+            </span>
+            {bet.rank && bet.rank <= 10 && (
+              <Badge variant={bet.rank <= 3 ? 'premium' : 'default'} size="sm">
+                #{bet.rank}
+              </Badge>
+            )}
           </div>
           <div className="text-4xl md:text-5xl font-bold text-text-primary mb-2">
             {bet.pick.selection}
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-2xl font-mono text-text-secondary">
-              {formatOdds(bet.pick.odds)}
-            </span>
-            {bet.sportsbook && (
-              <span className="text-sm text-text-muted">
-                via {bet.sportsbook}
+          {formatOdds(bet.pick.odds) && (
+            <div className="flex items-center gap-4">
+              <span className="text-2xl font-mono text-text-secondary">
+                {formatOdds(bet.pick.odds)}
               </span>
+              {bet.sportsbook && (
+                <span className="text-sm text-text-muted">
+                  via {bet.sportsbook}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Explanation - WHY this bet */}
+        {bet.explanation && (
+          <div className="text-sm text-text-secondary leading-relaxed mb-4 bg-bg-tertiary rounded-lg p-3">
+            {bet.explanation}
+          </div>
+        )}
+
+        {/* Season vs Recent averages */}
+        {(bet.seasonAvg || bet.recentAvg) && (
+          <div className="flex items-center gap-4 mb-4 text-xs text-text-muted">
+            {bet.seasonAvg != null && (
+              <span>Season: <span className="text-text-primary font-semibold">{bet.seasonAvg}</span></span>
+            )}
+            {bet.recentAvg != null && (
+              <span>Last 5: <span className="text-text-primary font-semibold">{bet.recentAvg}</span></span>
             )}
           </div>
-        </div>
+        )}
 
         {/* Stats Row */}
         <div className="flex items-center gap-6 mb-6">
@@ -263,13 +296,13 @@ function FeaturedBetCard({
             </Button>
           ) : (
             <Button
-              variant="action"
+              variant={bet.copied ? 'success' : 'action'}
               size="lg"
               fullWidth
               onClick={() => onTake?.(bet)}
-              icon={<Target className="w-5 h-5" />}
+              icon={bet.copied ? <Check className="w-5 h-5" /> : <Target className="w-5 h-5" />}
             >
-              TAKE THIS BET
+              {bet.copied ? 'COPIED TO CLIPBOARD' : 'TAKE THIS BET'}
             </Button>
           )}
           {onExpand && (
@@ -338,15 +371,29 @@ function CompactBetCard({
 
         {/* Pick */}
         <div className="mb-3">
-          <div className="text-xs text-text-muted uppercase tracking-wide mb-1">
-            {getPickTypeLabel(bet.pick.type)}
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs text-text-muted uppercase tracking-wide">
+              {getPickTypeLabel(bet.pick.type)}
+            </span>
+            {bet.rank && bet.rank <= 10 && (
+              <Badge variant={bet.rank <= 3 ? 'premium' : 'default'} size="sm">
+                #{bet.rank}
+              </Badge>
+            )}
           </div>
           <div className="text-xl font-bold text-text-primary truncate">
             {bet.pick.selection}
           </div>
-          <div className="text-sm font-mono text-text-secondary">
-            {formatOdds(bet.pick.odds)}
-          </div>
+          {formatOdds(bet.pick.odds) && (
+            <div className="text-sm font-mono text-text-secondary">
+              {formatOdds(bet.pick.odds)}
+            </div>
+          )}
+          {bet.explanation && (
+            <div className="text-xs text-text-muted truncate mt-1">
+              {bet.explanation}
+            </div>
+          )}
         </div>
 
         {/* Stats */}
@@ -372,7 +419,7 @@ function CompactBetCard({
           </Button>
         ) : (
           <Button
-            variant="action"
+            variant={bet.copied ? 'success' : 'action'}
             size="sm"
             fullWidth
             onClick={(e) => {
@@ -380,7 +427,7 @@ function CompactBetCard({
               onTake?.(bet);
             }}
           >
-            TAKE
+            {bet.copied ? 'COPIED' : 'TAKE'}
           </Button>
         )}
       </div>
@@ -430,9 +477,11 @@ function ListBetCard({
         <div className="font-semibold text-text-primary truncate">
           {bet.pick.selection}
         </div>
-        <div className="text-xs text-text-muted">
-          {formatOdds(bet.pick.odds)}
-        </div>
+        {formatOdds(bet.pick.odds) && (
+          <div className="text-xs text-text-muted">
+            {formatOdds(bet.pick.odds)}
+          </div>
+        )}
       </div>
 
       {/* Live Badge (when locked) */}
@@ -464,14 +513,14 @@ function ListBetCard({
         </Button>
       ) : (
         <Button
-          variant={isPositiveEdge ? 'success' : 'secondary'}
+          variant={bet.copied ? 'success' : isPositiveEdge ? 'success' : 'secondary'}
           size="sm"
           onClick={(e) => {
             e.stopPropagation();
             onTake?.(bet);
           }}
         >
-          TAKE
+          {bet.copied ? 'COPIED' : 'TAKE'}
         </Button>
       )}
     </div>
@@ -519,6 +568,7 @@ function formatGameTime(isoString: string): string {
 }
 
 function formatOdds(odds: number): string {
+  if (odds === 0) return '';
   return odds > 0 ? `+${odds}` : `${odds}`;
 }
 
