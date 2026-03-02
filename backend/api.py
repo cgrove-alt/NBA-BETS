@@ -1338,7 +1338,7 @@ def get_injury_report(date: str):
 
     # Validate date format
     try:
-        target_date = datetime.strptime(date, '%Y-%m-%d')
+        datetime.strptime(date, '%Y-%m-%d')
     except ValueError:
         raise HTTPException(
             status_code=400,
@@ -2433,7 +2433,6 @@ def log_game_predictions(game_id: str):
 
     for player in all_players:
         player_name = player.get("player_name", "")
-        team = player.get("team", "")
         for prop_type, prop_key in prop_key_map.items():
             pred_key = f"{prop_key}_pred"
             if pred_key not in player or player.get(pred_key) is None:

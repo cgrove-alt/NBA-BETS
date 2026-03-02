@@ -233,7 +233,7 @@ def test_api_endpoint() -> str:
     if missing:
         fail_msg("Response fields", f"missing: {missing}")
         return "FAIL"
-    pass_msg("Response fields", f"all expected fields present")
+    pass_msg("Response fields", "all expected fields present")
 
     print(f"         date: {data.get('date')}")
     print(f"         generated_at: {data.get('generated_at')}")

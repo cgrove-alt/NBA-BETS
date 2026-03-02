@@ -383,11 +383,10 @@ class TestQueryYesterdayRecord:
                 return m
             mock_path.side_effect = path_side_effect
 
-            with patch("sqlite3.connect", return_value=sqlite3.connect(str(cal_db))) as mock_connect:
-                mock_conn = sqlite3.connect(str(cal_db))
-                mock_conn.row_factory = sqlite3.Row
-                with patch("sqlite3.connect", return_value=mock_conn):
-                    result = _query_yesterday_record("2026-03-01")
+            mock_conn = sqlite3.connect(str(cal_db))
+            mock_conn.row_factory = sqlite3.Row
+            with patch("sqlite3.connect", return_value=mock_conn):
+                result = _query_yesterday_record("2026-03-01")
 
         assert result is not None
         assert result["source"] == "calibration"
