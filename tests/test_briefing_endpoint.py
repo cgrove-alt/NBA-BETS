@@ -337,7 +337,7 @@ class TestQueryYesterdayRecord:
 
     def test_no_db_files_returns_none(self, tmp_path):
         """When neither calibration.db nor bet_tracking.db exist, returns None."""
-        with patch("backend.api.Path") as mock_path:
+        with patch("agents.core.db_queries.Path") as mock_path:
             # Make both paths not exist
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = False
@@ -371,7 +371,7 @@ class TestQueryYesterdayRecord:
         conn.commit()
         conn.close()
 
-        with patch("backend.api.Path") as mock_path:
+        with patch("agents.core.db_queries.Path") as mock_path:
             def path_side_effect(p):
                 if "calibration.db" in str(p):
                     m = MagicMock()
@@ -423,7 +423,7 @@ class TestQueryYesterdayRecord:
 
         conns = iter([cal_conn, bt_conn])
 
-        with patch("backend.api.Path") as mock_path:
+        with patch("agents.core.db_queries.Path") as mock_path:
             def path_side_effect(p):
                 m = MagicMock()
                 m.exists.return_value = True
@@ -464,7 +464,7 @@ class TestQueryYesterdayRecord:
 
         conns = iter([cal_conn, bt_conn])
 
-        with patch("backend.api.Path") as mock_path:
+        with patch("agents.core.db_queries.Path") as mock_path:
             def path_side_effect(p):
                 m = MagicMock()
                 m.exists.return_value = True
