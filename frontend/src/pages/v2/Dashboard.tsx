@@ -29,6 +29,9 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [selectedDate] = useState<string>(getTodayDate());
 
+  // Retry counter must be declared before useQuery that references it
+  const emptyRetryCount = useRef(0);
+
   // Fetch today's games
   const { data: gamesData, isLoading: gamesLoading } = useQuery({
     queryKey: ['games', selectedDate],
@@ -55,8 +58,6 @@ export function Dashboard() {
       return false;
     },
   });
-
-  const emptyRetryCount = useRef(0);
 
   // Real bankroll data from /api/bankroll
   const { bankrollData } = useBankroll();
