@@ -313,6 +313,40 @@ export interface SystemHealthResponse {
 
 // ============== BRIEFING TYPES ==============
 
+export interface YesterdayBetTypeRecord {
+  wins: number;
+  losses: number;
+  total: number;
+  hit_rate: number;
+}
+
+export interface YesterdayConfidenceRecord {
+  wins: number;
+  losses: number;
+  total: number;
+  hit_rate: number;
+}
+
+export interface YesterdayRecord {
+  date: string;
+  overall: {
+    wins: number;
+    losses: number;
+    pushes: number;
+    total: number;
+    hit_rate: number;
+    profit: number;
+    roi: number;
+  };
+  by_bet_type: Record<string, YesterdayBetTypeRecord>;
+  by_confidence: Record<string, YesterdayConfidenceRecord>;
+  clv_summary: {
+    avg_clv: number;
+    positive_clv_rate: number;
+  } | null;
+  source?: string;
+}
+
 export interface BriefingSections {
   yesterday_results?: string;
   today_plays?: string;
@@ -326,6 +360,12 @@ export interface BriefingResponseData {
   briefing_text: string;
   generated_at: string | null;
   sections: BriefingSections | null;
+  yesterday_record: YesterdayRecord | null;
+  today_preview: {
+    actionable_plays: number;
+    games_count: number;
+    games_analyzed?: number;
+  } | null;
 }
 
 // ============== SETTINGS TYPES ==============
