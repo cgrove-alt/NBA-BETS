@@ -11,7 +11,7 @@ Trigger: Noon + 6 PM ET (after orchestrator, then 1hr before typical tip-off).
 import os
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from agents.core.agent_base import AgentBase
@@ -58,6 +58,16 @@ class DailyBriefingAgent(AgentBase):
             "Output valid JSON with sections and formatted_text."
         )
 
+    def _query_yesterday_results(self) -> dict | None:
+        """Direct DB fallback for yesterday's record when message bus has no data."""
+        yesterday = (datetime.strptime(self.target_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+        try:
+            from agents.core.db_queries import query_yesterday_record
+            return query_yesterday_record(yesterday)
+        except Exception:
+            logger.warning(f"[{self.AGENT_NAME}] Failed to query yesterday's record from DB")
+            return None
+
     def _gather_context(self) -> dict:
         """
         Read all messages from other agents.
@@ -77,10 +87,12 @@ class DailyBriefingAgent(AgentBase):
             # Take the most recent
             context['predictions'] = pred_msgs[-1].payload
 
-        # From postgame: yesterday's results
+        # From postgame: yesterday's results (message bus first, DB fallback)
         results_msgs = self.get_messages(event_type='results_analyzed')
         if results_msgs:
             context['yesterday_results'] = results_msgs[-1].payload
+        else:
+            context['yesterday_results'] = self._query_yesterday_results()
 
         # From odds monitor: market intelligence
         odds_msgs = self.get_messages(event_type='odds_alert')
@@ -106,16 +118,44 @@ class DailyBriefingAgent(AgentBase):
         }
 
     def _build_yesterday_section(self, results: dict) -> dict:
-        """Build yesterday's recap section."""
+        """Build yesterday's recap section.
+
+        Handles two formats:
+        - Message bus format: results_summary.wins/losses/roi_today/clv_average
+        - DB format (from query_yesterday_record): overall.wins/losses/hit_rate, by_bet_type, etc.
+        """
         if not results:
             return {
                 'record': 'N/A',
                 'roi': 'N/A',
                 'pnl': 'N/A',
+                'hit_rate': 'N/A',
                 'clv_summary': 'No data available',
                 'notable': 'No results data from post-game analysis',
             }
 
+        # DB format: has 'overall' key
+        if 'overall' in results:
+            o = results['overall']
+            cs = results.get('clv_summary')
+            if cs:
+                clv_str = f"CLV: {cs['avg_clv']:+.1f} avg | {cs['positive_clv_rate']:.0f}% positive CLV rate"
+            else:
+                clv_str = 'N/A'
+
+            return {
+                'record': f"{o['wins']}-{o['losses']}-{o['pushes']}",
+                'roi': f"{o['roi']:+.1f}%" if o['roi'] else 'N/A',
+                'pnl': f"${o['profit']:+,.0f}" if o.get('profit') else 'N/A',
+                'hit_rate': f"{o['hit_rate']:.1f}%",
+                'clv_summary': clv_str,
+                'notable': '',
+                'by_bet_type': results.get('by_bet_type', {}),
+                'by_confidence': results.get('by_confidence', {}),
+                'source': results.get('source', 'unknown'),
+            }
+
+        # Message bus format
         summary = results.get('results_summary', {})
         return {
             'record': f"{summary.get('wins', 0)}-{summary.get('losses', 0)}",
@@ -242,8 +282,47 @@ class DailyBriefingAgent(AgentBase):
         recap = sections.get('yesterday_recap', {})
         lines.append('')
         lines.append('YESTERDAY\'S RESULTS')
-        lines.append(f"  Record: {recap.get('record', 'N/A')} | ROI: {recap.get('roi', 'N/A')}")
-        lines.append(f"  {recap.get('clv_summary', '')}")
+        hit_rate_str = f" ({recap['hit_rate']})" if recap.get('hit_rate') and recap['hit_rate'] != 'N/A' else ''
+        pnl_str = f" | {recap['pnl']}" if recap.get('pnl') and recap['pnl'] != 'N/A' else ''
+        roi_str = f" | ROI: {recap.get('roi', 'N/A')}" if recap.get('roi') and recap['roi'] != 'N/A' else ''
+        lines.append(f"  Record: {recap.get('record', 'N/A')}{hit_rate_str}{pnl_str}{roi_str}")
+
+        # By bet type (only if data exists from DB format)
+        by_type = recap.get('by_bet_type', {})
+        if by_type:
+            lines.append('')
+            lines.append('  By Type:')
+            sorted_types = sorted(by_type.items(), key=lambda x: x[1].get('total', 0), reverse=True)
+            max_name_len = max(len(name) for name, _ in sorted_types) if sorted_types else 0
+            for name, stats in sorted_types:
+                if stats.get('total', 0) == 0:
+                    continue
+                pad = ' ' * (max_name_len - len(name) + 1)
+                lines.append(f"    {name}{pad}{stats['wins']}-{stats['losses']}  {stats.get('hit_rate', 0):.1f}%")
+
+        # By confidence (only if data exists from DB format)
+        by_conf = recap.get('by_confidence', {})
+        non_empty_conf = {k: v for k, v in by_conf.items() if v.get('total', 0) > 0}
+        if non_empty_conf:
+            lines.append('')
+            lines.append('  By Confidence:')
+            tier_labels = {
+                'high': 'High (\u226560)',
+                'medium': 'Medium (55-59)',
+                'low': 'Low (<55)',
+            }
+            for tier in ('high', 'medium', 'low'):
+                if tier in non_empty_conf:
+                    s = non_empty_conf[tier]
+                    label = tier_labels[tier]
+                    lines.append(f"    {label:<16}{s['wins']}-{s['losses']}  {s.get('hit_rate', 0):.1f}%")
+
+        # CLV line
+        clv_str = recap.get('clv_summary', '')
+        if clv_str and clv_str != 'N/A':
+            lines.append('')
+            lines.append(f"  {clv_str}")
+
         if recap.get('notable'):
             lines.append(f"  {recap['notable']}")
 
@@ -374,6 +453,7 @@ class DailyBriefingAgent(AgentBase):
             'generated_at': datetime.now(timezone.utc).isoformat(),
             'sections': result.get('sections', fallback_sections),
             'formatted_text': result.get('formatted_text', ''),
+            'yesterday_record': context.get('yesterday_results'),
             'data_sources': data_sources,
             'reasoning': result.get('reasoning', ''),
         }

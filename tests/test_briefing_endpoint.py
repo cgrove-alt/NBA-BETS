@@ -19,12 +19,12 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from backend.api import (
+from agents.core.db_queries import (
     _build_record_from_calibration,
     _build_record_from_tracking,
-    _format_yesterday_text,
-    _query_yesterday_record,
+    query_yesterday_record as _query_yesterday_record,
 )
+from backend.api import _format_yesterday_text
 
 
 # =============================================================================
