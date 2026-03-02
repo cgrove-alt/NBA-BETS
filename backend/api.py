@@ -2129,17 +2129,329 @@ def get_system_health():
 
 # ============== DAILY BRIEFING ENDPOINT ==============
 
+def _query_yesterday_record(yesterday_str: str) -> dict | None:
+    """Query yesterday's prediction results from calibration.db or bet_tracking.db.
+
+    Returns a structured dict with overall, by_bet_type, by_confidence,
+    clv_summary, and date fields — or None if no data is available.
+    """
+    import sqlite3
+
+    record: dict | None = None
+
+    # --- Attempt 1: calibration.db (has predictions + outcomes) ---
+    cal_path = Path("data/calibration.db")
+    if cal_path.exists():
+        try:
+            conn = sqlite3.connect(str(cal_path))
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT p.prop_type, p.confidence, o.hit, o.clv
+                FROM predictions p
+                JOIN outcomes o ON p.id = o.prediction_id
+                WHERE p.game_date = ?
+            """, (yesterday_str,)).fetchall()
+            conn.close()
+
+            if rows:
+                record = _build_record_from_calibration(rows, yesterday_str)
+        except Exception:
+            pass
+
+    if record is not None:
+        return record
+
+    # --- Attempt 2: bet_tracking.db ---
+    bt_path = Path("data/bet_tracking.db")
+    if bt_path.exists():
+        try:
+            conn = sqlite3.connect(str(bt_path))
+            conn.row_factory = sqlite3.Row
+
+            tables = [r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()]
+            bet_table = "tracked_bets" if "tracked_bets" in tables else "bets"
+
+            rows = conn.execute(f"""
+                SELECT status, pnl, tags, bet_type
+                FROM {bet_table}
+                WHERE event_date LIKE ?
+                  AND status IN ('won', 'lost', 'push')
+            """, (f"{yesterday_str}%",)).fetchall()
+            conn.close()
+
+            if rows:
+                record = _build_record_from_tracking(rows, yesterday_str)
+        except Exception:
+            pass
+
+    return record
+
+
+def _build_record_from_calibration(rows, yesterday_str: str) -> dict:
+    """Build a yesterday_record dict from calibration.db prediction+outcome rows."""
+    import json
+
+    wins = losses = pushes = 0
+    total_clv = 0.0
+    clv_count = 0
+    positive_clv = 0
+    by_type: dict[str, dict] = {}
+    by_conf: dict[str, dict] = {"high": {"wins": 0, "losses": 0, "total": 0},
+                                 "medium": {"wins": 0, "losses": 0, "total": 0},
+                                 "low": {"wins": 0, "losses": 0, "total": 0}}
+
+    for row in rows:
+        hit = row["hit"]
+        prop_type = row["prop_type"] or "Unknown"
+        confidence = row["confidence"] or 0
+        clv = row["clv"]
+
+        if hit is None:
+            pushes += 1
+            continue
+        if hit:
+            wins += 1
+        else:
+            losses += 1
+
+        # By bet type
+        if prop_type not in by_type:
+            by_type[prop_type] = {"wins": 0, "losses": 0, "total": 0}
+        by_type[prop_type]["total"] += 1
+        if hit:
+            by_type[prop_type]["wins"] += 1
+        else:
+            by_type[prop_type]["losses"] += 1
+
+        # By confidence tier
+        if confidence >= 60:
+            tier = "high"
+        elif confidence >= 55:
+            tier = "medium"
+        else:
+            tier = "low"
+        by_conf[tier]["total"] += 1
+        if hit:
+            by_conf[tier]["wins"] += 1
+        else:
+            by_conf[tier]["losses"] += 1
+
+        # CLV
+        if clv is not None:
+            total_clv += clv
+            clv_count += 1
+            if clv > 0:
+                positive_clv += 1
+
+    total = wins + losses + pushes
+    hit_rate = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0.0
+
+    # Add hit_rate to by_type / by_conf entries
+    for v in by_type.values():
+        denom = v["wins"] + v["losses"]
+        v["hit_rate"] = round(v["wins"] / denom * 100, 1) if denom > 0 else 0.0
+    for v in by_conf.values():
+        denom = v["wins"] + v["losses"]
+        v["hit_rate"] = round(v["wins"] / denom * 100, 1) if denom > 0 else 0.0
+
+    clv_summary = None
+    if clv_count > 0:
+        clv_summary = {
+            "avg_clv": round(total_clv / clv_count, 2),
+            "positive_clv_rate": round(positive_clv / clv_count * 100, 1),
+        }
+
+    return {
+        "date": yesterday_str,
+        "overall": {
+            "wins": wins,
+            "losses": losses,
+            "pushes": pushes,
+            "total": total,
+            "hit_rate": hit_rate,
+            "profit": 0.0,   # calibration.db doesn't track dollar P&L
+            "roi": 0.0,
+        },
+        "by_bet_type": by_type,
+        "by_confidence": by_conf,
+        "clv_summary": clv_summary,
+        "source": "calibration",
+    }
+
+
+def _build_record_from_tracking(rows, yesterday_str: str) -> dict:
+    """Build a yesterday_record dict from bet_tracking.db rows."""
+    import json
+
+    wins = losses = pushes = 0
+    total_pnl = 0.0
+    total_stake = 0.0
+    by_type: dict[str, dict] = {}
+
+    for row in rows:
+        status = row["status"]
+        pnl = row["pnl"] or 0.0
+        total_pnl += pnl
+
+        # Try to extract prop type from tags
+        tags_raw = row["tags"]
+        bet_type_raw = row["bet_type"] or "Unknown"
+        prop_type = bet_type_raw
+        if tags_raw:
+            try:
+                tags = json.loads(tags_raw) if isinstance(tags_raw, str) else tags_raw
+                if isinstance(tags, dict):
+                    prop_type = tags.get("prop_type", bet_type_raw)
+                elif isinstance(tags, list) and tags:
+                    prop_type = tags[0]
+            except Exception:
+                pass
+
+        if status == "won":
+            wins += 1
+        elif status == "lost":
+            losses += 1
+        elif status == "push":
+            pushes += 1
+
+        if prop_type not in by_type:
+            by_type[prop_type] = {"wins": 0, "losses": 0, "total": 0}
+        by_type[prop_type]["total"] += 1
+        if status == "won":
+            by_type[prop_type]["wins"] += 1
+        elif status == "lost":
+            by_type[prop_type]["losses"] += 1
+
+    total = wins + losses + pushes
+    hit_rate = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0.0
+
+    for v in by_type.values():
+        denom = v["wins"] + v["losses"]
+        v["hit_rate"] = round(v["wins"] / denom * 100, 1) if denom > 0 else 0.0
+
+    return {
+        "date": yesterday_str,
+        "overall": {
+            "wins": wins,
+            "losses": losses,
+            "pushes": pushes,
+            "total": total,
+            "hit_rate": hit_rate,
+            "profit": round(total_pnl, 2),
+            "roi": 0.0,  # can't compute without stake data from this query
+        },
+        "by_bet_type": by_type,
+        "by_confidence": {},  # bet_tracking.db doesn't store confidence tiers
+        "clv_summary": None,
+        "source": "bet_tracking",
+    }
+
+
+def _format_yesterday_text(record: dict) -> str:
+    """Format yesterday_record dict into human-readable briefing text."""
+    if not record:
+        return "YESTERDAY'S RECORD\n  No games yesterday."
+
+    o = record["overall"]
+    date_str = record["date"]
+    lines = [f"YESTERDAY'S RECORD ({date_str})"]
+    profit_str = f" | ${o['profit']:+,.0f}" if o["profit"] else ""
+    roi_str = f" | ROI: {o['roi']:+.1f}%" if o["roi"] else ""
+    lines.append(f"  Overall: {o['wins']}-{o['losses']} ({o['hit_rate']}%){profit_str}{roi_str}")
+
+    # By bet type
+    if record.get("by_bet_type"):
+        lines.append("")
+        lines.append("  By Bet Type:")
+        # Sort by total descending for readability
+        sorted_types = sorted(record["by_bet_type"].items(), key=lambda x: x[1]["total"], reverse=True)
+        max_name_len = max(len(name) for name, _ in sorted_types) if sorted_types else 0
+        for name, stats in sorted_types:
+            pad = " " * (max_name_len - len(name) + 1)
+            lines.append(f"    {name}:{pad}{stats['wins']}-{stats['losses']} ({stats['hit_rate']}%)")
+
+    # By confidence
+    if record.get("by_confidence"):
+        non_empty = {k: v for k, v in record["by_confidence"].items() if v.get("total", 0) > 0}
+        if non_empty:
+            lines.append("")
+            lines.append("  By Confidence:")
+            tier_labels = {
+                "high": "High (\u226560)",
+                "medium": "Medium (55-59)",
+                "low": "Low (<55)",
+            }
+            for tier in ("high", "medium", "low"):
+                if tier in non_empty:
+                    s = non_empty[tier]
+                    label = tier_labels[tier]
+                    lines.append(f"    {label}: {s['wins']}-{s['losses']} ({s['hit_rate']}%)")
+
+    # CLV
+    if record.get("clv_summary"):
+        cs = record["clv_summary"]
+        lines.append("")
+        lines.append(f"  CLV: {cs['avg_clv']:+.1f} avg | {cs['positive_clv_rate']:.0f}% positive CLV rate")
+
+    return "\n".join(lines)
+
+
+def _get_today_preview() -> dict | None:
+    """Count actionable plays for today from in-memory props."""
+    try:
+        service = get_service()
+        games = service.get_todays_games()
+        if not games:
+            return {"actionable_plays": 0, "games_count": 0}
+
+        play_count = 0
+        games_with_data = 0
+        prop_keys = {"points_pred": "Points", "rebounds_pred": "Rebounds",
+                     "assists_pred": "Assists", "3pm_pred": "3PM", "pra_pred": "PRA"}
+
+        for game in games:
+            game_id = str(game.get("game_id", ""))
+            status_data = service.get_props_fetch_status(game_id)
+            if status_data.get("status") != "ready":
+                continue
+            games_with_data += 1
+            all_players = status_data.get("home", []) + status_data.get("away", [])
+            for player in all_players:
+                for pred_key in prop_keys:
+                    pred_val = player.get(pred_key)
+                    conf_key = pred_key.replace("_pred", "_confidence")
+                    edge_key = pred_key.replace("_pred", "_edge_pct")
+                    conf = player.get(conf_key, 0) or 0
+                    edge_pct = abs(player.get(edge_key, 0) or 0)
+                    if pred_val is not None and conf >= 55 and edge_pct >= 4:
+                        play_count += 1
+
+        return {
+            "actionable_plays": play_count,
+            "games_count": len(games),
+            "games_analyzed": games_with_data,
+        }
+    except Exception:
+        return None
+
+
 @app.get("/api/briefing", response_model=BriefingResponse)
 def get_briefing(date: str = Query(None, description="Date in YYYY-MM-DD format")):
     """Get the daily briefing for a specific date (defaults to today)."""
     import sqlite3
     import json
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     if date is None:
         date = datetime.now(ET).strftime("%Y-%m-%d")
 
-    # Try to find a briefing from agent_runs
+    # Calculate yesterday in ET
+    requested_dt = datetime.strptime(date, "%Y-%m-%d")
+    yesterday_str = (requested_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # --- 1. Try to find a briefing from agent_runs ---
     briefing_text = ""
     generated_at = None
     sections = None
@@ -2150,7 +2462,6 @@ def get_briefing(date: str = Query(None, description="Date in YYYY-MM-DD format"
             conn = sqlite3.connect(str(guardrails_path))
             conn.row_factory = sqlite3.Row
 
-            # Find briefing agent run for the requested date
             row = conn.execute("""
                 SELECT payload, completed_at FROM agent_runs
                 WHERE agent_name = 'briefing'
@@ -2164,7 +2475,6 @@ def get_briefing(date: str = Query(None, description="Date in YYYY-MM-DD format"
                 briefing_text = payload.get("briefing_text", "")
                 generated_at = row["completed_at"]
 
-                # Try to extract sections
                 if "sections" in payload:
                     sections = BriefingSections(**payload["sections"])
 
@@ -2173,7 +2483,13 @@ def get_briefing(date: str = Query(None, description="Date in YYYY-MM-DD format"
             import logging
             logging.getLogger(__name__).error(f"Briefing query failed: {e}")
 
-    # If no agent briefing, generate a simple one from available data
+    # --- 2. Query yesterday's record directly from DB (always) ---
+    yesterday_record = _query_yesterday_record(yesterday_str)
+
+    # --- 3. Get today's preview ---
+    today_preview = _get_today_preview()
+
+    # --- 4. Build briefing text if no agent briefing exists ---
     if not briefing_text:
         try:
             bankroll = get_bankroll()
@@ -2189,14 +2505,25 @@ def get_briefing(date: str = Query(None, description="Date in YYYY-MM-DD format"
             briefing_text = "\n".join(briefing_lines)
             generated_at = datetime.now(ET).isoformat()
         except Exception:
-            briefing_text = f"Briefing unavailable for {date}. No data found."
+            briefing_text = f"Daily Briefing - {date}"
             generated_at = datetime.now(ET).isoformat()
+
+    # Append yesterday's record section to briefing text
+    briefing_text += "\n\n" + _format_yesterday_text(yesterday_record)
+
+    # Append today's preview
+    if today_preview:
+        plays = today_preview["actionable_plays"]
+        games = today_preview["games_count"]
+        briefing_text += f"\n\nTODAY'S PREVIEW\n  {plays} actionable play{'s' if plays != 1 else ''} across {games} game{'s' if games != 1 else ''}"
 
     return BriefingResponse(
         date=date,
         briefing_text=briefing_text,
         generated_at=generated_at,
         sections=sections,
+        yesterday_record=yesterday_record,
+        today_preview=today_preview,
     )
 
 

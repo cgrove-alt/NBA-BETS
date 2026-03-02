@@ -448,6 +448,8 @@ class BriefingResponse(BaseModel):
     briefing_text: str
     generated_at: str | None = None
     sections: BriefingSections | None = None
+    yesterday_record: dict | None = None
+    today_preview: dict | None = None
 
 
 # ============== SETTINGS SCHEMAS ==============
