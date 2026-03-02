@@ -25,6 +25,7 @@ import logging
 import argparse
 import signal
 import atexit
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -371,12 +372,11 @@ def main():
         save_pid()
         atexit.register(remove_pid)
 
+        shutdown_event = threading.Event()
+
         def signal_handler(signum, frame):
-            logger.info("Received shutdown signal, stopping scheduler...")
-            scheduler.shutdown(wait=True)
-            _persist_stats()
-            remove_pid()
-            sys.exit(0)
+            logger.info("Received shutdown signal, flagging exit...")
+            shutdown_event.set()
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -397,13 +397,21 @@ def main():
             scheduler.start()
 
             if args.daemon:
-                while True:
-                    time.sleep(60)
+                while not shutdown_event.is_set():
+                    shutdown_event.wait(timeout=60)
         except (KeyboardInterrupt, SystemExit):
-            logger.info("Shutting down scheduler...")
-            scheduler.shutdown(wait=True)
-            _persist_stats()
-            remove_pid()
+            shutdown_event.set()
+
+        # Single shutdown path — no matter how we got here
+        logger.info("Shutting down scheduler...")
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass  # already stopped, or never started
+        _persist_stats()
+        remove_pid()
+        logger.info("Agent scheduler exited cleanly")
+        sys.exit(0)
 
 
 if __name__ == '__main__':
