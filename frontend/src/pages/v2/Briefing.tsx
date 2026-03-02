@@ -7,13 +7,19 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
+  TrendingUp,
+  Target,
+  BarChart3,
+  Zap,
 } from 'lucide-react';
 import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
-import { Card } from '../../components/v2/Card';
+import { Card, CardHeader, CardBody, CardFooter } from '../../components/v2/Card';
 import { Button } from '../../components/v2/Button';
 import { Badge } from '../../components/v2/Badge';
+import { StatCard } from '../../components/ui/StatCard';
 import { fetchBriefing } from '../../lib/api';
 import { useBankroll } from '../../hooks/useBankroll';
+import type { YesterdayRecord } from '../../lib/types';
 
 function getTodayET(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -106,6 +112,9 @@ export function Briefing() {
           </Card>
         ) : data ? (
           <>
+            {data.yesterday_record && <YesterdayRecordCard record={data.yesterday_record} />}
+            {data.today_preview && <TodayPreviewCard preview={data.today_preview} />}
+
             {/* Formatted Briefing Text */}
             <Card>
               <div className="p-4 border-b border-border flex items-center justify-between">
@@ -158,6 +167,146 @@ export function Briefing() {
         )}
       </div>
     </ResponsiveLayout>
+  );
+}
+
+function YesterdayRecordCard({ record }: { record: YesterdayRecord }) {
+  const { overall, by_bet_type, by_confidence, clv_summary, date, source } = record;
+  const hitRate = overall.hit_rate;
+  const variant = hitRate >= 55 ? 'success' : 'danger';
+  const hitRateVariant = hitRate >= 55 ? 'success' : hitRate >= 45 ? 'warning' : 'danger';
+  const showProfit = source === 'bet_tracking' && overall.profit !== 0;
+
+  const betTypeEntries = Object.entries(by_bet_type);
+  const confidenceEntries = Object.entries(by_confidence);
+
+  return (
+    <Card variant={variant} glow>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-accent-success" />
+            <h3 className="font-semibold text-text-primary">Yesterday's Record</h3>
+            <span className="text-xs text-text-muted">{date}</span>
+          </div>
+          {source && (
+            <Badge variant="default" size="sm">{source === 'bet_tracking' ? 'Tracked' : 'Predictions'}</Badge>
+          )}
+        </div>
+      </CardHeader>
+
+      <CardBody>
+        {/* Headline Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard
+            label="Record"
+            value={`${overall.wins}-${overall.losses}-${overall.pushes}`}
+          />
+          <StatCard
+            label="Hit Rate"
+            value={`${hitRate.toFixed(1)}%`}
+            variant={hitRateVariant}
+          />
+          <StatCard
+            label="Profit"
+            value={showProfit ? `$${overall.profit >= 0 ? '+' : ''}${overall.profit.toFixed(0)}` : 'N/A'}
+            variant={showProfit ? (overall.profit >= 0 ? 'success' : 'danger') : 'default'}
+          />
+          <StatCard
+            label="Total Bets"
+            value={overall.total}
+          />
+        </div>
+
+        {/* By Bet Type */}
+        {betTypeEntries.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs text-text-muted uppercase tracking-wide mb-2 flex items-center gap-1">
+              <BarChart3 className="w-3 h-3" /> By Bet Type
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {betTypeEntries.map(([type, stats]) => (
+                <div key={type} className="bg-bg-tertiary rounded-lg p-2">
+                  <p className="text-xs text-text-muted">{type}</p>
+                  <p className="text-sm font-bold text-text-primary">
+                    {stats.wins}-{stats.losses}
+                  </p>
+                  <p className={`text-xs ${stats.hit_rate >= 55 ? 'text-accent-success' : stats.hit_rate >= 45 ? 'text-accent-warning' : 'text-accent-danger'}`}>
+                    {stats.hit_rate.toFixed(0)}%
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* By Confidence */}
+        {confidenceEntries.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs text-text-muted uppercase tracking-wide mb-2 flex items-center gap-1">
+              <Target className="w-3 h-3" /> By Confidence
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {confidenceEntries.map(([tier, stats]) => (
+                <div key={tier} className="bg-bg-tertiary rounded-lg p-2">
+                  <p className="text-xs text-text-muted capitalize">{tier}</p>
+                  <p className="text-sm font-bold text-text-primary">
+                    {stats.wins}-{stats.losses}
+                  </p>
+                  <p className={`text-xs ${stats.hit_rate >= 55 ? 'text-accent-success' : stats.hit_rate >= 45 ? 'text-accent-warning' : 'text-accent-danger'}`}>
+                    {stats.hit_rate.toFixed(0)}%
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardBody>
+
+      {/* CLV Summary */}
+      {clv_summary && (
+        <CardFooter>
+          <p className="text-xs text-text-secondary">
+            Avg CLV: <span className={clv_summary.avg_clv >= 0 ? 'text-accent-success' : 'text-accent-danger'}>{clv_summary.avg_clv >= 0 ? '+' : ''}{clv_summary.avg_clv.toFixed(1)}%</span>
+            {' · '}
+            Positive CLV: <span className="text-text-primary">{(clv_summary.positive_clv_rate * 100).toFixed(0)}%</span>
+          </p>
+        </CardFooter>
+      )}
+    </Card>
+  );
+}
+
+function TodayPreviewCard({ preview }: { preview: { actionable_plays: number; games_count: number; games_analyzed?: number } }) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Zap className="w-5 h-5 text-[#00d4ff]" />
+          <h3 className="font-semibold text-text-primary">Today's Preview</h3>
+        </div>
+      </CardHeader>
+      <CardBody>
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard
+            label="Actionable Plays"
+            value={preview.actionable_plays}
+            variant="default"
+            className="[&>p:nth-child(2)]:text-[#00d4ff]"
+          />
+          <StatCard
+            label="Games"
+            value={preview.games_count}
+          />
+          {preview.games_analyzed != null && (
+            <StatCard
+              label="Analyzed"
+              value={preview.games_analyzed}
+            />
+          )}
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 
