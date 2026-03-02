@@ -78,8 +78,8 @@ def _collect_environment():
     return data
 
 
-def _collect_scheduler():
-    """Section B — Scheduler status file + staleness."""
+def _collect_scheduler(pg_conn=None):
+    """Section B — Scheduler status from Postgres agent_runs, status file as fallback."""
     data = {
         "status_file_exists": False,
         "status_file_stale": False,
@@ -91,12 +91,94 @@ def _collect_scheduler():
         "daemon_running": False,
         "daemon_pid": None,
         "daemon_message": "",
+        "source": "none",
     }
 
+    # Import schedule metadata (needed for cron_kwargs / descriptions)
     try:
-        from agents.core.agent_scheduler import (
-            get_status, AGENT_SCHEDULES, STATUS_FILE, PID_FILE,
-        )
+        from agents.core.agent_scheduler import AGENT_SCHEDULES
+    except Exception:
+        AGENT_SCHEDULES = {}
+
+    # ------------------------------------------------------------------
+    # Primary source: Postgres agent_runs table
+    # ------------------------------------------------------------------
+    if pg_conn is not None:
+        try:
+            import psycopg2.extras
+            cursor = pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Aggregate stats from last 24 hours
+            cursor.execute("""
+                SELECT
+                    agent_name,
+                    COUNT(*) as run_count,
+                    MAX(started_at) as last_run,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failures,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as successes
+                FROM agent_runs
+                WHERE started_at >= NOW() - INTERVAL '24 hours'
+                GROUP BY agent_name
+            """)
+            recent_runs = cursor.fetchall()
+
+            data["total_runs"] = sum(r["run_count"] for r in recent_runs)
+            data["total_failures"] = sum(r["failures"] for r in recent_runs)
+
+            # Any runs in last 2 hours => scheduler is alive
+            cursor.execute("""
+                SELECT COUNT(*) as recent_count
+                FROM agent_runs
+                WHERE started_at >= NOW() - INTERVAL '2 hours'
+            """)
+            recent_count = cursor.fetchone()["recent_count"]
+            scheduler_running = recent_count > 0
+
+            data["daemon_running"] = scheduler_running
+            data["daemon_message"] = (
+                f"Scheduler active (detected via Postgres, {recent_count} runs in last 2h)"
+                if scheduler_running
+                else "No recent activity in Postgres agent_runs"
+            )
+            data["source"] = "postgres"
+
+            # Build per-agent stats
+            for name in AGENT_NAMES:
+                agent_data = next((r for r in recent_runs if r["agent_name"] == name), None)
+                cron_kwargs, sched_desc = AGENT_SCHEDULES.get(name, ({}, "N/A"))
+
+                if agent_data:
+                    last_run_val = agent_data["last_run"]
+                    data["agents"][name] = {
+                        "last_run": last_run_val.isoformat() if last_run_val else None,
+                        "last_status": "completed" if agent_data["successes"] > 0 else "failed",
+                        "runs": agent_data["run_count"],
+                        "failures": agent_data["failures"],
+                        "schedule": sched_desc,
+                        "cron_kwargs": cron_kwargs,
+                    }
+                else:
+                    data["agents"][name] = {
+                        "last_run": None,
+                        "last_status": "",
+                        "runs": 0,
+                        "failures": 0,
+                        "schedule": sched_desc,
+                        "cron_kwargs": cron_kwargs,
+                    }
+
+            cursor.close()
+            return data
+
+        except Exception as e:
+            data["postgres_error"] = str(e)
+            # Fall through to status file fallback
+
+    # ------------------------------------------------------------------
+    # Fallback: local status file (only works on scheduler service)
+    # ------------------------------------------------------------------
+    try:
+        from agents.core.agent_scheduler import get_status, STATUS_FILE
     except Exception as e:
         data["error"] = f"Import error: {e}"
         return data
@@ -105,8 +187,8 @@ def _collect_scheduler():
 
     if status_path.exists():
         data["status_file_exists"] = True
+        data["source"] = "status_file"
 
-        # Staleness: check mtime
         try:
             mtime = status_path.stat().st_mtime
             age_hours = (datetime.now(timezone.utc).timestamp() - mtime) / 3600
@@ -116,7 +198,6 @@ def _collect_scheduler():
         except Exception:
             pass
 
-        # Parse status file
         try:
             with open(status_path) as f:
                 saved = json.load(f)
@@ -137,14 +218,14 @@ def _collect_scheduler():
                 }
         except Exception as e:
             data["parse_error"] = str(e)
-    else:
-        data["status_file_exists"] = False
 
-    # Daemon PID check
+    # Daemon PID check (only meaningful on scheduler service)
     status = get_status()
-    data["daemon_running"] = status.get("running", False)
+    if data["source"] != "postgres":
+        data["daemon_running"] = status.get("running", False)
     data["daemon_pid"] = status.get("pid")
-    data["daemon_message"] = status.get("message", "")
+    if not data["daemon_message"]:
+        data["daemon_message"] = status.get("message", "")
 
     return data
 
@@ -356,10 +437,59 @@ def _collect_databases():
     return data
 
 
-def _collect_agent_health(scheduler_data, registry_data):
-    """Section F — Agent health analysis from recorded state (NO agent execution)."""
+def _collect_agent_health(scheduler_data, registry_data, pg_conn=None):
+    """Section F — Agent health analysis from Postgres agent_runs (NO agent execution)."""
     agents = {}
     now = datetime.now(timezone.utc)
+
+    # Schedule-specific staleness thresholds (in minutes)
+    _HEALTHY_THRESHOLDS = {
+        "odds_monitor": 30,     # runs every 15 min during 8AM-11PM
+        "pregame": 360,         # runs twice daily (6h)
+        "briefing": 360,        # runs twice daily (6h)
+        "postgame": 1500,       # runs once daily (25h)
+        "orchestrator": 1500,   # runs once daily (25h)
+        "watchdog": 1500,       # runs once daily (25h)
+    }
+
+    # Pre-fetch per-agent data from Postgres if available
+    pg_agent_data = {}
+    if pg_conn is not None:
+        try:
+            import psycopg2.extras
+            cursor = pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            for name in AGENT_NAMES:
+                # Most recent run
+                cursor.execute("""
+                    SELECT status, started_at, completed_at, tokens_used,
+                           messages_sent, errors
+                    FROM agent_runs
+                    WHERE agent_name = %s
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                """, (name,))
+                last_run = cursor.fetchone()
+
+                # Failures in last 24h
+                cursor.execute("""
+                    SELECT COUNT(*) as failure_count
+                    FROM agent_runs
+                    WHERE agent_name = %s
+                      AND status = 'failed'
+                      AND started_at >= NOW() - INTERVAL '24 hours'
+                """, (name,))
+                failures_24h = cursor.fetchone()["failure_count"]
+
+                pg_agent_data[name] = {
+                    "last_run": last_run,
+                    "failures_24h": failures_24h,
+                }
+
+            cursor.close()
+        except Exception as e:
+            pg_agent_data = {}
+            # Fall through — use scheduler_data below
 
     for name in AGENT_NAMES:
         agent_info = {
@@ -369,41 +499,17 @@ def _collect_agent_health(scheduler_data, registry_data):
             "details": {},
         }
 
-        # Source 1: Scheduler status file
-        sched_agent = scheduler_data.get("agents", {}).get(name, {})
-        last_run_str = sched_agent.get("last_run")
-        last_status = sched_agent.get("last_status", "")
-        failures = sched_agent.get("failures", 0)
-        cron_kwargs = sched_agent.get("cron_kwargs", {})
-
-        # Parse last_run timestamp
-        last_run_dt = None
-        if last_run_str:
-            try:
-                # Handle various ISO formats
-                clean = str(last_run_str).replace("Z", "+00:00")
-                if "+" not in clean and len(clean) <= 19:
-                    clean += "+00:00"
-                last_run_dt = datetime.fromisoformat(clean)
-                if last_run_dt.tzinfo is None:
-                    last_run_dt = last_run_dt.replace(tzinfo=timezone.utc)
-                delta = now - last_run_dt
-                agent_info["time_since_last_run_minutes"] = round(delta.total_seconds() / 60, 1)
-            except Exception:
-                pass
-
-        # Source 2: Registry
+        # Registry data (circuit breaker, token budget)
         reg_agent = registry_data.get("agents", {}).get(name, {})
         reg_status = reg_agent.get("registry_status", "unknown")
-
-        # Source 3: Circuit breaker
         cb_info = registry_data.get("circuit_breakers", {}).get(name, {})
-        cb_tripped = cb_info.get("tripped")
         cb_state = cb_info.get("state", "UNKNOWN")
-
-        # Source 4: Token budget
         cost_info = registry_data.get("cost_summary", {}).get(name, {})
-        utilization = cost_info.get("utilization_pct", 0)
+        token_util = cost_info.get("utilization_pct", 0)
+
+        # Schedule cron_kwargs for next_scheduled_run computation
+        sched_agent = scheduler_data.get("agents", {}).get(name, {})
+        cron_kwargs = sched_agent.get("cron_kwargs", {})
 
         # Compute next_scheduled_run via CronTrigger
         if cron_kwargs:
@@ -416,49 +522,140 @@ def _collect_agent_health(scheduler_data, registry_data):
             except Exception:
                 pass
 
-        # Compute expected schedule interval in minutes for staleness check
-        expected_interval_min = _estimate_interval_minutes(cron_kwargs)
+        # ----------------------------------------------------------
+        # Determine health from Postgres (primary) or scheduler data (fallback)
+        # ----------------------------------------------------------
+        pg_data = pg_agent_data.get(name)
+        last_run_row = pg_data["last_run"] if pg_data else None
 
-        # Health classification
-        if not last_run_str and reg_status in ("idle", "unknown"):
-            health = "NEVER_RUN"
-        elif last_status in ("failed", "error"):
-            health = "FAILED"
-        elif cb_tripped is True:
-            health = "DEGRADED"
-        elif utilization > 80:
-            health = "DEGRADED"
-        elif not os.environ.get("GEMINI_API_KEY") and name not in ("watchdog",):
-            health = "DEGRADED"
-        elif (agent_info["time_since_last_run_minutes"] is not None
-              and expected_interval_min > 0
-              and agent_info["time_since_last_run_minutes"] > 2 * expected_interval_min):
-            health = "STALE"
-        elif last_status == "completed":
-            health = "HEALTHY"
-        elif last_status == "pending":
-            health = "NEVER_RUN"
+        if last_run_row is not None:
+            # Postgres-sourced health
+            last_status = last_run_row["status"]
+            started_at = last_run_row["started_at"]
+            failures = pg_data["failures_24h"]
+
+            if started_at is not None:
+                # started_at is a datetime from psycopg2, ensure tz-aware
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=timezone.utc)
+                time_diff = now - started_at
+                time_since = int(time_diff.total_seconds() / 60)
+                agent_info["time_since_last_run_minutes"] = time_since
+
+                threshold = _HEALTHY_THRESHOLDS.get(name, 1500)
+                if last_status == "failed" and failures >= 3:
+                    health = "FAILED"
+                elif last_status == "completed" and time_since < threshold:
+                    health = "HEALTHY"
+                elif last_status == "completed":
+                    health = "DEGRADED"
+                elif last_status == "failed":
+                    health = "DEGRADED"
+                else:
+                    health = "DEGRADED"
+            else:
+                health = "NEVER_RUN"
+
+            agent_info["health"] = health
+            agent_info["details"] = {
+                "last_status": last_status,
+                "failures": failures,
+                "registry_status": reg_status,
+                "cb_state": cb_state,
+                "token_utilization_pct": token_util,
+                "last_run_at": started_at.isoformat() if started_at else None,
+                "tokens_used": last_run_row["tokens_used"] or 0,
+                "messages_sent": last_run_row["messages_sent"] or 0,
+            }
         else:
-            health = "UNKNOWN"
+            # Fallback: use scheduler_data (status file or empty)
+            last_run_str = sched_agent.get("last_run")
+            last_status = sched_agent.get("last_status", "")
+            failures = sched_agent.get("failures", 0)
 
-        agent_info["health"] = health
-        agent_info["details"] = {
-            "last_status": last_status,
-            "failures": failures,
-            "registry_status": reg_status,
-            "cb_state": cb_state,
-            "token_utilization_pct": utilization,
-        }
+            # Parse last_run timestamp
+            if last_run_str:
+                try:
+                    clean = str(last_run_str).replace("Z", "+00:00")
+                    if "+" not in clean and len(clean) <= 19:
+                        clean += "+00:00"
+                    last_run_dt = datetime.fromisoformat(clean)
+                    if last_run_dt.tzinfo is None:
+                        last_run_dt = last_run_dt.replace(tzinfo=timezone.utc)
+                    delta = now - last_run_dt
+                    agent_info["time_since_last_run_minutes"] = round(delta.total_seconds() / 60, 1)
+                except Exception:
+                    pass
+
+            # Health classification from scheduler data
+            if not last_run_str and reg_status in ("idle", "unknown"):
+                health = "NEVER_RUN"
+            elif last_status in ("failed", "error"):
+                health = "FAILED"
+            elif cb_info.get("tripped") is True:
+                health = "DEGRADED"
+            elif last_status == "completed":
+                health = "HEALTHY"
+            elif last_status == "pending":
+                health = "NEVER_RUN"
+            else:
+                health = "UNKNOWN"
+
+            agent_info["health"] = health
+            agent_info["details"] = {
+                "last_status": last_status,
+                "failures": failures,
+                "registry_status": reg_status,
+                "cb_state": cb_state,
+                "token_utilization_pct": token_util,
+            }
 
         agents[name] = agent_info
 
     return agents
 
 
-def _collect_daemon_health():
-    """Section G — Railway daemon process health."""
+def _collect_daemon_health(pg_conn=None):
+    """Section G — Scheduler process health via Postgres activity or PID file."""
     data = {"status": "UNKNOWN", "detail": "", "pid": None, "pid_alive": False}
 
+    # ------------------------------------------------------------------
+    # Primary: detect scheduler activity via Postgres agent_runs
+    # ------------------------------------------------------------------
+    if pg_conn is not None:
+        try:
+            import psycopg2.extras
+            cursor = pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute("""
+                SELECT MAX(started_at) as most_recent
+                FROM agent_runs
+                WHERE started_at >= NOW() - INTERVAL '2 hours'
+            """)
+            result = cursor.fetchone()
+            most_recent = result["most_recent"] if result else None
+            cursor.close()
+
+            if most_recent:
+                if most_recent.tzinfo is None:
+                    most_recent = most_recent.replace(tzinfo=timezone.utc)
+                minutes_ago = int((datetime.now(timezone.utc) - most_recent).total_seconds() / 60)
+                data["status"] = "OK"
+                data["detail"] = f"Scheduler active — last run {minutes_ago} minutes ago"
+                data["pid_alive"] = True
+                return data
+            else:
+                data["status"] = "FAIL"
+                data["detail"] = "No agent activity in last 2 hours — scheduler may be down"
+                data["pid_alive"] = False
+                return data
+
+        except Exception as e:
+            data["detail"] = f"Postgres query failed: {e}"
+            # Fall through to PID file check
+
+    # ------------------------------------------------------------------
+    # Fallback: PID file (only works on scheduler service)
+    # ------------------------------------------------------------------
     try:
         from agents.core.agent_scheduler import PID_FILE
     except Exception as e:
@@ -480,7 +677,7 @@ def _collect_daemon_health():
     try:
         pid = int(pid_path.read_text().strip())
         data["pid"] = pid
-        os.kill(pid, 0)  # signal 0 = liveness check only
+        os.kill(pid, 0)
         data["pid_alive"] = True
         data["status"] = "OK"
         data["detail"] = f"Scheduler daemon alive (PID {pid})"
@@ -527,7 +724,7 @@ def _collect_summary(env, scheduler, registry, redis, databases, agent_health, d
         suggestions.append("Set GEMINI_API_KEY in Railway env (or .env locally)")
     if env.get("apscheduler") == "NOT INSTALLED":
         suggestions.append("Install APScheduler: pip install apscheduler")
-    if not scheduler.get("daemon_running"):
+    if not scheduler.get("daemon_running") and not daemon.get("pid_alive"):
         suggestions.append("Start unified scheduler: python agents/core/agent_scheduler.py --daemon")
     if scheduler.get("status_file_stale"):
         suggestions.append(f"Scheduler status file is stale ({scheduler.get('stale_hours', '?')}h old)")
@@ -537,33 +734,37 @@ def _collect_summary(env, scheduler, registry, redis, databases, agent_health, d
         suggestions.append("Fix Redis connection — check REDIS_URL configuration")
     if not databases.get("postgres", {}).get("connected"):
         suggestions.append("Set DATABASE_URL for PostgreSQL (agent registry + guardrails persistence)")
+    if not databases.get("calibration_db", {}).get("exists"):
+        suggestions.append("calibration.db missing — orchestrator may not have data")
     for db_key in ["calibration_db", "bet_tracking_db"]:
-        warn = databases.get(db_key, {}).get("stale_warning")
-        if warn:
-            suggestions.append(warn)
+        warn_msg = databases.get(db_key, {}).get("stale_warning")
+        if warn_msg:
+            suggestions.append(warn_msg)
     for name in AGENT_NAMES:
         ah = agent_health.get(name, {})
         if ah.get("health") == "FAILED":
-            detail = ah.get("details", {}).get("last_status", "")
-            suggestions.append(f"Investigate {name} agent failure (last_status={detail})")
-        elif ah.get("health") == "STALE":
-            suggestions.append(f"Agent '{name}' has not run in expected window — check scheduler")
+            suggestions.append(f"Check {name} logs — multiple recent failures")
+        elif ah.get("health") == "DEGRADED":
+            suggestions.append(f"{name} hasn't run recently — verify schedule")
 
-    # Overall status
+    # Overall status based on agent health counts
     healths = [agent_health.get(n, {}).get("health", "UNKNOWN") for n in AGENT_NAMES]
-    any_failed = any(h in ("FAILED",) for h in healths)
-    any_degraded = any(h in ("DEGRADED", "STALE", "UNKNOWN") for h in healths)
-    infra_critical = (
-        infra["postgres"] == "DOWN"
-        and infra["guardrails_db"] == "MISSING"
-    ) or daemon.get("status") == "FAIL"
+    healthy_count = sum(1 for h in healths if h == "HEALTHY")
+    failed_count = sum(1 for h in healths if h == "FAILED")
+    degraded_count = sum(1 for h in healths if h in ("DEGRADED", "STALE"))
+    never_run_count = sum(1 for h in healths if h == "NEVER_RUN")
+    total_agents = len(healths)
 
-    if not any_failed and not any_degraded and not infra_critical and not suggestions:
-        overall = "ALL_GREEN"
-    elif any_failed or infra_critical:
+    if never_run_count == total_agents:
         overall = "CRITICAL"
-    else:
+    elif healthy_count == total_agents:
+        overall = "ALL_GREEN"
+    elif failed_count > 0 or not daemon.get("pid_alive"):
         overall = "DEGRADED"
+    elif degraded_count > 0:
+        overall = "DEGRADED"
+    else:
+        overall = "ALL_GREEN"
 
     return {
         "overall_status": overall,
@@ -581,13 +782,29 @@ def _collect_summary(env, scheduler, registry, redis, databases, agent_health, d
 def _collect_all():
     """Collect all diagnostic data into a structured dict."""
     env = _collect_environment()
-    scheduler = _collect_scheduler()
+
+    # Get a shared Postgres connection for sections that query agent_runs
+    pg_conn = None
+    try:
+        from agents.core.connections import get_postgres_connection
+        pg_conn = get_postgres_connection()
+    except Exception:
+        pass
+
+    scheduler = _collect_scheduler(pg_conn=pg_conn)
     registry = _collect_registry_guardrails()
     redis = _collect_redis()
     databases = _collect_databases()
-    agent_health = _collect_agent_health(scheduler, registry)
-    daemon = _collect_daemon_health()
+    agent_health = _collect_agent_health(scheduler, registry, pg_conn=pg_conn)
+    daemon = _collect_daemon_health(pg_conn=pg_conn)
     summary = _collect_summary(env, scheduler, registry, redis, databases, agent_health, daemon)
+
+    # Clean up shared connection
+    if pg_conn is not None:
+        try:
+            pg_conn.close()
+        except Exception:
+            pass
 
     return {
         "environment": env,
@@ -667,16 +884,26 @@ def _render_cli(data):
     banner("SECTION B — SCHEDULER STATUS")
     if sched.get("error"):
         fail(sched["error"])
-    elif not sched["status_file_exists"]:
-        warn("Status file missing — scheduler has never run")
     else:
-        info(f"start_time:     {sched.get('start_time', 'N/A')}")
-        info(f"total_runs:     {sched['total_runs']}")
-        info(f"total_failures: {sched['total_failures']}")
-        if sched["status_file_stale"]:
-            warn(f"Status file is STALE ({sched['stale_hours']}h since last update)")
+        source = sched.get("source", "none")
+        info(f"Data source:    {source}")
+        if source == "postgres":
+            ok("Reading scheduler activity from Postgres agent_runs")
+        elif source == "status_file":
+            info("Reading from local status file (scheduler service only)")
         else:
-            ok(f"Status file fresh ({sched.get('stale_hours', '?')}h old)")
+            warn("No scheduler data source available")
+
+        if sched.get("postgres_error"):
+            warn(f"Postgres query failed: {sched['postgres_error']}")
+
+        info(f"total_runs(24h): {sched['total_runs']}")
+        info(f"total_failures:  {sched['total_failures']}")
+
+        if sched.get("start_time"):
+            info(f"start_time:      {sched['start_time']}")
+        if sched.get("status_file_stale"):
+            warn(f"Status file is STALE ({sched['stale_hours']}h since last update)")
 
         for name in AGENT_NAMES:
             a = sched["agents"].get(name, {})
@@ -685,11 +912,11 @@ def _render_cli(data):
                  f"runs={a.get('runs', 0):>3}  fails={a.get('failures', 0):>3}  "
                  f'schedule="{a.get("schedule", "N/A")}"')
 
-    sub("Daemon PID")
+    sub("Scheduler activity")
     if sched["daemon_running"]:
-        ok(f"Scheduler daemon running (PID {sched['daemon_pid']})")
+        ok(sched["daemon_message"])
     else:
-        warn(f"Scheduler daemon NOT running: {sched['daemon_message']}")
+        warn(sched["daemon_message"])
 
     # --- C: Registry + Guardrails ---
     reg = data["registry_guardrails"]
@@ -838,30 +1065,6 @@ def _mask(val, prefix_len=12):
         return val[:4] + "..."
     return val[:prefix_len] + "..."
 
-
-def _estimate_interval_minutes(cron_kwargs):
-    """Rough estimate of expected run interval from cron kwargs."""
-    if not cron_kwargs:
-        return 0
-    minute = cron_kwargs.get("minute", "0")
-    hour = cron_kwargs.get("hour", "*")
-
-    # "*/15" in minute field => every 15 min
-    if isinstance(minute, str) and minute.startswith("*/"):
-        try:
-            return int(minute.split("/")[1])
-        except (ValueError, IndexError):
-            pass
-
-    # Multiple hours like "11,17" => interval between them
-    if isinstance(hour, str) and "," in hour:
-        parts = sorted(int(h) for h in hour.split(","))
-        if len(parts) >= 2:
-            gaps = [parts[i+1] - parts[i] for i in range(len(parts)-1)]
-            return min(gaps) * 60
-
-    # Single hour => once per day
-    return 24 * 60
 
 
 # ============================================================================
