@@ -2801,6 +2801,21 @@ def get_agent_diagnostics():
     return diag
 
 
+@app.get("/api/agents/diagnostics")
+def get_full_agent_diagnostics():
+    """Full agent system health check — read-only, no agent execution."""
+    try:
+        from scripts.agent_diagnostics import run_diagnostics
+        return run_diagnostics(return_json=True)
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "summary": {"overall_status": "CRITICAL"},
+        }
+
+
 # ============== BACKTEST TRIGGER ==============
 
 
