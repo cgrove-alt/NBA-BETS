@@ -2203,12 +2203,9 @@ def _get_today_preview() -> dict | None:
             all_players = status_data.get("home", []) + status_data.get("away", [])
             for player in all_players:
                 for pred_key in prop_keys:
-                    pred_val = player.get(pred_key)
-                    conf_key = pred_key.replace("_pred", "_confidence")
-                    edge_key = pred_key.replace("_pred", "_edge_pct")
-                    conf = player.get(conf_key, 0) or 0
-                    edge_pct = abs(player.get(edge_key, 0) or 0)
-                    if pred_val is not None and conf >= 55 and edge_pct >= 4:
+                    pick_key = pred_key.replace("_pred", "_pick")
+                    pick = player.get(pick_key, "-") or "-"
+                    if pick != "-":
                         play_count += 1
 
         return {
