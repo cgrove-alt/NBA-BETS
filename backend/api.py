@@ -2444,32 +2444,57 @@ def get_briefing(date: str = Query(None, description="Date in YYYY-MM-DD format"
     generated_at = None
     sections = None
 
-    guardrails_path = Path("data/agent_guardrails.db")
-    if guardrails_path.exists():
+    # Try PostgreSQL first (Railway production), fall back to SQLite (local dev)
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
         try:
-            conn = sqlite3.connect(str(guardrails_path))
-            conn.row_factory = sqlite3.Row
-
-            row = conn.execute("""
+            import psycopg2
+            conn = psycopg2.connect(database_url)
+            cur = conn.cursor()
+            cur.execute("""
                 SELECT payload, completed_at FROM agent_runs
                 WHERE agent_name = 'briefing'
-                AND started_at LIKE ?
-                AND success = 1
+                AND started_at LIKE %s
+                AND success = true
                 ORDER BY started_at DESC LIMIT 1
-            """, (f"{date}%",)).fetchone()
-
-            if row and row["payload"]:
-                payload = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
-                briefing_text = payload.get("briefing_text", "")
-                generated_at = row["completed_at"]
-
+            """, (f"{date}%",))
+            row = cur.fetchone()
+            if row and row[0]:
+                payload = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                briefing_text = payload.get("formatted_text", "") or payload.get("briefing_text", "")
+                generated_at = row[1]
                 if "sections" in payload:
                     sections = BriefingSections(**payload["sections"])
-
+            cur.close()
             conn.close()
         except Exception as e:
             import logging
-            logging.getLogger(__name__).error(f"Briefing query failed: {e}")
+            logging.getLogger(__name__).error(f"Briefing PG query failed: {e}")
+
+    # SQLite fallback (local dev)
+    if not briefing_text:
+        guardrails_path = Path("data/agent_guardrails.db")
+        if guardrails_path.exists():
+            try:
+                conn = sqlite3.connect(str(guardrails_path))
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("""
+                    SELECT payload, completed_at FROM agent_runs
+                    WHERE agent_name = 'briefing'
+                    AND started_at LIKE ?
+                    AND success = 1
+                    ORDER BY started_at DESC LIMIT 1
+                """, (f"{date}%",)).fetchone()
+                if row and row["payload"]:
+                    payload = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
+                    briefing_text = payload.get("formatted_text", "") or payload.get("briefing_text", "")
+                    generated_at = row["completed_at"]
+                    if "sections" in payload:
+                        sections = BriefingSections(**payload["sections"])
+                conn.close()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Briefing query failed: {e}")
 
     # --- 2. Query yesterday's record directly from DB (always) ---
     yesterday_record = _query_yesterday_record(yesterday_str)

@@ -437,11 +437,11 @@ class SystemHealthResponse(BaseModel):
 # ============== BRIEFING SCHEMAS ==============
 
 class BriefingSections(BaseModel):
-    yesterday_results: str | None = None
-    today_plays: str | None = None
-    bankroll: str | None = None
-    alerts: str | None = None
-    market_intel: str | None = None
+    yesterday_results: dict | str | None = None
+    today_plays: list | str | None = None
+    bankroll: dict | str | None = None
+    alerts: list | str | None = None
+    market_intel: list | str | None = None
 
 class BriefingResponse(BaseModel):
     date: str
