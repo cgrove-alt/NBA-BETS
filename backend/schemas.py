@@ -173,6 +173,7 @@ class BestBetsResponse(BaseModel):
     best_bets: list[BestBet]
     count: int
     filters: dict[str, Any]
+    data_source: str = "realtime"  # "realtime" or "precomputed"
 
 
 # ============== GAME RESULTS SCHEMAS ==============

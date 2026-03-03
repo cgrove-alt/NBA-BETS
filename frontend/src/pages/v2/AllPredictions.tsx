@@ -10,6 +10,7 @@ import {
   X,
   SlidersHorizontal,
   Search,
+  Clock,
 } from 'lucide-react';
 import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
 import { BetCard } from '../../components/v2/BetCard';
@@ -115,13 +116,14 @@ export function AllPredictions() {
       }),
     staleTime: 2 * 60 * 1000,
     // After a deploy, props generate in the background. Retry every 5s
-    // up to 6 times (30s max) until data arrives.
+    // up to 12 times (60s max) until real-time data arrives.
     refetchInterval: (query) => {
       const bets = query.state.data?.best_bets;
+      const source = query.state.data?.data_source;
       const hasGames = (gamesData?.games?.length ?? 0) > 0;
-      if (hasGames && (!bets || bets.length === 0)) {
+      if (hasGames && (!bets || bets.length === 0 || source === 'precomputed')) {
         emptyRetryCount.current++;
-        return emptyRetryCount.current <= 6 ? 5000 : false;
+        return emptyRetryCount.current <= 12 ? 5000 : false;
       }
       emptyRetryCount.current = 0;
       return false;
@@ -514,6 +516,14 @@ export function AllPredictions() {
             List
           </Button>
         </div>
+
+        {/* Precomputed data banner */}
+        {bestBetsData?.data_source === 'precomputed' && bets.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1c2333] border border-[#30363d] text-sm text-text-muted">
+            <Clock className="w-4 h-4 text-[#ff8800] animate-pulse" />
+            <span>Predictions from earlier today. Live predictions updating...</span>
+          </div>
+        )}
 
         {/* Bets Grid/List */}
         {isLoading ? (

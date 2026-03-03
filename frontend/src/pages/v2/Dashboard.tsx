@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Calendar, Flame, TrendingUp } from 'lucide-react';
+import { ChevronRight, Calendar, Flame, TrendingUp, Loader2, Clock } from 'lucide-react';
 import { ResponsiveLayout } from '../../components/v2/ResponsiveLayout';
 import { BetCard } from '../../components/v2/BetCard';
 import type { BetCardData } from '../../components/v2/BetCard';
@@ -46,13 +46,17 @@ export function Dashboard() {
     queryFn: () => getBestBets({ minConfidence: 50, minEdge: 3 }),
     staleTime: 5 * 60 * 1000,
     // After a deploy, props generate in the background. Retry every 5s
-    // up to 6 times (30s max) until data arrives.
+    // up to 12 times (60s max) until real-time data arrives.
+    // With the PostgreSQL fallback, the first response should already have data,
+    // but keep retrying to upgrade from precomputed to real-time predictions.
     refetchInterval: (query) => {
       const bets = query.state.data?.best_bets;
+      const source = query.state.data?.data_source;
       const hasGames = (gamesData?.games?.length ?? 0) > 0;
-      if (hasGames && (!bets || bets.length === 0)) {
+      // Retry if: no bets at all, OR data is precomputed (waiting for real-time)
+      if (hasGames && (!bets || bets.length === 0 || source === 'precomputed')) {
         emptyRetryCount.current++;
-        return emptyRetryCount.current <= 6 ? 5000 : false;
+        return emptyRetryCount.current <= 12 ? 5000 : false;
       }
       emptyRetryCount.current = 0;
       return false;
@@ -150,12 +154,28 @@ export function Dashboard() {
           {bestBetsLoading ? (
             <BetCardSkeleton variant="featured" />
           ) : topPicks.length > 0 ? (
-            <BetCard
-              bet={{ ...topPicks[0], copied: copiedBetId === topPicks[0].id }}
-              variant="featured"
-              onTake={handleTakeBet}
-              onExpand={handleExpandBet}
-            />
+            <>
+              {bestBetsData?.data_source === 'precomputed' && (
+                <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-[#1c2333] border border-[#30363d] text-sm text-text-muted">
+                  <Clock className="w-4 h-4 text-[#ff8800] animate-pulse" />
+                  <span>Predictions from earlier today. Live predictions updating...</span>
+                </div>
+              )}
+              <BetCard
+                bet={{ ...topPicks[0], copied: copiedBetId === topPicks[0].id }}
+                variant="featured"
+                onTake={handleTakeBet}
+                onExpand={handleExpandBet}
+              />
+            </>
+          ) : games.length > 0 && emptyRetryCount.current > 0 && emptyRetryCount.current <= 12 ? (
+            <Card className="p-8 text-center">
+              <Loader2 className="w-6 h-6 text-[#00d4ff] animate-spin mx-auto mb-3" />
+              <p className="text-text-muted">Generating predictions...</p>
+              <p className="text-sm text-text-muted mt-2">
+                Models are warming up. This usually takes 30-60 seconds.
+              </p>
+            </Card>
           ) : (
             <Card className="p-8 text-center">
               <p className="text-text-muted">No top picks available yet.</p>

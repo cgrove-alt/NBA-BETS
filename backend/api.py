@@ -978,8 +978,8 @@ def get_best_bets(
                             away_abbrev=away_abbrev,
                             selected_props=None,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"Warning: Auto-prop generation failed for game {gid}: {e}")
 
     # Parse prop types filter
     prop_type_filter = None
@@ -1129,7 +1129,29 @@ def get_best_bets(
                     used_ml_model=bool(used_ml_model),
                 ))
 
-    # Sort based on user preference
+    # Determine data source for response metadata
+    data_source = "realtime"
+
+    # If no real-time bets available, fall back to pre-computed predictions
+    # from PostgreSQL predictions_history table (populated by daily_predictions.py)
+    if not best_bets:
+        from datetime import datetime as _dt
+        today_et = _dt.now(ET).strftime('%Y-%m-%d')
+        fallback_bets = _load_best_bets_from_postgres(
+            date=today_et,
+            min_confidence=min_confidence,
+            min_edge=min_edge,
+            prop_types=prop_type_filter,
+            pick_type=pick_type,
+            sort_by=sort_by,
+            games=games,
+        )
+        if fallback_bets:
+            best_bets = fallback_bets
+            data_source = "precomputed"
+
+    # Sort based on user preference (real-time bets need sorting;
+    # fallback bets are already sorted but re-sort for consistency)
     if sort_by == "confidence":
         best_bets.sort(key=lambda x: x.confidence, reverse=True)
     elif sort_by == "edge":
@@ -1151,6 +1173,7 @@ def get_best_bets(
             "pick_type": pick_type,
             "sort_by": sort_by,
         },
+        data_source=data_source,
     )
 
 
@@ -1393,6 +1416,187 @@ def _load_predictions_from_postgres(date: str) -> list | None:
     except Exception as e:
         import logging as _logging
         _logging.getLogger(__name__).warning(f"PostgreSQL predictions query failed: {e}")
+        return None
+
+
+# ============== BEST BETS POSTGRES FALLBACK ==============
+
+# Map DB prop_type (uppercase) to display names used by BestBet schema
+_PROP_TYPE_DISPLAY = {
+    "POINTS": "Points",
+    "REBOUNDS": "Rebounds",
+    "ASSISTS": "Assists",
+    "THREES": "3PM",
+    "PRA": "PRA",
+}
+
+
+def _load_best_bets_from_postgres(
+    date: str,
+    min_confidence: float,
+    min_edge: float,
+    prop_types: list[str] | None,
+    pick_type: str | None,
+    sort_by: str,
+    games: list,
+) -> list[BestBet] | None:
+    """Load best bets from PostgreSQL predictions_history as a fallback.
+
+    Used when real-time DataService props haven't finished generating yet
+    (cold start, deploy, API hiccup). Returns pre-computed predictions from
+    the daily prediction pipeline.
+
+    Args:
+        date: Date string YYYY-MM-DD
+        min_confidence: Minimum confidence threshold
+        min_edge: Minimum edge percentage threshold
+        prop_types: Optional list of prop type display names to filter
+        pick_type: Optional OVER/UNDER filter
+        sort_by: Sort order (quality, confidence, edge)
+        games: List of game dicts from get_todays_games() for game_id mapping
+
+    Returns:
+        List of BestBet objects or None if unavailable
+    """
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return None
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT player_name, team, prop_type, prediction, line,
+                   confidence_score, edge_quality_tier, bet_recommendation,
+                   pick, edge, game, injury_boost, line_source, line_vendor
+            FROM predictions_history
+            WHERE date = %s
+              AND pick IS NOT NULL AND pick != ''
+              AND bet_recommendation IN ('BET', 'LEAN')
+            ORDER BY confidence_score DESC NULLS LAST
+        """, (date,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        if not rows:
+            return None
+
+        # Build game mapping: (away_abbrev, home_abbrev) -> game_id
+        game_id_map = {}
+        for g in games:
+            home_abbrev = g.get("home_team", {}).get("abbreviation", "")
+            away_abbrev = g.get("visitor_team", {}).get("abbreviation", "")
+            gid = str(g.get("game_id", ""))
+            if home_abbrev and away_abbrev and gid:
+                game_id_map[(away_abbrev, home_abbrev)] = gid
+
+        best_bets = []
+        for row in rows:
+            (player_name, team, prop_type_raw, prediction, line,
+             confidence_score, edge_quality_tier, bet_recommendation,
+             pick, edge_pct_val, game_str, injury_boost,
+             line_source, line_vendor) = row
+
+            # Skip rows with missing critical data
+            if prediction is None or line is None or confidence_score is None:
+                continue
+
+            prediction = float(prediction)
+            line = float(line)
+            confidence = float(confidence_score)
+            edge_pct = float(edge_pct_val) if edge_pct_val is not None else 0.0
+
+            # Apply confidence filter
+            if confidence < min_confidence:
+                continue
+
+            # Apply edge filter (edge in DB is already a percentage)
+            if abs(edge_pct) < min_edge:
+                continue
+
+            # Map prop_type from DB format to display format
+            prop_type_display = _PROP_TYPE_DISPLAY.get(
+                (prop_type_raw or "").upper(), prop_type_raw or ""
+            )
+
+            # Apply prop type filter
+            if prop_types and prop_type_display not in prop_types:
+                continue
+
+            # Apply pick type filter
+            pick_val = (pick or "").upper()
+            if pick_type and pick_val != pick_type.upper():
+                continue
+
+            # Resolve game_id from "AWAY@HOME" format
+            game_id = ""
+            if game_str and "@" in game_str:
+                parts = game_str.split("@")
+                if len(parts) == 2:
+                    game_id = game_id_map.get((parts[0].strip(), parts[1].strip()), "")
+
+            # Deterministic player_id from name (DB lacks player_id)
+            player_id = hash(player_name or "") & 0x7FFFFFFF
+
+            # Raw edge in points
+            edge_raw = prediction - line
+
+            # Build explanation
+            explanation_parts = [
+                f"Model predicts {prediction:.1f} {prop_type_display.lower()} (line: {line})"
+            ]
+            if edge_quality_tier:
+                explanation_parts.append(f"{edge_quality_tier.capitalize()} edge")
+            explanation = ". ".join(explanation_parts)
+
+            # Build signals
+            signals = ["Pre-computed"]
+            if injury_boost:
+                signals.append("Injury Boost")
+            if line_vendor:
+                signals.append(f"Line: {line_vendor}")
+
+            best_bets.append(BestBet(
+                player_name=player_name or "Unknown",
+                player_id=player_id,
+                team=team or "",
+                game_id=game_id,
+                prop_type=prop_type_display,
+                prediction=prediction,
+                line=line,
+                edge=edge_raw,
+                edge_pct=edge_pct,
+                pick=pick_val,
+                confidence=confidence,
+                explanation=explanation,
+                signals=signals,
+                used_real_line=bool(line_source and "odds-api" in str(line_source).lower()),
+                used_ml_model=True,
+            ))
+
+        if not best_bets:
+            return None
+
+        # Sort using same logic as real-time path
+        if sort_by == "confidence":
+            best_bets.sort(key=lambda x: x.confidence, reverse=True)
+        elif sort_by == "edge":
+            best_bets.sort(key=lambda x: abs(x.edge_pct), reverse=True)
+        else:  # "quality" — composite score
+            best_bets.sort(key=lambda x: (x.confidence - 50) * abs(x.edge_pct), reverse=True)
+
+        # Assign ranks
+        for i, bet in enumerate(best_bets):
+            bet.rank = i + 1
+
+        print(f"Loaded {len(best_bets)} best bets from PostgreSQL fallback for {date}")
+        return best_bets
+
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"PostgreSQL best-bets fallback failed: {e}")
         return None
 
 

@@ -153,6 +153,7 @@ export interface BestBetsResponse {
     pick_type?: string;
     sort_by?: string;
   };
+  data_source?: 'realtime' | 'precomputed';
 }
 
 export interface HealthResponse {
