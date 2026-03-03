@@ -85,7 +85,7 @@ def _make_intel_message(bus, game_id='game_001', confidence='high'):
     """Send an intel_ready message to the bus."""
     msg = Message.create(
         sender='pregame',
-        recipient='predictor',
+        recipient='orchestrator',
         event_type='intel_ready',
         payload={
             'game_id': game_id,

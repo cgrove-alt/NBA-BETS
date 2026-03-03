@@ -40,7 +40,7 @@ class PredictionOrchestratorAgent(AgentBase):
     and conflict resolution.
     """
 
-    AGENT_NAME = 'predictor'
+    AGENT_NAME = 'orchestrator'
     DAILY_TOKEN_BUDGET = 60_000
     MAX_EXECUTION_SECONDS = 900
 
@@ -423,8 +423,143 @@ class PredictionOrchestratorAgent(AgentBase):
             ),
         }
 
+    def _persist_predictions(self, run_output: dict):
+        """Persist predictions to PostgreSQL and paper_trades.
+
+        Flattens the nested game → player_props[] structure into flat rows,
+        writes to predictions_history table, and logs to paper_trades via
+        PaperTrader.log_predictions_batch().
+        """
+        predictions = run_output.get('predictions', [])
+        slate_date = run_output.get('slate_date', self.target_date)
+
+        if not predictions:
+            logger.info(f"[{self.AGENT_NAME}] No predictions to persist")
+            return
+
+        # Flatten game → player_props into flat rows
+        flat_rows = []
+        for game_pred in predictions:
+            game_label = (
+                f"{game_pred.get('away_team', '?')} @ {game_pred.get('home_team', '?')}"
+            )
+            for prop in game_pred.get('player_props', []):
+                flat_rows.append({
+                    'game': game_label,
+                    'game_id': str(game_pred.get('game_id', '')),
+                    'player_name': prop.get('player', prop.get('player_name', '')),
+                    'team': prop.get('team', ''),
+                    'prop_type': prop.get('stat', prop.get('prop_type', '')),
+                    'prediction': prop.get('predicted_value', 0),
+                    'pred_low': prop.get('pred_low'),
+                    'pred_median': prop.get('pred_median'),
+                    'pred_high': prop.get('pred_high'),
+                    'line': prop.get('line', 0),
+                    'over_prob': prop.get('over_prob'),
+                    'edge': prop.get('edge'),
+                    'confidence_score': prop.get('confidence_score', 0),
+                    'edge_quality_tier': prop.get('edge_quality_tier'),
+                    'suggested_bet_size': prop.get('suggested_bet_size'),
+                    'bet_recommendation': prop.get('bet_recommendation',
+                                                   prop.get('signal', 'PASS')),
+                    'pick': prop.get('pick', prop.get('direction', '')),
+                    'uncertainty_flag': prop.get('uncertainty_flag'),
+                    'injury_boost': prop.get('injury_boost'),
+                })
+
+        if not flat_rows:
+            logger.info(f"[{self.AGENT_NAME}] No player props to persist")
+            return
+
+        # 1. Write to predictions_history table
+        try:
+            from agents.core.connections import get_postgres_connection
+            conn = get_postgres_connection()
+            if conn is not None:
+                cursor = conn.cursor()
+                inserted = 0
+                for row in flat_rows:
+                    try:
+                        cursor.execute("""
+                            INSERT INTO predictions_history (
+                                date, game, player_name, team, prop_type,
+                                prediction, pred_low, pred_median, pred_high,
+                                line, over_prob, edge, confidence_score,
+                                edge_quality_tier, suggested_bet_size, bet_recommendation,
+                                pick, uncertainty_flag, injury_boost
+                            ) VALUES (
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s, %s,
+                                %s, %s, %s
+                            )
+                            ON CONFLICT (date, player_name, prop_type) DO UPDATE SET
+                                prediction = EXCLUDED.prediction,
+                                line = EXCLUDED.line,
+                                edge = EXCLUDED.edge,
+                                confidence_score = EXCLUDED.confidence_score,
+                                edge_quality_tier = EXCLUDED.edge_quality_tier,
+                                suggested_bet_size = EXCLUDED.suggested_bet_size,
+                                bet_recommendation = EXCLUDED.bet_recommendation,
+                                pick = EXCLUDED.pick
+                        """, (
+                            slate_date,
+                            row['game'],
+                            row['player_name'],
+                            row['team'],
+                            row['prop_type'],
+                            row['prediction'],
+                            row.get('pred_low'),
+                            row.get('pred_median'),
+                            row.get('pred_high'),
+                            row['line'],
+                            row.get('over_prob'),
+                            row.get('edge'),
+                            row['confidence_score'],
+                            row.get('edge_quality_tier'),
+                            row.get('suggested_bet_size'),
+                            row.get('bet_recommendation'),
+                            row.get('pick'),
+                            row.get('uncertainty_flag'),
+                            row.get('injury_boost'),
+                        ))
+                        inserted += 1
+                    except Exception as e:
+                        logger.warning(
+                            f"[{self.AGENT_NAME}] Failed to insert prediction for "
+                            f"{row['player_name']} {row['prop_type']}: {e}"
+                        )
+                conn.commit()
+                logger.info(
+                    f"[{self.AGENT_NAME}] Persisted {inserted}/{len(flat_rows)} "
+                    f"predictions to predictions_history"
+                )
+            else:
+                logger.warning(
+                    f"[{self.AGENT_NAME}] PostgreSQL unavailable — "
+                    f"skipping predictions_history write"
+                )
+        except Exception as e:
+            logger.error(f"[{self.AGENT_NAME}] predictions_history write failed: {e}")
+
+        # 2. Log to paper_trades via PaperTrader
+        try:
+            from nba_betting.paper_trading import PaperTrader
+            trader = PaperTrader()
+            count = trader.log_predictions_batch(flat_rows, slate_date)
+            logger.info(
+                f"[{self.AGENT_NAME}] Logged {count}/{len(flat_rows)} "
+                f"predictions to paper_trades"
+            )
+        except Exception as e:
+            logger.error(f"[{self.AGENT_NAME}] paper_trades write failed: {e}")
+
     def report(self, run_output: dict):
-        """Send predictions_published to briefing and all."""
+        """Persist predictions and send predictions_published to briefing and all."""
+        # Persist to DB before broadcasting
+        self._persist_predictions(run_output)
+
         predictions = run_output.get('predictions', [])
 
         # Summary for briefing

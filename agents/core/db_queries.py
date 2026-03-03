@@ -7,6 +7,7 @@ Queries calibration.db and bet_tracking.db — no FastAPI dependencies.
 
 import json
 import logging
+import os
 import sqlite3
 from pathlib import Path
 
@@ -14,12 +15,89 @@ logger = logging.getLogger(__name__)
 
 
 def query_yesterday_record(yesterday_str: str) -> dict | None:
-    """Query yesterday's prediction results from calibration.db or bet_tracking.db.
+    """Query yesterday's prediction results from PostgreSQL, calibration.db, or bet_tracking.db.
 
     Returns a structured dict with overall, by_bet_type, by_confidence,
     clv_summary, and date fields — or None if no data is available.
     """
     record: dict | None = None
+
+    # --- Attempt 0: PostgreSQL paper_trades (production / Railway) ---
+    if os.environ.get('DATABASE_URL'):
+        try:
+            from nba_betting.paper_trading import PaperTrader
+            trader = PaperTrader()
+            if trader._use_postgres:
+                report = trader.get_daily_report(yesterday_str)
+                if report and report.get('total', 0) > 0 and report.get('settled', 0) > 0:
+                    preds = report.get('predictions', [])
+                    wins = sum(1 for p in preds if p.get('result') == 'hit')
+                    losses = sum(1 for p in preds if p.get('result') == 'miss')
+                    pushes = sum(1 for p in preds if p.get('result') == 'push')
+                    total = wins + losses + pushes
+                    hit_rate = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0.0
+                    profit = report.get('profit_loss', 0.0)
+
+                    by_type: dict[str, dict] = {}
+                    by_conf: dict[str, dict] = {
+                        "high": {"wins": 0, "losses": 0, "total": 0},
+                        "medium": {"wins": 0, "losses": 0, "total": 0},
+                        "low": {"wins": 0, "losses": 0, "total": 0},
+                    }
+                    for p in preds:
+                        result = p.get('result')
+                        if result not in ('hit', 'miss'):
+                            continue
+                        pt = p.get('prop_type', 'Unknown')
+                        if pt not in by_type:
+                            by_type[pt] = {"wins": 0, "losses": 0, "total": 0}
+                        by_type[pt]["total"] += 1
+                        if result == 'hit':
+                            by_type[pt]["wins"] += 1
+                        else:
+                            by_type[pt]["losses"] += 1
+
+                        conf = float(p.get('confidence') or 0)
+                        if conf >= 60:
+                            tier = "high"
+                        elif conf >= 55:
+                            tier = "medium"
+                        else:
+                            tier = "low"
+                        by_conf[tier]["total"] += 1
+                        if result == 'hit':
+                            by_conf[tier]["wins"] += 1
+                        else:
+                            by_conf[tier]["losses"] += 1
+
+                    for v in by_type.values():
+                        denom = v["wins"] + v["losses"]
+                        v["hit_rate"] = round(v["wins"] / denom * 100, 1) if denom > 0 else 0.0
+                    for v in by_conf.values():
+                        denom = v["wins"] + v["losses"]
+                        v["hit_rate"] = round(v["wins"] / denom * 100, 1) if denom > 0 else 0.0
+
+                    record = {
+                        "date": yesterday_str,
+                        "overall": {
+                            "wins": wins,
+                            "losses": losses,
+                            "pushes": pushes,
+                            "total": total,
+                            "hit_rate": hit_rate,
+                            "profit": round(profit, 2),
+                            "roi": 0.0,
+                        },
+                        "by_bet_type": by_type,
+                        "by_confidence": by_conf,
+                        "clv_summary": None,
+                        "source": "paper_trades_pg",
+                    }
+        except Exception as e:
+            logger.warning(f"PostgreSQL paper_trades query failed: {e}")
+
+    if record is not None:
+        return record
 
     # --- Attempt 1: calibration.db (has predictions + outcomes) ---
     cal_path = Path("data/calibration.db")

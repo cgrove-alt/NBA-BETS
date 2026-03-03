@@ -1239,8 +1239,7 @@ def get_daily_predictions(date: str):
     Returns:
         Daily predictions with confidence, bet sizing, and recommendations
     """
-    import pandas as pd
-    from pathlib import Path
+    import logging as _logging
 
     # Validate date format
     try:
@@ -1252,7 +1251,23 @@ def get_daily_predictions(date: str):
             detail="Invalid date format. Use YYYY-MM-DD"
         )
 
-    # Check for predictions file
+    # --- Primary: PostgreSQL (predictions_history) ---
+    predictions = _load_predictions_from_postgres(date)
+
+    if predictions is not None:
+        return DailyPredictionsResponse(
+            date=date,
+            predictions=predictions,
+            count=len(predictions),
+            metadata={
+                "source": "postgresql",
+                "total_elite_bets": len([p for p in predictions if p.edge_quality_tier == "elite"]),
+                "total_strong_bets": len([p for p in predictions if p.edge_quality_tier == "strong"]),
+            }
+        )
+
+    # --- Fallback: CSV file (local dev) ---
+    import pandas as pd
     csv_path = Path(f"predictions_{date}.csv")
 
     if not csv_path.exists():
@@ -1261,7 +1276,6 @@ def get_daily_predictions(date: str):
             detail=f"No predictions found for {date}. Generate predictions first."
         )
 
-    # Load predictions CSV
     try:
         df = pd.read_csv(csv_path)
     except Exception as e:
@@ -1270,10 +1284,8 @@ def get_daily_predictions(date: str):
             detail=f"Error reading predictions file: {str(e)}"
         )
 
-    # Convert to prediction objects
     predictions = []
     for _, row in df.iterrows():
-        # Handle NaN values for string fields - pandas reads empty cells as NaN
         team = row.get('team', '')
         team = str(team) if pd.notna(team) and team != '' else ''
 
@@ -1315,11 +1327,73 @@ def get_daily_predictions(date: str):
         predictions=predictions,
         count=len(predictions),
         metadata={
+            "source": "csv",
             "file_path": str(csv_path),
             "total_elite_bets": len([p for p in predictions if p.edge_quality_tier == "elite"]),
             "total_strong_bets": len([p for p in predictions if p.edge_quality_tier == "strong"]),
         }
     )
+
+
+def _load_predictions_from_postgres(date: str) -> list | None:
+    """Load predictions from PostgreSQL predictions_history table.
+
+    Returns list of DailyPrediction or None if PostgreSQL is unavailable/empty.
+    """
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return None
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT player_name, team, prop_type, prediction,
+                   pred_low, pred_median, pred_high, line,
+                   confidence_score, edge_quality_tier, suggested_bet_size,
+                   bet_recommendation, uncertainty_flag, pick, edge
+            FROM predictions_history
+            WHERE date = %s
+            ORDER BY confidence_score DESC NULLS LAST
+        """, (date,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        if not rows:
+            return None
+
+        predictions = []
+        for row in rows:
+            (player_name, team, prop_type, prediction,
+             pred_low, pred_median, pred_high, line,
+             confidence_score, edge_quality_tier, suggested_bet_size,
+             bet_recommendation, uncertainty_flag, pick, edge) = row
+
+            predictions.append(DailyPrediction(
+                player_name=player_name or 'Unknown',
+                team=team or '',
+                prop_type=prop_type or '',
+                prediction=float(prediction) if prediction is not None else 0.0,
+                pred_low=float(pred_low) if pred_low is not None else None,
+                pred_median=float(pred_median) if pred_median is not None else None,
+                pred_high=float(pred_high) if pred_high is not None else None,
+                line=float(line) if line is not None else None,
+                confidence_score=float(confidence_score) if confidence_score is not None else None,
+                edge_quality_tier=edge_quality_tier,
+                suggested_bet_size=float(suggested_bet_size) if suggested_bet_size is not None else None,
+                bet_recommendation=bet_recommendation,
+                uncertainty_flag=uncertainty_flag,
+                pick=pick,
+                edge=float(edge) if edge is not None else None,
+            ))
+
+        return predictions
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"PostgreSQL predictions query failed: {e}")
+        return None
 
 
 # ============== INJURY REPORT ENDPOINT ==============
@@ -1759,6 +1833,13 @@ def get_performance(days: int = Query(30, ge=1, le=365)):
     total_wins = 0
     total_losses = 0
 
+    # --- Primary: PostgreSQL paper_trades (production / Railway) ---
+    pg_result = _load_performance_from_postgres(days, start_date)
+    if pg_result is not None:
+        return pg_result
+
+    # --- Fallback: SQLite (local dev) ---
+
     # Try calibration DB first (richer data)
     cal_db_path = Path("data/calibration.db")
     if cal_db_path.exists():
@@ -1914,6 +1995,133 @@ def get_performance(days: int = Query(30, ge=1, le=365)):
         overall_hit_rate=round(overall_hit_rate, 1),
         overall_roi=round(overall_roi, 1),
     )
+
+
+def _load_performance_from_postgres(days: int, start_date: str) -> PerformanceResponse | None:
+    """Load performance data from PostgreSQL paper_trades table.
+
+    Returns PerformanceResponse or None if PostgreSQL is unavailable/empty.
+    """
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return None
+
+    try:
+        import psycopg2
+        from collections import defaultdict
+
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+
+        # Check paper_trades table exists
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'paper_trades'
+            )
+        """)
+        if not cur.fetchone()[0]:
+            cur.close()
+            conn.close()
+            return None
+
+        # Query settled trades
+        cur.execute("""
+            SELECT game_date, prop_type, confidence, tier,
+                   result, profit_loss, should_bet, bet_size
+            FROM paper_trades
+            WHERE game_date >= %s AND result IS NOT NULL
+            ORDER BY game_date DESC
+        """, (start_date,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        if not rows:
+            return None
+
+        daily_records = []
+        by_prop_type: dict[str, dict] = defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0})
+        by_confidence: dict[str, dict] = defaultdict(lambda: {"total": 0, "wins": 0})
+        total_bets = 0
+        total_wins = 0
+        total_losses = 0
+
+        date_groups: dict[str, list] = defaultdict(list)
+        for row in rows:
+            (game_date, prop_type, confidence, tier,
+             result, profit_loss, should_bet, bet_size) = row
+            date_groups[game_date].append(row)
+
+        for date_str in sorted(date_groups.keys(), reverse=True):
+            group = date_groups[date_str]
+            wins = sum(1 for r in group if r[4] == 'hit')
+            losses = sum(1 for r in group if r[4] == 'miss')
+            pushes = sum(1 for r in group if r[4] == 'push')
+            profit = sum(float(r[5] or 0) for r in group if r[5] is not None)
+
+            daily_records.append(DailyRecord(
+                date=str(date_str),
+                wins=wins,
+                losses=losses,
+                pushes=pushes,
+                roi=round(profit / max(len(group) * 100, 1) * 100, 1),
+                clv_avg=None,
+                profit=round(profit, 2),
+            ))
+
+            total_bets += len(group)
+            total_wins += wins
+            total_losses += losses
+
+            for r in group:
+                pt = r[1] or "Unknown"
+                by_prop_type[pt]["total"] += 1
+                if r[4] == 'hit':
+                    by_prop_type[pt]["wins"] += 1
+                elif r[4] == 'miss':
+                    by_prop_type[pt]["losses"] += 1
+
+                conf = float(r[2]) if r[2] is not None else 0
+                if conf >= 60:
+                    ct = "high"
+                elif conf >= 55:
+                    ct = "medium"
+                else:
+                    ct = "low"
+                by_confidence[ct]["total"] += 1
+                if r[4] == 'hit':
+                    by_confidence[ct]["wins"] += 1
+
+        overall_hit_rate = (total_wins / total_bets * 100) if total_bets > 0 else 0.0
+        total_profit = sum(r.profit for r in daily_records)
+        overall_roi = (total_profit / max(total_bets * 100, 1) * 100) if total_bets > 0 else 0.0
+
+        return PerformanceResponse(
+            daily_records=daily_records,
+            by_prop_type={
+                k: PropTypeStats(
+                    total=v["total"], wins=v["wins"], losses=v["losses"],
+                    hit_rate=round(v["wins"] / max(v["total"], 1) * 100, 1),
+                ) for k, v in by_prop_type.items()
+            },
+            by_confidence_tier={
+                k: ConfidenceTierStats(
+                    total=v["total"], wins=v["wins"],
+                    hit_rate=round(v["wins"] / max(v["total"], 1) * 100, 1),
+                ) for k, v in by_confidence.items()
+            },
+            calibration_summary=None,
+            total_bets=total_bets,
+            total_wins=total_wins,
+            total_losses=total_losses,
+            overall_hit_rate=round(overall_hit_rate, 1),
+            overall_roi=round(overall_roi, 1),
+        )
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"PostgreSQL performance query failed: {e}")
+        return None
 
 
 # ============== SYSTEM HEALTH ENDPOINT ==============
