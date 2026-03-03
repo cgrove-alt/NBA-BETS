@@ -193,40 +193,18 @@ def get_latest_backtest_metrics() -> dict:
 
 
 def send_alert(subject: str, message: str, severity: str = 'info'):
-    """Send alert via email/Slack (if configured)."""
-    logger.log(
-        logging.CRITICAL if severity == 'critical' else
-        logging.ERROR if severity == 'error' else
-        logging.WARNING if severity == 'warning' else logging.INFO,
-        f"ALERT [{severity.upper()}]: {subject}\n{message}"
-    )
-
-    # Email alert (if configured)
-    email = os.getenv('ALERT_EMAIL')
-    if email:
-        try:
-            subprocess.run(
-                ['mail', '-s', f"[NBA Model] {subject}", email],
-                input=message.encode(),
-                timeout=10
-            )
-        except Exception as e:
-            logger.warning(f"Failed to send email alert: {e}")
-
-    # Slack webhook (if configured)
-    webhook_url = os.getenv('SLACK_WEBHOOK')
-    if webhook_url:
-        try:
-            import requests
-            emoji_map = {'critical': ':red_circle:', 'error': ':x:',
-                        'warning': ':warning:', 'info': ':information_source:'}
-            emoji = emoji_map.get(severity, ':bell:')
-
-            requests.post(webhook_url, json={
-                'text': f"{emoji} *{subject}*\n{message}"
-            }, timeout=10)
-        except Exception as e:
-            logger.warning(f"Failed to send Slack alert: {e}")
+    """Send alert via shared notification module (email + Slack)."""
+    try:
+        from agents.core.notifications import send_alert as _send_alert
+        _send_alert(subject, message, severity)
+    except ImportError:
+        # Fallback if agents module not on path (e.g. standalone execution)
+        logger.log(
+            logging.CRITICAL if severity == 'critical' else
+            logging.ERROR if severity == 'error' else
+            logging.WARNING if severity == 'warning' else logging.INFO,
+            f"ALERT [{severity.upper()}]: {subject}\n{message}"
+        )
 
 
 def check_drift_status() -> dict:

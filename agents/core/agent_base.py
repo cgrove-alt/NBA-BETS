@@ -141,6 +141,7 @@ class AgentBase(ABC):
                 tokens_used=self._tokens_used,
                 execution_seconds=execution_seconds,
                 messages_sent=self._messages_sent,
+                payload=run_output if isinstance(run_output, dict) else {'output': run_output},
             )
 
             logger.info(

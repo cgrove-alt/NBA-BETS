@@ -27,7 +27,7 @@ import signal
 import atexit
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Ensure project root is on path
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -137,6 +137,111 @@ def _persist_stats():
         pass  # non-critical
 
 
+# Agents whose failure/recovery should trigger push notifications
+CRITICAL_AGENTS = {'briefing', 'orchestrator'}
+
+# Max age (hours) for a missed job to still be recoverable
+RECOVERY_WINDOW_HOURS = 4
+
+
+def _send_scheduler_notification(title: str, message: str, priority: int = 0):
+    """Send a Pushover notification for scheduler events. Never raises."""
+    try:
+        from agents.core.notifications import send_pushover
+        send_pushover(title, message, priority=priority)
+    except Exception as e:
+        logger.warning(f"Scheduler notification failed: {e}")
+
+
+def _recover_missed_jobs():
+    """
+    Check if any recoverable agents missed their scheduled run while
+    the scheduler was down. If a critical agent was due within the last
+    RECOVERY_WINDOW_HOURS, trigger it immediately.
+    """
+    if not STATUS_FILE.exists():
+        logger.info("No previous status file — skipping missed job recovery")
+        return
+
+    try:
+        with open(STATUS_FILE) as f:
+            saved = json.load(f)
+    except Exception:
+        logger.warning("Could not read status file for recovery check")
+        return
+
+    last_start = saved.get('start_time')
+    if not last_start:
+        return
+
+    try:
+        last_alive = datetime.fromisoformat(last_start)
+    except (ValueError, TypeError):
+        return
+
+    now = datetime.now()
+    downtime = now - last_alive
+
+    # Only check if downtime is between 10 minutes and RECOVERY_WINDOW_HOURS
+    if downtime < timedelta(minutes=10) or downtime > timedelta(hours=RECOVERY_WINDOW_HOURS):
+        if downtime > timedelta(hours=RECOVERY_WINDOW_HOURS):
+            logger.info(f"Downtime ({downtime}) exceeds recovery window — skipping recovery")
+        return
+
+    logger.info(f"Scheduler was down for {downtime}. Checking for missed critical jobs...")
+
+    recovered = []
+    for agent_name in CRITICAL_AGENTS:
+        agent_info = saved.get('agents', {}).get(agent_name, {})
+        last_run_str = agent_info.get('last_run')
+
+        if last_run_str:
+            try:
+                last_run = datetime.fromisoformat(last_run_str)
+                time_since_last = now - last_run
+                # If last run was more than 2 hours ago, it likely missed a cycle
+                if time_since_last < timedelta(hours=2):
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+        logger.info(f"[{agent_name}] Missed run detected — triggering recovery")
+        try:
+            run_agent_job(agent_name)
+            recovered.append(agent_name)
+        except Exception as e:
+            logger.error(f"[{agent_name}] Recovery run failed: {e}")
+
+    if recovered:
+        msg = f"Recovered after {downtime}: {', '.join(recovered)}"
+        logger.info(msg)
+        _send_scheduler_notification("Scheduler Recovery", msg, priority=0)
+
+
+def _scheduler_health_check():
+    """
+    Periodic health check — runs every 2 hours.
+
+    Looks for agents with 3+ consecutive failures and alerts.
+    """
+    problem_agents = []
+
+    for agent_name, info in _stats.get('agents', {}).items():
+        failures = info.get('failures', 0)
+        runs = info.get('runs', 0)
+
+        # 3+ consecutive failures (approximated by high failure ratio in recent runs)
+        if failures >= 3 and info.get('last_status') in ('failed', 'error'):
+            problem_agents.append(f"{agent_name}: {failures} failures in {runs} runs")
+
+    if problem_agents:
+        msg = "Agents with repeated failures:\n" + "\n".join(f"  - {p}" for p in problem_agents)
+        logger.warning(f"Health check alert: {msg}")
+        _send_scheduler_notification("Agent Health Alert", msg, priority=1)
+    else:
+        logger.info("Health check: all agents healthy")
+
+
 def run_agent_job(agent_name: str):
     """
     Wrapper that runs a single agent via agent_runner.run_agent().
@@ -209,13 +314,34 @@ def create_scheduler(daemon: bool = False):
             )
         logger.info(f"Scheduled: {agent_name} — {description}")
 
-    # Job event listener
+    # Health check job — runs every 2 hours
+    from apscheduler.triggers.interval import IntervalTrigger
+    scheduler.add_job(
+        _scheduler_health_check,
+        IntervalTrigger(hours=2),
+        id='scheduler_health_check',
+        name='Scheduler health check (every 2h)',
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("Scheduled: health_check — every 2 hours")
+
+    # Job event listener — alerts on critical agent failures
     def job_listener(event):
         job_id = event.job_id.replace('agent_', '')
         if event.code == EVENT_JOB_EXECUTED:
             logger.debug(f"Job '{job_id}' executed successfully")
         elif event.code == EVENT_JOB_ERROR:
             logger.error(f"Job '{job_id}' raised exception: {event.exception}")
+            # Alert on critical agent failures
+            agent_name = job_id.split('_')[0] if '_' in job_id else job_id
+            if agent_name in CRITICAL_AGENTS:
+                _send_scheduler_notification(
+                    f"Critical Job Failed: {agent_name}",
+                    f"Agent '{agent_name}' raised an exception:\n{str(event.exception)[:500]}",
+                    priority=1,
+                )
 
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
@@ -398,7 +524,17 @@ def main():
             logger.info(f"  - {job.name} | next: {job.trigger}")
         logger.info("=" * 60)
 
+        # Recover any missed jobs from downtime
+        _recover_missed_jobs()
+
         _persist_stats()
+
+        # Startup notification
+        job_count = len(scheduler.get_jobs())
+        _send_scheduler_notification(
+            "Scheduler Started",
+            f"Agent scheduler online (PID {os.getpid()}, {job_count} jobs).",
+        )
 
         try:
             scheduler.start()
@@ -411,6 +547,7 @@ def main():
 
         # Single shutdown path — no matter how we got here
         logger.info("Shutting down scheduler...")
+        _send_scheduler_notification("Scheduler Stopping", "Agent scheduler shutting down.")
         try:
             scheduler.shutdown(wait=False)
         except Exception:

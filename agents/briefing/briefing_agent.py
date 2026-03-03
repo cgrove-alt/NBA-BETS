@@ -459,7 +459,7 @@ class DailyBriefingAgent(AgentBase):
         }
 
     def report(self, run_output: dict):
-        """Send briefing_ready to all agents."""
+        """Send briefing_ready to all agents + push via Pushover."""
         self.send_message(
             recipient='all',
             event_type='briefing_ready',
@@ -470,3 +470,18 @@ class DailyBriefingAgent(AgentBase):
             },
             priority='normal',
         )
+
+        # Push notification — failure never marks the run as failed
+        try:
+            from agents.core.notifications import send_briefing
+
+            plays = run_output.get('sections', {}).get('today_plays', [])
+            play_count = len(plays) if isinstance(plays, list) else 0
+
+            send_briefing(
+                formatted_text=run_output.get('formatted_text', ''),
+                briefing_date=run_output.get('briefing_date', self.target_date),
+                play_count=play_count,
+            )
+        except Exception as e:
+            logger.warning(f"[{self.AGENT_NAME}] Push notification failed (non-fatal): {e}")
