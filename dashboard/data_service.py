@@ -2136,6 +2136,101 @@ class DataService:
             return cached
         return []
 
+    def _seed_locked_game_from_postgres(self, game_id: str, home_abbrev: str, away_abbrev: str) -> bool:
+        """Seed in-memory prop cache from PostgreSQL for a game that already started.
+
+        Queries predictions_history for today's predictions matching the game,
+        converts rows into the flat dict format the best-bets endpoint expects,
+        and stores them in _prop_fetch_status with status='ready' + locked=True.
+
+        Returns True if predictions were loaded, False otherwise.
+        """
+        import os
+        database_url = os.environ.get("DATABASE_URL")
+        if not database_url:
+            return False
+
+        try:
+            import psycopg2
+            from datetime import datetime, timezone
+            from zoneinfo import ZoneInfo
+
+            conn = psycopg2.connect(database_url)
+            cur = conn.cursor()
+
+            today_et = datetime.now(ZoneInfo('America/New_York')).strftime('%Y-%m-%d')
+            game_str = f"{away_abbrev}@{home_abbrev}"
+
+            # Detect optional columns
+            cur.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'predictions_history'
+                  AND column_name IN ('line_source', 'line_vendor')
+            """)
+            existing_cols = {row[0] for row in cur.fetchall()}
+            line_source_expr = "line_source" if "line_source" in existing_cols else "NULL"
+            line_vendor_expr = "line_vendor" if "line_vendor" in existing_cols else "NULL"
+
+            cur.execute(f"""
+                SELECT player_name, team, prop_type, prediction, line,
+                       confidence_score, edge, pick, {line_source_expr}, {line_vendor_expr}
+                FROM predictions_history
+                WHERE date = %s AND game = %s
+                  AND pick IS NOT NULL AND pick != ''
+            """, (today_et, game_str))
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            if not rows:
+                return False
+
+            # Map DB prop_type to flat key prefixes
+            prop_type_to_key = {
+                'POINTS': 'points', 'REBOUNDS': 'rebounds', 'ASSISTS': 'assists',
+                'THREES': '3pm', 'PRA': 'pra',
+            }
+
+            # Group rows by player
+            players_by_name: dict[str, dict] = {}
+            for (player_name, team, prop_type_raw, prediction, line,
+                 confidence, edge, pick, line_source, line_vendor) in rows:
+                if player_name not in players_by_name:
+                    players_by_name[player_name] = {
+                        'player_name': player_name,
+                        'player_id': hash(player_name or "") & 0x7FFFFFFF,
+                        'team': team or '',
+                    }
+                p = players_by_name[player_name]
+                prop_key = prop_type_to_key.get((prop_type_raw or '').upper())
+                if not prop_key:
+                    continue
+
+                p[f'{prop_key}_pred'] = float(prediction) if prediction is not None else None
+                p[f'{prop_key}_line'] = float(line) if line is not None else None
+                p[f'{prop_key}_confidence'] = float(confidence) if confidence is not None else None
+                p[f'{prop_key}_edge'] = float(edge) if edge is not None else 0.0
+                p[f'{prop_key}_pick'] = (pick or '').upper()
+                p[f'{prop_key}_real_line'] = bool(line_source and 'odds-api' in str(line_source).lower())
+                p[f'{prop_key}_ml_model'] = True
+
+            # Split into home/away
+            home_players = [p for p in players_by_name.values() if p.get('team') == home_abbrev]
+            away_players = [p for p in players_by_name.values() if p.get('team') == away_abbrev]
+
+            self._prop_fetch_status[game_id] = {
+                'status': 'ready',
+                'home': home_players,
+                'away': away_players,
+                'locked': True,
+                'seeded_from_postgres': True,
+            }
+            return True
+
+        except Exception as e:
+            print(f"Failed to seed game {game_id} from PostgreSQL: {e}")
+            return False
+
     def _is_game_started(self, game_status: str, game_datetime: str = None) -> bool:
         """
         Check if a game has started and predictions should be locked.
@@ -2212,6 +2307,11 @@ class DataService:
                 if existing.get('status') == 'ready':
                     # Keep existing predictions, just mark as locked
                     existing['locked'] = True
+                    return
+                # No in-memory predictions — try to seed from PostgreSQL
+                seeded = self._seed_locked_game_from_postgres(game_id, home_abbrev, away_abbrev)
+                if seeded:
+                    print(f"Game {game_id}: seeded predictions from PostgreSQL")
                     return
                 # No predictions available - mark as locked with error
                 self._prop_fetch_status[game_id] = {

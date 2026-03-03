@@ -173,7 +173,9 @@ class BestBetsResponse(BaseModel):
     best_bets: list[BestBet]
     count: int
     filters: dict[str, Any]
-    data_source: str = "realtime"  # "realtime" or "precomputed"
+    data_source: str = "realtime"  # "realtime", "precomputed", or "mixed"
+    warnings: list[str] = []       # Non-fatal issues surfaced to frontend
+    locked_games: list[str] = []   # Game IDs that were locked (games started)
 
 
 # ============== GAME RESULTS SCHEMAS ==============

@@ -141,22 +141,47 @@ async def lifespan(app: FastAPI):
     try:
         games = service.get_todays_games()
         triggered = 0
+        seeded = 0
+        locked_no_data = 0
         for game in games:
             game_id = str(game.get("game_id", ""))
             home_abbrev = game.get("home_team", {}).get("abbreviation", "")
             away_abbrev = game.get("visitor_team", {}).get("abbreviation", "")
-            status_data = service.get_props_fetch_status(game_id)
-            if status_data.get("status") == "not_started" and home_abbrev and away_abbrev:
-                _game_teams_cache[game_id] = {"home": home_abbrev, "away": away_abbrev}
-                service.start_player_props_fetch(
-                    game_id=game_id,
-                    home_abbrev=home_abbrev,
-                    away_abbrev=away_abbrev,
-                    selected_props=None,
-                )
+            if not home_abbrev or not away_abbrev:
+                continue
+            _game_teams_cache[game_id] = {"home": home_abbrev, "away": away_abbrev}
+            # Always call start_player_props_fetch — for not_started games it
+            # triggers real-time generation; for started games it seeds from
+            # PostgreSQL or marks as locked (see data_service.py).
+            service.start_player_props_fetch(
+                game_id=game_id,
+                home_abbrev=home_abbrev,
+                away_abbrev=away_abbrev,
+                selected_props=None,
+            )
+            # Check result
+            refreshed = service.get_props_fetch_status(game_id)
+            if refreshed.get("seeded_from_postgres"):
+                seeded += 1
+                print(f"  Game {game_id} ({away_abbrev}@{home_abbrev}): seeded from PostgreSQL")
+            elif refreshed.get("status") == "locked":
+                locked_no_data += 1
+                print(f"  Game {game_id} ({away_abbrev}@{home_abbrev}): locked, no fallback data")
+            elif refreshed.get("status") in ("pending", "not_started"):
                 triggered += 1
+            else:
+                triggered += 1  # ready or generating
+        summary_parts = []
         if triggered:
-            print(f"Auto-generating props for {triggered} games...")
+            summary_parts.append(f"{triggered} generating")
+        if seeded:
+            summary_parts.append(f"{seeded} seeded from DB")
+        if locked_no_data:
+            summary_parts.append(f"{locked_no_data} locked (no data)")
+        if summary_parts:
+            print(f"Startup prop status: {', '.join(summary_parts)}")
+        else:
+            print("No games found for today.")
     except Exception as e:
         print(f"WARNING: Startup prop generation failed: {e}")
 
@@ -986,11 +1011,18 @@ def get_best_bets(
     if prop_types:
         prop_type_filter = [p.strip() for p in prop_types.split(",")]
 
+    locked_game_ids = set()
+    warnings = []
+
     for game in games:
         game_id = str(game.get("game_id", ""))
         status_data = service.get_props_fetch_status(game_id)
+        game_status = status_data.get("status", "not_started")
 
-        if status_data.get("status") != "ready":
+        if game_status in ("locked", "error"):
+            locked_game_ids.add(game_id)
+            continue
+        if game_status != "ready":
             continue
 
         all_players = status_data.get("home", []) + status_data.get("away", [])
@@ -1131,12 +1163,29 @@ def get_best_bets(
 
     # Determine data source for response metadata
     data_source = "realtime"
+    from datetime import datetime as _dt
+    today_et = _dt.now(ET).strftime('%Y-%m-%d')
 
-    # If no real-time bets available, fall back to pre-computed predictions
-    # from PostgreSQL predictions_history table (populated by daily_predictions.py)
+    # Per-game fallback: load PostgreSQL predictions for locked/errored games
+    if locked_game_ids:
+        locked_bets = _load_best_bets_from_postgres(
+            date=today_et,
+            min_confidence=min_confidence,
+            min_edge=min_edge,
+            prop_types=prop_type_filter,
+            pick_type=pick_type,
+            sort_by=sort_by,
+            games=games,
+            game_filter=locked_game_ids,
+            warnings=warnings,
+        )
+        if locked_bets:
+            best_bets.extend(locked_bets)
+            data_source = "mixed"
+            print(f"Loaded {len(locked_bets)} bets from PostgreSQL for {len(locked_game_ids)} locked game(s)")
+
+    # Full fallback: if still no bets at all, try PostgreSQL for ALL games
     if not best_bets:
-        from datetime import datetime as _dt
-        today_et = _dt.now(ET).strftime('%Y-%m-%d')
         fallback_bets = _load_best_bets_from_postgres(
             date=today_et,
             min_confidence=min_confidence,
@@ -1145,6 +1194,7 @@ def get_best_bets(
             pick_type=pick_type,
             sort_by=sort_by,
             games=games,
+            warnings=warnings,
         )
         if fallback_bets:
             best_bets = fallback_bets
@@ -1174,6 +1224,8 @@ def get_best_bets(
             "sort_by": sort_by,
         },
         data_source=data_source,
+        warnings=warnings,
+        locked_games=list(locked_game_ids),
     )
 
 
@@ -1439,6 +1491,8 @@ def _load_best_bets_from_postgres(
     pick_type: str | None,
     sort_by: str,
     games: list,
+    game_filter: set[str] | None = None,
+    warnings: list[str] | None = None,
 ) -> list[BestBet] | None:
     """Load best bets from PostgreSQL predictions_history as a fallback.
 
@@ -1454,6 +1508,8 @@ def _load_best_bets_from_postgres(
         pick_type: Optional OVER/UNDER filter
         sort_by: Sort order (quality, confidence, edge)
         games: List of game dicts from get_todays_games() for game_id mapping
+        game_filter: Optional set of game_ids to load (None = all games)
+        warnings: Optional list to append non-fatal warning messages to
 
     Returns:
         List of BestBet objects or None if unavailable
@@ -1466,10 +1522,21 @@ def _load_best_bets_from_postgres(
         import psycopg2
         conn = psycopg2.connect(database_url)
         cur = conn.cursor()
+
+        # Detect which optional columns exist to avoid UndefinedColumn errors
         cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'predictions_history'
+              AND column_name IN ('line_source', 'line_vendor')
+        """)
+        existing_cols = {row[0] for row in cur.fetchall()}
+        line_source_expr = "line_source" if "line_source" in existing_cols else "NULL AS line_source"
+        line_vendor_expr = "line_vendor" if "line_vendor" in existing_cols else "NULL AS line_vendor"
+
+        cur.execute(f"""
             SELECT player_name, team, prop_type, prediction, line,
                    confidence_score, edge_quality_tier, bet_recommendation,
-                   pick, edge, game, injury_boost, line_source, line_vendor
+                   pick, edge, game, injury_boost, {line_source_expr}, {line_vendor_expr}
             FROM predictions_history
             WHERE date = %s
               AND pick IS NOT NULL AND pick != ''
@@ -1537,6 +1604,10 @@ def _load_best_bets_from_postgres(
                 if len(parts) == 2:
                     game_id = game_id_map.get((parts[0].strip(), parts[1].strip()), "")
 
+            # Filter to specific games if requested
+            if game_filter and game_id not in game_filter:
+                continue
+
             # Deterministic player_id from name (DB lacks player_id)
             player_id = hash(player_name or "") & 0x7FFFFFFF
 
@@ -1597,6 +1668,8 @@ def _load_best_bets_from_postgres(
     except Exception as e:
         import logging as _logging
         _logging.getLogger(__name__).warning(f"PostgreSQL best-bets fallback failed: {e}")
+        if warnings is not None:
+            warnings.append(f"PostgreSQL fallback failed: {e}")
         return None
 
 
