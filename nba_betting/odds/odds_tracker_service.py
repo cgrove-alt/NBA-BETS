@@ -49,6 +49,13 @@ except ImportError:
     print("ERROR: betting_market_features.py not found. Please ensure it's in the same directory.")
     sys.exit(1)
 
+# Optional: PlayerPropFetcher for FD/DK prop line tracking
+try:
+    from odds_fetcher import PlayerPropFetcher
+    HAS_PROP_FETCHER = True
+except ImportError:
+    HAS_PROP_FETCHER = False
+
 
 # =============================================================================
 # CONFIGURATION
@@ -73,6 +80,12 @@ LOG_FILE = "odds_tracker.log"
 # Retry configuration
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 60
+
+# Player prop tracking interval (minutes)
+PROP_UPDATE_INTERVAL = 30
+
+# Pre-game refresh: minutes before tipoff to re-fetch props
+PRE_GAME_REFRESH_MINUTES = [30, 15]
 
 
 # =============================================================================
@@ -176,6 +189,20 @@ class OddsTrackerService:
         self.last_success: datetime | None = None
         self.last_failure: datetime | None = None
         self.service_start_time: datetime | None = None
+
+        # Player prop tracking
+        self._prop_fetcher = None
+        self._prop_events = []  # Cached events list
+        self._prop_runs = 0
+        self._prop_successful = 0
+        self._last_prop_fetch: datetime | None = None
+        self._pre_game_jobs_scheduled = set()  # Track scheduled pre-game refreshes
+
+        if HAS_PROP_FETCHER:
+            try:
+                self._prop_fetcher = PlayerPropFetcher(api_key=self.api_key)
+            except Exception as e:
+                self.logger.warning(f"PlayerPropFetcher init failed: {e}")
 
         # Register event listeners
         self.scheduler.add_listener(self._job_executed_listener, EVENT_JOB_EXECUTED)
@@ -304,7 +331,11 @@ class OddsTrackerService:
             'last_success': self.last_success.isoformat() if self.last_success else None,
             'last_failure': self.last_failure.isoformat() if self.last_failure else None,
             'is_nba_season': self.is_nba_season(),
-            'should_run_now': self.should_run_now()
+            'should_run_now': self.should_run_now(),
+            'prop_tracking_enabled': self._prop_fetcher is not None,
+            'prop_runs': self._prop_runs,
+            'prop_successful': self._prop_successful,
+            'last_prop_fetch': self._last_prop_fetch.isoformat() if self._last_prop_fetch else None,
         }
 
     def print_status(self):
@@ -335,6 +366,184 @@ class OddsTrackerService:
 
         print("=" * 70 + "\n")
 
+    def fetch_player_props(self):
+        """Fetch and store player prop lines from FanDuel/DraftKings.
+
+        Runs every 30 minutes during operating hours. Stores results in
+        the tracked_player_prop_lines PostgreSQL table.
+        """
+        if not self._prop_fetcher or not self.should_run_now():
+            return
+
+        self._prop_runs += 1
+
+        try:
+            # Fetch today's events (1 credit)
+            events = self._prop_fetcher.fetch_todays_events()
+            if not events:
+                self.logger.info("No NBA events found for prop tracking")
+                return
+
+            self._prop_events = events
+
+            # Schedule pre-game refresh jobs for any new games
+            self._schedule_pre_game_refreshes(events)
+
+            # Fetch props for each event (~4 credits each)
+            total_props = 0
+            for event in events:
+                event_id = event.get("id")
+                if not event_id:
+                    continue
+
+                props = self._prop_fetcher.fetch_props_for_event(event_id)
+                if props:
+                    total_props += len(props)
+                    self._store_tracked_props(event, props)
+
+            self._prop_successful += 1
+            self._last_prop_fetch = datetime.now()
+            credits = self._prop_fetcher.remaining_requests
+            self.logger.info(
+                f"Prop tracking: {total_props} props from {len(events)} events "
+                f"(credits remaining: {credits})"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Player prop tracking failed: {e}", exc_info=True)
+
+    def _store_tracked_props(self, event: dict, props: list[dict]):
+        """Store tracked player prop lines to PostgreSQL."""
+        try:
+            import psycopg2
+            database_url = os.environ.get("DATABASE_URL")
+            if not database_url:
+                return
+
+            conn = psycopg2.connect(database_url)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tracked_player_prop_lines (
+                    id SERIAL PRIMARY KEY,
+                    event_id VARCHAR(100) NOT NULL,
+                    home_team VARCHAR(100),
+                    away_team VARCHAR(100),
+                    commence_time TIMESTAMP,
+                    player_name VARCHAR(100) NOT NULL,
+                    prop_type VARCHAR(20) NOT NULL,
+                    line FLOAT NOT NULL,
+                    over_odds INT,
+                    under_odds INT,
+                    bookmaker VARCHAR(50),
+                    fetched_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(event_id, player_name, prop_type, bookmaker, fetched_at)
+                )
+            """)
+
+            now = datetime.now()
+            for prop in props:
+                try:
+                    commence_time = event.get("commence_time")
+                    ct_parsed = None
+                    if commence_time:
+                        try:
+                            ct_parsed = datetime.fromisoformat(
+                                commence_time.replace("Z", "+00:00")
+                            )
+                        except (ValueError, AttributeError):
+                            pass
+
+                    cursor.execute("""
+                        INSERT INTO tracked_player_prop_lines
+                            (event_id, home_team, away_team, commence_time,
+                             player_name, prop_type, line, over_odds, under_odds,
+                             bookmaker, fetched_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        event["id"],
+                        event.get("home_team", ""),
+                        event.get("away_team", ""),
+                        ct_parsed,
+                        prop["player_name"],
+                        prop["prop_type"],
+                        prop["line"],
+                        prop.get("over_odds"),
+                        prop.get("under_odds"),
+                        prop.get("bookmaker", ""),
+                        now,
+                    ))
+                except Exception:
+                    continue
+
+            conn.commit()
+            conn.close()
+
+        except ImportError:
+            pass  # psycopg2 not available
+        except Exception as e:
+            self.logger.warning(f"Failed to store tracked props: {e}")
+
+    def _schedule_pre_game_refreshes(self, events: list[dict]):
+        """Schedule one-shot prop refreshes at tipoff-30min and tipoff-15min."""
+        from apscheduler.triggers.date import DateTrigger
+        from datetime import timezone
+
+        now = datetime.now(timezone.utc)
+
+        for event in events:
+            event_id = event.get("id", "")
+            commence_time = event.get("commence_time", "")
+            if not commence_time or event_id in self._pre_game_jobs_scheduled:
+                continue
+
+            try:
+                tip = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                continue
+
+            for mins_before in PRE_GAME_REFRESH_MINUTES:
+                refresh_time = tip - timedelta(minutes=mins_before)
+                if refresh_time <= now:
+                    continue  # Already past this refresh window
+
+                job_id = f"pre_game_props_{event_id}_{mins_before}min"
+                try:
+                    self.scheduler.add_job(
+                        func=self._pre_game_prop_refresh,
+                        trigger=DateTrigger(run_date=refresh_time),
+                        args=[event],
+                        id=job_id,
+                        name=f"Pre-game props {event.get('home_team', '')} vs {event.get('away_team', '')} T-{mins_before}min",
+                        replace_existing=True,
+                    )
+                    self.logger.info(
+                        f"Scheduled pre-game prop refresh: {event.get('home_team')} vs "
+                        f"{event.get('away_team')} at T-{mins_before}min ({refresh_time.strftime('%H:%M')} UTC)"
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to schedule pre-game refresh: {e}")
+
+            self._pre_game_jobs_scheduled.add(event_id)
+
+    def _pre_game_prop_refresh(self, event: dict):
+        """Targeted prop refresh for a single game before tipoff."""
+        event_id = event.get("id")
+        if not event_id or not self._prop_fetcher:
+            return
+
+        try:
+            props = self._prop_fetcher.fetch_props_for_event(event_id)
+            if props:
+                self._store_tracked_props(event, props)
+                self.logger.info(
+                    f"Pre-game refresh: {len(props)} props for "
+                    f"{event.get('home_team')} vs {event.get('away_team')}"
+                )
+        except Exception as e:
+            self.logger.error(f"Pre-game prop refresh failed for {event_id}: {e}")
+
     def start(self):
         """
         Start the odds tracker service.
@@ -356,6 +565,21 @@ class OddsTrackerService:
             replace_existing=True
         )
 
+        # Add player prop tracking job (every 30 minutes)
+        if self._prop_fetcher:
+            self.scheduler.add_job(
+                func=self.fetch_player_props,
+                trigger=CronTrigger(
+                    minute=f'*/{PROP_UPDATE_INTERVAL}',
+                    hour=f'{START_HOUR}-{END_HOUR-1}',
+                    month=','.join(map(str, NBA_SEASON_MONTHS))
+                ),
+                id='player_prop_tracker_job',
+                name='Fetch and Store Player Props (FD/DK)',
+                replace_existing=True
+            )
+            self.logger.info(f"Player prop tracking enabled (every {PROP_UPDATE_INTERVAL} min)")
+
         # Start scheduler
         self.scheduler.start()
         self.service_start_time = datetime.now()
@@ -367,6 +591,10 @@ class OddsTrackerService:
         if self.should_run_now():
             self.logger.info("Running initial fetch...")
             self.fetch_and_store_with_retry()
+            # Also run initial prop fetch
+            if self._prop_fetcher:
+                self.logger.info("Running initial player prop fetch...")
+                self.fetch_player_props()
 
     def stop(self):
         """

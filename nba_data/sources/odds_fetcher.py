@@ -50,6 +50,56 @@ MARKETS = {
     "totals": "totals",
 }
 
+# Player prop market keys for The Odds API
+PLAYER_PROP_MARKETS = {
+    "points": "player_points",
+    "rebounds": "player_rebounds",
+    "assists": "player_assists",
+    "pra": "player_points_rebounds_assists",
+}
+
+# Reverse mapping: Odds API market key -> our prop type name
+MARKET_TO_PROP = {v: k for k, v in PLAYER_PROP_MARKETS.items()}
+
+# Full NBA team names (The Odds API) -> 3-letter abbreviations (our data)
+FULL_NAME_TO_ABBREV = {
+    "Atlanta Hawks": "ATL",
+    "Boston Celtics": "BOS",
+    "Brooklyn Nets": "BKN",
+    "Charlotte Hornets": "CHA",
+    "Chicago Bulls": "CHI",
+    "Cleveland Cavaliers": "CLE",
+    "Dallas Mavericks": "DAL",
+    "Denver Nuggets": "DEN",
+    "Detroit Pistons": "DET",
+    "Golden State Warriors": "GSW",
+    "Houston Rockets": "HOU",
+    "Indiana Pacers": "IND",
+    "Los Angeles Clippers": "LAC",
+    "Los Angeles Lakers": "LAL",
+    "LA Clippers": "LAC",
+    "LA Lakers": "LAL",
+    "Memphis Grizzlies": "MEM",
+    "Miami Heat": "MIA",
+    "Milwaukee Bucks": "MIL",
+    "Minnesota Timberwolves": "MIN",
+    "New Orleans Pelicans": "NOP",
+    "New York Knicks": "NYK",
+    "Oklahoma City Thunder": "OKC",
+    "Orlando Magic": "ORL",
+    "Philadelphia 76ers": "PHI",
+    "Phoenix Suns": "PHX",
+    "Portland Trail Blazers": "POR",
+    "Sacramento Kings": "SAC",
+    "San Antonio Spurs": "SAS",
+    "Toronto Raptors": "TOR",
+    "Utah Jazz": "UTA",
+    "Washington Wizards": "WAS",
+}
+
+# Bookmaker dedup priority: lower = preferred
+BOOK_PRIORITY = {"draftkings": 0, "fanduel": 1, "betmgm": 2}
+
 
 class OddsFetcher:
     """
@@ -884,6 +934,240 @@ class CLVTracker:
             "clv_std": float(np.std(clvs)),
             "best_clv": max(clvs),
             "worst_clv": min(clvs)
+        }
+
+
+class PlayerPropFetcher:
+    """Fetches live player prop lines from The Odds API (FanDuel/DraftKings).
+
+    Uses the same API infrastructure as OddsFetcher but targets player prop
+    markets. Designed to replace Balldontlie/Rebet as the primary prop source
+    for daily predictions.
+
+    API cost per game: ~4 credits (4 markets x 1 region).
+    """
+
+    PROP_MARKETS_STR = ",".join(PLAYER_PROP_MARKETS.values())
+
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or os.environ.get("THE_ODDS_API_KEY")
+        self.remaining_requests = None
+        self.used_requests = None
+        self._session = requests.Session()
+        if not self.api_key:
+            raise ValueError(
+                "No API key provided. Set THE_ODDS_API_KEY environment variable."
+            )
+
+    def _make_request(self, endpoint: str, params: dict | None = None) -> dict | list | None:
+        """Make API request with rate limiting and error handling."""
+        url = f"{THE_ODDS_API_BASE}/{endpoint}"
+        params = params or {}
+        params["apiKey"] = self.api_key
+
+        time.sleep(API_DELAY)
+
+        try:
+            response = self._session.get(url, params=params, timeout=30)
+            self.remaining_requests = response.headers.get("x-requests-remaining")
+            self.used_requests = response.headers.get("x-requests-used")
+
+            if response.status_code != 200:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "PlayerPropFetcher API error %d for %s", response.status_code, endpoint
+                )
+                return None
+
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            import logging
+            logging.getLogger(__name__).warning("PlayerPropFetcher request failed: %s", e)
+            return None
+
+    def fetch_todays_events(self) -> list[dict]:
+        """Fetch today's NBA events from The Odds API (1 credit).
+
+        Returns:
+            List of event dicts with id, home_team, away_team, commence_time.
+        """
+        data = self._make_request(f"sports/{NBA_SPORT_KEY}/events")
+        if not data or not isinstance(data, list):
+            return []
+        return data
+
+    def match_events_to_games(
+        self, events: list[dict], games: list[dict]
+    ) -> dict[int, dict]:
+        """Match Odds API events to Balldontlie game IDs using team abbreviations.
+
+        Args:
+            events: Events from fetch_todays_events().
+            games: Game dicts from the daily predictions pipeline. Each must have
+                   game['home_team']['abbreviation'] and game['visitor_team']['abbreviation'].
+
+        Returns:
+            Dict mapping bdl_game_id -> event info dict.
+        """
+        event_map = {}
+        for event in events:
+            home_abbrev = FULL_NAME_TO_ABBREV.get(event.get("home_team", ""))
+            away_abbrev = FULL_NAME_TO_ABBREV.get(event.get("away_team", ""))
+            if not home_abbrev or not away_abbrev:
+                continue
+
+            for game in games:
+                g_home = game.get("home_team", {}).get("abbreviation", "")
+                g_away = game.get("visitor_team", {}).get("abbreviation", "")
+
+                if (g_home == home_abbrev and g_away == away_abbrev) or \
+                   (g_home == away_abbrev and g_away == home_abbrev):
+                    game_id = game.get("id")
+                    if game_id:
+                        event_map[game_id] = {
+                            "event_id": event["id"],
+                            "home_team": event.get("home_team", ""),
+                            "away_team": event.get("away_team", ""),
+                            "home_abbrev": home_abbrev,
+                            "away_abbrev": away_abbrev,
+                            "commence_time": event.get("commence_time", ""),
+                        }
+                    break
+
+        return event_map
+
+    def fetch_props_for_event(self, event_id: str) -> list[dict]:
+        """Fetch player props for a single event (~4 credits).
+
+        Args:
+            event_id: The Odds API event ID.
+
+        Returns:
+            List of parsed prop dicts with player_name, prop_type, line,
+            over_odds, under_odds, bookmaker.
+        """
+        data = self._make_request(
+            f"sports/{NBA_SPORT_KEY}/events/{event_id}/odds",
+            params={
+                "regions": "us",
+                "markets": self.PROP_MARKETS_STR,
+                "bookmakers": "draftkings,fanduel",
+                "oddsFormat": "american",
+            },
+        )
+        if not data or not isinstance(data, dict):
+            return []
+
+        props = []
+        for book in data.get("bookmakers", []):
+            book_key = book["key"]
+            for market in book.get("markets", []):
+                prop_type = MARKET_TO_PROP.get(market["key"])
+                if not prop_type:
+                    continue
+
+                # Group outcomes by player (Over/Under pairs)
+                player_lines: dict[str, dict] = {}
+                for outcome in market.get("outcomes", []):
+                    player = outcome.get("description", "")
+                    direction = outcome.get("name", "").lower()
+                    if not player or direction not in ("over", "under"):
+                        continue
+
+                    if player not in player_lines:
+                        player_lines[player] = {
+                            "player_name": player,
+                            "prop_type": prop_type,
+                            "line": outcome.get("point", 0),
+                            "bookmaker": book_key,
+                        }
+                    if direction == "over":
+                        player_lines[player]["over_odds"] = outcome.get("price", -110)
+                        player_lines[player]["line"] = outcome.get("point", 0)
+                    else:
+                        player_lines[player]["under_odds"] = outcome.get("price", -110)
+
+                for pl in player_lines.values():
+                    if "over_odds" in pl and "under_odds" in pl:
+                        props.append(pl)
+
+        return props
+
+    def _dedupe_props(self, props: list[dict]) -> list[dict]:
+        """Deduplicate props, keeping DraftKings > FanDuel > others."""
+        best: dict[tuple[str, str], dict] = {}
+        for p in props:
+            key = (p["player_name"], p["prop_type"])
+            existing = best.get(key)
+            if existing is None:
+                best[key] = p
+            else:
+                new_rank = BOOK_PRIORITY.get(p["bookmaker"], 99)
+                old_rank = BOOK_PRIORITY.get(existing["bookmaker"], 99)
+                if new_rank < old_rank:
+                    best[key] = p
+        return list(best.values())
+
+    def get_props_for_game(
+        self,
+        bdl_game_id: int,
+        event_id: str,
+        id_mapper=None,
+    ) -> dict[int, dict]:
+        """Main interface: fetch props and return in daily_predictions format.
+
+        Args:
+            bdl_game_id: Balldontlie game ID.
+            event_id: The Odds API event ID.
+            id_mapper: Optional IDMapper for resolving player names to BDL IDs.
+
+        Returns:
+            Dict keyed by player_id (BDL ID or hash) with prop lines in the
+            same format that daily_predictions.py expects:
+            {player_id: {'player_id': id, 'points_line': 25.5,
+                         'points_vendor': 'draftkings', 'points_over_odds': -110, ...}}
+        """
+        raw_props = self.fetch_props_for_event(event_id)
+        if not raw_props:
+            return {}
+
+        deduped = self._dedupe_props(raw_props)
+
+        # Group by player name
+        by_player_name: dict[str, dict] = {}
+        for p in deduped:
+            name = p["player_name"]
+            if name not in by_player_name:
+                by_player_name[name] = {}
+            entry = by_player_name[name]
+            pt = p["prop_type"]
+            entry[f"{pt}_line"] = p["line"]
+            entry[f"{pt}_vendor"] = p["bookmaker"]
+            entry[f"{pt}_over_odds"] = p.get("over_odds", -110)
+            entry[f"{pt}_under_odds"] = p.get("under_odds", -110)
+
+        # Resolve player names to BDL IDs
+        result: dict[int, dict] = {}
+        for name, prop_data in by_player_name.items():
+            player_id = None
+            if id_mapper:
+                player_id = id_mapper.get_player_id(name)
+
+            if not player_id:
+                # Use a deterministic hash as fallback ID (negative to avoid collisions)
+                player_id = -abs(hash(name)) % 1_000_000
+
+            prop_data["player_id"] = player_id
+            prop_data["player_name_odds_api"] = name
+            result[player_id] = prop_data
+
+        return result
+
+    def get_api_usage(self) -> dict:
+        """Get current API usage statistics."""
+        return {
+            "remaining_requests": self.remaining_requests,
+            "used_requests": self.used_requests,
         }
 
 

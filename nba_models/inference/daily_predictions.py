@@ -1836,6 +1836,59 @@ def get_player_props_for_game(api: BalldontlieAPI, game_id: int) -> dict[int, di
     return props_by_player
 
 
+def get_player_props_hybrid(
+    game_id: int,
+    prop_source: str,
+    api: BalldontlieAPI | None,
+    event_map: dict | None = None,
+    prop_fetcher=None,
+    id_mapper=None,
+) -> tuple[dict[int, dict], str]:
+    """Fetch player props using the configured source strategy.
+
+    Args:
+        game_id: Balldontlie game ID.
+        prop_source: One of 'odds-api', 'balldontlie', 'hybrid'.
+        api: BalldontlieAPI instance (for legacy fallback).
+        event_map: Dict from PlayerPropFetcher.match_events_to_games().
+        prop_fetcher: PlayerPropFetcher instance.
+        id_mapper: IDMapper for name resolution.
+
+    Returns:
+        (props_dict, source_used) where source_used is 'odds-api' or 'balldontlie'.
+    """
+    props = {}
+    source_used = "none"
+
+    event_info = event_map.get(game_id) if event_map else None
+
+    # Try Odds API first (if enabled and event matched)
+    if prop_source in ("odds-api", "hybrid") and prop_fetcher and event_info:
+        try:
+            props = prop_fetcher.get_props_for_game(
+                bdl_game_id=game_id,
+                event_id=event_info["event_id"],
+                id_mapper=id_mapper,
+            )
+            if props:
+                source_used = "odds-api"
+                print(f" [Odds API: {len(props)} players]", end="")
+        except Exception as e:
+            print(f" [Odds API error: {e}]", end="")
+
+    # Fall back to Balldontlie (if enabled and Odds API didn't return data)
+    if not props and prop_source in ("balldontlie", "hybrid") and api:
+        try:
+            props = get_player_props_for_game(api, game_id)
+            if props:
+                source_used = "balldontlie"
+                print(f" [BDL fallback: {len(props)} players]", end="")
+        except Exception as e:
+            print(f" [BDL error: {e}]", end="")
+
+    return props, source_used
+
+
 def predict_player_prop(
     player_name: str,
     player_id: int,
@@ -2458,6 +2511,18 @@ def main():
     parser.add_argument("--date", type=str, help="Date in YYYY-MM-DD format")
     parser.add_argument("--no-warmup", action="store_true", help="Skip cache warmup")
     parser.add_argument("--clear-cache", action="store_true", help="Clear cache before running")
+    parser.add_argument(
+        "--prop-source",
+        choices=["odds-api", "balldontlie", "hybrid"],
+        default="hybrid",
+        help="Player prop line source: odds-api (FD/DK only), balldontlie (legacy), hybrid (try Odds API first, fallback to BDL)",
+    )
+    parser.add_argument(
+        "--max-prop-games",
+        type=int,
+        default=0,
+        help="Limit Odds API prop fetches to N games (0=all). Use 1-2 for testing.",
+    )
     args = parser.parse_args()
 
     target_date = args.date or datetime.now(ET).strftime("%Y-%m-%d")
@@ -2594,9 +2659,37 @@ def main():
         print("\n  No games found for today.")
         return
 
+    # Initialize PlayerPropFetcher for Odds API prop lines (FanDuel/DraftKings)
+    prop_fetcher = None
+    event_map = {}  # {bdl_game_id: {event_id, home_team, ...}}
+    prop_source = getattr(args, 'prop_source', 'hybrid')
+    max_prop_games = getattr(args, 'max_prop_games', 0)
+
+    if prop_source in ("odds-api", "hybrid"):
+        try:
+            from odds_fetcher import PlayerPropFetcher
+            prop_fetcher = PlayerPropFetcher()
+            events = prop_fetcher.fetch_todays_events()
+            if events:
+                event_map = prop_fetcher.match_events_to_games(events, games)
+                print(f"  Odds API: {len(events)} events, {len(event_map)} matched to games")
+                if max_prop_games > 0:
+                    # Limit to first N games
+                    limited = dict(list(event_map.items())[:max_prop_games])
+                    print(f"  Odds API: Limited to {len(limited)} games (--max-prop-games {max_prop_games})")
+                    event_map = limited
+                print(f"  Prop source: {prop_source} | API credits remaining: {prop_fetcher.remaining_requests}")
+            else:
+                print("  Odds API: No events returned (games may not have props yet)")
+        except Exception as e:
+            print(f"  Odds API init failed: {e}")
+            if prop_source == "odds-api":
+                print("  WARNING: --prop-source=odds-api but Odds API unavailable!")
+
     # TASK 4.1: Cache warmup - pre-fetch all team/player data in parallel
     # Also cache props data to avoid duplicate API calls
     props_cache = {}  # Cache props data for reuse in main loop
+    props_source_cache = {}  # Track source per game: {game_id: 'odds-api'|'balldontlie'}
 
     if not args.no_warmup and api:
         team_ids = []
@@ -2615,15 +2708,25 @@ def main():
 
         # Collect player IDs from all games (quickly)
         # OPTIMIZATION: Cache props data here to avoid fetching twice
+        # Uses hybrid fetching: Odds API (FD/DK) -> Balldontlie fallback
         print("\n  Collecting player IDs for cache warmup...", end='', flush=True)
+        id_mapper_warmup = get_id_mapper()
         for game in games:
             game_id = game.get('id')
             if game_id:
                 try:
-                    props_data = get_player_props_for_game(api, game_id)
+                    props_data, source = get_player_props_hybrid(
+                        game_id=game_id,
+                        prop_source=prop_source,
+                        api=api,
+                        event_map=event_map,
+                        prop_fetcher=prop_fetcher,
+                        id_mapper=id_mapper_warmup,
+                    )
                     if props_data:
                         # Cache props for later use in main loop
                         props_cache[game_id] = props_data
+                        props_source_cache[game_id] = source
 
                         # Get players with significant lines (likely to be analyzed)
                         for pid, props in props_data.items():
@@ -2661,16 +2764,24 @@ def main():
         analysis = analyze_game(game, odds, models)
 
         # Fetch player props for this game (limit to top players with points props)
-        if api and game_id:
+        if game_id and (api or prop_fetcher):
             home = analysis['home_team']
             away = analysis['away_team']
             print(f"\n  Analyzing {away}@{home} props...", end="", flush=True)
 
             # OPTIMIZATION: Use cached props if available (from warmup phase)
             props_data = props_cache.get(game_id)
+            game_prop_source = props_source_cache.get(game_id, "unknown")
             if not props_data:
-                # Fall back to API call if not in cache
-                props_data = get_player_props_for_game(api, game_id)
+                # Fall back to hybrid fetch if not in cache
+                props_data, game_prop_source = get_player_props_hybrid(
+                    game_id=game_id,
+                    prop_source=prop_source,
+                    api=api,
+                    event_map=event_map,
+                    prop_fetcher=prop_fetcher,
+                    id_mapper=get_id_mapper(),
+                )
 
             if props_data:
                 # Get player names from API
@@ -2696,19 +2807,26 @@ def main():
                             if name:
                                 player_names[player_id] = name
 
-                    # Fallback: try Balldontlie API for any missing names
+                    # Fallback: use Odds API player name or Balldontlie API
                     missing_ids = [pid for pid, _ in sorted_players if pid not in player_names]
                     if missing_ids:
-                        try:
-                            for pid in missing_ids:
-                                p = api.get_player(pid)
-                                if p:
-                                    fname = p.get('first_name', '')
-                                    lname = p.get('last_name', '')
-                                    if fname or lname:
-                                        player_names[pid] = f"{fname} {lname}".strip()
-                        except:
-                            pass
+                        for pid in missing_ids:
+                            # First check if Odds API provided the name
+                            odds_api_name = props_data.get(pid, {}).get('player_name_odds_api')
+                            if odds_api_name:
+                                player_names[pid] = odds_api_name
+                                continue
+                            # Fall back to Balldontlie API
+                            try:
+                                if api:
+                                    p = api.get_player(pid)
+                                    if p:
+                                        fname = p.get('first_name', '')
+                                        lname = p.get('last_name', '')
+                                        if fname or lname:
+                                            player_names[pid] = f"{fname} {lname}".strip()
+                            except:
+                                pass
 
                     # Get team IDs for opponent context
                     home_team = game.get('home_team', {})
@@ -2801,6 +2919,8 @@ def main():
                                     'team_abbrev': team_abbrev,
                                     'over_odds': props.get(f'{prop_type}_over_odds', -110),
                                     'under_odds': props.get(f'{prop_type}_under_odds', -110),
+                                    'line_source': game_prop_source,
+                                    'line_vendor': props.get(f'{prop_type}_vendor', 'unknown'),
                                     'game_context': {
                                         'spread': odds.get('spread', 0),
                                         'total': odds.get('total', 220),
@@ -2838,6 +2958,9 @@ def main():
                             # Fix 4: Pass through actual sportsbook odds
                             pred['over_odds'] = task.get('over_odds', -110)
                             pred['under_odds'] = task.get('under_odds', -110)
+                            # Track line source (odds-api vs balldontlie) and vendor (draftkings, fanduel, rebet)
+                            pred['line_source'] = task.get('line_source', 'unknown')
+                            pred['line_vendor'] = task.get('line_vendor', 'unknown')
                             # Fix 5: Expand uncertainty_flag beyond just injury status
                             if task['uncertainty_flag']:
                                 pred['uncertainty_flag'] = task['uncertainty_flag']
@@ -2995,21 +3118,36 @@ def main():
             if signal in ('BET', 'LEAN'):
                 direction = prop.get('pick', 'OVER' if prop['over_prob'] > 0.5 else 'UNDER')
                 prob = prop.get('model_probability', prop['over_prob'] if prop['over_prob'] > 0.5 else (1 - prop['over_prob']))
+                vendor = prop.get('line_vendor', 'unknown')
+                source = prop.get('line_source', 'unknown')
+                bettable = vendor in ('draftkings', 'fanduel')
                 recommendations.append({
                     'game': f"{away}@{home}",
                     'bet': f"{prop['player']} {prop['stat']} {direction} {prop['line']}",
                     'prob': prob,
                     'edge': prop['edge'],
                     'signal': signal,
+                    'line_vendor': vendor,
+                    'line_source': source,
+                    'bettable': bettable,
                 })
 
     # Sort by edge
     recommendations.sort(key=lambda x: x['edge'], reverse=True)
 
     if recommendations:
+        # When using odds-api or hybrid, prioritize bettable lines from FD/DK
+        bettable_recs = [r for r in recommendations if r.get('bettable', True)]
+        non_bettable = [r for r in recommendations if not r.get('bettable', True)]
+
         print()
-        for i, rec in enumerate(recommendations[:10], 1):
-            print(f"  {i}. {rec['game']}: {rec['bet']} ({rec['prob']:.0%}, edge: {rec['edge']:+.1f}%)")
+        display_recs = bettable_recs[:10] if bettable_recs else recommendations[:10]
+        for i, rec in enumerate(display_recs, 1):
+            vendor_tag = f" [{rec.get('line_vendor', '')}]" if rec.get('line_vendor', 'unknown') != 'unknown' else ""
+            print(f"  {i}. {rec['game']}: {rec['bet']} ({rec['prob']:.0%}, edge: {rec['edge']:+.1f}%){vendor_tag}")
+
+        if non_bettable and prop_source in ('odds-api', 'hybrid'):
+            print(f"\n  NOTE: {len(non_bettable)} additional edges from non-FD/DK sources (not shown)")
     else:
         print("\n  No strong edges found today.")
 
@@ -3064,6 +3202,8 @@ def main():
                     'has_edge': prop.get('has_edge', False),
                     'uncertainty_flag': prop.get('uncertainty_flag', ''),
                     'injury_boost': prop.get('injury_boost', 1.0),
+                    'line_source': prop.get('line_source', 'unknown'),
+                    'line_vendor': prop.get('line_vendor', 'unknown'),
                 }
                 csv_data.append(row)
 
@@ -3108,11 +3248,19 @@ def main():
                             pick VARCHAR(10),
                             uncertainty_flag VARCHAR(50),
                             injury_boost BOOLEAN,
+                            line_source VARCHAR(20),
+                            line_vendor VARCHAR(50),
                             created_at TIMESTAMP DEFAULT NOW(),
                             UNIQUE(date, player_name, prop_type)
                         )
                     """)
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_date ON predictions_history(date)")
+                    # Add new columns if table already exists (idempotent)
+                    for col, col_type in [("line_source", "VARCHAR(20)"), ("line_vendor", "VARCHAR(50)")]:
+                        try:
+                            cursor.execute(f"ALTER TABLE predictions_history ADD COLUMN {col} {col_type}")
+                        except Exception:
+                            conn.rollback()  # Column already exists
                     conn.commit()
 
                     # Delete existing predictions for this date
@@ -3132,13 +3280,15 @@ def main():
                                 prediction, pred_low, pred_median, pred_high,
                                 line, over_prob, edge, confidence_score,
                                 edge_quality_tier, suggested_bet_size, bet_recommendation,
-                                pick, uncertainty_flag, injury_boost
+                                pick, uncertainty_flag, injury_boost,
+                                line_source, line_vendor
                             ) VALUES (
                                 %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s,
                                 %s, %s, %s, %s,
                                 %s, %s, %s,
-                                %s, %s, %s
+                                %s, %s, %s,
+                                %s, %s
                             )
                         """, (
                             target_date,
@@ -3159,7 +3309,9 @@ def main():
                             safe_val(row.get('bet_recommendation')),
                             safe_val(row.get('pick')),
                             safe_val(row.get('uncertainty_flag')),
-                            safe_val(row.get('injury_boost'))
+                            safe_val(row.get('injury_boost')),
+                            safe_val(row.get('line_source')),
+                            safe_val(row.get('line_vendor')),
                         ))
                         inserted_count += 1
 

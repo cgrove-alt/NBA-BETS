@@ -35,57 +35,40 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 CACHE_DIR = ROOT / "data" / "historical_lines"
 LIVE_SEASONS_DIR = ROOT / "data" / "live_seasons"
 
+# Add project root to path for shared imports
+sys.path.insert(0, str(ROOT / "nba_data" / "sources"))
+
 logger = logging.getLogger(__name__)
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 SPORT = "basketball_nba"
-MARKETS = "player_points,player_rebounds,player_assists,player_points_rebounds_assists"
 REGION = "us"
 
-# Mapping from The Odds API full team names to common abbreviations.
-# The Odds API uses city+mascot; our CSV data uses 3-letter codes.
-FULL_NAME_TO_ABBREV = {
-    "Atlanta Hawks": "ATL",
-    "Boston Celtics": "BOS",
-    "Brooklyn Nets": "BKN",
-    "Charlotte Hornets": "CHA",
-    "Chicago Bulls": "CHI",
-    "Cleveland Cavaliers": "CLE",
-    "Dallas Mavericks": "DAL",
-    "Denver Nuggets": "DEN",
-    "Detroit Pistons": "DET",
-    "Golden State Warriors": "GSW",
-    "Houston Rockets": "HOU",
-    "Indiana Pacers": "IND",
-    "Los Angeles Clippers": "LAC",
-    "Los Angeles Lakers": "LAL",
-    "LA Clippers": "LAC",
-    "LA Lakers": "LAL",
-    "Memphis Grizzlies": "MEM",
-    "Miami Heat": "MIA",
-    "Milwaukee Bucks": "MIL",
-    "Minnesota Timberwolves": "MIN",
-    "New Orleans Pelicans": "NOP",
-    "New York Knicks": "NYK",
-    "Oklahoma City Thunder": "OKC",
-    "Orlando Magic": "ORL",
-    "Philadelphia 76ers": "PHI",
-    "Phoenix Suns": "PHX",
-    "Portland Trail Blazers": "POR",
-    "Sacramento Kings": "SAC",
-    "San Antonio Spurs": "SAS",
-    "Toronto Raptors": "TOR",
-    "Utah Jazz": "UTA",
-    "Washington Wizards": "WAS",
-}
-
-# Market key → our prop type name
-MARKET_TO_PROP = {
-    "player_points": "points",
-    "player_rebounds": "rebounds",
-    "player_assists": "assists",
-    "player_points_rebounds_assists": "pra",
-}
+# Import shared constants from odds_fetcher (single source of truth)
+try:
+    from odds_fetcher import FULL_NAME_TO_ABBREV, MARKET_TO_PROP, PLAYER_PROP_MARKETS
+    MARKETS = ",".join(PLAYER_PROP_MARKETS.values())
+except ImportError:
+    logger.warning("Could not import from odds_fetcher, using local constants")
+    MARKETS = "player_points,player_rebounds,player_assists,player_points_rebounds_assists"
+    FULL_NAME_TO_ABBREV = {
+        "Atlanta Hawks": "ATL", "Boston Celtics": "BOS", "Brooklyn Nets": "BKN",
+        "Charlotte Hornets": "CHA", "Chicago Bulls": "CHI", "Cleveland Cavaliers": "CLE",
+        "Dallas Mavericks": "DAL", "Denver Nuggets": "DEN", "Detroit Pistons": "DET",
+        "Golden State Warriors": "GSW", "Houston Rockets": "HOU", "Indiana Pacers": "IND",
+        "Los Angeles Clippers": "LAC", "Los Angeles Lakers": "LAL",
+        "LA Clippers": "LAC", "LA Lakers": "LAL",
+        "Memphis Grizzlies": "MEM", "Miami Heat": "MIA", "Milwaukee Bucks": "MIL",
+        "Minnesota Timberwolves": "MIN", "New Orleans Pelicans": "NOP",
+        "New York Knicks": "NYK", "Oklahoma City Thunder": "OKC", "Orlando Magic": "ORL",
+        "Philadelphia 76ers": "PHI", "Phoenix Suns": "PHX", "Portland Trail Blazers": "POR",
+        "Sacramento Kings": "SAC", "San Antonio Spurs": "SAS", "Toronto Raptors": "TOR",
+        "Utah Jazz": "UTA", "Washington Wizards": "WAS",
+    }
+    MARKET_TO_PROP = {
+        "player_points": "points", "player_rebounds": "rebounds",
+        "player_assists": "assists", "player_points_rebounds_assists": "pra",
+    }
 
 
 def load_season_games(season: str) -> pd.DataFrame:

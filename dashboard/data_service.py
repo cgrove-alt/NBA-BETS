@@ -688,6 +688,12 @@ class DataService:
         self._real_prop_lines_timestamps = {}  # game_id -> datetime when cached
         self._prop_lines_ttl = timedelta(seconds=30)  # 30 sec TTL for prop lines
 
+        # PlayerPropFetcher for FanDuel/DraftKings lines via The Odds API
+        self._player_prop_fetcher = None
+        self._odds_api_event_map = {}  # {bdl_game_id: {event_id, ...}}
+        self._odds_api_event_map_timestamp = None
+        self._odds_api_event_map_ttl = timedelta(minutes=15)
+
         # Opponent stats cache (30 min TTL - defensive ratings don't change mid-game)
         self._opponent_stats_cache = {}  # team_abbrev -> {def_rating, off_rating, pace, ...}
         self._opponent_stats_timestamp = None
@@ -736,6 +742,14 @@ class DataService:
         # SportsDataIO API removed - not being paid for
         # BAKER projections will use fallback logic if _sportsdata_api is None
         self._sportsdata_api = None
+
+        # Initialize PlayerPropFetcher for FanDuel/DraftKings lines
+        try:
+            from odds_fetcher import PlayerPropFetcher
+            self._player_prop_fetcher = PlayerPropFetcher()
+            print("PlayerPropFetcher initialized (FD/DK prop lines)")
+        except Exception as e:
+            print(f"PlayerPropFetcher not available: {e}")
 
         # Initialize Orchestrator (loads models)
         try:
@@ -2678,12 +2692,40 @@ class DataService:
 
     # _get_key_players method removed - replaced by Balldontlie API in _fetch_props_background()
 
-    def _get_players_from_props(self, game_id: int) -> dict[int, dict]:
-        """Get player info for all players with DraftKings props.
+    def _get_odds_api_event(self, game_id: int) -> dict | None:
+        """Get the Odds API event info for a Balldontlie game ID.
 
-        This ensures player IDs match between the props cache and player lookups,
-        solving the ID mismatch issue where get_active_players() returns different
-        IDs than get_player_props().
+        Caches the event map for 15 minutes to avoid repeated API calls.
+        Returns None if the game has no matching Odds API event.
+        """
+        if not self._player_prop_fetcher:
+            return None
+
+        # Check if event map is stale
+        now = datetime.now()
+        if (self._odds_api_event_map_timestamp is None or
+                (now - self._odds_api_event_map_timestamp) > self._odds_api_event_map_ttl):
+            try:
+                events = self._player_prop_fetcher.fetch_todays_events()
+                if events and self.balldontlie:
+                    # Build games list from today's BDL games
+                    from datetime import datetime as dt
+                    today = dt.now().strftime("%Y-%m-%d")
+                    games = self.balldontlie.get_games(dates=[today])
+                    if games:
+                        self._odds_api_event_map = self._player_prop_fetcher.match_events_to_games(events, games)
+                        self._odds_api_event_map_timestamp = now
+            except Exception as e:
+                print(f"Odds API event map refresh failed: {e}")
+
+        return self._odds_api_event_map.get(game_id)
+
+    def _get_players_from_props(self, game_id: int) -> dict[int, dict]:
+        """Get player info for all players with sportsbook props.
+
+        Tries The Odds API (FanDuel/DraftKings) first, then falls back to
+        Balldontlie API. This ensures player IDs match between the props cache
+        and player lookups.
 
         Args:
             game_id: Balldontlie game ID
@@ -2691,6 +2733,32 @@ class DataService:
         Returns:
             Dict keyed by player_id with player info (name, team_id, position)
         """
+        # Try Odds API first for FD/DK lines
+        if self._player_prop_fetcher:
+            try:
+                event_info = self._get_odds_api_event(game_id)
+                if event_info:
+                    from id_mapping import IDMapper
+                    mapper = IDMapper()
+                    props = self._player_prop_fetcher.get_props_for_game(
+                        bdl_game_id=game_id,
+                        event_id=event_info["event_id"],
+                        id_mapper=mapper,
+                    )
+                    if props:
+                        players = {}
+                        for pid, pdata in props.items():
+                            name = pdata.get("player_name_odds_api", f"Player {pid}")
+                            players[pid] = {
+                                "player_id": pid,
+                                "player_name": name,
+                                "team_id": None,
+                                "position": "",
+                            }
+                        return players
+            except Exception as e:
+                print(f"Odds API player lookup failed for game {game_id}: {e}")
+
         if not self.balldontlie:
             return {}
 
@@ -2758,7 +2826,7 @@ class DataService:
         return players
 
     def _get_real_prop_line(self, game_id: str, player_id: int, prop_type: str) -> float | None:
-        """Get real prop line from FanDuel ONLY for a player/prop.
+        """Get real prop line from FanDuel/DraftKings via Odds API, falling back to Balldontlie.
 
         Args:
             game_id: Game ID
@@ -2766,8 +2834,28 @@ class DataService:
             prop_type: Prop type (points, rebounds, assists, threes, pra)
 
         Returns:
-            Real betting line from DraftKings, or None if unavailable
+            Real betting line from FD/DK (preferred) or Balldontlie, or None
         """
+        # Try Odds API first for FD/DK lines
+        if self._player_prop_fetcher:
+            try:
+                event_info = self._get_odds_api_event(int(game_id))
+                if event_info:
+                    from id_mapping import IDMapper
+                    mapper = IDMapper()
+                    props = self._player_prop_fetcher.get_props_for_game(
+                        bdl_game_id=int(game_id),
+                        event_id=event_info["event_id"],
+                        id_mapper=mapper,
+                    )
+                    if props and player_id in props:
+                        line_key = f"{prop_type.lower()}_line"
+                        line = props[player_id].get(line_key)
+                        if line is not None:
+                            return float(line)
+            except Exception as e:
+                print(f"Odds API prop line lookup failed: {e}")
+
         if not self.balldontlie:
             return None
 
