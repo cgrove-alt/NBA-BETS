@@ -319,7 +319,7 @@ class PreGameIntelAgent(AgentBase):
 
             # Send to future Prediction Orchestrator
             self.send_message(
-                recipient='predictor',
+                recipient='orchestrator',
                 event_type='intel_ready',
                 payload=intel,
                 priority='normal',

@@ -211,7 +211,7 @@ class OddsMonitorAgent(AgentBase):
 
             if edge > NOTABLE_EDGE_THRESHOLD:
                 self.send_message(
-                    recipient='predictor',
+                    recipient='orchestrator',
                     event_type='odds_alert',
                     payload={
                         'event_type': 'steam_move',

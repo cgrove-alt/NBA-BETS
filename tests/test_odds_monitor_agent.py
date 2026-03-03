@@ -159,8 +159,8 @@ class TestOddsMonitorAgent:
         assert 'notable_movements' in result
         assert 'Deterministic fallback' in result['reasoning']
 
-    def test_report_sends_odds_alert_to_predictor(self, odds_agent, memory_bus):
-        """odds_alert messages sent to predictor for notable steam moves."""
+    def test_report_sends_odds_alert_to_orchestrator(self, odds_agent, memory_bus):
+        """odds_alert messages sent to orchestrator for notable steam moves."""
         run_output = {
             'target_date': '2026-02-24',
             'steam_alerts': [{
@@ -176,9 +176,9 @@ class TestOddsMonitorAgent:
 
         odds_agent.report(run_output)
 
-        predictor_msgs = memory_bus.receive('predictor', event_type='odds_alert')
-        assert len(predictor_msgs) >= 1
-        assert predictor_msgs[0].priority == 'high'
+        orchestrator_msgs = memory_bus.receive('orchestrator', event_type='odds_alert')
+        assert len(orchestrator_msgs) >= 1
+        assert orchestrator_msgs[0].priority == 'high'
 
     def test_report_sends_to_briefing(self, odds_agent, memory_bus):
         """odds_alert sent to briefing."""

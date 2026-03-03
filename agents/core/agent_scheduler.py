@@ -84,8 +84,11 @@ AGENT_SCHEDULES = {
         'Every 15 min (8 AM-11 PM ET) — line movements',
     ),
     'orchestrator': (
-        {'hour': '11', 'minute': '30'},
-        '11:30 AM ET — prediction pipeline',
+        [
+            {'hour': '11', 'minute': '30'},
+            {'hour': '17', 'minute': '15'},
+        ],
+        '11:30 AM + 5:15 PM ET — prediction pipeline',
     ),
     'watchdog': (
         {'hour': '1', 'minute': '30'},
@@ -190,16 +193,20 @@ def create_scheduler(daemon: bool = False):
     )
 
     for agent_name, (cron_kwargs, description) in AGENT_SCHEDULES.items():
-        scheduler.add_job(
-            run_agent_job,
-            CronTrigger(**cron_kwargs),
-            args=[agent_name],
-            id=f'agent_{agent_name}',
-            name=f'{agent_name}: {description}',
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=600,  # 10 min grace
-        )
+        # Support both single cron dict and list of cron dicts
+        schedules = cron_kwargs if isinstance(cron_kwargs, list) else [cron_kwargs]
+        for i, kwargs in enumerate(schedules):
+            job_id = f'agent_{agent_name}' if len(schedules) == 1 else f'agent_{agent_name}_{i}'
+            scheduler.add_job(
+                run_agent_job,
+                CronTrigger(**kwargs),
+                args=[agent_name],
+                id=job_id,
+                name=f'{agent_name}: {description}',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=600,  # 10 min grace
+            )
         logger.info(f"Scheduled: {agent_name} — {description}")
 
     # Job event listener
