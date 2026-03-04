@@ -428,7 +428,7 @@ def _build_prop_prediction(player_data: dict, prop_key: str) -> PropPrediction |
         prediction=prediction,
         confidence=confidence,
         edge=raw_edge,            # Raw points (e.g., +2.5)
-        edge_pct=edge_pct_from_ds,  # Percentage (e.g., 10.2%)
+        edge_pct=min(edge_pct_from_ds, 100.0) if edge_pct_from_ds > 0 else max(edge_pct_from_ds, -100.0),  # Capped at ±100%
         pick=pick,
         line=line,  # Can be None now
         implied_probability=None,
@@ -1213,7 +1213,7 @@ def get_best_bets(
                     prediction=prediction,
                     line=line,
                     edge=edge,
-                    edge_pct=edge_pct,
+                    edge_pct=min(edge_pct, 100.0) if edge_pct > 0 else max(edge_pct, -100.0),
                     pick=pick,
                     confidence=confidence,
                     season_avg=round(season_avg_val, 1) if season_avg_val else None,
@@ -1275,7 +1275,14 @@ def get_best_bets(
     elif sort_by == "edge":
         best_bets.sort(key=lambda x: abs(x.edge_pct), reverse=True)
     else:  # Default "quality" - composite score
-        best_bets.sort(key=lambda x: (x.confidence - 50) * abs(x.edge_pct), reverse=True)
+        # Use log-dampened edge to prevent low-line props (assists, 3PM) from
+        # dominating. A 300% edge on a 0.5 line is not 30x more valuable than
+        # a 10% edge on a 25.5 line. Log scale compresses the range fairly.
+        import math
+        best_bets.sort(
+            key=lambda x: (x.confidence - 50) * math.log1p(abs(x.edge_pct)),
+            reverse=True
+        )
 
     # Assign rank after sorting (1 = best)
     for i, bet in enumerate(best_bets):
@@ -1713,7 +1720,7 @@ def _load_best_bets_from_postgres(
                 prediction=prediction,
                 line=line,
                 edge=edge_raw,
-                edge_pct=edge_pct,
+                edge_pct=min(edge_pct, 100.0) if edge_pct > 0 else max(edge_pct, -100.0),
                 pick=pick_val,
                 confidence=confidence,
                 explanation=explanation,
@@ -1734,7 +1741,11 @@ def _load_best_bets_from_postgres(
         elif sort_by == "edge":
             best_bets.sort(key=lambda x: abs(x.edge_pct), reverse=True)
         else:  # "quality" — composite score
-            best_bets.sort(key=lambda x: (x.confidence - 50) * abs(x.edge_pct), reverse=True)
+            import math
+            best_bets.sort(
+                key=lambda x: (x.confidence - 50) * math.log1p(abs(x.edge_pct)),
+                reverse=True
+            )
 
         # Assign ranks
         for i, bet in enumerate(best_bets):

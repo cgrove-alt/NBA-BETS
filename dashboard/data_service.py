@@ -2485,6 +2485,119 @@ class DataService:
 
             print(f"Background: Got season averages for {len(stats_by_player)} players", flush=True)
 
+            # Step 3b: Batch fetch recent game stats for ALL players (ONE API call)
+            # This fixes the bug where recent_averages == season_averages because
+            # _get_recent_stats() was never called (skip_api_calls=True always).
+            print("Background: [3b/4] Fetching recent game stats for all players (batch)...", flush=True)
+            recent_stats_by_player = {}
+            try:
+                from datetime import datetime as _dt
+                _current_season = _dt.now().year if _dt.now().month > 9 else _dt.now().year - 1
+                # Fetch up to 250 game stat lines for all players this season
+                all_game_stats = self.balldontlie.get_player_stats(
+                    player_ids=all_player_ids,
+                    seasons=[_current_season],
+                    per_page=250
+                )
+                if all_game_stats:
+                    # Group by player_id
+                    from collections import defaultdict
+                    games_by_player = defaultdict(list)
+                    for gs in all_game_stats:
+                        # Extract player_id from nested player object or top-level
+                        pid = gs.get('player', {}).get('id') if isinstance(gs.get('player'), dict) else gs.get('player_id')
+                        if pid:
+                            games_by_player[pid].append(gs)
+
+                    # For each player, sort by game date descending, take last 5, compute averages
+                    import numpy as np
+                    for pid, games in games_by_player.items():
+                        # Sort by game date descending (most recent first)
+                        games.sort(
+                            key=lambda g: g.get('game', {}).get('date', '') or '',
+                            reverse=True
+                        )
+
+                        # Filter to games where player actually played (>5 min)
+                        played_games = []
+                        for g in games:
+                            mins = _parse_minutes(g.get('min', 0))
+                            if mins > 5:
+                                played_games.append(g)
+                            if len(played_games) >= 5:
+                                break
+
+                        if not played_games:
+                            continue
+
+                        # Extract stat arrays
+                        pts_vals = [g.get('pts', 0) or 0 for g in played_games]
+                        reb_vals = [g.get('reb', 0) or 0 for g in played_games]
+                        ast_vals = [g.get('ast', 0) or 0 for g in played_games]
+                        fg3_vals = [g.get('fg3m', 0) or 0 for g in played_games]
+                        fg3a_vals = [g.get('fg3a', 0) or 0 for g in played_games]
+                        min_vals = [_parse_minutes(g.get('min', 0)) for g in played_games]
+
+                        avg_pts = sum(pts_vals) / len(pts_vals)
+                        avg_reb = sum(reb_vals) / len(reb_vals)
+                        avg_ast = sum(ast_vals) / len(ast_vals)
+                        avg_fg3 = sum(fg3_vals) / len(fg3_vals)
+                        avg_fg3a = sum(fg3a_vals) / len(fg3a_vals) if fg3a_vals else 0
+                        avg_min = sum(min_vals) / len(min_vals)
+
+                        # Calculate trends (3-game vs 5-game)
+                        if len(pts_vals) >= 3:
+                            pts_trend = round(sum(pts_vals[:3]) / 3 - avg_pts, 1)
+                            reb_trend = round(sum(reb_vals[:3]) / 3 - avg_reb, 1)
+                            ast_trend = round(sum(ast_vals[:3]) / 3 - avg_ast, 1)
+                            min_trend = round(sum(min_vals[:3]) / 3 - avg_min, 1)
+                        else:
+                            pts_trend = reb_trend = ast_trend = min_trend = 0
+
+                        # Standard deviations
+                        n = len(pts_vals)
+                        pts_std = float(np.std(pts_vals)) if n >= 3 else avg_pts * 0.25
+                        reb_std = float(np.std(reb_vals)) if n >= 3 else avg_reb * 0.25
+                        ast_std = float(np.std(ast_vals)) if n >= 3 else avg_ast * 0.25
+                        fg3_std = float(np.std(fg3_vals)) if n >= 3 else avg_fg3 * 0.35
+                        min_std = float(np.std(min_vals)) if n >= 3 else avg_min * 0.15
+
+                        # Min consistency
+                        min_consistency = 1 - (min_std / max(avg_min, 1)) if avg_min > 0 else 0.7
+                        min_consistency = max(0.3, min(1.0, min_consistency))
+
+                        result = {
+                            'recent_pts_avg': round(avg_pts, 1),
+                            'recent_reb_avg': round(avg_reb, 1),
+                            'recent_ast_avg': round(avg_ast, 1),
+                            'recent_fg3_avg': round(avg_fg3, 1),
+                            'recent_fg3a_avg': round(avg_fg3a, 1),
+                            'recent_min_avg': round(avg_min, 1),
+                            'pts_trend': pts_trend,
+                            'reb_trend': reb_trend,
+                            'ast_trend': ast_trend,
+                            'min_trend': min_trend,
+                            'games_analyzed': n,
+                            'pts_std': round(pts_std, 2),
+                            'reb_std': round(reb_std, 2),
+                            'ast_std': round(ast_std, 2),
+                            'fg3_std': round(fg3_std, 2),
+                            'fg3a_std': round(float(np.std(fg3a_vals)) if n >= 3 else avg_fg3a * 0.35, 2),
+                            'min_std': round(min_std, 2),
+                            'min_consistency': round(min_consistency, 2),
+                        }
+                        recent_stats_by_player[pid] = result
+
+                        # Also populate the cache so other code paths benefit
+                        cache_key = f"recent_stats_{pid}"
+                        self.cache.set(cache_key, result, "player_stats")
+
+                    print(f"Background: Computed real recent stats for {len(recent_stats_by_player)} players", flush=True)
+                else:
+                    print("Background: No game stats returned from batch call", flush=True)
+            except Exception as e:
+                print(f"Background: Could not fetch batch recent stats: {e}", flush=True)
+
             # Step 4: Generate predictions for each team
             print("Background: [4/4] Generating predictions...", flush=True)
 
@@ -2496,27 +2609,21 @@ class DataService:
             except Exception as e:
                 print(f"Background: Could not load injury data: {e}", flush=True)
 
-            def create_player_dict(player_id, stats, skip_api_calls=False):
+            def create_player_dict(player_id, stats):
                 """Convert Balldontlie stats to our player dict format with recent stats.
 
                 Args:
                     player_id: Player ID
                     stats: Season stats from batch API call
-                    skip_api_calls: If True, skip individual API calls and use season averages
+
+                Uses pre-computed recent_stats_by_player from batch game stats fetch.
                 """
                 player_info = all_players.get(player_id, {})
                 # Parse minutes from 'MM:SS' string to float (Bug 12d fix)
                 min_float = _parse_minutes(stats.get('min', 0))
 
-                # For fast background fetch, skip individual API calls to avoid rate limiting
-                # Use cached stats if available, otherwise use season averages as fallback
-                if skip_api_calls:
-                    # Try cache first, but don't make new API call
-                    cache_key = f"recent_stats_{player_id}"
-                    recent_stats = self.cache.get(cache_key) or {}
-                else:
-                    # Fetch REAL recent stats (last 5 games) for trend analysis
-                    recent_stats = self._get_recent_stats(player_id, num_games=5)
+                # Use batch-computed recent stats (from Step 3b above)
+                recent_stats = recent_stats_by_player.get(player_id, {})
 
                 # Use recent stats if available, else fall back to season averages
                 recent_pts = recent_stats.get('recent_pts_avg', stats.get('pts', 0) or 0)
@@ -2581,7 +2688,7 @@ class DataService:
             home_props = []
             for pid in home_player_ids[:8]:
                 if pid in stats_by_player:
-                    player = create_player_dict(pid, stats_by_player[pid], skip_api_calls=True)
+                    player = create_player_dict(pid, stats_by_player[pid])
 
                     # Skip injured players (OUT or DOUBTFUL status)
                     player_name = player.get('player_name', '').lower()
@@ -2610,7 +2717,7 @@ class DataService:
             away_props = []
             for pid in away_player_ids[:8]:
                 if pid in stats_by_player:
-                    player = create_player_dict(pid, stats_by_player[pid], skip_api_calls=True)
+                    player = create_player_dict(pid, stats_by_player[pid])
 
                     # Skip injured players (OUT or DOUBTFUL status)
                     player_name = player.get('player_name', '').lower()
@@ -3934,7 +4041,15 @@ class DataService:
                         fg3m_avg if model_key in ('threes', '3PM') else \
                         pra_avg if model_key in ('pra', 'PRA') else 0
 
-            player_max = player_avg * 2.5 if player_avg > 5 else max_bound
+            # Always cap relative to player's average — prevents unrealistic predictions
+            # For very low averages (< 1.0), allow more headroom since variance is naturally higher
+            if player_avg >= 5:
+                player_max = player_avg * 2.5
+            elif player_avg >= 1.0:
+                player_max = player_avg * 2.0
+            else:
+                # Sub-1.0 averages (e.g., 0.4 3PM): cap at avg + 2.0 to allow reasonable upside
+                player_max = player_avg + 2.0
 
             # Apply bounds
             prediction = max(min_bound, min(prediction, max_bound, player_max))
