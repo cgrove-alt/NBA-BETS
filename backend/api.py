@@ -377,7 +377,7 @@ def get_games(
 
             # Check if props already exist or are being generated
             status_data = service.get_props_fetch_status(game_id)
-            if status_data.get("status") == "not_started":
+            if status_data.get("status") in ("not_started", "error"):
                 # Cache team abbreviations
                 _game_teams_cache[game_id] = {"home": home_abbrev, "away": away_abbrev}
 
@@ -514,6 +514,7 @@ def get_props(game_id: str):
     return PropsResponse(
         game_id=game_id,
         status=status,
+        error=error,
         home_team=home_team,
         away_team=away_team,
         home_props=home_props,
@@ -549,6 +550,61 @@ def start_props_fetch(
     )
 
     return {"message": "Props fetch started", "game_id": game_id}
+
+
+@app.post("/api/games/{game_id}/props/retry")
+def retry_props_fetch(game_id: str):
+    """Reset and retry prop generation for a failed game."""
+    global _game_teams_cache
+    service = get_service()
+
+    status_data = service.get_props_fetch_status(game_id)
+    current_status = status_data.get("status", "not_started")
+
+    if current_status in ("pending", "ready"):
+        return {"message": f"Props are already {current_status}", "game_id": game_id, "status": current_status}
+
+    if current_status == "locked":
+        return {"message": "Game is locked - cannot retry", "game_id": game_id, "status": "locked"}
+
+    # Get team abbreviations from cache
+    cached_teams = _game_teams_cache.get(game_id)
+    if not cached_teams:
+        return {"message": "No cached team data for this game. Call /api/games?auto_generate_props=true first.", "game_id": game_id}
+
+    home_abbrev = cached_teams["home"]
+    away_abbrev = cached_teams["away"]
+
+    # Reset and re-trigger
+    service.reset_props_status(game_id)
+    service.start_player_props_fetch(
+        game_id=game_id,
+        home_abbrev=home_abbrev,
+        away_abbrev=away_abbrev,
+        selected_props=None,
+    )
+
+    return {"message": "Props retry started", "game_id": game_id, "previous_status": current_status}
+
+
+@app.get("/api/props/status")
+def get_all_props_status():
+    """Get prop generation status for all known games. Diagnostic endpoint."""
+    service = get_service()
+    results = {}
+
+    for game_id, teams in _game_teams_cache.items():
+        status_data = service.get_props_fetch_status(game_id)
+        results[game_id] = {
+            "status": status_data.get("status", "not_started"),
+            "error": status_data.get("error"),
+            "home_team": teams.get("home"),
+            "away_team": teams.get("away"),
+            "home_count": len(status_data.get("home", [])),
+            "away_count": len(status_data.get("away", [])),
+        }
+
+    return {"games": results, "total": len(results)}
 
 
 @app.get("/api/games/{game_id}/live-stats")

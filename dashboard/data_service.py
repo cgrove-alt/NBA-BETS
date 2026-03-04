@@ -2694,6 +2694,14 @@ class DataService:
             # Return a copy to prevent race conditions
             return status.copy()
 
+    def reset_props_status(self, game_id: str):
+        """Reset prop fetch status to allow retry. Thread-safe."""
+        with self._prop_status_lock:
+            if game_id in self._prop_fetch_status:
+                del self._prop_fetch_status[game_id]
+            if game_id in self._fetch_threads:
+                del self._fetch_threads[game_id]
+
     def get_live_player_stats(self, game_id: str) -> dict[int, dict]:
         """Fetch live player stats for an in-progress game.
 
