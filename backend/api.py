@@ -964,6 +964,7 @@ def get_best_bets(
     prop_types: str | None = Query(None, description="Comma-separated prop types to filter"),
     pick_type: str | None = Query(None, description="Filter by OVER or UNDER"),
     sort_by: str = Query("quality", description="Sort order: quality, confidence, or edge"),
+    bettable_only: bool = Query(True, description="Only show bets with DraftKings/FanDuel lines"),
 ):
     """Get best bets across all games based on confidence and edge thresholds.
 
@@ -1083,6 +1084,12 @@ def get_best_bets(
                 opp_def = player.get(f"{prop_key}_opp_def", None)
                 used_real_line = player.get(f"{prop_key}_real_line", False)
                 used_ml_model = player.get(f"{prop_key}_ml_model", False)
+                bet_line_vendor = player.get(f"{prop_key}_line_vendor", "unknown")
+                bet_line_source = player.get(f"{prop_key}_line_source", "unknown")
+                is_bettable = bet_line_vendor in ('draftkings', 'fanduel')
+
+                if bettable_only and not is_bettable:
+                    continue
 
                 # Get season and recent averages
                 season_avgs = player.get("season_averages", {}) or {}
@@ -1159,6 +1166,9 @@ def get_best_bets(
                     signals=signals,
                     used_real_line=bool(used_real_line),
                     used_ml_model=bool(used_ml_model),
+                    line_vendor=bet_line_vendor,
+                    line_source=bet_line_source,
+                    bettable=is_bettable,
                 ))
 
     # Determine data source for response metadata
@@ -1178,6 +1188,7 @@ def get_best_bets(
             games=games,
             game_filter=locked_game_ids,
             warnings=warnings,
+            bettable_only=bettable_only,
         )
         if locked_bets:
             best_bets.extend(locked_bets)
@@ -1195,6 +1206,7 @@ def get_best_bets(
             sort_by=sort_by,
             games=games,
             warnings=warnings,
+            bettable_only=bettable_only,
         )
         if fallback_bets:
             best_bets = fallback_bets
@@ -1222,6 +1234,7 @@ def get_best_bets(
             "prop_types": prop_type_filter,
             "pick_type": pick_type,
             "sort_by": sort_by,
+            "bettable_only": bettable_only,
         },
         data_source=data_source,
         warnings=warnings,
@@ -1493,6 +1506,7 @@ def _load_best_bets_from_postgres(
     games: list,
     game_filter: set[str] | None = None,
     warnings: list[str] | None = None,
+    bettable_only: bool = True,
 ) -> list[BestBet] | None:
     """Load best bets from PostgreSQL predictions_history as a fallback.
 
@@ -1608,6 +1622,11 @@ def _load_best_bets_from_postgres(
             if game_filter and game_id not in game_filter:
                 continue
 
+            # Filter non-bettable lines (Rebet/offshore)
+            is_bettable = (line_vendor or '').lower() in ('draftkings', 'fanduel')
+            if bettable_only and not is_bettable:
+                continue
+
             # Deterministic player_id from name (DB lacks player_id)
             player_id = hash(player_name or "") & 0x7FFFFFFF
 
@@ -1645,6 +1664,9 @@ def _load_best_bets_from_postgres(
                 signals=signals,
                 used_real_line=bool(line_source and "odds-api" in str(line_source).lower()),
                 used_ml_model=True,
+                line_vendor=(line_vendor or 'unknown').lower(),
+                line_source=(line_source or 'unknown').lower(),
+                bettable=is_bettable,
             ))
 
         if not best_bets:

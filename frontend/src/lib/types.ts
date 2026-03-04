@@ -141,6 +141,9 @@ export interface BestBet {
   signals: string[];
   used_real_line: boolean;
   used_ml_model: boolean;
+  line_vendor?: string;
+  line_source?: string;
+  bettable?: boolean;
 }
 
 export interface BestBetsResponse {

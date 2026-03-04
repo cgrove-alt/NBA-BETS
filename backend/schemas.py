@@ -167,6 +167,9 @@ class BestBet(BaseModel):
     signals: list[str] = []
     used_real_line: bool = False
     used_ml_model: bool = False
+    line_vendor: str = "unknown"
+    line_source: str = "unknown"
+    bettable: bool = True
 
 
 class BestBetsResponse(BaseModel):

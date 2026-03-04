@@ -2213,6 +2213,9 @@ class DataService:
                 p[f'{prop_key}_pick'] = (pick or '').upper()
                 p[f'{prop_key}_real_line'] = bool(line_source and 'odds-api' in str(line_source).lower())
                 p[f'{prop_key}_ml_model'] = True
+                p[f'{prop_key}_line_vendor'] = (line_vendor or 'unknown').lower()
+                p[f'{prop_key}_line_source'] = (line_source or 'unknown').lower()
+                p[f'{prop_key}_bettable'] = (line_vendor or '').lower() in ('draftkings', 'fanduel')
 
             # Split into home/away
             home_players = [p for p in players_by_name.values() if p.get('team') == home_abbrev]
@@ -2925,7 +2928,7 @@ class DataService:
 
         return players
 
-    def _get_real_prop_line(self, game_id: str, player_id: int, prop_type: str) -> float | None:
+    def _get_real_prop_line(self, game_id: str, player_id: int, prop_type: str) -> tuple[float, str, str] | None:
         """Get real prop line from FanDuel/DraftKings via Odds API, falling back to Balldontlie.
 
         Args:
@@ -2934,7 +2937,8 @@ class DataService:
             prop_type: Prop type (points, rebounds, assists, threes, pra)
 
         Returns:
-            Real betting line from FD/DK (preferred) or Balldontlie, or None
+            Tuple of (line, source, vendor) or None. Source is 'odds-api' or 'balldontlie',
+            vendor is 'fanduel', 'draftkings', 'rebet', etc.
         """
         # Try Odds API first for FD/DK lines
         if self._player_prop_fetcher:
@@ -2952,7 +2956,8 @@ class DataService:
                         line_key = f"{prop_type.lower()}_line"
                         line = props[player_id].get(line_key)
                         if line is not None:
-                            return float(line)
+                            vendor = props[player_id].get(f"{prop_type.lower()}_vendor", "unknown")
+                            return (float(line), "odds-api", vendor)
             except Exception as e:
                 print(f"Odds API prop line lookup failed: {e}")
 
@@ -3031,7 +3036,17 @@ class DataService:
                         # FIX: API uses 'line_value' not 'line' or 'value'
                         line_value = prop.get('line_value')
                         if line_value is not None:
-                            lines_by_player[p_id][mapped_type] = float(line_value)
+                            # Extract vendor name from sportsbook field
+                            sb = prop.get('sportsbook', {})
+                            vendor_name = sb.get('name', 'unknown').lower() if isinstance(sb, dict) else str(sb).lower()
+                            # Also check vendor field as fallback
+                            if vendor_name in ('', 'unknown'):
+                                vendor_name = prop.get('vendor', 'rebet').lower()
+                            lines_by_player[p_id][mapped_type] = {
+                                'line': float(line_value),
+                                'vendor': vendor_name,
+                                'source': 'balldontlie',
+                            }
 
                     self._real_prop_lines_cache[cache_key] = lines_by_player
                     self._real_prop_lines_timestamps[cache_key] = datetime.now()
@@ -3046,7 +3061,13 @@ class DataService:
         # Look up the specific player/prop
         game_lines = self._real_prop_lines_cache.get(cache_key, {})
         player_lines = game_lines.get(player_id, {})
-        return player_lines.get(prop_type.lower())
+        prop_data = player_lines.get(prop_type.lower())
+        if prop_data is None:
+            return None
+        # Handle both new dict format and legacy float format
+        if isinstance(prop_data, dict):
+            return (prop_data['line'], prop_data.get('source', 'balldontlie'), prop_data.get('vendor', 'rebet'))
+        return (float(prop_data), 'balldontlie', 'rebet')
 
     def _get_baker_projection(self, player_name: str, game_date: str, prop_type: str) -> float | None:
         """Get BAKER engine projection for a player prop (Phase 6).
@@ -4413,12 +4434,16 @@ class DataService:
             used_real_line = False
 
             # Try to get real prop line from sportsbooks
+            line_source = "unknown"
+            line_vendor = "unknown"
             prop_game_id = player.get("game_id")
             if prop_game_id and player_id:
-                real_line = self._get_real_prop_line(prop_game_id, player_id, model_key)
-                if real_line is not None and real_line > 0:
-                    line = real_line
-                    used_real_line = True
+                line_info = self._get_real_prop_line(prop_game_id, player_id, model_key)
+                if line_info is not None:
+                    real_line_val, line_source, line_vendor = line_info
+                    if real_line_val > 0:
+                        line = real_line_val
+                        used_real_line = True
 
             # Fall back to estimated line if real line unavailable
             # FIX: Use opponent-defense-adjusted formula instead of fixed multipliers
@@ -4527,6 +4552,9 @@ class DataService:
             result[f"{prop_key}_raw_confidence"] = round(confidence, 0)  # Keep raw for debugging
             result[f"{prop_key}_real_line"] = used_real_line  # Indicates if sportsbook line was used
             result[f"{prop_key}_ml_model"] = used_ml_model    # Indicates if ML model was used
+            result[f"{prop_key}_line_vendor"] = line_vendor if used_real_line else "estimated"
+            result[f"{prop_key}_line_source"] = line_source if used_real_line else "model"
+            result[f"{prop_key}_bettable"] = line_vendor in ('draftkings', 'fanduel') if used_real_line else False
 
             # Add injury adjustment info for transparency
             if injury_adjustment != 1.0:
