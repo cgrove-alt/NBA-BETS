@@ -399,13 +399,20 @@ def get_status() -> dict:
             saved_boot_id = lines[1] if len(lines) > 1 else None
             current_boot_id = _get_boot_id()
 
-            # If boot ID changed, this is a stale file from a previous container
-            if saved_boot_id and saved_boot_id != current_boot_id:
-                logger.info(f"Stale PID file from previous boot (PID {pid})")
+            # No boot ID → old format, definitely stale (predates this fix)
+            # Different boot ID → stale file from a previous container
+            if saved_boot_id is None or saved_boot_id != current_boot_id:
+                logger.info(f"Stale PID file detected (PID {pid}, boot_id={'missing' if saved_boot_id is None else 'changed'})")
                 remove_pid()
                 return result  # not running
 
-            # Same boot — check if process is alive
+            # Same boot — but if it's our own PID, we haven't started yet
+            if pid == os.getpid():
+                logger.info(f"Stale PID file from current process (PID {pid})")
+                remove_pid()
+                return result  # not running
+
+            # Same boot, different PID — check if that process is alive
             os.kill(pid, 0)
             result = {'running': True, 'pid': pid, 'message': f'Running (PID {pid})'}
         except (OSError, ValueError):
