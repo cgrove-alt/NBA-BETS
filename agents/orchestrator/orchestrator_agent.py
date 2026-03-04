@@ -465,6 +465,8 @@ class PredictionOrchestratorAgent(AgentBase):
                     'pick': prop.get('pick', prop.get('direction', '')),
                     'uncertainty_flag': prop.get('uncertainty_flag'),
                     'injury_boost': prop.get('injury_boost'),
+                    'line_source': prop.get('line_source'),
+                    'line_vendor': prop.get('line_vendor'),
                 })
 
         if not flat_rows:
@@ -486,13 +488,15 @@ class PredictionOrchestratorAgent(AgentBase):
                                 prediction, pred_low, pred_median, pred_high,
                                 line, over_prob, edge, confidence_score,
                                 edge_quality_tier, suggested_bet_size, bet_recommendation,
-                                pick, uncertainty_flag, injury_boost
+                                pick, uncertainty_flag, injury_boost,
+                                line_source, line_vendor
                             ) VALUES (
                                 %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s,
                                 %s, %s, %s, %s,
                                 %s, %s, %s,
-                                %s, %s, %s
+                                %s, %s, %s,
+                                %s, %s
                             )
                             ON CONFLICT (date, player_name, prop_type) DO UPDATE SET
                                 prediction = EXCLUDED.prediction,
@@ -502,7 +506,9 @@ class PredictionOrchestratorAgent(AgentBase):
                                 edge_quality_tier = EXCLUDED.edge_quality_tier,
                                 suggested_bet_size = EXCLUDED.suggested_bet_size,
                                 bet_recommendation = EXCLUDED.bet_recommendation,
-                                pick = EXCLUDED.pick
+                                pick = EXCLUDED.pick,
+                                line_source = EXCLUDED.line_source,
+                                line_vendor = EXCLUDED.line_vendor
                         """, (
                             slate_date,
                             row['game'],
@@ -523,6 +529,8 @@ class PredictionOrchestratorAgent(AgentBase):
                             row.get('pick'),
                             row.get('uncertainty_flag'),
                             row.get('injury_boost'),
+                            row.get('line_source'),
+                            row.get('line_vendor'),
                         ))
                         inserted += 1
                     except Exception as e:

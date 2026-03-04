@@ -964,7 +964,7 @@ def get_best_bets(
     prop_types: str | None = Query(None, description="Comma-separated prop types to filter"),
     pick_type: str | None = Query(None, description="Filter by OVER or UNDER"),
     sort_by: str = Query("quality", description="Sort order: quality, confidence, or edge"),
-    bettable_only: bool = Query(True, description="Only show bets with DraftKings/FanDuel lines"),
+    bettable_only: bool = Query(False, description="Only show bets with DraftKings/FanDuel lines"),
 ):
     """Get best bets across all games based on confidence and edge thresholds.
 
@@ -1506,7 +1506,7 @@ def _load_best_bets_from_postgres(
     games: list,
     game_filter: set[str] | None = None,
     warnings: list[str] | None = None,
-    bettable_only: bool = True,
+    bettable_only: bool = False,
 ) -> list[BestBet] | None:
     """Load best bets from PostgreSQL predictions_history as a fallback.
 
