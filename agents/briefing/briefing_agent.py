@@ -58,7 +58,7 @@ class DailyBriefingAgent(AgentBase):
             "Output valid JSON with sections and formatted_text."
         )
 
-    def _query_yesterday_results(self) -> dict | None:
+    def _query_yesterday_results(self) -> Optional[dict]:
         """Direct DB fallback for yesterday's record when message bus has no data."""
         yesterday = (datetime.strptime(self.target_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
         try:

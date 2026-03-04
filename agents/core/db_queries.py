@@ -10,17 +10,18 @@ import logging
 import os
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-def query_yesterday_record(yesterday_str: str) -> dict | None:
+def query_yesterday_record(yesterday_str: str) -> Optional[dict]:
     """Query yesterday's prediction results from PostgreSQL, calibration.db, or bet_tracking.db.
 
     Returns a structured dict with overall, by_bet_type, by_confidence,
     clv_summary, and date fields — or None if no data is available.
     """
-    record: dict | None = None
+    record: Optional[dict] = None
 
     # --- Attempt 0: PostgreSQL paper_trades (production / Railway) ---
     if os.environ.get('DATABASE_URL'):

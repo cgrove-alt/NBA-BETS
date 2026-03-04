@@ -362,6 +362,47 @@ def remove_pid():
         PID_FILE.unlink()
 
 
+def _is_scheduler_process(pid: int) -> bool:
+    """Check if PID belongs to an actual scheduler process (not just any process).
+
+    On Railway/Docker, PID 1 is always the container init process, so a plain
+    os.kill(pid, 0) check is not sufficient — a stale PID file pointing to
+    PID 1 would always pass, causing an infinite crash loop on redeploy.
+    """
+    try:
+        os.kill(pid, 0)  # process exists?
+    except OSError:
+        return False
+
+    # On Linux (Railway), read /proc/<pid>/cmdline to verify it's actually us
+    cmdline_path = Path(f"/proc/{pid}/cmdline")
+    if cmdline_path.exists():
+        try:
+            cmdline = cmdline_path.read_text()
+            return "agent_scheduler" in cmdline
+        except Exception:
+            pass
+
+    # On macOS (local dev), use ps to check the command
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                capture_output=True, text=True, timeout=5,
+            )
+            return "agent_scheduler" in result.stdout
+        except Exception:
+            pass
+
+    # If we can't verify the command, treat PID 1 as stale (it's always
+    # the container init) and trust other PIDs conservatively.
+    if pid == 1:
+        return False
+
+    return True
+
+
 def get_status() -> dict:
     """Get scheduler status (from PID file + persisted stats)."""
     result = {'running': False, 'pid': None, 'message': 'Scheduler not running'}
@@ -369,8 +410,13 @@ def get_status() -> dict:
     if PID_FILE.exists():
         try:
             pid = int(PID_FILE.read_text().strip())
-            os.kill(pid, 0)  # check if alive
-            result = {'running': True, 'pid': pid, 'message': f'Running (PID {pid})'}
+            if _is_scheduler_process(pid):
+                result = {'running': True, 'pid': pid, 'message': f'Running (PID {pid})'}
+            else:
+                # Stale PID file — clean it up
+                logger.info(f"Removing stale PID file (PID {pid} is not a scheduler process)")
+                remove_pid()
+                result = {'running': False, 'pid': None, 'message': 'Stale PID file (cleaned)'}
         except (OSError, ValueError):
             result = {'running': False, 'pid': None, 'message': 'Stale PID file'}
 
