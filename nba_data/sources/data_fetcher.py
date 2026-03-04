@@ -1944,16 +1944,23 @@ def fetch_league_team_stats(season="2025-26"):
     Returns:
         List of team stats dictionaries
     """
+    _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
 
-    league_stats = leaguedashteamstats.LeagueDashTeamStats(
-        season=season,
-        season_type_all_star="Regular Season",
-        per_mode_detailed="PerGame"
-    )
-    stats_dict = league_stats.get_normalized_dict()
-
-    return stats_dict.get("LeagueDashTeamStats", [])
+    try:
+        league_stats = leaguedashteamstats.LeagueDashTeamStats(
+            season=season,
+            season_type_all_star="Regular Season",
+            per_mode_detailed="PerGame"
+        )
+        stats_dict = league_stats.get_normalized_dict()
+        _nba_stats_circuit_breaker.record_success()
+        return stats_dict.get("LeagueDashTeamStats", [])
+    except CircuitBreakerOpenError:
+        raise
+    except Exception:
+        _nba_stats_circuit_breaker.record_failure()
+        raise
 
 
 def _player_stats_cache_key(player_id, season="2025-26", last_n_games=None):

@@ -3598,6 +3598,36 @@ def get_real_lines_backtest_status():
     }
 
 
+# ============== DEBUG ENDPOINTS ==============
+
+@app.get("/api/debug/player/{player_id}/stats")
+def get_player_debug_stats(player_id: int):
+    """Return raw season and recent stats for a player so model inputs can be audited."""
+    service = get_service()
+    season_avg = {}
+    recent = {}
+    player_info = {}
+
+    if service.balldontlie:
+        try:
+            season_data = service.balldontlie.get_season_averages(player_ids=[player_id])
+            if season_data:
+                season_avg = season_data[0] if isinstance(season_data, list) else season_data
+        except Exception as e:
+            season_avg = {"error": str(e)}
+
+        try:
+            recent = service._get_recent_stats(player_id, num_games=5)
+        except Exception as e:
+            recent = {"error": str(e)}
+
+    return {
+        "player_id": player_id,
+        "season_averages": season_avg,
+        "recent_stats": recent,
+    }
+
+
 # ============== SERVE FRONTEND STATIC FILES ==============
 
 _frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"

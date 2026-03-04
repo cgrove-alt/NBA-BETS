@@ -568,13 +568,21 @@ class InjuryReportManager:
         "SG": {"offense": 0.25, "defense": 0.20, "scoring": 0.30},
         "SF": {"offense": 0.20, "defense": 0.25, "versatility": 0.25},
         "PF": {"offense": 0.15, "defense": 0.25, "rebounding": 0.30},
-        "C": {"offense": 0.15, "defense": 0.30, "rebounding": 0.35},
+        "C":  {"offense": 0.15, "defense": 0.30, "rebounding": 0.35},
+        # BDL single-letter and combo position codes
+        "G":  {"offense": 0.25, "defense": 0.175},
+        "F":  {"offense": 0.175, "defense": 0.25},
+        "G-F": {"offense": 0.22, "defense": 0.21},
+        "F-G": {"offense": 0.22, "defense": 0.21},
+        "F-C": {"offense": 0.15, "defense": 0.27},
+        "C-F": {"offense": 0.15, "defense": 0.27},
     }
 
     def __init__(self, season="2025-26"):
         self.season = season
         self._injury_cache = {}
         self._all_injuries_fetched = False
+        self._cached_impacts = {}  # Pre-computed injury impacts keyed by team_id
 
     def fetch_all_injuries(self) -> list[dict]:
         """
@@ -753,6 +761,7 @@ class InjuryReportManager:
                 "defensive_impact": 0.0,
                 "injured_player_count": 0,
                 "key_players_out": 0,
+                "star_player_out": False,
                 "injured_players": [],
             }
 
@@ -779,8 +788,9 @@ class InjuryReportManager:
                     value_lost = player_value * impact_probability
                     total_value_lost += value_lost
 
-                    # Position-specific impact
-                    pos_weights = self.POSITION_WEIGHTS.get(position[:2], {"offense": 0.2, "defense": 0.2})
+                    # Position-specific impact (try full key e.g. "G-F", then truncated e.g. "PG")
+                    pos_weights = self.POSITION_WEIGHTS.get(position,
+                        self.POSITION_WEIGHTS.get(position[:2], {"offense": 0.2, "defense": 0.2}))
                     offensive_value_lost += value_lost * pos_weights.get("offense", 0.2)
                     defensive_value_lost += value_lost * pos_weights.get("defense", 0.2)
 
@@ -810,7 +820,8 @@ class InjuryReportManager:
                 total_value_lost += estimated_value
 
                 # Position-specific impact for estimated values
-                pos_weights = self.POSITION_WEIGHTS.get(position[:2], {"offense": 0.2, "defense": 0.2})
+                pos_weights = self.POSITION_WEIGHTS.get(position,
+                    self.POSITION_WEIGHTS.get(position[:2], {"offense": 0.2, "defense": 0.2}))
                 offensive_value_lost += estimated_value * pos_weights.get("offense", 0.2)
                 defensive_value_lost += estimated_value * pos_weights.get("defense", 0.2)
 
@@ -827,6 +838,7 @@ class InjuryReportManager:
             "defensive_impact": defensive_value_lost,
             "injured_player_count": len(injuries),
             "key_players_out": key_players_out,
+            "star_player_out": key_players_out > 0,
             "injured_players": injured_player_details,
         }
 

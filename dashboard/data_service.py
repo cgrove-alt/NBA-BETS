@@ -555,6 +555,11 @@ class EnsembleMoneylineWrapper:
 from injury_fetcher import InjuryFetcher
 from feature_engineering import InjuryReportManager, PlayerPropFeatureGenerator, calculate_travel_fatigue
 from prop_tracker import PropTracker
+try:
+    from data_fetcher import fetch_league_team_stats
+    HAS_LEAGUE_TEAM_STATS = True
+except ImportError:
+    HAS_LEAGUE_TEAM_STATS = False
 
 
 # NBA Team ID mapping (required by InjuryReportManager)
@@ -1273,17 +1278,32 @@ class DataService:
                 for inj in all_injuries:
                     # Match by team abbreviation
                     if inj.team.upper() == team_abbrev.upper():
+                        # Resolve actual position from BDL instead of hardcoding
+                        position = "F"  # Default (positional midpoint)
+                        if inj.player_id and self.balldontlie:
+                            try:
+                                bdl_player = self.balldontlie.get_player(int(inj.player_id))
+                                if bdl_player:
+                                    position = bdl_player.get("position", "F") or "F"
+                            except Exception:
+                                pass
                         team_injuries.append({
                             "player_id": inj.player_id,
                             "player_name": inj.player_name,
                             "status": inj.status.value.lower(),
-                            "position": "G",  # Default position
+                            "position": position,
                             "injury": inj.injury_detail,
                         })
 
                 if team_injuries:
                     manager.set_injury_report(team_id, team_injuries)
-                    print(f"Set {len(team_injuries)} injuries for {team_abbrev}", flush=True)
+                    # Pre-compute injury impact so background threads can read cached result
+                    try:
+                        impact = manager.calculate_injury_impact(team_id)
+                        manager._cached_impacts[team_id] = impact
+                        print(f"Set {len(team_injuries)} injuries for {team_abbrev} (impact cached)", flush=True)
+                    except Exception:
+                        print(f"Set {len(team_injuries)} injuries for {team_abbrev} (cache failed)", flush=True)
 
         except Exception as e:
             print(f"Error fetching injury data: {e}", flush=True)
@@ -1324,50 +1344,65 @@ class DataService:
                 cache_valid = True
 
         if not cache_valid:
-            # Fetch fresh standings data
-            try:
-                standings = self.balldontlie.get_standings()
-                if standings:
-                    # Build cache mapping team abbreviation to stats
-                    stats_cache = {}
-                    for team_data in standings:
-                        team = team_data.get('team', {})
-                        abbrev = team.get('abbreviation', '')
-                        if abbrev:
-                            wins = team_data.get('wins', 0) or 0
-                            losses = team_data.get('losses', 0) or 0
-                            games = wins + losses
-
-                            # Calculate defensive rating from points against
-                            # Balldontlie standings don't have direct def_rating, estimate from win%
-                            # Better teams typically have better defense
-                            win_pct = wins / max(games, 1)
-
-                            # Estimate defensive rating based on league trends
-                            # Good teams (>60% wins) tend to have def_rating ~108-112
-                            # Bad teams (<40% wins) tend to have def_rating ~116-120
-                            est_def_rating = 118 - (win_pct * 10)  # Range: ~108-118
-
-                            # Get pace from standings if available, else estimate
-                            # Higher scoring teams typically play faster
-                            est_pace = 100 + (win_pct - 0.5) * 4  # Range: ~98-102
-
+            used_nba_api = False
+            # Primary: real stats from NBA API (DEF_RATING, OFF_RATING, PACE)
+            if HAS_LEAGUE_TEAM_STATS:
+                try:
+                    all_stats = fetch_league_team_stats(season="2025-26")
+                    if all_stats:
+                        stats_cache = {}
+                        for team in all_stats:
+                            abbrev = team.get("TEAM_ABBREVIATION", "")
+                            if not abbrev:
+                                continue
                             stats_cache[abbrev] = {
-                                'def_rating': round(est_def_rating, 1),
-                                'off_rating': round(118 - (win_pct * 8), 1),  # Inverse for offense
-                                'pace': round(est_pace, 1),
-                                'pts_allowed': round(116 - (win_pct * 8), 1),
-                                'wins': wins,
-                                'losses': losses,
+                                'def_rating': round(float(team.get("DEF_RATING", 114.0)), 1),
+                                'off_rating': round(float(team.get("OFF_RATING", 114.0)), 1),
+                                'pace': round(float(team.get("PACE", 100.0)), 1),
+                                'pts_allowed': round(float(team.get("DEF_RATING", 114.0)), 1),
+                                'source': 'nba_api',
                             }
+                        self._opponent_stats_cache = stats_cache
+                        self._opponent_stats_timestamp = datetime.now()
+                        used_nba_api = True
+                        print(f"Refreshed opponent stats from nba_api: {len(stats_cache)} teams")
+                except Exception as e:
+                    print(f"nba_api opponent stats failed, trying BDL: {e}")
 
-                    self._opponent_stats_cache = stats_cache
-                    self._opponent_stats_timestamp = datetime.now()
-                    print(f"Refreshed opponent stats cache with {len(stats_cache)} teams")
+            # Fallback: BDL standings with win% proxy
+            if not used_nba_api:
+                try:
+                    standings = self.balldontlie.get_standings()
+                    if standings:
+                        stats_cache = {}
+                        for team_data in standings:
+                            team = team_data.get('team', {})
+                            abbrev = team.get('abbreviation', '')
+                            if abbrev:
+                                wins = team_data.get('wins', 0) or 0
+                                losses = team_data.get('losses', 0) or 0
+                                games = wins + losses
+                                win_pct = wins / max(games, 1)
+                                est_def_rating = 118 - (win_pct * 10)
+                                est_pace = 100 + (win_pct - 0.5) * 4
 
-            except Exception as e:
-                print(f"Error fetching opponent stats: {e}")
-                return default_stats
+                                stats_cache[abbrev] = {
+                                    'def_rating': round(est_def_rating, 1),
+                                    'off_rating': round(118 - (win_pct * 8), 1),
+                                    'pace': round(est_pace, 1),
+                                    'pts_allowed': round(116 - (win_pct * 8), 1),
+                                    'wins': wins,
+                                    'losses': losses,
+                                    'source': 'bdl_standings',
+                                }
+
+                        self._opponent_stats_cache = stats_cache
+                        self._opponent_stats_timestamp = datetime.now()
+                        print(f"Refreshed opponent stats from BDL standings: {len(stats_cache)} teams")
+
+                except Exception as e:
+                    print(f"Error fetching opponent stats: {e}")
+                    return default_stats
 
         # Look up opponent in cache
         opp_stats = self._opponent_stats_cache.get(opponent_abbrev.upper())
@@ -4193,7 +4228,18 @@ class DataService:
             # =============================================================
             # USE ML MODEL FOR PREDICTION (Phase 1 Critical Fix)
             # =============================================================
-            pred_value = season_value  # Default fallback
+            # Use recency-weighted baseline when recent production diverges from season
+            # This catches traded players, role changes, and injury returns
+            if season_value > 0 and recent_value > 0:
+                divergence = abs(recent_value - season_value) / season_value
+                if divergence > 0.20:
+                    # Weight recent more heavily when there's significant divergence
+                    weighted_baseline = (recent_value * 0.7) + (season_value * 0.3)
+                else:
+                    weighted_baseline = (recent_value * 0.5) + (season_value * 0.5)
+            else:
+                weighted_baseline = season_value or recent_value
+            pred_value = weighted_baseline  # Recency-weighted fallback
             full_features = None
             used_ml_model = False
 
@@ -4229,6 +4275,22 @@ class DataService:
 
             except Exception as e:
                 print(f"ML model error for {player.get('player_name')} {prop_label}: {e}")
+
+            # =============================================================
+            # RECENCY BOUND: Cap ML prediction for traded/role-changed players
+            # =============================================================
+            if used_ml_model and recent_value > 0 and season_value > 0:
+                divergence = abs(recent_value - season_value) / season_value
+                if divergence > 0.25:
+                    # Large divergence — cap prediction relative to recent average
+                    max_pred = recent_value * 1.4
+                    min_pred = recent_value * 0.6
+                    if pred_value > max_pred or pred_value < min_pred:
+                        old_pred = pred_value
+                        pred_value = max(min_pred, min(max_pred, pred_value))
+                        print(f"Recency bound: {player.get('player_name')} {prop_label} "
+                              f"{old_pred:.1f} -> {pred_value:.1f} "
+                              f"(season={season_value:.1f}, recent={recent_value:.1f})")
 
             # =============================================================
             # MINUTES PROJECTION ADJUSTMENT (Phase 3)
@@ -4370,27 +4432,30 @@ class DataService:
             injury_confidence_penalty = 0.0
             injury_notes = []
 
-            # Only do opponent injury check if not skipping slow features
-            if not skip_slow_features and injury_manager and opponent_team_id:
+            # Use cached injury impact (pre-computed in get_injury_manager) to avoid API calls in bg threads
+            if injury_manager and opponent_team_id:
                 try:
-                    # Calculate opponent's injury impact
-                    opp_injury_impact = injury_manager.calculate_injury_impact(opponent_team_id)
-                    defensive_impact = opp_injury_impact.get('defensive_impact', 0)
-                    opp_injury_impact.get('total_impact', 0)
-                    opp_injury_impact.get('injured_player_count', 0)
-                    star_player_out = opp_injury_impact.get('star_player_out', False)
+                    # Read pre-computed cached impact; fall back to live calc only if not skipping slow features
+                    opp_injury_impact = getattr(injury_manager, '_cached_impacts', {}).get(opponent_team_id)
+                    if opp_injury_impact is None and not skip_slow_features:
+                        opp_injury_impact = injury_manager.calculate_injury_impact(opponent_team_id)
 
-                    # Opponent missing defenders = boost our player's projection
-                    if defensive_impact > 0.08:  # At least 8% defensive impact
-                        # Enhanced boost when star player is out (up to 25% vs 15%)
-                        if star_player_out:
-                            boost = min(defensive_impact * 0.50, 0.25)  # Larger boost when star is out
-                            injury_notes.append(f"Opp star player OUT (+{boost*100:.0f}%)")
-                        else:
-                            boost = min(defensive_impact * 0.35, 0.15)  # Standard boost
-                            injury_notes.append(f"Opp missing defense (+{boost*100:.0f}%)")
-                        injury_adjustment = 1.0 + boost
-                        injury_confidence_penalty = 0.05  # Small penalty for uncertainty
+                    if opp_injury_impact:
+                        defensive_impact = opp_injury_impact.get('defensive_impact', 0)
+                        star_player_out = opp_injury_impact.get('star_player_out', False)
+
+                        # Normalize: defensive_impact is in raw player-value units (0-20+)
+                        # Threshold 2.0 = roughly a rotation player missing
+                        if defensive_impact > 2.0:
+                            normalized = min(defensive_impact / 12.0, 1.0)  # 12 ≈ 1 strong starter
+                            if star_player_out:
+                                boost = min(normalized * 0.50, 0.25)  # Up to 25% for star out
+                                injury_notes.append(f"Opp star player OUT (+{boost*100:.0f}%)")
+                            else:
+                                boost = min(normalized * 0.35, 0.15)  # Up to 15% standard
+                                injury_notes.append(f"Opp missing defense (+{boost*100:.0f}%)")
+                            injury_adjustment = 1.0 + boost
+                            injury_confidence_penalty = 0.05  # Small penalty for uncertainty
 
                     # Apply injury adjustment to prediction
                     if injury_adjustment != 1.0:
@@ -4656,6 +4721,10 @@ class DataService:
                     )
                 except Exception as e:
                     print(f"Failed to record prediction: {e}")
+
+        # Expose model inputs for transparency (best-bets API reads these)
+        result['season_averages'] = player.get('season_averages', {})
+        result['recent_averages'] = player.get('recent_averages', {})
 
         return result
 

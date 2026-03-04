@@ -486,11 +486,12 @@ class InjuryFetcher:
                 elif injury.status in [InjuryStatus.QUESTIONABLE, InjuryStatus.DOUBTFUL, InjuryStatus.GTD]:
                     impact.total_players_questionable += 1
 
-                # Check for star player
-                if injury.player_name in self._star_players:
-                    star_info = self._star_players[injury.player_name]
-                    if star_info.get("tier") == 1 and missing_prob >= 0.75:
-                        impact.star_player_out = True
+                # Check for star player (name list OR stat thresholds)
+                is_named_star = (injury.player_name in self._star_players and
+                                 self._star_players[injury.player_name].get("tier") == 1)
+                is_stat_star = ppg >= 20.0 and minutes >= 30.0
+                if (is_named_star or is_stat_star) and missing_prob >= 0.75:
+                    impact.star_player_out = True
 
         # Calculate impact as percentage of team production
         # Average NBA team: ~115 PPG, ~45 RPG, ~25 APG, 240 total minutes
