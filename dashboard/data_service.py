@@ -2415,7 +2415,7 @@ class DataService:
                 player_data['team_abbrev'] = team_id_to_abbrev.get(team_id, '')
                 player_data['game_id'] = game_id  # Add game_id for prop line lookup
 
-            print(f"Background: Found {len(all_players)} players with DraftKings props", flush=True)
+            print(f"Background: Found {len(all_players)} players with props", flush=True)
 
             # Filter players by team
             home_player_ids = [pid for pid, p in all_players.items() if p['team_abbrev'] == home_abbrev]
@@ -2430,7 +2430,8 @@ class DataService:
             if not all_player_ids:
                 # Build detailed error message for debugging
                 teams_found = {p['team_abbrev'] for p in all_players.values()}
-                error_msg = f"No players found for {home_abbrev} vs {away_abbrev}. Found teams: {sorted(teams_found)}"
+                null_team_count = sum(1 for p in all_players.values() if p.get('team_id') is None)
+                error_msg = f"No players found for {home_abbrev} vs {away_abbrev}. Found teams: {sorted(teams_found)}. Total players: {len(all_players)}, unresolved team: {null_team_count}"
                 print(f"Background: {error_msg}", flush=True)
                 with self._prop_status_lock:
                     if game_id in self._prop_fetch_status:
@@ -2860,20 +2861,52 @@ class DataService:
                         players = {}
                         for pid, pdata in props.items():
                             name = pdata.get("player_name_odds_api", f"Player {pid}")
-                            # Resolve team_id from IDMapper's player cache
                             team_id = None
-                            player_info = mapper.get_player_info(pid) if pid > 0 else None
-                            if player_info:
-                                team_data = player_info.get('team', {})
-                                if isinstance(team_data, dict):
-                                    team_id = team_data.get('id')
-                                else:
-                                    team_id = player_info.get('team_id')
+                            position = ""
+
+                            # Resolve team from BDL player data
+                            if pid > 0:
+                                # Valid BDL ID — look up in mapper cache (no API call)
+                                player_info = mapper.get_player_info(pid)
+                                if player_info:
+                                    td = player_info.get('team', {})
+                                    team_id = td.get('id') if isinstance(td, dict) else None
+                                    position = player_info.get("position", "")
+                                if team_id is None and self.balldontlie:
+                                    # Cache miss — fetch from BDL API directly (cached per player)
+                                    try:
+                                        bdl_player = self.balldontlie.get_player(pid)
+                                        if bdl_player:
+                                            td = bdl_player.get('team', {})
+                                            team_id = td.get('id') if isinstance(td, dict) else None
+                                            position = bdl_player.get("position", "")
+                                    except Exception:
+                                        pass
+
+                            if team_id is None and self.balldontlie and name:
+                                # Hash ID or all lookups failed — search BDL by name
+                                try:
+                                    last_name = name.split()[-1] if name else ""
+                                    results = self.balldontlie.get_players(search=last_name)
+                                    for r in results:
+                                        full = f"{r.get('first_name', '')} {r.get('last_name', '')}".strip()
+                                        if full.lower() == name.lower():
+                                            td = r.get('team', {})
+                                            team_id = td.get('id') if isinstance(td, dict) else None
+                                            position = r.get("position", "")
+                                            # Fix hash ID to real BDL ID for downstream consistency
+                                            if pid < 0 and r.get('id'):
+                                                pid = r['id']
+                                                pdata['player_id'] = pid
+                                            break
+                                except Exception:
+                                    pass
+
                             players[pid] = {
                                 "player_id": pid,
                                 "player_name": name,
                                 "team_id": team_id,
-                                "position": player_info.get("position", "") if player_info else "",
+                                "position": position,
                             }
                         return players
             except Exception as e:
