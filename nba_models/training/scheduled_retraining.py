@@ -616,10 +616,34 @@ def create_scheduler(daemon: bool = False):
     return scheduler
 
 
+def _get_boot_id() -> str:
+    """Return a string unique to this OS boot / container lifecycle."""
+    # Linux: /proc/sys/kernel/random/boot_id is unique per boot
+    boot_id_path = Path("/proc/sys/kernel/random/boot_id")
+    if boot_id_path.exists():
+        try:
+            return boot_id_path.read_text().strip()
+        except Exception:
+            pass
+    # Fallback: process start time of PID 1 (changes on container restart)
+    try:
+        return str(Path("/proc/1").stat().st_mtime)
+    except Exception:
+        pass
+    # macOS / other: use system boot time
+    try:
+        r = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 def save_pid():
-    """Save process ID to file."""
+    """Write PID + boot ID so we can detect stale files from previous containers."""
+    boot_id = _get_boot_id()
     with open(PID_FILE, 'w') as f:
-        f.write(str(os.getpid()))
+        f.write(f"{os.getpid()}\n{boot_id}")
 
 
 def remove_pid():
@@ -633,22 +657,30 @@ def get_scheduler_status() -> dict:
     if not PID_FILE.exists():
         return {'running': False, 'message': 'Scheduler not running'}
 
-    with open(PID_FILE) as f:
-        pid = int(f.read().strip())
-
-    # Check if process is running
     try:
-        os.kill(pid, 0)  # Signal 0 just checks if process exists
+        lines = PID_FILE.read_text().strip().split('\n')
+        pid = int(lines[0])
+        saved_boot_id = lines[1] if len(lines) > 1 else None
+        current_boot_id = _get_boot_id()
+
+        # If boot ID changed, this is a stale file from a previous container
+        if saved_boot_id and saved_boot_id != current_boot_id:
+            logger.info(f"Stale PID file from previous boot (PID {pid})")
+            remove_pid()
+            return {'running': False, 'message': 'Scheduler not running'}
+
+        # Same boot — check if process is alive
+        os.kill(pid, 0)
         return {
             'running': True,
             'pid': pid,
             'message': f'Scheduler running (PID: {pid})'
         }
-    except OSError:
+    except (OSError, ValueError):
+        remove_pid()
         return {
             'running': False,
-            'pid': pid,
-            'message': f'Stale PID file (process {pid} not found)'
+            'message': 'Stale PID file (cleaned)'
         }
 
 

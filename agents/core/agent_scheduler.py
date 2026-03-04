@@ -352,55 +352,40 @@ def create_scheduler(daemon: bool = False):
 # PID management
 # ============================================================================
 
+def _get_boot_id() -> str:
+    """Return a string unique to this OS boot / container lifecycle."""
+    # Linux: /proc/sys/kernel/random/boot_id is unique per boot
+    boot_id_path = Path("/proc/sys/kernel/random/boot_id")
+    if boot_id_path.exists():
+        try:
+            return boot_id_path.read_text().strip()
+        except Exception:
+            pass
+    # Fallback: process start time of PID 1 (changes on container restart)
+    try:
+        return str(Path("/proc/1").stat().st_mtime)
+    except Exception:
+        pass
+    # macOS / other: use system boot time
+    try:
+        import subprocess
+        r = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 def save_pid():
+    """Write PID + boot ID so we can detect stale files from previous containers."""
+    boot_id = _get_boot_id()
     with open(PID_FILE, 'w') as f:
-        f.write(str(os.getpid()))
+        f.write(f"{os.getpid()}\n{boot_id}")
 
 
 def remove_pid():
     if PID_FILE.exists():
         PID_FILE.unlink()
-
-
-def _is_scheduler_process(pid: int) -> bool:
-    """Check if PID belongs to an actual scheduler process (not just any process).
-
-    On Railway/Docker, PID 1 is always the container init process, so a plain
-    os.kill(pid, 0) check is not sufficient — a stale PID file pointing to
-    PID 1 would always pass, causing an infinite crash loop on redeploy.
-    """
-    try:
-        os.kill(pid, 0)  # process exists?
-    except OSError:
-        return False
-
-    # On Linux (Railway), read /proc/<pid>/cmdline to verify it's actually us
-    cmdline_path = Path(f"/proc/{pid}/cmdline")
-    if cmdline_path.exists():
-        try:
-            cmdline = cmdline_path.read_text()
-            return "agent_scheduler" in cmdline
-        except Exception:
-            pass
-
-    # On macOS (local dev), use ps to check the command
-    if sys.platform == "darwin":
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "command="],
-                capture_output=True, text=True, timeout=5,
-            )
-            return "agent_scheduler" in result.stdout
-        except Exception:
-            pass
-
-    # If we can't verify the command, treat PID 1 as stale (it's always
-    # the container init) and trust other PIDs conservatively.
-    if pid == 1:
-        return False
-
-    return True
 
 
 def get_status() -> dict:
@@ -409,16 +394,23 @@ def get_status() -> dict:
 
     if PID_FILE.exists():
         try:
-            pid = int(PID_FILE.read_text().strip())
-            if _is_scheduler_process(pid):
-                result = {'running': True, 'pid': pid, 'message': f'Running (PID {pid})'}
-            else:
-                # Stale PID file — clean it up
-                logger.info(f"Removing stale PID file (PID {pid} is not a scheduler process)")
+            lines = PID_FILE.read_text().strip().split('\n')
+            pid = int(lines[0])
+            saved_boot_id = lines[1] if len(lines) > 1 else None
+            current_boot_id = _get_boot_id()
+
+            # If boot ID changed, this is a stale file from a previous container
+            if saved_boot_id and saved_boot_id != current_boot_id:
+                logger.info(f"Stale PID file from previous boot (PID {pid})")
                 remove_pid()
-                result = {'running': False, 'pid': None, 'message': 'Stale PID file (cleaned)'}
+                return result  # not running
+
+            # Same boot — check if process is alive
+            os.kill(pid, 0)
+            result = {'running': True, 'pid': pid, 'message': f'Running (PID {pid})'}
         except (OSError, ValueError):
-            result = {'running': False, 'pid': None, 'message': 'Stale PID file'}
+            remove_pid()
+            result['message'] = 'Stale PID file (cleaned)'
 
     # Merge persisted stats
     if STATUS_FILE.exists():
@@ -446,7 +438,8 @@ def stop_scheduler():
         return False
 
     try:
-        pid = int(PID_FILE.read_text().strip())
+        lines = PID_FILE.read_text().strip().split('\n')
+        pid = int(lines[0])
         os.kill(pid, signal.SIGTERM)
         print(f"Sent SIGTERM to PID {pid}")
         remove_pid()
