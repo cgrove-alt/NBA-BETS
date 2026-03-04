@@ -2860,11 +2860,20 @@ class DataService:
                         players = {}
                         for pid, pdata in props.items():
                             name = pdata.get("player_name_odds_api", f"Player {pid}")
+                            # Resolve team_id from IDMapper's player cache
+                            team_id = None
+                            player_info = mapper.get_player_info(pid) if pid > 0 else None
+                            if player_info:
+                                team_data = player_info.get('team', {})
+                                if isinstance(team_data, dict):
+                                    team_id = team_data.get('id')
+                                else:
+                                    team_id = player_info.get('team_id')
                             players[pid] = {
                                 "player_id": pid,
                                 "player_name": name,
-                                "team_id": None,
-                                "position": "",
+                                "team_id": team_id,
+                                "position": player_info.get("position", "") if player_info else "",
                             }
                         return players
             except Exception as e:
