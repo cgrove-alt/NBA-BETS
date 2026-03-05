@@ -254,6 +254,176 @@ app.add_middleware(CacheControlMiddleware)
 
 # ============== HEALTH CHECK ==============
 
+_ENV_PLACEHOLDERS = {
+    "your_balldontlie_api_key_here",
+    "your_odds_api_key_here",
+    "your_gemini_api_key_here",
+    "your-key-here",
+}
+
+_RAILWAY_SERVICE_ENV_REQUIREMENTS: dict[str, dict[str, list[str]]] = {
+    "nba-betting-api": {
+        "required": ["DATABASE_URL"],
+        "recommended": ["BALLDONTLIE_API_KEY", "THE_ODDS_API_KEY", "REDIS_URL"],
+    },
+    "nba-daily-predictions": {
+        "required": ["BALLDONTLIE_API_KEY", "DATABASE_URL"],
+        "recommended": ["THE_ODDS_API_KEY"],
+    },
+    "nba-odds-tracker": {
+        "required": ["THE_ODDS_API_KEY"],
+        "recommended": ["DATABASE_URL"],
+    },
+    "nba-retraining": {
+        "required": ["BALLDONTLIE_API_KEY"],
+        "recommended": ["DATABASE_URL"],
+    },
+    "nba-agent-scheduler": {
+        "required": ["DATABASE_URL", "REDIS_URL", "GEMINI_API_KEY"],
+        "recommended": ["BALLDONTLIE_API_KEY", "THE_ODDS_API_KEY"],
+    },
+}
+
+
+def _is_env_var_configured(name: str) -> bool:
+    """Return True when an environment variable exists with a real value."""
+    value = os.environ.get(name)
+    return bool(value and value.strip() and value not in _ENV_PLACEHOLDERS)
+
+
+def _current_service_name() -> str:
+    """Best-effort Railway service name, defaulting to the API service."""
+    return (
+        os.environ.get("RAILWAY_SERVICE_NAME")
+        or os.environ.get("RAILWAY_SERVICE")
+        or "nba-betting-api"
+    )
+
+
+def _build_environment_report() -> dict[str, Any]:
+    """Build a Railway/shared-variable readiness report without exposing secrets."""
+    current_service = _current_service_name()
+    service_requirements: dict[str, Any] = {}
+
+    all_env_names = sorted({
+        env_name
+        for spec in _RAILWAY_SERVICE_ENV_REQUIREMENTS.values()
+        for env_name in spec["required"] + spec["recommended"]
+    })
+
+    shared_env: dict[str, Any] = {}
+    for env_name in all_env_names:
+        shared_env[env_name] = {
+            "present": _is_env_var_configured(env_name),
+            "required_by": [
+                service_name
+                for service_name, spec in _RAILWAY_SERVICE_ENV_REQUIREMENTS.items()
+                if env_name in spec["required"]
+            ],
+            "recommended_by": [
+                service_name
+                for service_name, spec in _RAILWAY_SERVICE_ENV_REQUIREMENTS.items()
+                if env_name in spec["recommended"]
+            ],
+        }
+
+    for service_name, spec in _RAILWAY_SERVICE_ENV_REQUIREMENTS.items():
+        service_requirements[service_name] = {
+            "required_env": spec["required"],
+            "recommended_env": spec["recommended"],
+            "missing_required_in_current_runtime": [
+                env_name for env_name in spec["required"] if not shared_env[env_name]["present"]
+            ],
+            "missing_recommended_in_current_runtime": [
+                env_name for env_name in spec["recommended"] if not shared_env[env_name]["present"]
+            ],
+            "matches_current_service": service_name == current_service,
+        }
+
+    return {
+        "is_railway": bool(os.environ.get("RAILWAY_ENVIRONMENT")),
+        "railway_environment": os.environ.get("RAILWAY_ENVIRONMENT"),
+        "service_name": current_service,
+        "shared_env": shared_env,
+        "service_requirements": service_requirements,
+    }
+
+
+def _summarize_health_issues(
+    *,
+    models_loaded: bool,
+    db_connected: bool,
+    redis_connected: bool,
+    environment: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Classify health issues into fatal problems vs degraded warnings."""
+    issues: list[str] = []
+    warnings: list[str] = []
+
+    if not models_loaded:
+        issues.append("No model artifacts found in models/; inference cannot run.")
+
+    current_service = environment["service_name"]
+    current_requirements = environment["service_requirements"].get(
+        current_service,
+        {"missing_required_in_current_runtime": [], "missing_recommended_in_current_runtime": []},
+    )
+    missing_required = current_requirements["missing_required_in_current_runtime"]
+    missing_recommended = current_requirements["missing_recommended_in_current_runtime"]
+
+    if environment["is_railway"]:
+        if missing_required:
+            issues.append(
+                f"Railway service '{current_service}' is missing required env vars: "
+                + ", ".join(missing_required)
+            )
+        if missing_recommended:
+            warnings.append(
+                f"Railway service '{current_service}' is missing recommended env vars: "
+                + ", ".join(missing_recommended)
+            )
+
+        for service_name, spec in environment["service_requirements"].items():
+            if service_name == current_service or not spec["missing_required_in_current_runtime"]:
+                continue
+            warnings.append(
+                f"If shared variables are configured project-wide, '{service_name}' still needs: "
+                + ", ".join(spec["missing_required_in_current_runtime"])
+            )
+    if _is_env_var_configured("DATABASE_URL") and not db_connected:
+        issues.append("DATABASE_URL is set but PostgreSQL is unreachable.")
+    elif (
+        environment["is_railway"]
+        and not _is_env_var_configured("DATABASE_URL")
+        and "DATABASE_URL" not in missing_required
+    ):
+        issues.append("DATABASE_URL is not set on Railway; PostgreSQL-backed features will fail.")
+
+    if _is_env_var_configured("REDIS_URL") and not redis_connected:
+        warnings.append("REDIS_URL is set but Redis is unreachable; agent coordination will degrade.")
+    elif (
+        environment["is_railway"]
+        and not _is_env_var_configured("REDIS_URL")
+        and "REDIS_URL" not in missing_recommended
+    ):
+        warnings.append("REDIS_URL is not set on Railway; agent coordination will use fallbacks or fail.")
+
+    if (
+        environment["is_railway"]
+        and not _is_env_var_configured("BALLDONTLIE_API_KEY")
+        and "BALLDONTLIE_API_KEY" not in missing_recommended
+    ):
+        warnings.append("BALLDONTLIE_API_KEY is not set; live stats and daily prediction freshness will degrade.")
+
+    if (
+        environment["is_railway"]
+        and not _is_env_var_configured("THE_ODDS_API_KEY")
+        and "THE_ODDS_API_KEY" not in missing_recommended
+    ):
+        warnings.append("THE_ODDS_API_KEY is not set; live odds and odds-tracker features will degrade.")
+
+    return issues, warnings
+
 @app.get("/api/health", response_model=HealthResponse)
 def health_check():
     """Health check endpoint — verifies actual system state."""
@@ -261,6 +431,7 @@ def health_check():
     from pathlib import Path
 
     checks: dict[str, Any] = {}
+    environment = _build_environment_report()
 
     # 1. PostgreSQL check
     db_connected = False
@@ -301,15 +472,25 @@ def health_check():
     pkl_files = list(models_dir.glob("*.pkl")) if models_dir.exists() else []
     models_loaded = len(pkl_files) > 0
     checks["models"] = f"{len(pkl_files)} .pkl files found"
+    checks["runtime_mode"] = "railway" if environment["is_railway"] else "local"
+    checks["environment_summary"] = {
+        env_name: data["present"] for env_name, data in environment["shared_env"].items()
+    }
+
+    issues, warnings = _summarize_health_issues(
+        models_loaded=models_loaded,
+        db_connected=db_connected,
+        redis_connected=redis_connected,
+        environment=environment,
+    )
 
     # 4. Determine overall status
-    if db_connected and models_loaded:
-        status = "healthy"
-    elif models_loaded and not db_connected and os.environ.get("DATABASE_URL") or not models_loaded:
+    if issues:
         status = "unhealthy"
+    elif warnings:
+        status = "degraded"
     else:
-        # Redis down or DATABASE_URL not set (local dev) — degraded at worst
-        status = "degraded" if (os.environ.get("REDIS_URL") and not redis_connected) else "healthy"
+        status = "healthy"
 
     from fastapi.responses import JSONResponse
     status_code = 503 if status == "unhealthy" else 200
@@ -324,6 +505,9 @@ def health_check():
             database_connected=db_connected,
             redis_connected=redis_connected,
             checks=checks,
+            environment=environment,
+            warnings=warnings,
+            issues=issues,
         ).model_dump(),
     )
 
