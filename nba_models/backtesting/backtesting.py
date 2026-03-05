@@ -42,21 +42,23 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Canonical constants — single source of truth
+from nba_betting.constants import BACKTEST_SANITY as _BACKTEST_SANITY, MIN_BACKTEST_SAMPLES
 
 # =============================================================================
 # SANITY CHECK THRESHOLDS
 # =============================================================================
-# These thresholds help detect data leakage or bugs in the backtesting pipeline.
+# Sourced from nba_betting.constants.BACKTEST_SANITY.
 # Professional sports bettors typically achieve 2-8% ROI, so anything significantly
 # higher is a red flag for temporal leakage or other issues.
 
 SANITY_THRESHOLDS = {
-    "max_realistic_roi": 15.0,           # ROI > 15% is almost certainly leakage
-    "max_realistic_win_rate": 60.0,      # Win rate > 60% on -110 juice is suspicious
-    "max_realistic_sharpe": 3.0,         # Sharpe > 3 is hedge fund level (unrealistic for betting)
-    "max_realistic_profit_factor": 3.0,  # Profit factor > 3 is highly suspicious
-    "min_samples_for_validation": 50,    # Need at least 50 bets for meaningful stats
-    "max_streak_for_size": 15,           # Winning streaks > 15 in a small sample = suspicious
+    "max_realistic_roi":          _BACKTEST_SANITY["max_roi"],
+    "max_realistic_win_rate":     _BACKTEST_SANITY["max_win_rate"],
+    "max_realistic_sharpe":       _BACKTEST_SANITY["max_sharpe"],
+    "max_realistic_profit_factor": _BACKTEST_SANITY["max_profit_factor"],
+    "min_samples_for_validation": MIN_BACKTEST_SAMPLES,
+    "max_streak_for_size": 15,    # Winning streaks > 15 in a small sample = suspicious
 }
 
 

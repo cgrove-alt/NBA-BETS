@@ -311,8 +311,9 @@ class TestEdgeCalculatorModule:
     """Test the edge_calculator.py calculate_edge_from_prediction with norm.cdf."""
 
     def test_prop_uses_norm_cdf(self):
-        """calculate_edge_from_prediction should use norm.cdf, not linear 4%."""
+        """calculate_edge_from_prediction should use norm.cdf with canonical std devs."""
         from edge_calculator.edge_calculator import EdgeCalculator
+        from nba_betting.constants import PROP_STD_DEVS
 
         calc = EdgeCalculator()
         result = calc.calculate_edge_from_prediction(
@@ -321,13 +322,18 @@ class TestEdgeCalculatorModule:
             american_odds=-110,
             prop_type='points',
         )
-        # 3.5pt diff / 5.5 std = z=0.636, norm.cdf ≈ 0.7377
-        expected_prob = float(norm.cdf(3.5 / 5.5))
-        assert abs(result.model_probability - expected_prob) < 0.01
+        # Use the canonical std dev (6.5) — NOT the old hardcoded 5.5
+        pts_std = PROP_STD_DEVS['points']
+        expected_prob = float(norm.cdf(3.5 / pts_std))
+        assert abs(result.model_probability - expected_prob) < 0.01, (
+            f"Expected norm.cdf(3.5 / {pts_std}) = {expected_prob:.4f}, "
+            f"got {result.model_probability:.4f}"
+        )
 
     def test_prop_type_affects_probability(self):
         """Different prop types should produce different probabilities for same diff."""
         from edge_calculator.edge_calculator import EdgeCalculator
+        from nba_betting.constants import PROP_STD_DEVS
 
         calc = EdgeCalculator()
         pts_result = calc.calculate_edge_from_prediction(
@@ -336,7 +342,10 @@ class TestEdgeCalculatorModule:
         ast_result = calc.calculate_edge_from_prediction(
             predicted_value=7.0, prop_line=5.0, prop_type='assists'
         )
-        # Same 2pt diff but assists std=2.5 vs points std=5.5
+        # Same 2pt diff: assists std (2.2) < points std (6.5) → assists z-score is larger → higher prob
+        assert PROP_STD_DEVS['assists'] < PROP_STD_DEVS['points'], (
+            "assists std dev should be smaller than points std dev"
+        )
         assert ast_result.model_probability > pts_result.model_probability
 
     def test_default_std_when_no_prop_type(self):
