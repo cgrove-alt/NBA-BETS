@@ -2493,12 +2493,29 @@ class DataService:
             try:
                 from datetime import datetime as _dt
                 _current_season = _dt.now().year if _dt.now().month > 9 else _dt.now().year - 1
-                # Fetch up to 250 game stat lines for all players this season
-                all_game_stats = self.balldontlie.get_player_stats(
-                    player_ids=all_player_ids,
-                    seasons=[_current_season],
-                    per_page=250
-                )
+                # Paginate: BDL API max per_page is 100, we need all games for all players
+                all_game_stats = []
+                cursor = None
+                for page in range(5):  # Max 5 pages = 500 stat lines
+                    params = {
+                        "player_ids[]": all_player_ids,
+                        "seasons[]": [_current_season],
+                        "per_page": 100,
+                    }
+                    if cursor:
+                        params["cursor"] = cursor
+                    data = self.balldontlie._get("stats", params)
+                    if not data:
+                        print(f"Background: Batch stats page {page} returned None", flush=True)
+                        break
+                    page_stats = data.get("data", [])
+                    if not page_stats:
+                        break
+                    all_game_stats.extend(page_stats)
+                    cursor = data.get("meta", {}).get("next_cursor")
+                    if not cursor:
+                        break
+                print(f"Background: Fetched {len(all_game_stats)} game stat lines across pages", flush=True)
                 if all_game_stats:
                     # Group by player_id
                     from collections import defaultdict
