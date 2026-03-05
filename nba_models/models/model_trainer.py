@@ -5109,9 +5109,46 @@ class ModelTrainingPipeline:
                 with open(filepath, "rb") as f:
                     model_data = pickle.load(f)
 
+                is_mapping = isinstance(model_data, dict)
+
+                # Some legacy artifacts pickle the model object directly instead of a dict.
+                # Register those first so they do not fall through dict-specific checks.
+                if not is_mapping and hasattr(model_data, "predict"):
+                    self.models[model_name] = model_data
+                    continue
+
+                # Legacy stacking classifier/regressor artifacts are saved as dicts
+                # with base_models + meta_model, not the standard {"model": ...} shape.
+                if (
+                    is_mapping
+                    and "base_models" in model_data
+                    and "meta_model" in model_data
+                    and not model_name.startswith("player_")
+                ):
+                    try:
+                        from models.stacking_model import (
+                            StackingClassifier as PersistedStackingClassifier,
+                            StackingRegressor as PersistedStackingRegressor,
+                        )
+
+                        if "moneyline" in model_name:
+                            stacking_model = PersistedStackingClassifier.load(filepath)
+                        else:
+                            stacking_model = PersistedStackingRegressor.load(filepath)
+
+                        self.models[model_name] = stacking_model
+                        continue
+                    except Exception as e:
+                        print(f"  Warning: Could not load {model_name} as stacking model: {e}")
+
+                # Some quantile artifacts are metadata-only sidecars and are not
+                # directly used as prediction models by the application runtime.
+                if is_mapping and "quantile_models" in model_data and "model" not in model_data:
+                    continue
+
                 # Check if this is a prop model FIRST (before ensemble check)
                 # Prop models have 'prop_type' key OR are named 'player_*'
-                if "prop_type" in model_data or model_name.startswith("player_"):
+                if is_mapping and ("prop_type" in model_data or model_name.startswith("player_")):
                     # Check if this is a PropEnsembleModel (has 'models' dict with sub-models)
                     if "models" in model_data and isinstance(model_data.get("models"), dict):
                         try:
@@ -5144,7 +5181,7 @@ class ModelTrainingPipeline:
                     continue
 
                 # Check if this is an ensemble wrapper model (has predict method on the 'model' key)
-                model_obj = model_data.get("model")
+                model_obj = model_data.get("model") if is_mapping else None
                 if model_obj is not None and hasattr(model_obj, "predict") and hasattr(model_obj, "models"):
                     # This is our EnsembleMoneylineWrapper
                     wrapper = model_obj
