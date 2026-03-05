@@ -51,10 +51,16 @@ try:
     from apscheduler.triggers.interval import IntervalTrigger
     from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
     HAS_SCHEDULER = True
-except ImportError:
+    SCHEDULER_IMPORT_ERROR = None
+except ImportError as exc:
     HAS_SCHEDULER = False
-    print("ERROR: APScheduler not installed. Install with: pip install apscheduler")
-    sys.exit(1)
+    SCHEDULER_IMPORT_ERROR = str(exc)
+    BlockingScheduler = None  # type: ignore[assignment]
+    BackgroundScheduler = None  # type: ignore[assignment]
+    CronTrigger = None  # type: ignore[assignment]
+    IntervalTrigger = None  # type: ignore[assignment]
+    EVENT_JOB_EXECUTED = 0
+    EVENT_JOB_ERROR = 0
 
 # Configuration
 PROJECT_DIR = Path(__file__).parent
@@ -88,6 +94,15 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+def _require_scheduler():
+    """Fail fast only when scheduler functionality is actually used."""
+    if not HAS_SCHEDULER:
+        raise RuntimeError(
+            "APScheduler not installed. Install with: pip install apscheduler"
+            + (f" (import error: {SCHEDULER_IMPORT_ERROR})" if SCHEDULER_IMPORT_ERROR else "")
+        )
 
 
 # ============================================================================
@@ -573,6 +588,7 @@ def create_scheduler(daemon: bool = False):
     Args:
         daemon: If True, use BackgroundScheduler; else BlockingScheduler
     """
+    _require_scheduler()
     tz = 'America/New_York'
     scheduler = BackgroundScheduler(timezone=tz) if daemon else BlockingScheduler(timezone=tz)
 
@@ -641,17 +657,24 @@ def _get_boot_id() -> str:
     return "unknown"
 
 
+def _get_boot_id_file() -> Path:
+    """Path for sidecar boot-id metadata associated with PID_FILE."""
+    return PID_FILE.parent / f"{PID_FILE.name}.boot_id"
+
+
 def save_pid():
-    """Write PID + boot ID so we can detect stale files from previous containers."""
-    boot_id = _get_boot_id()
-    with open(PID_FILE, 'w') as f:
-        f.write(f"{os.getpid()}\n{boot_id}")
+    """Write PID file and boot-id sidecar for stale-file detection."""
+    PID_FILE.write_text(str(os.getpid()))
+    _get_boot_id_file().write_text(_get_boot_id())
 
 
 def remove_pid():
     """Remove PID file."""
     if PID_FILE.exists():
         PID_FILE.unlink()
+    boot_id_file = _get_boot_id_file()
+    if boot_id_file.exists():
+        boot_id_file.unlink()
 
 
 def get_scheduler_status() -> dict:
@@ -661,24 +684,25 @@ def get_scheduler_status() -> dict:
 
     try:
         lines = PID_FILE.read_text().strip().split('\n')
-        pid = int(lines[0])
-        saved_boot_id = lines[1] if len(lines) > 1 else None
+        pid = int(lines[0].strip())
+
+        # Preferred format: sidecar file. Fallback: legacy second-line boot id.
+        boot_id_file = _get_boot_id_file()
+        saved_boot_id = None
+        if boot_id_file.exists():
+            saved_boot_id = boot_id_file.read_text().strip() or None
+        elif len(lines) > 1:
+            saved_boot_id = lines[1].strip() or None
+
         current_boot_id = _get_boot_id()
 
-        # No boot ID → old format, definitely stale (predates this fix)
-        # Different boot ID → stale file from a previous container
-        if saved_boot_id is None or saved_boot_id != current_boot_id:
-            logger.info(f"Stale PID file detected (PID {pid}, boot_id={'missing' if saved_boot_id is None else 'changed'})")
+        # Different boot ID means file belongs to a previous OS boot/container.
+        if saved_boot_id is not None and saved_boot_id != current_boot_id:
+            logger.info(f"Stale PID file detected (PID {pid}, boot_id changed)")
             remove_pid()
             return {'running': False, 'message': 'Scheduler not running'}
 
-        # Same boot, same PID → we're checking our own stale file
-        if pid == os.getpid():
-            logger.info(f"Stale PID file from current process (PID {pid})")
-            remove_pid()
-            return {'running': False, 'message': 'Scheduler not running'}
-
-        # Same boot, different PID — check if process is alive
+        # Process exists if signal 0 succeeds.
         os.kill(pid, 0)
         return {
             'running': True,
@@ -772,6 +796,12 @@ def main():
         sys.exit(0)
 
     elif args.start or args.daemon:
+        try:
+            _require_scheduler()
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            sys.exit(1)
+
         # Check if already running
         status = get_scheduler_status()
         if status['running']:
