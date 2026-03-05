@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pickle
 from typing import Any
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge, LogisticRegression, ElasticNet
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -173,7 +173,7 @@ class StackingClassifier:
         else:
             oof_predictions = np.zeros((n_samples, n_models))
 
-        kfold = StratifiedKFold(n_splits=self.n_folds, shuffle=True, random_state=42)
+        tscv = TimeSeriesSplit(n_splits=self.n_folds)
 
         for model_idx, (name, model) in enumerate(self.base_models.items()):
             if self.verbose:
@@ -181,12 +181,13 @@ class StackingClassifier:
 
             oof_pred = np.zeros(n_samples)
 
-            for _fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled, y)):
+            for _fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X_scaled)):
                 X_train_fold = X_scaled[train_idx]
                 y_train_fold = y[train_idx]
                 X_val_fold = X_scaled[val_idx]
 
-                fold_model = type(model)(**model.get_params())
+                from sklearn.base import clone
+                fold_model = clone(model)
                 fold_model.fit(X_train_fold, y_train_fold)
 
                 if self.use_proba:
@@ -398,7 +399,7 @@ class StackingRegressor:
         n_models = len(self.base_models)
         oof_predictions = np.zeros((n_samples, n_models))
 
-        kfold = KFold(n_splits=self.n_folds, shuffle=True, random_state=42)
+        tscv = TimeSeriesSplit(n_splits=self.n_folds)
 
         for model_idx, (name, model) in enumerate(self.base_models.items()):
             if self.verbose:
@@ -406,12 +407,13 @@ class StackingRegressor:
 
             oof_pred = np.zeros(n_samples)
 
-            for _fold_idx, (train_idx, val_idx) in enumerate(kfold.split(X_scaled)):
+            for _fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X_scaled)):
                 X_train_fold = X_scaled[train_idx]
                 y_train_fold = y[train_idx]
                 X_val_fold = X_scaled[val_idx]
 
-                fold_model = type(model)(**model.get_params())
+                from sklearn.base import clone
+                fold_model = clone(model)
                 fold_model.fit(X_train_fold, y_train_fold)
                 oof_pred[val_idx] = fold_model.predict(X_val_fold)
 

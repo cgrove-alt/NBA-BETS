@@ -62,8 +62,14 @@ except ImportError as exc:
     EVENT_JOB_EXECUTED = 0
     EVENT_JOB_ERROR = 0
 
-# Configuration
-PROJECT_DIR = Path(__file__).parent
+# Configuration — resolve project root by walking up to the .git directory
+_this_dir = Path(__file__).resolve().parent
+PROJECT_DIR = _this_dir
+for _p in (_this_dir, _this_dir.parent, _this_dir.parent.parent, _this_dir.parent.parent.parent):
+    if (_p / ".git").exists():
+        PROJECT_DIR = _p
+        break
+
 MODELS_DIR = PROJECT_DIR / "models"
 LOGS_DIR = PROJECT_DIR / "logs"
 DATA_DIR = PROJECT_DIR / "data" / "balldontlie_cache"
@@ -71,7 +77,7 @@ BACKTEST_RESULTS = PROJECT_DIR / "backtest_results"
 RETRAIN_LOG = LOGS_DIR / "retrain_history.json"
 PID_FILE = LOGS_DIR / "scheduler.pid"
 
-# Training scripts
+# Training scripts (root-level shims)
 FULL_TRAIN_SCRIPT = PROJECT_DIR / "train_complete_balldontlie.py"
 INCREMENTAL_TRAIN_SCRIPT = PROJECT_DIR / "train_stacking_model.py"
 BACKTEST_SCRIPT = PROJECT_DIR / "comprehensive_backtest.py"

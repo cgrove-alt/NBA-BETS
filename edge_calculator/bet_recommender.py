@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from scipy.stats import norm
+
 from .edge_calculator import EdgeCalculator, EdgeResult
 from .kelly_criterion import KellyCriterion, BetSize
 from .bankroll_manager import BankrollManager
@@ -410,14 +412,14 @@ class BetRecommender:
         # Determine pick (OVER or UNDER)
         pick = 'OVER' if prediction > line else 'UNDER'
 
-        # Calculate edge
-        # Convert prediction difference to probability
-        diff = abs(prediction - line)
-        prob_adjustment = diff * 0.04  # ~4% per point
-        model_prob = 0.50 + prob_adjustment
+        # Calculate probability using norm.cdf with prop-specific std devs
+        diff = prediction - line
+        std_dev = EdgeCalculator.PROP_STD_DEVS.get(
+            prop_type.lower() if prop_type else '', EdgeCalculator.DEFAULT_PROP_STD_DEV
+        )
+        model_prob = float(norm.cdf(diff / std_dev))
 
         if model_confidence:
-            # Blend with model confidence
             conf_prob = model_confidence / 100
             model_prob = 0.7 * model_prob + 0.3 * conf_prob
 

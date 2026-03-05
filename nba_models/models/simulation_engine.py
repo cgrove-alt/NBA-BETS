@@ -442,7 +442,7 @@ class GameSimulator:
         shooter = offense.players[shooter_idx]
 
         # Adjust ratings for home court
-        offense.off_rating * (1 + self.home_boost if is_home_offense else 1)
+        off_rating = offense.off_rating * (1 + self.home_boost if is_home_offense else 1)
         def_rating = defense.def_rating * (1 - self.home_boost * 0.5 if is_home_offense else 1)
 
         # Check for turnover
@@ -642,7 +642,7 @@ class GameSimulator:
 
         # Handle overtime if tied
         while game_state.home_score == game_state.away_score:
-            for poss in range(10):  # ~5 per team in OT
+            for poss in range(26):  # ~13 per team in OT (5 min period)
                 is_home_offense = poss % 2 == 0
 
                 if is_home_offense:

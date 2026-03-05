@@ -255,9 +255,9 @@ class EdgeCalculator:
         ev = (model_probability * potential_profit) - ((1 - model_probability) * stake)
         ev_per_dollar = ev / stake
 
-        # Classify edge
-        has_edge = edge >= self.min_edge_threshold
-        edge_quality = self.classify_edge(edge)
+        # Classify edge using no-vig edge (true edge vs market)
+        has_edge = no_vig_edge >= self.min_edge_threshold
+        edge_quality = self.classify_edge(no_vig_edge)
 
         return EdgeResult(
             model_probability=model_probability,

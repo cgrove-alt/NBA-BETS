@@ -1444,6 +1444,89 @@ def get_retrain_status():
     }
 
 
+@app.post("/api/retrain/trigger")
+def trigger_retrain(
+    mode: str = "full",
+    api_key: str | None = None,
+):
+    """Trigger a model retrain in the background.
+
+    Args:
+        mode: 'full' (complete retrain) or 'incremental' (meta-learner only)
+        api_key: Optional API key for authorization (checked against API_KEY env var)
+    """
+    import subprocess
+    import threading
+    import uuid
+    from datetime import datetime
+
+    expected_key = os.environ.get("API_KEY")
+    if expected_key and api_key != expected_key:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
+
+    if mode not in ("full", "incremental"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="mode must be 'full' or 'incremental'")
+
+    if hasattr(app.state, "_retrain_running") and app.state._retrain_running:
+        return {
+            "status": "already_running",
+            "message": "A retrain job is already in progress. Check /api/retrain/status for details.",
+        }
+
+    job_id = str(uuid.uuid4())[:8]
+    app.state._retrain_running = True
+    app.state._retrain_job_id = job_id
+    app.state._retrain_started = datetime.now().isoformat()
+
+    def _run_retrain():
+        try:
+            if mode == "incremental":
+                cmd = [sys.executable, "scheduled_retraining.py", "--incremental"]
+            else:
+                cmd = [sys.executable, "scheduled_retraining.py", "--full"]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+            app.state._retrain_result = {
+                "success": result.returncode == 0,
+                "exit_code": result.returncode,
+                "stdout_tail": (result.stdout or "")[-2000:],
+                "stderr_tail": (result.stderr or "")[-1000:],
+            }
+        except subprocess.TimeoutExpired:
+            app.state._retrain_result = {"success": False, "error": "Timed out after 2 hours"}
+        except Exception as e:
+            app.state._retrain_result = {"success": False, "error": str(e)}
+        finally:
+            app.state._retrain_running = False
+
+    thread = threading.Thread(target=_run_retrain, daemon=True)
+    thread.start()
+
+    return {
+        "status": "started",
+        "job_id": job_id,
+        "mode": mode,
+        "message": f"Retrain ({mode}) started in background. Poll GET /api/retrain/job for progress.",
+        "started_at": app.state._retrain_started,
+    }
+
+
+@app.get("/api/retrain/job")
+def get_retrain_job_status():
+    """Check status of a running or recently completed retrain job."""
+    from datetime import datetime
+
+    return {
+        "running": getattr(app.state, "_retrain_running", False),
+        "job_id": getattr(app.state, "_retrain_job_id", None),
+        "started_at": getattr(app.state, "_retrain_started", None),
+        "result": getattr(app.state, "_retrain_result", None),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
 # ============== DAILY PREDICTIONS ENDPOINT ==============
 
 @app.get("/api/predictions/{date}", response_model=DailyPredictionsResponse)
