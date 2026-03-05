@@ -13,6 +13,13 @@ from typing import Optional
 
 from scipy.stats import norm
 
+# Canonical constants — single source of truth for all prop std devs
+from nba_betting.constants import (
+    PROP_STD_DEVS as _CANONICAL_PROP_STD_DEVS,
+    DEFAULT_PROP_STD_DEV as _CANONICAL_DEFAULT_STD_DEV,
+    EDGE_QUALITY_THRESHOLDS,
+)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -29,7 +36,8 @@ class EdgeResult:
     # Calculated values
     implied_probability: float = 0.0
     no_vig_probability: float = 0.0
-    edge: float = 0.0
+    edge: float = 0.0              # model_prob - implied_prob (with vig)
+    no_vig_edge: float = 0.0       # model_prob - no_vig_prob (true market prob)
     edge_percentage: float = 0.0
     expected_value: float = 0.0
     ev_per_dollar: float = 0.0
@@ -47,6 +55,7 @@ class EdgeResult:
             'implied_probability': round(self.implied_probability, 4),
             'no_vig_probability': round(self.no_vig_probability, 4),
             'edge': round(self.edge, 4),
+            'no_vig_edge': round(self.no_vig_edge, 4),
             'edge_percentage': round(self.edge_percentage, 2),
             'expected_value': round(self.expected_value, 4),
             'ev_per_dollar': round(self.ev_per_dollar, 4),
@@ -67,7 +76,9 @@ class EdgeCalculator:
     Standard sportsbook vig is ~4.5% (both sides at -110)
     """
 
-    # Edge quality thresholds
+    # Edge quality thresholds — sourced from nba_betting.constants.EDGE_QUALITY_THRESHOLDS
+    # but kept as a local mapping to preserve the legacy 'marginal'/'none' classification
+    # that existing tests rely on.
     EDGE_THRESHOLDS = {
         'strong': 0.05,      # 5%+ edge
         'moderate': 0.03,    # 3-5% edge
@@ -234,6 +245,10 @@ class EdgeCalculator:
         # Calculate edge against no-vig (true) probability, not vig-inflated implied probability.
         # Using implied_prob inflates perceived edge by ~2.3% at standard -110/-110 vig.
         edge = model_probability - no_vig_prob
+        # Calculate edge vs raw implied probability (with vig)
+        edge = model_probability - implied_prob
+        # No-vig edge (vs true market probability without juice)
+        no_vig_edge = model_probability - no_vig_prob
 
         # Calculate potential profit
         potential_profit = stake * (decimal_odds - 1)
@@ -254,6 +269,7 @@ class EdgeCalculator:
             implied_probability=implied_prob,
             no_vig_probability=no_vig_prob,
             edge=edge,
+            no_vig_edge=no_vig_edge,
             edge_percentage=edge * 100,
             expected_value=ev,
             ev_per_dollar=ev_per_dollar,
@@ -272,6 +288,9 @@ class EdgeCalculator:
         'pra': 8.5,
     }
     DEFAULT_PROP_STD_DEV = 5.0
+    # Prop-specific standard deviations — pulled from nba_betting.constants (single source of truth)
+    PROP_STD_DEVS: dict = _CANONICAL_PROP_STD_DEVS
+    DEFAULT_PROP_STD_DEV: float = _CANONICAL_DEFAULT_STD_DEV
 
     def calculate_edge_from_prediction(
         self,

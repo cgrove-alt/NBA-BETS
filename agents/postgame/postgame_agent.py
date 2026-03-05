@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from agents.core.agent_base import AgentBase
+from nba_betting.constants import PROP_STD_DEVS, DEFAULT_PROP_STD_DEV as DEFAULT_STD_DEV
 
 logger = logging.getLogger(__name__)
 

@@ -48,32 +48,25 @@ from injury_tracker_v3 import fetch_current_injuries, InjuryStatus
 # Required for pickle deserialization of quantile models
 from nba_models.models.model_trainer import QuantilePropModel  # noqa: F401
 
-# BUG FIX: Prop-specific standard deviations (not line-based)
-# Previous bug: std = line * 0.20 caused massive miscalibration
-# - Rebounds (line ~5): std=1.0 → Z-scores inflated 2-3x → 76.7% avg over_prob
-# - Points (line ~25): std=5.0 → Z-scores reasonable → 56.4% avg over_prob
-# Fix: Use empirically-derived prop-specific constants from NBA historical data
-PROP_STD_DEVS = {
-    'points': 6.5,      # Empirically-derived from NBA historical data
-    'rebounds': 3.1,    # FIX: Corrected from 7.0 (was inflating Z-scores ~2x for rebounds)
-    'assists': 2.2,     # Calibrated from empirical data
-    'threes': 1.6,      # Calibrated from empirical data
-    'pra': 8.5,         # Points + Rebounds + Assists combined variance
-}
+# Canonical constants — single source of truth across the entire pipeline.
+# Do NOT redefine PROP_STD_DEVS or quantile defaults locally; update nba_betting/constants.py.
+from nba_betting.constants import (
+    PROP_STD_DEVS,
+    DEFAULT_PROP_STD_DEV,
+    QUANTILE_DECOMPRESSION_DEFAULTS,
+    QUANTILE_TARGET_SLOPE,
+)
 
-# Quantile model regression-to-mean decompression parameters.
-# Measured by regressing quantile p50 predictions against the prop line.
-# A slope < 1.0 means the model under-predicts high-line players and over-predicts
-# low-line players (regression to mean). mean_gap < 0 means overall under-prediction.
-# Correction: pred += slope_fix * (line - mean_line) + level_fix
-# where slope_fix = target_slope - measured_slope, level_fix = -mean_gap
-# Re-measure these after every model retrain.
-def load_quantile_decompression():
+
+def load_quantile_decompression() -> dict:
     """Load quantile decompression constants from model artifact, falling back to defaults.
 
     Looks for models/quantile_decompression.json alongside the model files.
-    Falls back to hardcoded defaults if the file is not found.
-    Re-run calibration and regenerate the JSON after every model retrain.
+    Falls back to QUANTILE_DECOMPRESSION_DEFAULTS (from nba_betting.constants) if the file
+    is not found or is unreadable.
+
+    Re-run the calibration script and regenerate the JSON after every model retrain:
+        python3 scripts/calibrate_quantile_decompression.py
     """
     import json
     from pathlib import Path
@@ -81,23 +74,26 @@ def load_quantile_decompression():
     if filepath.exists():
         try:
             with open(filepath) as f:
-                return json.load(f)
-        except Exception:
-            pass  # Fall through to defaults on any read/parse error
-    # Fallback defaults (should be updated after each retrain)
-    return {
-        # mean_gap is the END-TO-END gap (after minutes oracle + injury + calibration),
-        # not just the raw quantile median gap. Measured from production prediction run.
-        'points':   {'slope': 0.724, 'mean_gap': -3.15, 'mean_line': 19.9},
-        'rebounds':  {'slope': 0.805, 'mean_gap':  0.00, 'mean_line':  5.1},
-        'assists':   {'slope': 0.644, 'mean_gap':  0.38, 'mean_line':  4.1},
-        'threes':    {'slope': 0.85,  'mean_gap':  0.00, 'mean_line':  2.5},  # assumed ~balanced
-        'pra':       {'slope': 0.80,  'mean_gap': -1.00, 'mean_line': 30.0},  # estimated
-    }
+                data = json.load(f)
+            # Validate that the loaded data has the expected structure and is not stale placeholders
+            expected_keys = {'points', 'rebounds', 'assists', 'threes', 'pra'}
+            if expected_keys.issubset(data.keys()):
+                # Detect stale placeholder: all slopes identical at 0.7 is the old default
+                slopes = [data[k].get('slope', 0) for k in expected_keys]
+                if len(set(slopes)) == 1 and slopes[0] == 0.7:
+                    logger.warning(
+                        "quantile_decompression.json contains stale placeholder values "
+                        "(slope=0.7 for all props). Falling back to calibrated defaults. "
+                        "Run: python3 scripts/calibrate_quantile_decompression.py"
+                    )
+                else:
+                    return data
+        except Exception as exc:
+            logger.warning("Failed to load quantile_decompression.json: %s. Using defaults.", exc)
+    return QUANTILE_DECOMPRESSION_DEFAULTS
 
 
 QUANTILE_DECOMPRESSION = load_quantile_decompression()
-QUANTILE_TARGET_SLOPE = 0.85
 
 def get_prop_std_dev(prop_type: str) -> float:
     """
@@ -109,7 +105,7 @@ def get_prop_std_dev(prop_type: str) -> float:
     Returns:
         float: Standard deviation for calculating Z-scores
     """
-    return PROP_STD_DEVS.get(prop_type.lower(), 5.0)
+    return PROP_STD_DEVS.get(prop_type.lower(), DEFAULT_PROP_STD_DEV)
 
 
 def compute_quantile_sigma(pred_low: float, pred_high: float, prop_type: str) -> float:

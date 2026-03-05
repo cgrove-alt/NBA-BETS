@@ -212,13 +212,16 @@ BACKTEST_THRESHOLDS = {
 # If ANY metric exceeds these limits, it indicates DATA LEAKAGE or a bug.
 # These are mathematically impossible for legitimate sports betting models.
 # Professional sports bettors achieve 3-8% ROI, 54-57% win rates.
+#
+# Sourced from nba_betting.constants.BACKTEST_SANITY (canonical single source of truth).
+from nba_betting.constants import BACKTEST_SANITY as _BACKTEST_SANITY
 
 SANITY_LIMITS = {
-    "max_roi": 30.0,              # ROI > 30% is impossible (data leakage)
-    "max_win_rate": 62.0,         # Win rate > 62% is impossible at -110
-    "max_sharpe": 3.5,            # Sharpe > 3.5 exceeds hedge funds
-    "min_ece": 0.02,              # ECE < 0.02 is suspiciously perfect
-    "max_training_roi": 50.0,     # Training ROI > 50% = testing on train data
+    "max_roi": _BACKTEST_SANITY["max_roi"],                   # ROI > 15% on holdout → leakage red flag
+    "max_win_rate": _BACKTEST_SANITY["max_win_rate"],         # Win rate > 60% at -110 → near-impossible
+    "max_sharpe": _BACKTEST_SANITY["max_sharpe"],             # Sharpe > 3.0 → hedge-fund tier
+    "min_ece": 0.02,                                          # ECE < 0.02 is suspiciously perfect
+    "max_training_roi": _BACKTEST_SANITY["max_training_roi"], # Training ROI > 50% → train/test leak
 }
 
 
