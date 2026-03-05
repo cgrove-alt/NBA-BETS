@@ -18,6 +18,8 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
+from nba_data.utils.runtime_config import get_live_seasons_dir
+
 # API Configuration
 BALLDONTLIE_BASE = "https://api.balldontlie.io/v1"
 FAST_API_DELAY = 0.1  # 100ms between requests
@@ -283,7 +285,7 @@ def save_to_csv(df: pd.DataFrame, output_path: str = None) -> str:
         Path to saved file
     """
     if output_path is None:
-        data_dir = Path(__file__).parent / "data" / "live_seasons"
+        data_dir = get_live_seasons_dir()
         data_dir.mkdir(parents=True, exist_ok=True)
         output_path = data_dir / f"live_seasons_{datetime.now().strftime('%Y%m%d')}.csv"
 
@@ -306,7 +308,7 @@ def load_live_season_data(csv_path: str = None) -> pd.DataFrame:
         return pd.read_csv(csv_path)
 
     # Find latest file
-    data_dir = Path(__file__).parent / "data" / "live_seasons"
+    data_dir = get_live_seasons_dir()
     if not data_dir.exists():
         return pd.DataFrame()
 

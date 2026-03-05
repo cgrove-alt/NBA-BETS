@@ -68,6 +68,7 @@ from data_fetcher import (
     fetch_injuries_bdl,
     get_player_injury_status,
 )
+from nba_data.utils.runtime_config import resolve_nba_season
 
 # Phase 2 enhancements: Betting Market and Enhanced Injury Features
 try:
@@ -578,8 +579,8 @@ class InjuryReportManager:
         "C-F": {"offense": 0.15, "defense": 0.27},
     }
 
-    def __init__(self, season="2025-26"):
-        self.season = season
+    def __init__(self, season: str | None = None):
+        self.season = resolve_nba_season(season)
         self._injury_cache = {}
         self._all_injuries_fetched = False
         self._cached_impacts = {}  # Pre-computed injury impacts keyed by team_id
@@ -846,8 +847,8 @@ class InjuryReportManager:
 class HeadToHeadAnalyzer:
     """Analyze head-to-head matchup history between teams."""
 
-    def __init__(self, season="2025-26"):
-        self.season = season
+    def __init__(self, season: str | None = None):
+        self.season = resolve_nba_season(season)
 
     def analyze_h2h(self, team1_id: int, team2_id: int, include_previous_season: bool = True, before_date: str = None) -> dict:
         """
@@ -917,8 +918,8 @@ class HeadToHeadAnalyzer:
 class PositionalAnalyzer:
     """Analyze positional strengths and weaknesses."""
 
-    def __init__(self, season="2025-26"):
-        self.season = season
+    def __init__(self, season: str | None = None):
+        self.season = resolve_nba_season(season)
 
     def get_position_group(self, position: str) -> str:
         """Map detailed position to position group (G/F/C)."""
@@ -1054,8 +1055,8 @@ class PositionalAnalyzer:
 class TeamFeatureGenerator:
     """Generate features for team-level predictions (moneyline, spread)."""
 
-    def __init__(self, season="2025-26"):
-        self.season = season
+    def __init__(self, season: str | None = None):
+        self.season = resolve_nba_season(season)
         self._league_stats_cache = None
 
     def get_league_stats(self):
@@ -1478,12 +1479,12 @@ class TeamFeatureGenerator:
 class MatchupFeatureGenerator:
     """Generate features for matchup predictions with comprehensive analysis."""
 
-    def __init__(self, season="2025-26", injury_manager: InjuryReportManager | None = None):
-        self.season = season
-        self.team_generator = TeamFeatureGenerator(season)
-        self.h2h_analyzer = HeadToHeadAnalyzer(season)
-        self.positional_analyzer = PositionalAnalyzer(season)
-        self.injury_manager = injury_manager or InjuryReportManager(season)
+    def __init__(self, season: str | None = None, injury_manager: InjuryReportManager | None = None):
+        self.season = resolve_nba_season(season)
+        self.team_generator = TeamFeatureGenerator(self.season)
+        self.h2h_analyzer = HeadToHeadAnalyzer(self.season)
+        self.positional_analyzer = PositionalAnalyzer(self.season)
+        self.injury_manager = injury_manager or InjuryReportManager(self.season)
 
         # Phase 2: Initialize betting market features tracker
         if HAS_BETTING_MARKET_FEATURES:
@@ -1958,8 +1959,8 @@ class MatchupFeatureGenerator:
 class PlayerPropFeatureGenerator:
     """Generate features for player prop predictions with matchup analysis."""
 
-    def __init__(self, season="2025-26"):
-        self.season = season
+    def __init__(self, season: str | None = None):
+        self.season = resolve_nba_season(season)
         self._balldontlie_api = None  # Lazy loading
 
     def _get_balldontlie_api(self):
@@ -2948,7 +2949,7 @@ class PlayerPropFeatureGenerator:
 def generate_game_features(
     home_team,
     away_team,
-    season="2025-26",
+    season: str | None = None,
     last_n_games=10,
     include_advanced=True,
     injury_manager: InjuryReportManager | None = None,
@@ -2976,7 +2977,8 @@ def generate_game_features(
     if not home_id or not away_id:
         raise ValueError(f"Could not find team IDs for {home_team} or {away_team}")
 
-    matchup_gen = MatchupFeatureGenerator(season, injury_manager)
+    resolved_season = resolve_nba_season(season)
+    matchup_gen = MatchupFeatureGenerator(resolved_season, injury_manager)
 
     # TIER 1.2: Pass home_team as venue for travel fatigue calculations
     # The venue is where the game is being played (home team's arena)
@@ -2999,7 +3001,12 @@ def generate_game_features(
     }
 
 
-def generate_player_features(player_name, opponent_team=None, season="2025-26", last_n_games=10):
+def generate_player_features(
+    player_name,
+    opponent_team=None,
+    season: str | None = None,
+    last_n_games=10,
+):
     """
     Convenience function to generate all prop features for a player.
 
@@ -3019,7 +3026,7 @@ def generate_player_features(player_name, opponent_team=None, season="2025-26", 
 
     opponent_id = get_team_id(opponent_team) if opponent_team else None
 
-    prop_gen = PlayerPropFeatureGenerator(season)
+    prop_gen = PlayerPropFeatureGenerator(resolve_nba_season(season))
 
     features = {
         "player_name": player_name,
@@ -3040,7 +3047,10 @@ def generate_player_features(player_name, opponent_team=None, season="2025-26", 
     return features
 
 
-def create_injury_report(injuries_data: list[dict], season="2025-26") -> InjuryReportManager:
+def create_injury_report(
+    injuries_data: list[dict],
+    season: str | None = None,
+) -> InjuryReportManager:
     """
     Create an InjuryReportManager with injury data.
 
@@ -3058,7 +3068,7 @@ def create_injury_report(injuries_data: list[dict], season="2025-26") -> InjuryR
     Returns:
         Configured InjuryReportManager
     """
-    manager = InjuryReportManager(season)
+    manager = InjuryReportManager(resolve_nba_season(season))
 
     for team_data in injuries_data:
         team = team_data.get("team")

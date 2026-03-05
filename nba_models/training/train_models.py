@@ -35,6 +35,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from nba_data.utils.runtime_config import resolve_nba_season
+
 # Import our modules
 from data_fetcher import (
     fetch_historical_games as get_team_game_log,
@@ -94,7 +96,10 @@ def load_recent_seasons_only(
         return []
 
     if seasons is None:
-        seasons = ["2024-25", "2025-26"]
+        current_season = resolve_nba_season()
+        current_start = int(current_season.split("-")[0])
+        previous_start = current_start - 1
+        seasons = [f"{previous_start}-{str(previous_start + 1)[-2:]}", current_season]
 
     print("\n" + "="*60)
     print("RECENT SEASONS ONLY MODE")
@@ -152,7 +157,7 @@ def rate_limit():
 
 def fetch_historical_games(
     num_games: int = 100,
-    season: str = "2025-26",
+    season: str | None = None,
 ) -> list[dict]:
     """
     Fetch historical game data with outcomes.
@@ -164,6 +169,8 @@ def fetch_historical_games(
     Returns:
         List of game dictionaries with features and outcomes
     """
+    season = resolve_nba_season(season)
+
     print(f"\n{'='*60}")
     print(f"Fetching historical game data ({num_games} games target)")
     print(f"Season: {season}")
@@ -297,7 +304,7 @@ def fetch_historical_games(
 def fetch_player_data(
     num_players: int = 50,
     games_per_player: int = 10,
-    season: str = "2025-26",
+    season: str | None = None,
 ) -> list[dict]:
     """
     Fetch historical player game data with outcomes.
@@ -310,6 +317,8 @@ def fetch_player_data(
     Returns:
         List of player game dictionaries with features and outcomes
     """
+    season = resolve_nba_season(season)
+
     print(f"\n{'='*60}")
     print(f"Fetching player data ({num_players} players)")
     print(f"{'='*60}\n")
@@ -573,7 +582,7 @@ def load_training_data_from_kaggle(
 def train_models(
     games_data: list[dict],
     player_data: list[dict] | None = None,
-    season: str = "2025-26",
+    season: str | None = None,
     use_ensemble: bool = True,
     run_backtest: bool = False,
     backtest_min_games: int = 100,
@@ -592,6 +601,8 @@ def train_models(
     Returns:
         Training results dictionary
     """
+    season = resolve_nba_season(season)
+
     print(f"\n{'='*60}")
     print("TRAINING ML MODELS")
     print(f"{'='*60}")
@@ -648,7 +659,7 @@ Examples:
     )
     parser.add_argument("--games", type=int, default=50, help="Number of games (API mode only, max 20)")
     parser.add_argument("--players", type=int, default=20, help="Number of players (API mode only)")
-    parser.add_argument("--season", type=str, default="2025-26", help="NBA season")
+    parser.add_argument("--season", type=str, default=resolve_nba_season(), help="NBA season")
     parser.add_argument("--load-games", type=str, help="Load games from JSON file")
     parser.add_argument("--load-players", type=str, help="Load players from JSON file")
     parser.add_argument("--save-data", action="store_true", help="Save fetched data to JSON")
@@ -682,8 +693,13 @@ Examples:
     # Load or fetch data
     if args.recent_only:
         print("\n*** RECENT SEASONS ONLY MODE ***")
-        print("Training on 2024-25 and 2025-26 seasons only.\n")
-        seasons = args.seasons.split(",") if args.seasons else ["2024-25", "2025-26"]
+        current_season = resolve_nba_season(args.season)
+        current_start = int(current_season.split("-")[0])
+        previous_start = current_start - 1
+        previous_season = f"{previous_start}-{str(previous_start + 1)[-2:]}"
+        default_recent_seasons = [previous_season, current_season]
+        print(f"Training on {default_recent_seasons[0]} and {default_recent_seasons[1]} seasons only.\n")
+        seasons = args.seasons.split(",") if args.seasons else default_recent_seasons
         games_data = load_recent_seasons_only(seasons=seasons)
         player_data = None
     elif args.kaggle and args.live:

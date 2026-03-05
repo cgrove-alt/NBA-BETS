@@ -19,6 +19,8 @@ import traceback
 import numpy as np
 import concurrent.futures
 
+from nba_data.utils.runtime_config import resolve_nba_season
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -715,8 +717,10 @@ class DataService:
         # Injury data fetcher (fetches from ESPN API with 30-min cache)
         self._injury_fetcher = InjuryFetcher(cache_duration_minutes=30)
 
+        self._active_season = resolve_nba_season()
+
         # Player prop feature generator for enhanced predictions
-        self._prop_feature_generator = PlayerPropFeatureGenerator(season="2024-25")
+        self._prop_feature_generator = PlayerPropFeatureGenerator(season=self._active_season)
 
         # Prop prediction tracker for performance analysis
         self._prop_tracker = PropTracker()
@@ -761,7 +765,7 @@ class DataService:
         # Initialize Orchestrator (loads models)
         try:
             from app import Orchestrator
-            self.orchestrator = Orchestrator(season="2025-26")
+            self.orchestrator = Orchestrator(season=self._active_season)
             self.orchestrator.load_models()
             self._models_loaded = self.orchestrator.models_loaded
             print(f"Orchestrator models loaded: {self._models_loaded}")
@@ -1262,7 +1266,7 @@ class DataService:
         This connects the InjuryFetcher (which fetches from ESPN) to the
         InjuryReportManager (which calculates impact on features).
         """
-        manager = InjuryReportManager(season="2025-26")
+        manager = InjuryReportManager(season=self._active_season)
 
         try:
             # Fetch all injuries from ESPN API (cached for 30 minutes)
@@ -1350,7 +1354,7 @@ class DataService:
             # Primary: real stats from NBA API (DEF_RATING, OFF_RATING, PACE)
             if HAS_LEAGUE_TEAM_STATS:
                 try:
-                    all_stats = fetch_league_team_stats(season="2025-26")
+                    all_stats = fetch_league_team_stats(season=self._active_season)
                     if all_stats:
                         stats_cache = {}
                         for team in all_stats:
@@ -1845,7 +1849,7 @@ class DataService:
                     generate_game_features,
                     home_team=home_abbrev,
                     away_team=away_abbrev,
-                    season="2025-26",
+                    season=self._active_season,
                     game_date=datetime.now().strftime("%Y-%m-%d"),
                     injury_manager=injury_manager  # NOW PASSING REAL INJURY DATA!
                 )

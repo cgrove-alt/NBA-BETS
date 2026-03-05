@@ -18,10 +18,16 @@ import pandas as pd
 from pathlib import Path
 import warnings
 
+from nba_data.utils.runtime_config import (
+    get_historical_csv_dir,
+    get_live_seasons_dir,
+)
+
 warnings.filterwarnings('ignore')
 
-# Data directory
-DATA_DIR = Path(__file__).parent / "data" / "NBA-Data-2010-2024-main"
+# Canonical data directories live at the repository root, not inside the package.
+DATA_DIR = get_historical_csv_dir()
+LIVE_SEASONS_DIR = get_live_seasons_dir()
 
 # Team abbreviation mappings (handle variations)
 TEAM_ABBREV_MAP = {
@@ -133,7 +139,7 @@ def process_games_to_matchups(df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         home_row = game_rows[game_rows["IS_HOME"]]
-        away_row = game_rows[not game_rows["IS_HOME"]]
+        away_row = game_rows[~game_rows["IS_HOME"]]
 
         if len(home_row) != 1 or len(away_row) != 1:
             continue
@@ -395,13 +401,17 @@ def load_training_data_from_csv(
 
     # Summary statistics
     home_wins = sum(1 for g in training_data if g["home_win"])
-    avg_diff = sum(g["point_differential"] for g in training_data) / len(training_data)
+    avg_diff = (
+        sum(g["point_differential"] for g in training_data) / len(training_data)
+        if training_data
+        else 0.0
+    )
 
     print("\n" + "="*60)
     print("Data Loading Complete!")
     print("="*60)
     print(f"Total training examples: {len(training_data)}")
-    print(f"Home win rate: {home_wins/len(training_data):.1%}")
+    print(f"Home win rate: {home_wins/len(training_data):.1%}" if training_data else "Home win rate: N/A")
     print(f"Average point differential: {avg_diff:+.1f}")
     if seasons:
         print(f"Seasons: {', '.join(seasons)}")
@@ -427,7 +437,7 @@ def load_live_season_data() -> pd.DataFrame:
     Returns:
         DataFrame with live season data (2023-24, 2024-25, 2025-26)
     """
-    live_dir = Path(__file__).parent / "data" / "live_seasons"
+    live_dir = LIVE_SEASONS_DIR
 
     if not live_dir.exists():
         return pd.DataFrame()

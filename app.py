@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Optional, Any
 from dataclasses import dataclass, field, asdict
 
+from nba_data.utils.runtime_config import resolve_nba_season
+
 # Import scipy for proper probability calculations
 try:
     from scipy.stats import norm
@@ -553,7 +555,7 @@ class Orchestrator:
 
     def __init__(
         self,
-        season: str = "2025-26",
+        season: str | None = None,
         bankroll: float = 1000.0,
         risk_tolerance: str = "moderate",
     ):
@@ -565,14 +567,14 @@ class Orchestrator:
             bankroll: Betting bankroll
             risk_tolerance: Risk tolerance level
         """
-        self.season = season
+        self.season = resolve_nba_season(season)
         self.bankroll = bankroll
         self.risk_tolerance = risk_tolerance
 
         # Initialize components
         self.strategy = BettingStrategy(bankroll, risk_tolerance)
-        self.pipeline = ModelTrainingPipeline(season)
-        self.injury_manager = InjuryReportManager(season)
+        self.pipeline = ModelTrainingPipeline(self.season)
+        self.injury_manager = InjuryReportManager(self.season)
 
         # Initialize real odds fetcher
         self.odds_fetcher = None
@@ -2310,7 +2312,7 @@ def main():
 
     # Initialize orchestrator
     orchestrator = Orchestrator(
-        season="2025-26",
+        season=resolve_nba_season(),
         bankroll=1000.0,
         risk_tolerance="moderate",
     )
