@@ -553,15 +553,15 @@ def start_props_fetch(
 
 
 @app.post("/api/games/{game_id}/props/retry")
-def retry_props_fetch(game_id: str):
-    """Reset and retry prop generation for a failed game."""
+def retry_props_fetch(game_id: str, force: bool = Query(False, description="Force regeneration even if props are ready")):
+    """Reset and retry prop generation for a failed game. Use force=true to regenerate ready props."""
     global _game_teams_cache
     service = get_service()
 
     status_data = service.get_props_fetch_status(game_id)
     current_status = status_data.get("status", "not_started")
 
-    if current_status in ("pending", "ready"):
+    if not force and current_status in ("pending", "ready"):
         return {"message": f"Props are already {current_status}", "game_id": game_id, "status": current_status}
 
     if current_status == "locked":
