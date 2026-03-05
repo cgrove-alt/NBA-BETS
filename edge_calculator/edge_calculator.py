@@ -242,12 +242,9 @@ class EdgeCalculator:
         implied_prob = self.american_to_implied_probability(american_odds)
         no_vig_prob = self.calculate_no_vig_probability(american_odds, opposite_odds)
 
-        # Calculate edge against no-vig (true) probability, not vig-inflated implied probability.
-        # Using implied_prob inflates perceived edge by ~2.3% at standard -110/-110 vig.
-        edge = model_probability - no_vig_prob
-        # Calculate edge vs raw implied probability (with vig)
+        # edge: raw gap vs implied probability (includes vig, kept for backward compat)
         edge = model_probability - implied_prob
-        # No-vig edge (vs true market probability without juice)
+        # no_vig_edge: gap vs true market probability (vig removed) — used for betting decisions
         no_vig_edge = model_probability - no_vig_prob
 
         # Calculate potential profit
@@ -258,9 +255,10 @@ class EdgeCalculator:
         ev = (model_probability * potential_profit) - ((1 - model_probability) * stake)
         ev_per_dollar = ev / stake
 
-        # Classify edge
-        has_edge = edge >= self.min_edge_threshold
-        edge_quality = self.classify_edge(edge)
+        # Classify edge using no-vig edge (true edge vs market)
+        # Using implied_prob would inflate perceived edge by ~2.3% at standard -110 vig
+        has_edge = no_vig_edge >= self.min_edge_threshold
+        edge_quality = self.classify_edge(no_vig_edge)
 
         return EdgeResult(
             model_probability=model_probability,

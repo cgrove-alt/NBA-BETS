@@ -386,33 +386,33 @@ class TestMoneylineEdge:
     """Test moneyline edge calculation."""
 
     def test_favorite_with_edge(self):
-        """Model sees 65% chance, market implies 60% (no-vig ~53.4%) → positive edge."""
+        """Model sees 65% chance, market implies 60% → has_edge uses no-vig edge."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
         result = calc.calculate_edge(model_probability=0.65, american_odds=-150)
-        # Edge is vs no-vig probability (removing vig from -150 vs default -110 opposite)
-        assert result.edge > 0.05
-        assert result.has_edge is True
+        assert result.edge > 0  # vig-inflated edge is positive
+        assert result.no_vig_edge > 0  # true edge is also positive
+        assert result.has_edge is True  # based on no_vig_edge
 
     def test_underdog_with_edge(self):
-        """Model sees 45% chance on +150, no-vig ~43.3% → small positive edge."""
+        """Model sees 45% chance on +150, no-vig ~43.3% → small positive no-vig edge."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
         result = calc.calculate_edge(model_probability=0.45, american_odds=150)
-        # Edge is vs no-vig probability
-        assert result.edge > 0
-        assert result.has_edge is False  # Edge exists but below 3% threshold
+        assert result.edge > 0  # vs implied (with vig)
+        assert result.no_vig_edge > 0  # vs true market prob
+        assert result.has_edge is False  # no_vig_edge < 3% threshold
 
     def test_no_edge(self):
-        """Model agrees with true (no-vig) probability → no edge."""
+        """Model at 50% vs -110/-110 → no_vig_edge ≈ 0, edge is negative (vig)."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
-        # -110/-110 has no-vig probability of exactly 0.50
         result = calc.calculate_edge(model_probability=0.50, american_odds=-110)
-        assert abs(result.edge) < 0.01
+        assert abs(result.no_vig_edge) < 0.01  # true edge is zero
+        assert result.edge < 0  # raw edge is negative due to vig
         assert result.has_edge is False
 
     def test_negative_edge(self):
