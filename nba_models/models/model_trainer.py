@@ -1120,8 +1120,9 @@ class PropModelWrapper:
         X = pd.DataFrame([features])
         for col in self.feature_names:
             if col not in X.columns:
-                X[col] = 0
-        X = X[self.feature_names].fillna(0)
+                X[col] = PREDICTION_FEATURE_DEFAULTS.get(col, 0)
+        X = X[self.feature_names]
+        X = smart_fillna_features(X)
         X_scaled = self.scaler.transform(X)
 
         predicted = float(self.model.predict(X_scaled)[0])
@@ -1170,9 +1171,9 @@ class EnsembleMoneylineWrapper:
         X = pd.DataFrame([numeric_features])
         for col in self.feature_names:
             if col not in X.columns:
-                X[col] = 0
+                X[col] = PREDICTION_FEATURE_DEFAULTS.get(col, 0)
         X = X[self.feature_names]
-        X_clean = X.fillna(0)
+        X_clean = smart_fillna_features(X)
         X_scaled = self.scaler.transform(X_clean)
 
         # Ensemble prediction
@@ -4449,20 +4450,17 @@ class TotalsModel(BaseModelTrainer):
         test_size: float = 0.2,
         cv_folds: int = 5,
     ) -> dict[str, Any]:
-        """Train the totals model."""
-        if self.use_classifier:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=42, stratify=y
-            )
-        else:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=42
-            )
+        """Train the totals model with temporal split (no future leakage)."""
+        split_idx = int(len(X) * (1 - test_size))
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
 
         X_train_scaled = self.preprocess_features(X_train, fit=True)
         X_test_scaled = self.preprocess_features(X_test, fit=False)
 
-        cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=cv_folds)
+        from sklearn.model_selection import TimeSeriesSplit as TotalsTimeSeriesSplit
+        tscv_totals = TotalsTimeSeriesSplit(n_splits=cv_folds)
+        cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=tscv_totals)
 
         self.model.fit(X_train_scaled, y_train)
         self.is_fitted = True
@@ -4856,8 +4854,8 @@ class ModelTrainingPipeline:
                         logger.log_classification_metrics(y_test, y_pred_test, y_prob_test_calibrated)
                         logger.log_calibration_metrics(y_prob_test_calibrated, y_test)
 
-                        # Log betting ROI on TEST data only
-                        logger.log_betting_roi(y_prob_test, np.array(y_test))
+                        # Log betting ROI on TEST data using calibrated probabilities
+                        logger.log_betting_roi(y_prob_test_calibrated, np.array(y_test))
                         logger.add_custom_metric("train_size", len(X_train_only))
                         logger.add_custom_metric("cal_val_size", len(X_cal_val))
                         logger.add_custom_metric("test_size", len(X_test))

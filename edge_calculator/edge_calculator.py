@@ -231,9 +231,9 @@ class EdgeCalculator:
         implied_prob = self.american_to_implied_probability(american_odds)
         no_vig_prob = self.calculate_no_vig_probability(american_odds, opposite_odds)
 
-        # Calculate edge
-        edge = model_probability - implied_prob
-        model_probability - no_vig_prob
+        # Calculate edge against no-vig (true) probability, not vig-inflated implied probability.
+        # Using implied_prob inflates perceived edge by ~2.3% at standard -110/-110 vig.
+        edge = model_probability - no_vig_prob
 
         # Calculate potential profit
         potential_profit = stake * (decimal_odds - 1)
@@ -263,13 +263,13 @@ class EdgeCalculator:
             edge_quality=edge_quality,
         )
 
-    # Prop-specific standard deviations (aligned with daily_predictions.py PROP_STD_DEVS)
+    # Prop-specific standard deviations (must match daily_predictions.py PROP_STD_DEVS)
     PROP_STD_DEVS = {
-        'points': 5.5,
-        'rebounds': 7.0,
-        'assists': 2.5,
-        'threes': 1.8,
-        'pra': 9.0,
+        'points': 6.5,
+        'rebounds': 3.1,
+        'assists': 2.2,
+        'threes': 1.6,
+        'pra': 8.5,
     }
     DEFAULT_PROP_STD_DEV = 5.0
 

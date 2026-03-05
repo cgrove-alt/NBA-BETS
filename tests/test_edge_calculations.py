@@ -251,11 +251,11 @@ class TestPropEdge:
     """Test prop over/under edge calculations from daily_predictions.py."""
 
     PROP_STD_DEVS = {
-        'points': 5.5,
-        'rebounds': 7.0,
-        'assists': 2.5,
-        'threes': 1.8,
-        'pra': 9.0,
+        'points': 6.5,
+        'rebounds': 3.1,
+        'assists': 2.2,
+        'threes': 1.6,
+        'pra': 8.5,
     }
 
     def _calc_prop_over_prob(self, predicted, line, prop_type='points'):
@@ -279,27 +279,27 @@ class TestPropEdge:
         prob = self._calc_prop_over_prob(24.5, 24.5, 'points')
         assert abs(prob - 0.5) < 0.001
 
-    def test_rebounds_wider_std_dev(self):
-        """Rebounds have larger std dev → same point diff produces lower probability."""
-        pts_prob = self._calc_prop_over_prob(27.5, 24.5, 'points')  # 3pt diff, std=5.5
-        reb_prob = self._calc_prop_over_prob(10.5, 7.5, 'rebounds')  # 3pt diff, std=7.0
-        assert pts_prob > reb_prob, "Same diff should give higher prob with tighter std"
+    def test_rebounds_tighter_std_dev(self):
+        """Rebounds have tighter std dev (3.1) → same point diff produces higher probability."""
+        pts_prob = self._calc_prop_over_prob(27.5, 24.5, 'points')  # 3pt diff, std=6.5
+        reb_prob = self._calc_prop_over_prob(10.5, 7.5, 'rebounds')  # 3pt diff, std=3.1
+        assert reb_prob > pts_prob, "Same diff should give higher prob with tighter std"
 
     def test_assists_tighter_std_dev(self):
         """Assists have smaller std dev → same point diff produces higher probability."""
-        pts_prob = self._calc_prop_over_prob(27.0, 25.0, 'points')  # 2pt diff, std=5.5
-        ast_prob = self._calc_prop_over_prob(7.0, 5.0, 'assists')   # 2pt diff, std=2.5
+        pts_prob = self._calc_prop_over_prob(27.0, 25.0, 'points')  # 2pt diff, std=6.5
+        ast_prob = self._calc_prop_over_prob(7.0, 5.0, 'assists')   # 2pt diff, std=2.2
         assert ast_prob > pts_prob, "Same diff should give higher prob with tighter std"
 
     def test_threes_extreme_diff(self):
         """Large diff on threes (small std) → very high probability."""
-        prob = self._calc_prop_over_prob(5.0, 2.5, 'threes')  # 2.5pt diff, std=1.8
+        prob = self._calc_prop_over_prob(5.0, 2.5, 'threes')  # 2.5pt diff, std=1.6
         assert prob > 0.9
 
     def test_pra_combined(self):
-        """PRA uses combined std dev of 9.0."""
-        prob = self._calc_prop_over_prob(45.0, 40.0, 'pra')  # 5pt diff, std=9.0
-        expected = float(norm.cdf(5.0 / 9.0))
+        """PRA uses combined std dev of 8.5."""
+        prob = self._calc_prop_over_prob(45.0, 40.0, 'pra')  # 5pt diff, std=8.5
+        expected = float(norm.cdf(5.0 / 8.5))
         assert abs(prob - expected) < 0.001
 
 
@@ -321,8 +321,8 @@ class TestEdgeCalculatorModule:
             american_odds=-110,
             prop_type='points',
         )
-        # 3.5pt diff / 5.5 std = z=0.636, norm.cdf ≈ 0.7377
-        expected_prob = float(norm.cdf(3.5 / 5.5))
+        # 3.5pt diff / 6.5 std (empirically calibrated) = z=0.538, norm.cdf ≈ 0.705
+        expected_prob = float(norm.cdf(3.5 / 6.5))
         assert abs(result.model_probability - expected_prob) < 0.01
 
     def test_prop_type_affects_probability(self):
@@ -336,7 +336,7 @@ class TestEdgeCalculatorModule:
         ast_result = calc.calculate_edge_from_prediction(
             predicted_value=7.0, prop_line=5.0, prop_type='assists'
         )
-        # Same 2pt diff but assists std=2.5 vs points std=5.5
+        # Same 2pt diff but assists std=2.2 vs points std=6.5
         assert ast_result.model_probability > pts_result.model_probability
 
     def test_default_std_when_no_prop_type(self):
@@ -373,32 +373,32 @@ class TestMoneylineEdge:
     """Test moneyline edge calculation."""
 
     def test_favorite_with_edge(self):
-        """Model sees 65% chance, market implies 60% → positive edge."""
+        """Model sees 65% chance, market implies 60% (no-vig ~53.4%) → positive edge."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
         result = calc.calculate_edge(model_probability=0.65, american_odds=-150)
-        # -150 implies 60%, so edge = 0.65 - 0.60 = 0.05
-        assert result.edge == pytest.approx(0.05, abs=0.01)
+        # Edge is vs no-vig probability (removing vig from -150 vs default -110 opposite)
+        assert result.edge > 0.05
         assert result.has_edge is True
 
     def test_underdog_with_edge(self):
-        """Model sees 45% chance on +150, implied 40% → positive edge."""
+        """Model sees 45% chance on +150, no-vig ~43.3% → small positive edge."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
         result = calc.calculate_edge(model_probability=0.45, american_odds=150)
-        # +150 implies 40%, edge = 0.45 - 0.40 = 0.05
-        assert result.edge == pytest.approx(0.05, abs=0.01)
-        assert result.has_edge is True
+        # Edge is vs no-vig probability
+        assert result.edge > 0
+        assert result.has_edge is False  # Edge exists but below 3% threshold
 
     def test_no_edge(self):
-        """Model agrees with market → no edge."""
+        """Model agrees with true (no-vig) probability → no edge."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
-        result = calc.calculate_edge(model_probability=0.5238, american_odds=-110)
-        # -110 implies 52.38%, so edge ≈ 0
+        # -110/-110 has no-vig probability of exactly 0.50
+        result = calc.calculate_edge(model_probability=0.50, american_odds=-110)
         assert abs(result.edge) < 0.01
         assert result.has_edge is False
 

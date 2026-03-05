@@ -328,7 +328,8 @@ class PlayerFeatureGenerator:
         features['ast_per_100_poss'] = (season_ast_avg / expected_game_pace) * 100 if expected_game_pace > 0 else season_ast_avg
 
         # Minutes projections (4 features)
-        features['minutes_cv'] = features['season_pts_std'] / season_min_avg if season_min_avg > 0 else 0
+        season_min_std = np.std(mins) if len(mins) > 1 else 0
+        features['minutes_cv'] = season_min_std / season_min_avg if season_min_avg > 0 else 0
         features['minutes_recency_ratio'] = features['recent_min_avg'] / season_min_avg if season_min_avg > 0 else 1.0
         features['expected_min_reduction'] = 0.0
         features['projected_min_factor'] = 1.0

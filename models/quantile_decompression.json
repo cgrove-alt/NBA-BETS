@@ -1,22 +1,27 @@
 {
   "points": {
-    "slope": 0.7,
-    "mean_gap": -2.0
+    "slope": 0.724,
+    "mean_gap": -3.15,
+    "mean_line": 19.9
   },
   "rebounds": {
-    "slope": 0.7,
-    "mean_gap": -2.0
+    "slope": 0.805,
+    "mean_gap": 0.00,
+    "mean_line": 5.1
   },
   "assists": {
-    "slope": 0.7,
-    "mean_gap": -2.0
+    "slope": 0.644,
+    "mean_gap": 0.38,
+    "mean_line": 4.1
   },
   "threes": {
-    "slope": 0.7,
-    "mean_gap": -2.0
+    "slope": 0.85,
+    "mean_gap": 0.00,
+    "mean_line": 2.5
   },
   "pra": {
-    "slope": 0.7,
-    "mean_gap": -2.0
+    "slope": 0.80,
+    "mean_gap": -1.00,
+    "mean_line": 30.0
   }
 }

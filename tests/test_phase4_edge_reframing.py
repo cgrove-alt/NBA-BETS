@@ -46,26 +46,25 @@ class TestCalculatePropEdge:
         assert result['edge'] > 0
 
     def test_calculate_prop_edge_coin_flip(self):
-        """over_prob=0.5 → near-zero edge both sides."""
+        """over_prob=0.5 → near-zero edge both sides (edge is vs no-vig prob)."""
         from nba_models.inference.daily_predictions import _calculate_prop_edge
 
         result = _calculate_prop_edge(0.5, -110)
         assert abs(result['over_edge']) < 5
         assert abs(result['under_edge']) < 5
-        # Both edges should be negative (vig eats them)
-        assert result['over_edge'] < 0
-        assert result['under_edge'] < 0
+        # At -110/-110, no-vig prob is exactly 0.5, so 0.5 model prob = zero edge
+        assert abs(result['over_edge']) < 0.5
+        assert abs(result['under_edge']) < 0.5
 
-    def test_edge_at_minus_110_matches_legacy(self):
-        """At -110 odds, new calc should be close to old (over_prob-0.524)*100."""
+    def test_edge_at_minus_110_vs_no_vig(self):
+        """At -110 odds, edge should be vs no-vig probability (0.5 at -110/-110)."""
         from nba_models.inference.daily_predictions import _calculate_prop_edge
 
         for prob in [0.55, 0.60, 0.65, 0.70]:
             result = _calculate_prop_edge(prob, -110)
-            legacy_edge = (prob - 0.524) * 100  # old formula
-            # The over_edge should be close to legacy (within 0.5%)
-            assert abs(result['over_edge'] - legacy_edge) < 0.5, \
-                f"prob={prob}: new={result['over_edge']:.2f} vs legacy={legacy_edge:.2f}"
+            expected_edge = (prob - 0.5) * 100
+            assert abs(result['over_edge'] - expected_edge) < 0.5, \
+                f"prob={prob}: new={result['over_edge']:.2f} vs expected={expected_edge:.2f}"
 
     def test_edge_at_different_odds(self):
         """Harder odds (-120) should give less edge than standard (-110) for same prob."""
@@ -78,13 +77,13 @@ class TestCalculatePropEdge:
         # At -120, implied probability is higher (~54.5% vs 52.4%), so edge is smaller
         assert result_120['over_edge'] < result_110['over_edge']
 
-    def test_over_under_edge_sum_negative(self):
-        """over_edge + under_edge < 0 due to vig."""
+    def test_over_under_edge_sum_near_zero(self):
+        """over_edge + under_edge ≈ 0 since edges are vs no-vig probabilities."""
         from nba_models.inference.daily_predictions import _calculate_prop_edge
 
         result = _calculate_prop_edge(0.55, -110)
         total = result['over_edge'] + result['under_edge']
-        assert total < 0, f"Expected negative sum (vig), got {total}"
+        assert abs(total) < 1.0, f"Expected near-zero sum, got {total}"
 
 
 # ============================================================
