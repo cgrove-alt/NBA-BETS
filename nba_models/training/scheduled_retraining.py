@@ -337,6 +337,32 @@ def full_retrain() -> bool:
 
         logger.info("Training completed successfully")
 
+        # Step 3b: Refresh quantile decompression constants
+        logger.info("Recalibrating quantile decompression constants...")
+        try:
+            calib_script = PROJECT_DIR.parent.parent / "scripts" / "calibrate_quantile_decompression.py"
+            if not calib_script.exists():
+                calib_script = Path(__file__).parent.parent.parent / "scripts" / "calibrate_quantile_decompression.py"
+            if calib_script.exists():
+                calib_result = subprocess.run(
+                    [sys.executable, str(calib_script)],
+                    cwd=PROJECT_DIR,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if calib_result.returncode == 0:
+                    logger.info("Quantile decompression recalibrated successfully")
+                else:
+                    logger.warning(
+                        "Quantile decompression calibration failed (non-critical): %s",
+                        calib_result.stderr[:300],
+                    )
+            else:
+                logger.warning("calibrate_quantile_decompression.py not found — skipping")
+        except Exception as calib_exc:
+            logger.warning("Quantile decompression calibration error (non-critical): %s", calib_exc)
+
         # Step 4: Run validation backtest
         logger.info("Running validation backtest...")
 

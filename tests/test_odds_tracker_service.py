@@ -310,10 +310,11 @@ class TestOddsTrackerService(unittest.TestCase):
         self.assertTrue(service.scheduler.running)
         self.assertIsNotNone(service.service_start_time)
 
-        # Verify job was added
+        # Verify the primary odds tracking job was added
+        # (player prop job may also be added — check by job ID, not count)
         jobs = service.scheduler.get_jobs()
-        self.assertEqual(len(jobs), 1)
-        self.assertEqual(jobs[0].id, 'odds_tracker_job')
+        job_ids = [j.id for j in jobs]
+        self.assertIn('odds_tracker_job', job_ids)
 
         # Stop service
         service.stop()
@@ -437,9 +438,10 @@ class TestEdgeCases(unittest.TestCase):
         # First start should work
         service.start()
 
-        # Should have 1 job
+        # The primary odds tracking job must be present
         jobs = service.scheduler.get_jobs()
-        self.assertEqual(len(jobs), 1)
+        job_ids = [j.id for j in jobs]
+        self.assertIn('odds_tracker_job', job_ids)
 
         # Second start should raise error (scheduler already running)
         # This is expected behavior - APScheduler doesn't allow double-start
