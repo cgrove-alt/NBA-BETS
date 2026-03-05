@@ -21,6 +21,8 @@ Expected Impact:
 - Must be validated through backtesting on held-out data
 """
 
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 from typing import Union, Any

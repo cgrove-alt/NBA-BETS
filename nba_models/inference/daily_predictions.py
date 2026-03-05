@@ -13,6 +13,8 @@ Usage:
     python3 daily_predictions.py --date 2026-01-05  # Specific date
 """
 
+from __future__ import annotations
+
 import warnings
 warnings.filterwarnings('ignore')
 

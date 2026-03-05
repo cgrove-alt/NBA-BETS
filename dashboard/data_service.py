@@ -5,6 +5,8 @@ Provides data fetching and caching layer for the dashboard.
 Integrates ML models for real predictions instead of hardcoded defaults.
 """
 
+from __future__ import annotations
+
 import sys
 import pickle
 import queue

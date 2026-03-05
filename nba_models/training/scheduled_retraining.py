@@ -28,6 +28,8 @@ For Railway deployment, add to railway.toml:
     command = "python3 scheduled_retraining.py --daemon"
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json

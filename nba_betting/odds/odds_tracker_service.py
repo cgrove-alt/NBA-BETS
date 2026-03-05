@@ -31,6 +31,8 @@ Dependencies:
 - betting_market_features.py (OddsTracker class)
 """
 
+from __future__ import annotations
+
 import load_env  # noqa: F401  — load .env before any code reads os.environ
 import os
 import sys

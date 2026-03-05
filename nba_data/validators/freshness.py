@@ -5,6 +5,8 @@ Tracks when each data source was last fetched so predictions
 can report how stale their input data is.
 """
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime

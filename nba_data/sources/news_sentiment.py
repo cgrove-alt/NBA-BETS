@@ -21,6 +21,8 @@ INSIGHT TYPES:
 =============================================================================
 """
 
+from __future__ import annotations
+
 import load_env  # noqa: F401  — load .env before any code reads os.environ
 import os
 import time

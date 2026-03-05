@@ -15,6 +15,8 @@ Key Features:
 Reference: FiveThirtyEight's NBA Elo methodology
 """
 
+from __future__ import annotations
+
 import math
 import json
 from datetime import datetime

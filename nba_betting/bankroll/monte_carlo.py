@@ -11,6 +11,8 @@ Provides statistical confidence intervals for performance metrics through simula
 This helps quantify uncertainty in backtesting results and set realistic expectations.
 """
 
+from __future__ import annotations
+
 import numpy as np
 from dataclasses import dataclass
 

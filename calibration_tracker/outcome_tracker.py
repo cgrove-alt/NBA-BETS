@@ -8,6 +8,8 @@ Responsibilities:
 - Handle edge cases (DNP, blowouts, OT)
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime
 from dataclasses import dataclass, asdict

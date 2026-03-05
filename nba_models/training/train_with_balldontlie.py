@@ -15,6 +15,8 @@ Usage:
     python3 train_with_balldontlie.py --quick  # Quick test with limited data
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json

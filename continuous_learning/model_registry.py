@@ -8,6 +8,8 @@ Manages model versions with:
 4. Active model selection
 """
 
+from __future__ import annotations
+
 import json
 import shutil
 import pickle

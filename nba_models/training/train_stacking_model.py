@@ -13,6 +13,8 @@ Usage:
     python3 train_stacking_model.py --incremental  # Retrain meta-learner only (fast)
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import pickle

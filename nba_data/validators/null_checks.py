@@ -5,6 +5,8 @@ Validates that critical features are present and non-null before
 predictions are generated.
 """
 
+from __future__ import annotations
+
 import logging
 import math
 from typing import Any

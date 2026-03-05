@@ -17,6 +17,8 @@ API Endpoints used:
 - Direct scraping of NBA game pages for referee assignments
 """
 
+from __future__ import annotations
+
 import json
 import time
 import requests

@@ -10,6 +10,8 @@ Provides:
 Goal: Reduce prediction generation time from >10 minutes to <5 minutes
 """
 
+from __future__ import annotations
+
 import time
 import hashlib
 import json

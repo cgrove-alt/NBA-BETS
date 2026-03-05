@@ -28,6 +28,8 @@ New Endpoints (Task 4.4):
     - GET /api/auth/verify - Verify JWT token (if AUTH_ENABLED)
 """
 
+from __future__ import annotations
+
 import load_env  # noqa: F401  — load .env before any code reads os.environ
 import sys
 from pathlib import Path
@@ -324,6 +326,70 @@ def health_check():
             checks=checks,
         ).model_dump(),
     )
+
+
+# ============== PIPELINE STATUS ==============
+
+@app.get("/api/pipeline/status")
+def pipeline_status():
+    """Pipeline health: last prediction time, today's count, settlement status."""
+    from datetime import datetime, date
+
+    result = {
+        "timestamp": datetime.now(ET).isoformat(),
+        "predictions_today": 0,
+        "last_prediction_time": None,
+        "settlement_last_run": None,
+        "settled_today": 0,
+        "days_with_predictions_last_7": 0,
+    }
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        result["error"] = "DATABASE_URL not set"
+        return result
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+
+        today = date.today().isoformat()
+
+        # Count today's predictions
+        cur.execute(
+            "SELECT COUNT(*), MAX(created_at) FROM predictions_history WHERE date = %s",
+            (today,),
+        )
+        row = cur.fetchone()
+        result["predictions_today"] = row[0] or 0
+        result["last_prediction_time"] = row[1].isoformat() if row[1] else None
+
+        # Days with predictions in last 7 days
+        cur.execute(
+            "SELECT COUNT(DISTINCT date) FROM predictions_history "
+            "WHERE date >= (CURRENT_DATE - INTERVAL '7 days')"
+        )
+        result["days_with_predictions_last_7"] = cur.fetchone()[0] or 0
+
+        # Settlement status (paper trades)
+        try:
+            cur.execute(
+                "SELECT COUNT(*), MAX(settled_at) FROM paper_trades "
+                "WHERE settled_at IS NOT NULL AND settled_at >= CURRENT_DATE"
+            )
+            srow = cur.fetchone()
+            result["settled_today"] = srow[0] or 0
+            result["settlement_last_run"] = srow[1].isoformat() if srow[1] else None
+        except Exception:
+            pass  # table may not exist
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
 
 
 # ============== GAMES ENDPOINTS ==============

@@ -18,6 +18,8 @@ Usage:
     impact = calc.calculate_injury_impact(team_id, injuries, game_date)
 """
 
+from __future__ import annotations
+
 import numpy as np
 from collections import defaultdict
 

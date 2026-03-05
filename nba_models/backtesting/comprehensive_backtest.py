@@ -8,6 +8,8 @@ Usage:
     python3 comprehensive_backtest.py
 """
 
+from __future__ import annotations
+
 import json
 import pickle
 import warnings

@@ -6,6 +6,8 @@ Uses permissive validation: logs warnings on unexpected shapes but returns
 data anyway to avoid breaking existing callers.
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime
 from typing import Optional

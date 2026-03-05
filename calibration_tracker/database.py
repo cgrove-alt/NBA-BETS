@@ -12,6 +12,8 @@ Production uses PostgreSQL (via DATABASE_URL).
 Local dev/tests fall back to SQLite.
 """
 
+from __future__ import annotations
+
 import sqlite3
 import json
 import logging

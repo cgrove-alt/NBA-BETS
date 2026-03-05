@@ -24,6 +24,8 @@ Usage:
     print(results.summary())
 """
 
+from __future__ import annotations
+
 import numpy as np
 from collections.abc import Callable
 from dataclasses import dataclass, field

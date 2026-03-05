@@ -26,6 +26,8 @@ Usage:
     stats = api.get_season_averages(player_ids=[1, 2, 3])
 """
 
+from __future__ import annotations
+
 import os
 import requests
 import time

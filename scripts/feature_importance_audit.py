@@ -9,6 +9,8 @@ Usage:
     python3 scripts/feature_importance_audit.py [--threshold 0.01] [--output models/selected_features.json]
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging

@@ -25,6 +25,8 @@ CLV (Closing Line Value): The difference between the odds you bet at and
 =============================================================================
 """
 
+from __future__ import annotations
+
 import time
 import json
 import hashlib

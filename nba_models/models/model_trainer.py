@@ -8,6 +8,8 @@ Implements machine learning models for NBA betting predictions:
 - Parlay probability calculator
 """
 
+from __future__ import annotations
+
 import json
 import pickle
 import warnings

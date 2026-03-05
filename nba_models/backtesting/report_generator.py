@@ -11,6 +11,8 @@ Author: NBA Prediction Model Team
 Version: 1.0
 """
 
+from __future__ import annotations
+
 import json
 import sys
 from datetime import datetime

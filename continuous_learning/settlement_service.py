@@ -7,6 +7,8 @@ Automatically settles predictions with actual game results by:
 3. Settling each prediction as hit or miss
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta

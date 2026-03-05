@@ -40,6 +40,8 @@ was available at the time of the game.
 =============================================================================
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import time

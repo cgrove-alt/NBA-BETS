@@ -12,6 +12,8 @@ Usage:
     team_id = TEAM_ABBREV_TO_BDL["LAL"]
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from datetime import datetime, timedelta

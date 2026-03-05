@@ -19,6 +19,8 @@ Usage:
     stats = db.get_team_stats_before_date(team_id, game_date)
 """
 
+from __future__ import annotations
+
 import sqlite3
 import json
 from datetime import datetime, timedelta

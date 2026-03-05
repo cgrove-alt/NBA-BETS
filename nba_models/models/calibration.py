@@ -17,6 +17,8 @@ Calibration is CRITICAL for betting because:
 - Kelly criterion bet sizing requires well-calibrated probabilities
 """
 
+from __future__ import annotations
+
 import numpy as np
 import pickle
 import json

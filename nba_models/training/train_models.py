@@ -22,6 +22,8 @@ Data Source Hierarchy (fastest to slowest):
     3. NBA API (default) - Rate limited, slow, use only for testing
 """
 
+from __future__ import annotations
+
 # API safeguard: Limit games when using slow API path
 MAX_API_GAMES = 20  # Maximum games to fetch via API (prevents long waits)
 API_WARNING_THRESHOLD = 50  # Warn if user requests more than this via API

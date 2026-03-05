@@ -28,6 +28,8 @@ Multi-bet Kelly: Maximize E[log(wealth)] subject to constraints
 =============================================================================
 """
 
+from __future__ import annotations
+
 import numpy as np
 from scipy.optimize import minimize
 from dataclasses import dataclass, field

@@ -10,6 +10,8 @@ Key adjustments:
 3. Player Props: Pace-project current stats to end of game
 """
 
+from __future__ import annotations
+
 import math
 
 

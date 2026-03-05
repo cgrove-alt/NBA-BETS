@@ -30,6 +30,8 @@ Output: Distribution of 10,000+ simulated games providing:
 =============================================================================
 """
 
+from __future__ import annotations
+
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Any

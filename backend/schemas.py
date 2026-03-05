@@ -2,6 +2,8 @@
 Pydantic schemas for NBA Props API request/response validation.
 """
 
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
 from typing import Any
 

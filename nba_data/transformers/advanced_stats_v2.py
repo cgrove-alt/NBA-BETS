@@ -20,6 +20,8 @@ Usage:
     features = calc.get_four_factors_before_date(team_id, game_date)
 """
 
+from __future__ import annotations
+
 import numpy as np
 from collections import defaultdict
 

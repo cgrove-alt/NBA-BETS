@@ -11,6 +11,8 @@ Usage:
     team_rating = fetcher.calculate_team_rating(team_players, injuries)
 """
 
+from __future__ import annotations
+
 import json
 import time
 import requests

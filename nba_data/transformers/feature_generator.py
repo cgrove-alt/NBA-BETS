@@ -13,6 +13,8 @@ Created: 2026-01-14
 Purpose: Fix feature mismatch bug discovered during Phase 1
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 

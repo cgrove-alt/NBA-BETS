@@ -10,6 +10,8 @@ Usage:
     python3 live_season_fetcher.py --test            # Test with small sample
 """
 
+from __future__ import annotations
+
 import requests
 import time
 import pandas as pd

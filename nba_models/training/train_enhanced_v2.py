@@ -16,6 +16,8 @@ Usage:
     python3 train_enhanced_v2.py
 """
 
+from __future__ import annotations
+
 import json
 import warnings
 from datetime import datetime

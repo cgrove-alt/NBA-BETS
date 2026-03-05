@@ -8,6 +8,8 @@ Supports incremental model updates using:
 4. Feature extraction from settled predictions
 """
 
+from __future__ import annotations
+
 import sys
 import sqlite3
 from pathlib import Path

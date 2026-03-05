@@ -12,6 +12,8 @@ and reliability of betting edges, combining multiple factors:
 A higher edge quality score indicates greater confidence in the edge being real.
 """
 
+from __future__ import annotations
+
 import numpy as np
 from dataclasses import dataclass
 from enum import Enum

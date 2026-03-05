@@ -12,6 +12,8 @@ Usage:
     games = load_training_data_from_csv(seasons=["2022-23", "2023-24"])
 """
 
+from __future__ import annotations
+
 import pandas as pd
 from pathlib import Path
 import warnings

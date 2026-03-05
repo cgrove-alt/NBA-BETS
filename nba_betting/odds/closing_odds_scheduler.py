@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 r"""
 Closing Odds Scheduler - Captures closing lines before game start.
 
