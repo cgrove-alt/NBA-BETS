@@ -146,25 +146,27 @@ def fetch_new_data():
 
     # Import and run the data fetcher
     try:
-        # Run a quick fetch of recent games
+        # Run a quick fetch of recent games using BalldontlieAPI
         result = subprocess.run(
             [sys.executable, "-c", """
-import sys
+import sys, os
 sys.path.insert(0, '.')
-from balldontlie_client import BalldontlieClient
+import load_env
+from nba_data.sources.balldontlie_api import BalldontlieAPI
 from datetime import datetime, timedelta
 
-client = BalldontlieClient()
+api = BalldontlieAPI()
 
 # Fetch games from last 7 days
 end_date = datetime.now()
-start_date = end_date - timedelta(days=7)
+dates = [(end_date - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
 
-games = client.get_games(
-    start_date=start_date.strftime('%Y-%m-%d'),
-    end_date=end_date.strftime('%Y-%m-%d')
-)
-print(f"Fetched {len(games)} games from last 7 days")
+total = 0
+for date in dates:
+    games = api.get_games(dates=[date])
+    if games:
+        total += len(games)
+print(f"Fetched {total} games from last 7 days")
 """],
             cwd=PROJECT_DIR,
             capture_output=True,
