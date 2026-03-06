@@ -200,6 +200,29 @@ def calculate_time_decay_weights(dates: pd.Series, half_life_days: int = 180) ->
     return weights.values
 
 
+def _save_inference_ready_stacking_model(
+    model,
+    output_paths: list[Path],
+    feature_names: list[str],
+    context_feature_names: list[str] | None = None,
+) -> None:
+    """Save stacking artifacts in a format the inference pipeline can consume."""
+    model.feature_names = list(feature_names)
+    model.context_feature_names = list(context_feature_names or [])
+
+    artifact = {
+        'model': model,
+        'feature_names': list(feature_names),
+        'context_feature_names': list(context_feature_names or []),
+        'context_scaler': getattr(model, 'context_scaler', None),
+        'artifact_type': 'stacking_meta_learner',
+    }
+
+    for output_path in output_paths:
+        with open(output_path, 'wb') as f:
+            pickle.dump(artifact, f)
+
+
 class TrainingDataLoader:
     """Load and prepare training data from cache with proper feature engineering."""
 
@@ -688,28 +711,34 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
 
             # Only save if improved
             if acc >= acc_baseline or ll <= ll_baseline:
-                output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
-                with open(output_path, 'wb') as f:
-                    pickle.dump(model, f)
-                print(f"  ✓ Model improved! Saved to {output_path}")
+                output_paths = [
+                    MODEL_DIR / "moneyline_stacking.pkl",
+                    MODEL_DIR / "moneyline_stacking_metalearner.pkl",
+                ]
+                _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
+                print(f"  ✓ Model improved! Saved to {output_paths[0]} and {output_paths[1]}")
             else:
                 print("  ✗ Model did not improve. Keeping baseline.")
                 return baseline_model
         except Exception as e:
             print(f"  Warning: Could not load baseline: {e}")
             # Save anyway if baseline comparison failed
-            output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
-            with open(output_path, 'wb') as f:
-                pickle.dump(model, f)
-            print(f"  Saved to {output_path}")
+            output_paths = [
+                MODEL_DIR / "moneyline_stacking.pkl",
+                MODEL_DIR / "moneyline_stacking_metalearner.pkl",
+            ]
+            _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
+            print(f"  Saved to {output_paths[0]} and {output_paths[1]}")
     else:
-        output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
-        with open(output_path, 'wb') as f:
-            pickle.dump(model, f)
+        output_paths = [
+            MODEL_DIR / "moneyline_stacking.pkl",
+            MODEL_DIR / "moneyline_stacking_metalearner.pkl",
+        ]
+        _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
         # Save as baseline for future comparisons
         with open(baseline_path, 'wb') as f:
             pickle.dump(model, f)
-        print(f"  Saved to {output_path}")
+        print(f"  Saved to {output_paths[0]} and {output_paths[1]}")
         print("  Also saved as baseline for future comparisons")
 
     return model
@@ -819,28 +848,34 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
 
             # Only save if improved
             if improvement >= 0:
-                output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
-                with open(output_path, 'wb') as f:
-                    pickle.dump(model, f)
-                print(f"  ✓ Model improved! Saved to {output_path}")
+                output_paths = [
+                    MODEL_DIR / "spread_stacking.pkl",
+                    MODEL_DIR / "spread_stacking_metalearner.pkl",
+                ]
+                _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
+                print(f"  ✓ Model improved! Saved to {output_paths[0]} and {output_paths[1]}")
             else:
                 print("  ✗ Model did not improve. Keeping baseline.")
                 return baseline_model
         except Exception as e:
             print(f"  Warning: Could not load baseline: {e}")
             # Save anyway if baseline comparison failed
-            output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
-            with open(output_path, 'wb') as f:
-                pickle.dump(model, f)
-            print(f"  Saved to {output_path}")
+            output_paths = [
+                MODEL_DIR / "spread_stacking.pkl",
+                MODEL_DIR / "spread_stacking_metalearner.pkl",
+            ]
+            _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
+            print(f"  Saved to {output_paths[0]} and {output_paths[1]}")
     else:
-        output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
-        with open(output_path, 'wb') as f:
-            pickle.dump(model, f)
+        output_paths = [
+            MODEL_DIR / "spread_stacking.pkl",
+            MODEL_DIR / "spread_stacking_metalearner.pkl",
+        ]
+        _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
         # Save as baseline for future comparisons
         with open(baseline_path, 'wb') as f:
             pickle.dump(model, f)
-        print(f"  Saved to {output_path}")
+        print(f"  Saved to {output_paths[0]} and {output_paths[1]}")
         print("  Also saved as baseline for future comparisons")
 
     return model

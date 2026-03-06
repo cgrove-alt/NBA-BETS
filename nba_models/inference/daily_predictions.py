@@ -32,8 +32,9 @@ import numpy as np
 # Eastern Time for date-sensitive operations
 ET = ZoneInfo('America/New_York')
 
-# Create logger instance
-logger = logging.getLogger(__name__)
+# Keep the historical logger name for backward compatibility with older
+# integration scripts and operational log filters.
+logger = logging.getLogger("daily_predictions")
 
 # Suppress logging noise
 logging.disable(logging.WARNING)
@@ -43,7 +44,32 @@ from balldontlie_api import BalldontlieAPI
 from feature_engineering import generate_game_features, PlayerPropFeatureGenerator, InjuryReportManager, filter_features
 from scipy.stats import norm
 from data_fetcher import fetch_player_stats_bdl
-from injury_tracker_v3 import fetch_current_injuries, InjuryStatus
+from injury_tracker_v3 import (
+    fetch_current_injuries as _fetch_current_injuries,
+    is_player_available,
+    InjuryStatus as _RawInjuryStatus,
+)
+
+
+class _CompatInjuryStatus(str):
+    @property
+    def value(self) -> str:
+        return str(self)
+
+
+class InjuryStatus:
+    OUT = _CompatInjuryStatus(_RawInjuryStatus.OUT)
+    DOUBTFUL = _CompatInjuryStatus(_RawInjuryStatus.DOUBTFUL)
+    QUESTIONABLE = _CompatInjuryStatus(_RawInjuryStatus.QUESTIONABLE)
+    GTD = _CompatInjuryStatus(_RawInjuryStatus.GTD)
+    PROBABLE = _CompatInjuryStatus(_RawInjuryStatus.PROBABLE)
+    ACTIVE = _CompatInjuryStatus(_RawInjuryStatus.ACTIVE)
+
+
+def fetch_current_injuries(target_date=None):
+    """Backward-compatible wrapper around the current-injury fetcher."""
+    _ = target_date
+    return _fetch_current_injuries()
 
 # Required for pickle deserialization of quantile models
 from nba_models.models.model_trainer import QuantilePropModel  # noqa: F401
@@ -55,6 +81,12 @@ from nba_betting.constants import (
     DEFAULT_PROP_STD_DEV,
     QUANTILE_DECOMPRESSION_DEFAULTS,
     QUANTILE_TARGET_SLOPE,
+)
+from nba_models.inference.model_compat import (
+    get_feature_names,
+    predict_binary_probability,
+    predict_regression_value,
+    prepare_loaded_model_artifact,
 )
 
 
@@ -969,7 +1001,7 @@ def load_models() -> dict:
         try:
             with open(ml_path, 'rb') as f:
                 data = pickle.load(f)
-                models['moneyline'] = data.get('model', data) if isinstance(data, dict) else data
+                models['moneyline'] = prepare_loaded_model_artifact(data)
             print(f"    Loaded moneyline from {ml_path.name}")
         except Exception as e:
             print(f"    Warning: Could not load moneyline model: {e}")
@@ -984,7 +1016,7 @@ def load_models() -> dict:
         try:
             with open(spread_path, 'rb') as f:
                 data = pickle.load(f)
-                models['spread'] = data.get('model', data) if isinstance(data, dict) else data
+                models['spread'] = prepare_loaded_model_artifact(data)
             print(f"    Loaded spread from {spread_path.name}")
         except Exception as e:
             print(f"    Warning: Could not load spread model: {e}")
@@ -1158,28 +1190,15 @@ def predict_moneyline(features: dict, models: dict) -> tuple[float, float]:
         return 0.5, 0.5
 
     try:
-        # Use model's stored feature_names for correct alignment
-        model_features = getattr(model, 'feature_names', None)
+        model_features = get_feature_names(model)
         if model_features:
-            # Check if this is the dict-based EnsembleMoneylineWrapper from model_trainer
-            # (its predict() takes a dict, not a numpy array, and returns a dict)
-            if hasattr(model, 'model_weights') and hasattr(model, 'model_name'):
-                result = model.predict(features)
-                home_prob = result.get('home_win_probability', 0.5)
-            else:
-                X = np.array([[features.get(col, 0) for col in model_features]])
-                # Warn if most features are zero (data pipeline failure)
-                non_zero = np.count_nonzero(X[0])
-                if non_zero < len(model_features) * 0.3:
-                    print(f"    WARNING: moneyline model has {non_zero}/{len(model_features)} non-zero features")
+            non_zero = sum(1 for col in model_features if features.get(col, 0))
+            if non_zero < len(model_features) * 0.3:
+                print(f"    WARNING: moneyline model has {non_zero}/{len(model_features)} non-zero features")
 
-                if hasattr(model, 'predict_proba'):
-                    probs = model.predict_proba(X)[0]
-                    home_prob = probs[1] if len(probs) > 1 else probs[0]
-                else:
-                    # Model without predict_proba — use sigmoid of predict output
-                    pred = model.predict(X)[0]
-                    home_prob = 1 / (1 + np.exp(-pred))
+            home_prob = predict_binary_probability(model, features)
+            if home_prob is None:
+                raise ValueError("unsupported moneyline artifact format")
         else:
             print("    WARNING: moneyline model has no feature_names, using fallback")
             net_rating_diff = features.get('net_rating_diff', 0)
@@ -1203,15 +1222,14 @@ def predict_spread(features: dict, models: dict) -> float:
 
     if model:
         try:
-            # Use model's stored feature_names for correct alignment
-            model_features = getattr(model, 'feature_names', None)
+            model_features = get_feature_names(model)
             if model_features:
-                X = np.array([[features.get(col, 0) for col in model_features]])
-                # Warn if most features are zero (data pipeline failure)
-                non_zero = np.count_nonzero(X[0])
+                non_zero = sum(1 for col in model_features if features.get(col, 0))
                 if non_zero < len(model_features) * 0.3:
                     print(f"    WARNING: spread model has {non_zero}/{len(model_features)} non-zero features")
-                pred = model.predict(X)[0]
+                pred = predict_regression_value(model, features)
+                if pred is None:
+                    raise ValueError("unsupported spread artifact format")
                 # Sanity check
                 if -30 <= pred <= 30:
                     return pred
