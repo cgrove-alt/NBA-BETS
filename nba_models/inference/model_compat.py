@@ -221,8 +221,35 @@ def _build_context_array(
     context_names = getattr(model, "context_feature_names", None)
     if not context_names:
         return None
+
+    aliases = {
+        "travel_distance_away": "away_travel_distance",
+        "back_to_back_away": "away_is_b2b",
+        "days_rest_diff": "rest_days_diff",
+        "pace_combined": "avg_pace",
+        "home_advantage": "home_advantage_factor",
+    }
+
+    values: list[float] = []
+    for name in context_names:
+        candidates = [name]
+        if name.startswith("ctx_"):
+            stripped = name[4:]
+            candidates.append(stripped)
+            if stripped in aliases:
+                candidates.append(aliases[stripped])
+        elif name in aliases:
+            candidates.append(aliases[name])
+
+        value = 0.0
+        for candidate in candidates:
+            if candidate in features:
+                value = float(features.get(candidate, 0.0))
+                break
+        values.append(value)
+
     return np.asarray(
-        [[float(features.get(name, 0.0)) for name in context_names]],
+        [values],
         dtype=float,
     )
 

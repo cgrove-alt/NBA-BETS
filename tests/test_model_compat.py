@@ -45,14 +45,18 @@ class RecordingMetaClassifier:
 class ContextAwareRegressor:
     def __init__(self):
         self.feature_names = ["net_rating_diff", "pace"]
-        self.context_feature_names = ["ctx_days_rest_diff", "ctx_line_movement"]
+        self.context_feature_names = [
+            "ctx_rest_days_diff",
+            "ctx_line_movement",
+            "ctx_away_travel_distance",
+        ]
         self.last_X = None
         self.last_context = None
 
     def predict(self, X, context_features=None):
         self.last_X = np.asarray(X)
         self.last_context = np.asarray(context_features)
-        return np.array([self.last_X[0, 0] + self.last_context[0, 1]])
+        return np.array([self.last_X[0, 0] + self.last_context[0, 1] + self.last_context[0, 2]])
 
 
 def test_prepare_loaded_model_artifact_copies_metadata_to_inner_model():
@@ -109,11 +113,12 @@ def test_predict_regression_value_passes_context_features_to_context_models():
         {
             "net_rating_diff": 6.0,
             "pace": 99.0,
-            "ctx_days_rest_diff": 1.0,
+            "rest_days_diff": 1.0,
             "ctx_line_movement": -2.5,
+            "away_travel_distance": 1200.0,
         },
     )
 
-    assert value == 3.5
+    assert value == 1203.5
     assert np.allclose(model.last_X, np.array([[6.0, 99.0]]))
-    assert np.allclose(model.last_context, np.array([[1.0, -2.5]]))
+    assert np.allclose(model.last_context, np.array([[1.0, -2.5, 1200.0]]))
