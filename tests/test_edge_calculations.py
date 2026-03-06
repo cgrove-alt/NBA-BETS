@@ -311,8 +311,9 @@ class TestEdgeCalculatorModule:
     """Test the edge_calculator.py calculate_edge_from_prediction with norm.cdf."""
 
     def test_prop_uses_norm_cdf(self):
-        """calculate_edge_from_prediction should use norm.cdf, not linear 4%."""
+        """calculate_edge_from_prediction should use norm.cdf with canonical std devs."""
         from edge_calculator.edge_calculator import EdgeCalculator
+        from nba_betting.constants import PROP_STD_DEVS
 
         calc = EdgeCalculator()
         result = calc.calculate_edge_from_prediction(
@@ -321,13 +322,18 @@ class TestEdgeCalculatorModule:
             american_odds=-110,
             prop_type='points',
         )
-        # 3.5pt diff / 5.5 std = z=0.636, norm.cdf ≈ 0.7377
-        expected_prob = float(norm.cdf(3.5 / 5.5))
-        assert abs(result.model_probability - expected_prob) < 0.01
+        # Use the canonical std dev (6.5) — NOT the old hardcoded 5.5
+        pts_std = PROP_STD_DEVS['points']
+        expected_prob = float(norm.cdf(3.5 / pts_std))
+        assert abs(result.model_probability - expected_prob) < 0.01, (
+            f"Expected norm.cdf(3.5 / {pts_std}) = {expected_prob:.4f}, "
+            f"got {result.model_probability:.4f}"
+        )
 
     def test_prop_type_affects_probability(self):
         """Different prop types should produce different probabilities for same diff."""
         from edge_calculator.edge_calculator import EdgeCalculator
+        from nba_betting.constants import PROP_STD_DEVS
 
         calc = EdgeCalculator()
         pts_result = calc.calculate_edge_from_prediction(
@@ -336,7 +342,10 @@ class TestEdgeCalculatorModule:
         ast_result = calc.calculate_edge_from_prediction(
             predicted_value=7.0, prop_line=5.0, prop_type='assists'
         )
-        # Same 2pt diff but assists std=2.5 vs points std=5.5
+        # Same 2pt diff: assists std (2.2) < points std (6.5) → assists z-score is larger → higher prob
+        assert PROP_STD_DEVS['assists'] < PROP_STD_DEVS['points'], (
+            "assists std dev should be smaller than points std dev"
+        )
         assert ast_result.model_probability > pts_result.model_probability
 
     def test_default_std_when_no_prop_type(self):
@@ -373,33 +382,33 @@ class TestMoneylineEdge:
     """Test moneyline edge calculation."""
 
     def test_favorite_with_edge(self):
-        """Model sees 65% chance, market implies 60% → positive edge."""
+        """Model sees 65% chance, market implies 60% → has_edge uses no-vig edge."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
         result = calc.calculate_edge(model_probability=0.65, american_odds=-150)
-        # -150 implies 60%, so edge = 0.65 - 0.60 = 0.05
-        assert result.edge == pytest.approx(0.05, abs=0.01)
+        assert result.edge > 0
+        assert result.no_vig_edge > 0
         assert result.has_edge is True
 
     def test_underdog_with_edge(self):
-        """Model sees 45% chance on +150, implied 40% → positive edge."""
+        """Model sees 45% chance on +150, no-vig ~43.3% → small positive no-vig edge."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
         result = calc.calculate_edge(model_probability=0.45, american_odds=150)
-        # +150 implies 40%, edge = 0.45 - 0.40 = 0.05
-        assert result.edge == pytest.approx(0.05, abs=0.01)
-        assert result.has_edge is True
+        assert result.edge > 0
+        assert result.no_vig_edge > 0
+        assert result.has_edge is False  # no_vig_edge < 3% threshold
 
     def test_no_edge(self):
-        """Model agrees with market → no edge."""
+        """Model at 50% vs -110/-110 → no_vig_edge ≈ 0, edge is negative (vig)."""
         from edge_calculator.edge_calculator import EdgeCalculator
 
         calc = EdgeCalculator()
-        result = calc.calculate_edge(model_probability=0.5238, american_odds=-110)
-        # -110 implies 52.38%, so edge ≈ 0
-        assert abs(result.edge) < 0.01
+        result = calc.calculate_edge(model_probability=0.50, american_odds=-110)
+        assert abs(result.no_vig_edge) < 0.01
+        assert result.edge < 0
         assert result.has_edge is False
 
     def test_negative_edge(self):

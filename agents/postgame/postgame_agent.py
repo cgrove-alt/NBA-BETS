@@ -14,18 +14,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from agents.core.agent_base import AgentBase
+from nba_betting.constants import PROP_STD_DEVS, DEFAULT_PROP_STD_DEV as DEFAULT_STD_DEV
 
 logger = logging.getLogger(__name__)
-
-# Standard deviations for identifying large misses (per prop type)
-PROP_STD_DEVS = {
-    'points': 5.5,
-    'rebounds': 3.5,
-    'assists': 2.5,
-    'threes': 1.8,
-    'pra': 9.0,
-}
-DEFAULT_STD_DEV = 5.0
 
 
 class PostGameAnalysisAgent(AgentBase):

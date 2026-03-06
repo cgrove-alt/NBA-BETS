@@ -89,6 +89,10 @@ PROP_UPDATE_INTERVAL = 30
 # Pre-game refresh: minutes before tipoff to re-fetch props
 PRE_GAME_REFRESH_MINUTES = [30, 15]
 
+# Feature flag: player-prop tracking is opt-in to avoid changing default
+# scheduler behavior for users that only want core odds snapshots.
+PROP_TRACKING_ENV_VAR = "ENABLE_PROP_TRACKING"
+
 
 # =============================================================================
 # LOGGING SETUP
@@ -149,7 +153,8 @@ class OddsTrackerService:
                  api_key: str | None = None,
                  update_interval: int = UPDATE_INTERVAL,
                  db_path: str = DEFAULT_DB_PATH,
-                 log_file: str = LOG_FILE):
+                 log_file: str = LOG_FILE,
+                 enable_prop_tracking: bool | None = None):
         """
         Initialize the odds tracker service.
 
@@ -163,6 +168,11 @@ class OddsTrackerService:
         self.update_interval = update_interval
         self.db_path = db_path
         self.log_file = log_file
+        self.enable_prop_tracking = (
+            self._env_flag(PROP_TRACKING_ENV_VAR)
+            if enable_prop_tracking is None
+            else bool(enable_prop_tracking)
+        )
 
         # Setup logging
         self.logger = setup_logging(log_file)
@@ -200,11 +210,13 @@ class OddsTrackerService:
         self._last_prop_fetch: datetime | None = None
         self._pre_game_jobs_scheduled = set()  # Track scheduled pre-game refreshes
 
-        if HAS_PROP_FETCHER:
+        if self.enable_prop_tracking and HAS_PROP_FETCHER:
             try:
                 self._prop_fetcher = PlayerPropFetcher(api_key=self.api_key)
             except Exception as e:
                 self.logger.warning(f"PlayerPropFetcher init failed: {e}")
+        elif self.enable_prop_tracking and not HAS_PROP_FETCHER:
+            self.logger.warning("Prop tracking enabled but PlayerPropFetcher dependency not available")
 
         # Register event listeners
         self.scheduler.add_listener(self._job_executed_listener, EVENT_JOB_EXECUTED)
@@ -212,6 +224,14 @@ class OddsTrackerService:
 
         # Validate setup
         self._validate_setup()
+
+    @staticmethod
+    def _env_flag(name: str, default: bool = False) -> bool:
+        """Parse boolean feature flags from environment variables."""
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
 
     def _validate_setup(self):
         """Validate API key and database connectivity."""
@@ -223,6 +243,7 @@ class OddsTrackerService:
         self.logger.info(f"Database: {self.db_path}")
         self.logger.info(f"Update interval: {self.update_interval} minutes")
         self.logger.info(f"Operating hours: {START_HOUR}:00 - {END_HOUR}:00 EST")
+        self.logger.info(f"Player prop tracking: {'enabled' if self.enable_prop_tracking else 'disabled'}")
 
     def is_nba_season(self) -> bool:
         """
@@ -568,7 +589,7 @@ class OddsTrackerService:
         )
 
         # Add player prop tracking job (every 30 minutes)
-        if self._prop_fetcher:
+        if self.enable_prop_tracking and self._prop_fetcher:
             self.scheduler.add_job(
                 func=self.fetch_player_props,
                 trigger=CronTrigger(

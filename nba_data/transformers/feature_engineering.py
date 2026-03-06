@@ -1502,7 +1502,7 @@ class MatchupFeatureGenerator:
 
         TIER 1.2: Now accepts current_venue for travel fatigue calculations.
         """
-        cache_key = (team_id, is_home, current_venue)
+        cache_key = (team_id, is_home, current_venue, game_date)
         if cache_key not in self._team_features_cache:
             self._team_features_cache[cache_key] = self.team_generator.generate_team_features(
                 team_id, is_home=is_home, last_n_games=last_n_games, game_date=game_date, current_venue=current_venue
@@ -2738,7 +2738,10 @@ class PlayerPropFeatureGenerator:
         }
 
         if opponent_team_id:
-            opp_stats = fetch_team_statistics(opponent_team_id, self.season)
+            if game_date:
+                opp_stats = fetch_team_statistics_before_date(opponent_team_id, self.season, game_date)
+            else:
+                opp_stats = fetch_team_statistics(opponent_team_id, self.season)
             opp_overall = opp_stats.get("overall", {})
             features["opp_def_rating"] = opp_overall.get("def_rating", 110) or 110
             features["opp_stl_avg"] = opp_overall.get("stl_avg", 0) or 0
@@ -2908,7 +2911,10 @@ class PlayerPropFeatureGenerator:
         }
 
         if opponent_team_id:
-            opp_stats = fetch_team_statistics(opponent_team_id, self.season)
+            if game_date:
+                opp_stats = fetch_team_statistics_before_date(opponent_team_id, self.season, game_date)
+            else:
+                opp_stats = fetch_team_statistics(opponent_team_id, self.season)
             opp_overall = opp_stats.get("overall", {})
             features["opp_def_rating"] = opp_overall.get("def_rating", 110) or 110
             features["opp_pace"] = opp_overall.get("pace", 100) or 100

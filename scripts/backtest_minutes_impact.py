@@ -21,18 +21,12 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scipy.stats import norm
+from nba_betting.constants import PROP_STD_DEVS, DEFAULT_PROP_STD_DEV
 
 
 def get_prop_std_dev(prop_type: str) -> float:
-    """Mirrored from daily_predictions.py."""
-    PROP_STD_DEVS = {
-        'points': 5.5,
-        'rebounds': 7.0,
-        'assists': 2.5,
-        'threes': 1.8,
-        'pra': 9.0,
-    }
-    return PROP_STD_DEVS.get(prop_type.lower(), 5.0)
+    """Return canonical prop standard deviation from nba_betting.constants."""
+    return PROP_STD_DEVS.get(prop_type.lower(), DEFAULT_PROP_STD_DEV)
 
 
 def simulate_adjustment(predicted_value, avg_minutes, predicted_minutes_p50, line, prop_type):

@@ -2128,6 +2128,17 @@ def fetch_player_stats(player_id, season="2025-26", last_n_games=None):
     return result
 
 
+def _volume_weighted_pct(games: list, made_key: str, att_key: str) -> float:
+    """Compute shooting percentage from total makes / total attempts (volume-weighted)."""
+    total_made = sum(g.get(made_key, 0) or 0 for g in games)
+    total_att = sum(g.get(att_key, 0) or 0 for g in games)
+    if total_att > 0:
+        return round(total_made / total_att, 3)
+    pct_key = made_key.replace("_made", "_pct").replace("fg_made", "fg_pct")
+    pct_vals = [g.get(pct_key, 0) or 0 for g in games if (g.get(pct_key, 0) or 0) > 0]
+    return round(sum(pct_vals) / len(pct_vals), 3) if pct_vals else 0.0
+
+
 def fetch_player_stats_before_date(player_id, season="2025-26", before_date=None, last_n_games=None):
     """
     TEMPORAL DISCIPLINE: Fetch player statistics using ONLY games BEFORE the specified date.
@@ -2248,9 +2259,9 @@ def fetch_player_stats_before_date(player_id, season="2025-26", before_date=None
             "blk_avg": sum(g.get("blk", 0) or 0 for g in parsed_games) / num_games,
             "tov_avg": sum(g.get("tov", 0) or 0 for g in parsed_games) / num_games,
             "fg3_avg": sum(g.get("fg3_made", 0) or 0 for g in parsed_games) / num_games,
-            "fg_pct": sum(g.get("fg_pct", 0) or 0 for g in parsed_games) / num_games,
-            "fg3_pct": sum(g.get("fg3_pct", 0) or 0 for g in parsed_games) / num_games,
-            "ft_pct": sum(g.get("ft_pct", 0) or 0 for g in parsed_games) / num_games,
+            "fg_pct": _volume_weighted_pct(parsed_games, "fg_made", "fg_att"),
+            "fg3_pct": _volume_weighted_pct(parsed_games, "fg3_made", "fg3_att"),
+            "ft_pct": _volume_weighted_pct(parsed_games, "ft_made", "ft_att"),
             "plus_minus": sum(g.get("plus_minus", 0) or 0 for g in parsed_games) / num_games,
         }
 
@@ -2713,9 +2724,9 @@ def fetch_player_stats_bdl(
             "stl_avg": sum(g.get("stl") or 0 for g in parsed_games) / num_games,
             "blk_avg": sum(g.get("blk") or 0 for g in parsed_games) / num_games,
             "tov_avg": sum(g.get("tov") or 0 for g in parsed_games) / num_games,
-            "fg_pct": sum(g.get("fg_pct") or 0 for g in parsed_games) / num_games,
-            "fg3_pct": sum(g.get("fg3_pct") or 0 for g in parsed_games) / num_games,
-            "ft_pct": sum(g.get("ft_pct") or 0 for g in parsed_games) / num_games,
+            "fg_pct": _volume_weighted_pct(parsed_games, "fg_made", "fg_att"),
+            "fg3_pct": _volume_weighted_pct(parsed_games, "fg3_made", "fg3_att"),
+            "ft_pct": _volume_weighted_pct(parsed_games, "ft_made", "ft_att"),
         }
 
     # Calculate last 5 averages
@@ -2878,9 +2889,9 @@ def fetch_player_stats_before_date_bdl(
             "blk_avg": sum(g.get("blk") or 0 for g in parsed_games) / num_games,
             "tov_avg": sum(g.get("tov") or 0 for g in parsed_games) / num_games,
             "fg3_avg": sum(g.get("fg3_made") or 0 for g in parsed_games) / num_games,
-            "fg_pct": sum(g.get("fg_pct") or 0 for g in parsed_games) / num_games,
-            "fg3_pct": sum(g.get("fg3_pct") or 0 for g in parsed_games) / num_games,
-            "ft_pct": sum(g.get("ft_pct") or 0 for g in parsed_games) / num_games,
+            "fg_pct": _volume_weighted_pct(parsed_games, "fg_made", "fg_att"),
+            "fg3_pct": _volume_weighted_pct(parsed_games, "fg3_made", "fg3_att"),
+            "ft_pct": _volume_weighted_pct(parsed_games, "ft_made", "ft_att"),
         }
 
     last_5_averages = {}
