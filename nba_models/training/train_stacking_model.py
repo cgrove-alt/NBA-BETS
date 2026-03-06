@@ -277,6 +277,7 @@ class TrainingDataLoader:
         self.team_players_by_game: dict[tuple[str, str], dict[int, dict]] = defaultdict(dict)
         self.player_team_lookup: dict[tuple[str, str], dict[str, Any]] = {}
         self.market_context: dict[tuple[str, str, str], dict[str, float | int]] = {}
+        self.game_market_context: dict[tuple[str, str, str], dict[str, float | int]] = {}
         self.market_active_players: dict[tuple[str, str], set[int]] = defaultdict(set)
 
     def load_games(self) -> list[dict]:
@@ -499,7 +500,7 @@ class TrainingDataLoader:
         return loaded > 0
 
     def _load_market_context(self):
-        """Load pregame player-prop market snapshots and derive team-level context."""
+        """Load archived prop-board and game-market context."""
         grouped_snapshots: dict[tuple[str, str, str, str], list[dict]] = defaultdict(list)
 
         for snapshot_file in sorted(HISTORICAL_LINES_DIR.glob("20*.json")):
@@ -518,6 +519,22 @@ class TrainingDataLoader:
                     continue
                 event_id = game.get('odds_api_event_id') or str(game.get('bdl_game_id'))
                 grouped_snapshots[(event_id, game_date, home_abbrev, away_abbrev)].append(game)
+
+                game_markets = game.get('game_markets', {})
+                if isinstance(game_markets, dict):
+                    derived = game_markets.get('derived', {})
+                    if derived:
+                        self.game_market_context[(game_date, home_abbrev, away_abbrev)] = {
+                            'opening_line': float(derived.get('opening_line', 0.0) or 0.0),
+                            'closing_line': float(derived.get('closing_line', 0.0) or 0.0),
+                            'line_movement': float(derived.get('line_movement', 0.0) or 0.0),
+                            'moneyline_home_prob_movement': float(
+                                derived.get('moneyline_home_prob_movement', 0.0) or 0.0
+                            ),
+                            'consensus_odds': float(derived.get('consensus_odds', -110) or -110),
+                            'rlm_flag': int(bool(derived.get('rlm_flag', False))),
+                            'steam_move_flag': int(bool(derived.get('steam_move_flag', False))),
+                        }
 
         loaded = 0
         for (_event_id, game_date, home_abbrev, away_abbrev), snapshots in grouped_snapshots.items():
@@ -544,6 +561,8 @@ class TrainingDataLoader:
 
         if loaded:
             print(f"  Loaded market context for {loaded} games from historical props archive")
+        if self.game_market_context:
+            print(f"  Loaded true game-market history for {len(self.game_market_context)} games")
 
     def _summarize_market_snapshot(
         self,
@@ -649,28 +668,32 @@ class TrainingDataLoader:
         away_abbrev: str,
         baseline_diff: float,
     ) -> dict[str, float | int]:
-        """Return market context derived from historical prop-board snapshots."""
-        market = self.market_context.get((game_date, home_abbrev, away_abbrev))
-        if not market:
-            return {
-                'market_strength_diff': 0.0,
-                'line_movement': 0.0,
-                'rlm_flag': 0,
-            }
+        """Return market context, preferring true game-odds history when present."""
+        prop_market = self.market_context.get((game_date, home_abbrev, away_abbrev), {})
+        game_market = self.game_market_context.get((game_date, home_abbrev, away_abbrev), {})
 
-        line_movement = float(market.get('line_movement', 0.0))
-        market_strength_diff = float(market.get('market_strength_diff', 0.0))
-        rlm_flag = int(
-            market.get('snapshot_count', 0) > 1
-            and abs(line_movement) >= 1.0
-            and baseline_diff != 0
-            and np.sign(line_movement) != np.sign(baseline_diff)
-        )
+        line_movement = float(game_market.get('line_movement', 0.0))
+        if not game_market:
+            line_movement = float(prop_market.get('line_movement', 0.0))
+
+        rlm_flag = int(game_market.get('rlm_flag', 0))
+        if not game_market:
+            rlm_flag = int(
+                prop_market.get('snapshot_count', 0) > 1
+                and abs(line_movement) >= 1.0
+                and baseline_diff != 0
+                and np.sign(line_movement) != np.sign(baseline_diff)
+            )
 
         return {
-            'market_strength_diff': market_strength_diff,
+            'market_strength_diff': float(prop_market.get('market_strength_diff', 0.0)),
+            'opening_line': float(game_market.get('opening_line', 0.0)),
+            'closing_line': float(game_market.get('closing_line', 0.0)),
             'line_movement': line_movement,
             'rlm_flag': rlm_flag,
+            'consensus_odds': float(game_market.get('consensus_odds', -110)),
+            'steam_move_flag': int(game_market.get('steam_move_flag', 0)),
+            'moneyline_home_prob_movement': float(game_market.get('moneyline_home_prob_movement', 0.0)),
         }
 
     def _extract_context_features(self, game: dict, home_feats: dict, away_feats: dict) -> dict:
@@ -680,8 +703,9 @@ class TrainingDataLoader:
         These features intentionally mirror the semantics of the live
         generate_game_features() output as closely as the historical archives allow.
         Injury/availability features are inferred from real player-game history and
-        archived pregame prop boards; market features come from real archived prop
-        snapshots; travel features come from real venue sequencing.
+        archived pregame prop boards; game-market features come from true archived
+        spread/moneyline/totals snapshots when available; travel features come from
+        real venue sequencing.
         """
         game_date = game.get('date', '')[:10]
         home_team_id = game.get('home_team', {}).get('id')
@@ -740,8 +764,13 @@ class TrainingDataLoader:
             'ctx_star_player_out_home': availability_home['star_player_out'],
             'ctx_star_player_out_away': availability_away['star_player_out'],
             'ctx_market_strength_diff': market_context['market_strength_diff'],
+            'ctx_opening_line': market_context['opening_line'],
+            'ctx_closing_line': market_context['closing_line'],
             'ctx_line_movement': market_context['line_movement'],
             'ctx_rlm_flag': market_context['rlm_flag'],
+            'ctx_consensus_odds': market_context['consensus_odds'],
+            'ctx_steam_move_flag': market_context['steam_move_flag'],
+            'ctx_moneyline_home_prob_movement': market_context['moneyline_home_prob_movement'],
             'ctx_prediction_variance': prediction_variance,
             'ctx_home_advantage_factor': home_advantage_factor,
             'ctx_away_travel_distance': away_travel_distance,

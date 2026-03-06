@@ -57,8 +57,16 @@ def test_extract_context_features_uses_real_availability_market_and_travel_signa
     loader.market_active_players[("2025-01-10", away_abbrev)] = {21, 22, 23}
     loader.market_context[("2025-01-10", home_abbrev, away_abbrev)] = {
         "market_strength_diff": 6.0,
-        "line_movement": -1.5,
         "snapshot_count": 2,
+    }
+    loader.game_market_context[("2025-01-10", home_abbrev, away_abbrev)] = {
+        "opening_line": -4.5,
+        "closing_line": -6.0,
+        "line_movement": -1.5,
+        "consensus_odds": -112,
+        "rlm_flag": 1,
+        "steam_move_flag": 0,
+        "moneyline_home_prob_movement": 0.022,
     }
 
     game = {
@@ -84,8 +92,13 @@ def test_extract_context_features_uses_real_availability_market_and_travel_signa
     assert context["ctx_injury_count_away"] == 0
     assert context["ctx_star_player_out_away"] == 0
     assert context["ctx_market_strength_diff"] == 6.0
+    assert context["ctx_opening_line"] == -4.5
+    assert context["ctx_closing_line"] == -6.0
     assert context["ctx_line_movement"] == -1.5
     assert context["ctx_rlm_flag"] == 1
+    assert context["ctx_consensus_odds"] == -112
+    assert context["ctx_steam_move_flag"] == 0
+    assert context["ctx_moneyline_home_prob_movement"] == pytest.approx(0.022)
     assert context["ctx_rest_days_diff"] == 0
     assert context["ctx_avg_pace"] == 114.5
     assert context["ctx_home_advantage_factor"] == pytest.approx(0.25)

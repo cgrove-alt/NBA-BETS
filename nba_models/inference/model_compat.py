@@ -49,6 +49,15 @@ def get_feature_names(model: Any) -> list[str]:
     return list(names)
 
 
+def get_context_feature_names(model: Any) -> list[str]:
+    """Extract context feature names from a wrapped artifact or raw model."""
+    if isinstance(model, Mapping):
+        names = model.get("context_feature_names") or []
+        return list(names)
+    names = getattr(model, "context_feature_names", None) or []
+    return list(names)
+
+
 def predict_binary_probability(model: Any, features: dict[str, float | int]) -> float | None:
     """Predict positive-class probability from heterogeneous model artifacts."""
     return _predict_value(model, features, task="classification")

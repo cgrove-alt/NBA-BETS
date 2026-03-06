@@ -122,3 +122,23 @@ def test_predict_regression_value_passes_context_features_to_context_models():
     assert value == 1203.5
     assert np.allclose(model.last_X, np.array([[6.0, 99.0]]))
     assert np.allclose(model.last_context, np.array([[1.0, -2.5, 1200.0]]))
+
+
+def test_preserve_model_context_features_restores_filtered_context():
+    from daily_predictions import preserve_model_context_features
+
+    model = ContextAwareRegressor()
+    filtered = {"net_rating_diff": 6.0}
+    raw = {
+        "net_rating_diff": 6.0,
+        "rest_days_diff": 1.0,
+        "ctx_line_movement": -2.5,
+        "away_travel_distance": 1200.0,
+    }
+
+    preserved = preserve_model_context_features(filtered, raw, model)
+
+    assert preserved["net_rating_diff"] == 6.0
+    assert preserved["rest_days_diff"] == 1.0
+    assert preserved["ctx_line_movement"] == -2.5
+    assert preserved["away_travel_distance"] == 1200.0

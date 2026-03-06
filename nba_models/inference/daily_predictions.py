@@ -83,6 +83,7 @@ from nba_betting.constants import (
     QUANTILE_TARGET_SLOPE,
 )
 from nba_models.inference.model_compat import (
+    get_context_feature_names,
     get_feature_names,
     predict_binary_probability,
     predict_regression_value,
@@ -1183,6 +1184,30 @@ def get_implied_probability(american_odds: int) -> float:
     return abs(american_odds) / (abs(american_odds) + 100)
 
 
+def preserve_model_context_features(
+    filtered_features: dict,
+    raw_features: dict,
+    model: object | None,
+) -> dict:
+    """Reattach stacking context fields removed by feature-selection gating."""
+    if not model:
+        return filtered_features
+
+    preserved = dict(filtered_features)
+    for name in get_context_feature_names(model):
+        candidates = [name]
+        if name.startswith("ctx_"):
+            candidates.append(name[4:])
+        else:
+            candidates.append(f"ctx_{name}")
+
+        for candidate in candidates:
+            if candidate in raw_features:
+                preserved[candidate] = raw_features[candidate]
+                break
+    return preserved
+
+
 def predict_moneyline(features: dict, models: dict) -> tuple[float, float]:
     """Predict moneyline probabilities."""
     model = models.get('moneyline')
@@ -1576,8 +1601,11 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
     analysis['injury_features'] = injury_features
     analysis['injury_details'] = injury_details
 
-    # Apply feature selection (if models/selected_features.json exists)
+    # Apply feature selection (if models/selected_features.json exists), but keep
+    # context features required by context-aware stacking artifacts.
+    raw_ml_features = dict(ml_features)
     ml_features = filter_features(ml_features)
+    ml_features = preserve_model_context_features(ml_features, raw_ml_features, models.get('moneyline'))
 
     # Record odds freshness (odds were fetched by the caller before this)
     if freshness and odds:
