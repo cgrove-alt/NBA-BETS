@@ -23,6 +23,7 @@ import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -49,6 +50,42 @@ except ImportError:
 # Directories
 MODEL_DIR = Path("models")
 CACHE_DIR = Path("data/balldontlie_cache")
+HISTORICAL_LINES_DIR = Path("data/historical_lines")
+LIVE_SEASON_LABELS = ["2024-25"]
+
+
+def normalize_player_name(name: str) -> str:
+    """Normalize player names for fuzzy matching across archives."""
+    return (
+        name.lower()
+        .strip()
+        .replace(".", "")
+        .replace("'", "")
+        .replace("-", " ")
+        .replace("  ", " ")
+    )
+
+
+def parse_minutes(value: Any) -> float:
+    """Convert a minutes field like '32:14' or '32' to float minutes."""
+    if value is None:
+        return 0.0
+
+    text = str(value).strip()
+    if not text or text in {"00", "0", "0:00"}:
+        return 0.0
+
+    if ":" in text:
+        try:
+            minutes_str, seconds_str = text.split(":", 1)
+            return float(minutes_str) + (float(seconds_str) / 60.0)
+        except ValueError:
+            return 0.0
+
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
 
 
 def build_base_models_for_regression():
@@ -200,6 +237,33 @@ def calculate_time_decay_weights(dates: pd.Series, half_life_days: int = 180) ->
     return weights.values
 
 
+def _save_inference_ready_stacking_model(
+    model,
+    output_paths: list[Path],
+    feature_names: list[str],
+    context_feature_names: list[str] | None = None,
+) -> None:
+    """Save stacking artifacts in a format the inference pipeline can consume."""
+    model.feature_names = list(feature_names)
+    inference_context_names = [
+        name[4:] if name.startswith("ctx_") else name
+        for name in (context_feature_names or [])
+    ]
+    model.context_feature_names = inference_context_names
+
+    artifact = {
+        'model': model,
+        'feature_names': list(feature_names),
+        'context_feature_names': inference_context_names,
+        'context_scaler': getattr(model, 'context_scaler', None),
+        'artifact_type': 'stacking_meta_learner',
+    }
+
+    for output_path in output_paths:
+        with open(output_path, 'wb') as f:
+            pickle.dump(artifact, f)
+
+
 class TrainingDataLoader:
     """Load and prepare training data from cache with proper feature engineering."""
 
@@ -208,10 +272,16 @@ class TrainingDataLoader:
         self.window = window
         self.games = []
         self.player_stats = defaultdict(list)
-        self.team_history = defaultdict(list)  # team_id -> [(date, game_data)]
+        self.team_history = defaultdict(list)
+        self.team_id_to_abbrev: dict[int, str] = {}
+        self.team_players_by_game: dict[tuple[str, str], dict[int, dict]] = defaultdict(dict)
+        self.player_team_lookup: dict[tuple[str, str], dict[str, Any]] = {}
+        self.market_context: dict[tuple[str, str, str], dict[str, float | int]] = {}
+        self.game_market_context: dict[tuple[str, str, str], dict[str, float | int]] = {}
+        self.market_active_players: dict[tuple[str, str], set[int]] = defaultdict(set)
 
     def load_games(self) -> list[dict]:
-        """Load game data from multiple seasons."""
+        """Load game data from cache or CSV fallback."""
         all_games = []
 
         # Load all available season files
@@ -225,6 +295,9 @@ class TrainingDataLoader:
                 print(f"  Loaded {len(final_games)} games from {season_file.name}")
             except Exception as e:
                 print(f"  Warning loading {season_file}: {e}")
+
+        if not all_games:
+            all_games = self._load_games_from_csv_fallback()
 
         # Sort by date and deduplicate
         seen_ids = set()
@@ -242,17 +315,42 @@ class TrainingDataLoader:
         self._build_team_history()
         return self.games
 
+    def _load_games_from_csv_fallback(self) -> list[dict]:
+        """Load current-season games from CSV when the cache directory is empty."""
+        print("  No cache games found; loading live-season CSV fallback...")
+
+        try:
+            from train_from_csv import build_team_id_map, _build_team_metadata, load_team_games
+        except Exception as e:
+            print(f"  Warning: CSV fallback unavailable: {e}")
+            return []
+
+        try:
+            team_id_map = build_team_id_map()
+            team_meta = _build_team_metadata()
+            games = load_team_games(LIVE_SEASON_LABELS, team_id_map, team_meta)
+            print(f"  Loaded {len(games)} games from live-season CSV fallback")
+            return games
+        except Exception as e:
+            print(f"  Warning: Could not load games from CSV fallback: {e}")
+            return []
+
     def _build_team_history(self):
         """Build historical record for each team."""
         for game in self.games:
             game_date = game.get('date', '')[:10]
             home_team_id = game.get('home_team', {}).get('id')
             away_team_id = game.get('visitor_team', {}).get('id')
+            home_abbrev = game.get('home_team', {}).get('abbreviation', '')
+            away_abbrev = game.get('visitor_team', {}).get('abbreviation', '')
             home_score = game.get('home_team_score', 0) or 0
             away_score = game.get('visitor_team_score', 0) or 0
 
             if not all([game_date, home_team_id, away_team_id, home_score]):
                 continue
+
+            self.team_id_to_abbrev[home_team_id] = home_abbrev
+            self.team_id_to_abbrev[away_team_id] = away_abbrev
 
             # Record for home team
             self.team_history[home_team_id].append({
@@ -263,6 +361,9 @@ class TrainingDataLoader:
                 'won': home_score > away_score,
                 'point_diff': home_score - away_score,
                 'opponent_id': away_team_id,
+                'team_abbrev': home_abbrev,
+                'opponent_abbrev': away_abbrev,
+                'venue_abbrev': home_abbrev,
             })
 
             # Record for away team
@@ -274,6 +375,9 @@ class TrainingDataLoader:
                 'won': away_score > home_score,
                 'point_diff': away_score - home_score,
                 'opponent_id': home_team_id,
+                'team_abbrev': away_abbrev,
+                'opponent_abbrev': home_abbrev,
+                'venue_abbrev': home_abbrev,
             })
 
     def _get_team_features(self, team_id: int, before_date: str, min_games: int = 5) -> dict | None:
@@ -321,75 +425,363 @@ class TrainingDataLoader:
                 break
         return streak
 
+    def _record_player_game(self, game_date: str, raw_stat: dict):
+        """Store a player-game record in the flattened structures this trainer uses."""
+        player_id = raw_stat.get('player_id') or raw_stat.get('player', {}).get('id')
+        if not player_id:
+            return
+
+        player_name = raw_stat.get('player_name')
+        if not player_name:
+            first = raw_stat.get('first_name') or raw_stat.get('player', {}).get('first_name', '')
+            last = raw_stat.get('last_name') or raw_stat.get('player', {}).get('last_name', '')
+            player_name = f"{first} {last}".strip()
+
+        team_id = raw_stat.get('team_id')
+        if team_id is None:
+            team_id = raw_stat.get('team', {}).get('id')
+
+        team_abbrev = raw_stat.get('team_abbreviation')
+        if not team_abbrev:
+            team_abbrev = raw_stat.get('team', {}).get('abbreviation', '')
+
+        flat_stat = {
+            'player_id': int(player_id),
+            'player_name': player_name,
+            'position': raw_stat.get('position') or raw_stat.get('player', {}).get('position', ''),
+            'team_id': team_id,
+            'team_abbreviation': team_abbrev,
+            'min': parse_minutes(raw_stat.get('min')),
+            'pts': raw_stat.get('pts', 0) or 0,
+            'reb': raw_stat.get('reb', 0) or 0,
+            'ast': raw_stat.get('ast', 0) or 0,
+            'fg3m': raw_stat.get('fg3m', 0) or 0,
+        }
+        flat_stat['pra'] = flat_stat['pts'] + flat_stat['reb'] + flat_stat['ast']
+
+        self.player_stats[int(player_id)].append((game_date, flat_stat))
+
+        if team_abbrev:
+            self.team_players_by_game[(game_date, team_abbrev)][int(player_id)] = flat_stat
+        if player_name:
+            self.player_team_lookup[(normalize_player_name(player_name), game_date)] = {
+                'player_id': int(player_id),
+                'team_abbreviation': team_abbrev,
+            }
+
+    def _load_historical_player_stats_fallback(self) -> bool:
+        """Load current-season player stats from the historical BDL archive."""
+        stats_path = HISTORICAL_LINES_DIR / "player_stats_2024.json"
+        meta_path = HISTORICAL_LINES_DIR / "player_stats_2024_meta.json"
+        if not stats_path.exists() or not meta_path.exists():
+            return False
+
+        try:
+            with open(stats_path) as f:
+                stats_by_game = json.load(f)
+            with open(meta_path) as f:
+                meta_by_game = json.load(f)
+        except Exception as e:
+            print(f"Warning loading historical player stats fallback: {e}")
+            return False
+
+        loaded = 0
+        for game_id, players in stats_by_game.items():
+            meta = meta_by_game.get(str(game_id), {})
+            game_date = str(meta.get('date', ''))[:10]
+            if not game_date or not isinstance(players, list):
+                continue
+            for player in players:
+                self._record_player_game(game_date, player)
+                loaded += 1
+
+        if loaded:
+            print(f"  Loaded {loaded} player-game records from historical archive fallback")
+        return loaded > 0
+
+    def _load_market_context(self):
+        """Load archived prop-board and game-market context."""
+        grouped_snapshots: dict[tuple[str, str, str, str], list[dict]] = defaultdict(list)
+
+        for snapshot_file in sorted(HISTORICAL_LINES_DIR.glob("20*.json")):
+            try:
+                with open(snapshot_file) as f:
+                    data = json.load(f)
+            except Exception as e:
+                print(f"Warning loading {snapshot_file.name}: {e}")
+                continue
+
+            for game in data.get('games', []):
+                home_abbrev = game.get('home_abbrev')
+                away_abbrev = game.get('away_abbrev')
+                game_date = str(game.get('commence_time', ''))[:10]
+                if not all([home_abbrev, away_abbrev, game_date]):
+                    continue
+                event_id = game.get('odds_api_event_id') or str(game.get('bdl_game_id'))
+                grouped_snapshots[(event_id, game_date, home_abbrev, away_abbrev)].append(game)
+
+                game_markets = game.get('game_markets', {})
+                if isinstance(game_markets, dict):
+                    derived = game_markets.get('derived', {})
+                    if derived:
+                        self.game_market_context[(game_date, home_abbrev, away_abbrev)] = {
+                            'opening_line': float(derived.get('opening_line', 0.0) or 0.0),
+                            'closing_line': float(derived.get('closing_line', 0.0) or 0.0),
+                            'line_movement': float(derived.get('line_movement', 0.0) or 0.0),
+                            'moneyline_home_prob_movement': float(
+                                derived.get('moneyline_home_prob_movement', 0.0) or 0.0
+                            ),
+                            'consensus_odds': float(derived.get('consensus_odds', -110) or -110),
+                            'rlm_flag': int(bool(derived.get('rlm_flag', False))),
+                            'steam_move_flag': int(bool(derived.get('steam_move_flag', False))),
+                        }
+
+        loaded = 0
+        for (_event_id, game_date, home_abbrev, away_abbrev), snapshots in grouped_snapshots.items():
+            snapshots.sort(key=lambda snap: snap.get('snapshot_timestamp', ''))
+            first = self._summarize_market_snapshot(game_date, home_abbrev, away_abbrev, snapshots[0])
+            last = self._summarize_market_snapshot(game_date, home_abbrev, away_abbrev, snapshots[-1])
+
+            if not first and not last:
+                continue
+
+            first_diff = first.get('market_strength_diff', 0.0)
+            last_diff = last.get('market_strength_diff', 0.0)
+            line_movement = last_diff - first_diff if len(snapshots) > 1 else 0.0
+
+            self.market_context[(game_date, home_abbrev, away_abbrev)] = {
+                'market_strength_diff': last_diff,
+                'line_movement': line_movement,
+                'market_depth_total': last.get('market_depth_total', 0),
+                'snapshot_count': len(snapshots),
+            }
+            self.market_active_players[(game_date, home_abbrev)].update(last.get('active_home_ids', set()))
+            self.market_active_players[(game_date, away_abbrev)].update(last.get('active_away_ids', set()))
+            loaded += 1
+
+        if loaded:
+            print(f"  Loaded market context for {loaded} games from historical props archive")
+        if self.game_market_context:
+            print(f"  Loaded true game-market history for {len(self.game_market_context)} games")
+
+    def _summarize_market_snapshot(
+        self,
+        game_date: str,
+        home_abbrev: str,
+        away_abbrev: str,
+        snapshot: dict,
+    ) -> dict[str, float | int | set[int]]:
+        """Collapse a single prop-board snapshot into team-level market features."""
+        team_player_lines: dict[str, dict[int, dict[str, float]]] = {
+            home_abbrev: {},
+            away_abbrev: {},
+        }
+
+        for prop in snapshot.get('player_props', []):
+            player_name = prop.get('player_name', '')
+            if not player_name:
+                continue
+            lookup = self.player_team_lookup.get((normalize_player_name(player_name), game_date))
+            if not lookup:
+                continue
+
+            team_abbrev = lookup.get('team_abbreviation')
+            player_id = lookup.get('player_id')
+            if team_abbrev not in team_player_lines or player_id is None:
+                continue
+
+            player_props = team_player_lines[team_abbrev].setdefault(int(player_id), {})
+            player_props[prop.get('prop_type', '')] = float(prop.get('line', 0) or 0)
+
+        def _representative_lines(player_map: dict[int, dict[str, float]]) -> list[float]:
+            values = []
+            for prop_map in player_map.values():
+                if prop_map.get('points', 0) > 0:
+                    values.append(prop_map['points'])
+                elif prop_map.get('pra', 0) > 0:
+                    values.append(prop_map['pra'] * 0.6)
+            return sorted(values, reverse=True)
+
+        home_lines = _representative_lines(team_player_lines[home_abbrev])
+        away_lines = _representative_lines(team_player_lines[away_abbrev])
+
+        return {
+            'market_strength_diff': float(sum(home_lines[:5]) - sum(away_lines[:5])),
+            'market_depth_total': len(home_lines) + len(away_lines),
+            'active_home_ids': set(team_player_lines[home_abbrev].keys()),
+            'active_away_ids': set(team_player_lines[away_abbrev].keys()),
+        }
+
+    def _get_availability_context(self, game_date: str, team_id: int, team_abbrev: str) -> dict[str, float | int]:
+        """Infer pregame absences from recent rotation players and the historical prop board."""
+        prior_team_games = [
+            game for game in self.team_history.get(team_id, [])
+            if game['date'] < game_date
+        ]
+        prior_team_games.sort(key=lambda item: item['date'], reverse=True)
+        recent_games = prior_team_games[:10]
+        if len(recent_games) < 3:
+            return {'injury_count': 0, 'star_player_out': 0}
+
+        player_recent: dict[int, list[dict]] = defaultdict(list)
+        for prior_game in recent_games:
+            for player_id, player_stat in self.team_players_by_game.get((prior_game['date'], team_abbrev), {}).items():
+                player_recent[player_id].append(player_stat)
+
+        expected_rotation: dict[int, dict[str, float]] = {}
+        for player_id, appearances in player_recent.items():
+            avg_minutes = float(np.mean([stat['min'] for stat in appearances]))
+            if len(appearances) < 3 or avg_minutes < 12:
+                continue
+
+            avg_points = float(np.mean([stat['pts'] for stat in appearances]))
+            avg_pra = float(np.mean([stat['pra'] for stat in appearances]))
+            expected_rotation[player_id] = {
+                'avg_minutes': avg_minutes,
+                'avg_points': avg_points,
+                'avg_pra': avg_pra,
+            }
+
+        if not expected_rotation:
+            return {'injury_count': 0, 'star_player_out': 0}
+
+        active_ids = self.market_active_players.get((game_date, team_abbrev), set())
+        absent_players = [
+            meta for player_id, meta in expected_rotation.items()
+            if player_id not in active_ids
+        ]
+
+        star_out = any(
+            meta['avg_minutes'] >= 28 and (meta['avg_points'] >= 18 or meta['avg_pra'] >= 28)
+            for meta in absent_players
+        )
+
+        return {
+            'injury_count': len(absent_players),
+            'star_player_out': int(star_out),
+        }
+
+    def _get_market_context(
+        self,
+        game_date: str,
+        home_abbrev: str,
+        away_abbrev: str,
+        baseline_diff: float,
+    ) -> dict[str, float | int]:
+        """Return market context, preferring true game-odds history when present."""
+        prop_market = self.market_context.get((game_date, home_abbrev, away_abbrev), {})
+        game_market = self.game_market_context.get((game_date, home_abbrev, away_abbrev), {})
+
+        line_movement = float(game_market.get('line_movement', 0.0))
+        if not game_market:
+            line_movement = float(prop_market.get('line_movement', 0.0))
+
+        rlm_flag = int(game_market.get('rlm_flag', 0))
+        if not game_market:
+            rlm_flag = int(
+                prop_market.get('snapshot_count', 0) > 1
+                and abs(line_movement) >= 1.0
+                and baseline_diff != 0
+                and np.sign(line_movement) != np.sign(baseline_diff)
+            )
+
+        return {
+            'market_strength_diff': float(prop_market.get('market_strength_diff', 0.0)),
+            'opening_line': float(game_market.get('opening_line', 0.0)),
+            'closing_line': float(game_market.get('closing_line', 0.0)),
+            'line_movement': line_movement,
+            'rlm_flag': rlm_flag,
+            'consensus_odds': float(game_market.get('consensus_odds', -110)),
+            'steam_move_flag': int(game_market.get('steam_move_flag', 0)),
+            'moneyline_home_prob_movement': float(game_market.get('moneyline_home_prob_movement', 0.0)),
+        }
+
     def _extract_context_features(self, game: dict, home_feats: dict, away_feats: dict) -> dict:
         """
-        Extract context features for meta-learner (12 features total).
+        Extract context features for the stacking meta-learner.
 
-        Context features help the meta-learner understand the game context
-        and weight base model predictions appropriately.
-
-        Features:
-        1. days_rest_diff: Difference in days rest (home - away)
-        2. pace_combined: Combined pace estimate
-        3. injury_count_home: Number of injured players (home)
-        4. injury_count_away: Number of injured players (away)
-        5. star_player_out_home: Is a star player out (home)?
-        6. star_player_out_away: Is a star player out (away)?
-        7. line_movement: Market line movement (placeholder)
-        8. rlm_flag: Reverse line movement flag (placeholder)
-        9. prediction_variance: Filled during training (placeholder = 0)
-        10. home_advantage: Standard home court advantage
-        11. travel_distance_away: Travel distance for away team (placeholder)
-        12. back_to_back_away: Is away team on back-to-back?
+        These features intentionally mirror the semantics of the live
+        generate_game_features() output as closely as the historical archives allow.
+        Injury/availability features are inferred from real player-game history and
+        archived pregame prop boards; game-market features come from true archived
+        spread/moneyline/totals snapshots when available; travel features come from
+        real venue sequencing.
         """
-        # Calculate days since last game for each team
         game_date = game.get('date', '')[:10]
         home_team_id = game.get('home_team', {}).get('id')
         away_team_id = game.get('visitor_team', {}).get('id')
+        home_abbrev = game.get('home_team', {}).get('abbreviation', '')
+        away_abbrev = game.get('visitor_team', {}).get('abbreviation', '')
 
-        # Get last game dates
         home_games = [g for g in self.team_history.get(home_team_id, []) if g['date'] < game_date]
         away_games = [g for g in self.team_history.get(away_team_id, []) if g['date'] < game_date]
+        home_games.sort(key=lambda x: x['date'], reverse=True)
+        away_games.sort(key=lambda x: x['date'], reverse=True)
 
-        days_rest_home = 2  # Default
-        days_rest_away = 2  # Default
+        days_rest_home = 2
+        days_rest_away = 2
 
         if home_games:
-            home_games.sort(key=lambda x: x['date'], reverse=True)
             last_home_date = datetime.strptime(home_games[0]['date'], '%Y-%m-%d')
             current_date = datetime.strptime(game_date, '%Y-%m-%d')
             days_rest_home = (current_date - last_home_date).days
 
         if away_games:
-            away_games.sort(key=lambda x: x['date'], reverse=True)
             last_away_date = datetime.strptime(away_games[0]['date'], '%Y-%m-%d')
             current_date = datetime.strptime(game_date, '%Y-%m-%d')
             days_rest_away = (current_date - last_away_date).days
 
-        # Estimate pace from recent scoring
-        pace_combined = (home_feats.get('recent_pts_avg', 110) +
-                        away_feats.get('recent_pts_avg', 110)) / 2
+        recent_home_diffs = [g['point_diff'] for g in home_games[:5]]
+        recent_away_diffs = [g['point_diff'] for g in away_games[:5]]
+        volatility_samples = recent_home_diffs + recent_away_diffs
+        prediction_variance = float(np.std(volatility_samples)) if len(volatility_samples) >= 2 else 0.0
 
-        # Context features (12 total)
+        availability_home = self._get_availability_context(game_date, home_team_id, home_abbrev)
+        availability_away = self._get_availability_context(game_date, away_team_id, away_abbrev)
+
+        baseline_strength_diff = home_feats.get('point_diff_avg', 0) - away_feats.get('point_diff_avg', 0)
+        market_context = self._get_market_context(game_date, home_abbrev, away_abbrev, baseline_strength_diff)
+
+        away_travel_distance = 0.0
+        if away_games and home_abbrev:
+            try:
+                from travel_fatigue import TravelFatigueCalculator
+
+                travel_calc = TravelFatigueCalculator()
+                previous_venue = away_games[0].get('venue_abbrev', away_abbrev)
+                away_travel_distance = travel_calc.calculate_travel_distance(previous_venue, home_abbrev)
+            except Exception:
+                away_travel_distance = 0.0
+
+        avg_pace = (home_feats.get('recent_pts_avg', 110) + away_feats.get('recent_pts_avg', 110)) / 2.0
+        home_advantage_factor = home_feats.get('home_win_pct', 0.5) - away_feats.get('away_win_pct', 0.5)
+
         return {
-            'ctx_days_rest_diff': days_rest_home - days_rest_away,
-            'ctx_pace_combined': pace_combined,
-            'ctx_injury_count_home': 0,  # TODO: Will be populated in Phase 2
-            'ctx_injury_count_away': 0,  # TODO: Will be populated in Phase 2
-            'ctx_star_player_out_home': 0,  # TODO: Will be populated in Phase 2
-            'ctx_star_player_out_away': 0,  # TODO: Will be populated in Phase 2
-            'ctx_line_movement': 0.0,  # TODO: Will be populated in Phase 2
-            'ctx_rlm_flag': 0,  # TODO: Will be populated in Phase 2
-            'ctx_prediction_variance': 0.0,  # Filled during training
-            'ctx_home_advantage': 3.0,  # Standard NBA home court advantage
-            'ctx_travel_distance_away': 0.0,  # TODO: Will be populated in Phase 2
-            'ctx_back_to_back_away': int(days_rest_away == 0),
+            'ctx_rest_days_diff': days_rest_home - days_rest_away,
+            'ctx_avg_pace': avg_pace,
+            'ctx_injury_count_home': availability_home['injury_count'],
+            'ctx_injury_count_away': availability_away['injury_count'],
+            'ctx_star_player_out_home': availability_home['star_player_out'],
+            'ctx_star_player_out_away': availability_away['star_player_out'],
+            'ctx_market_strength_diff': market_context['market_strength_diff'],
+            'ctx_opening_line': market_context['opening_line'],
+            'ctx_closing_line': market_context['closing_line'],
+            'ctx_line_movement': market_context['line_movement'],
+            'ctx_rlm_flag': market_context['rlm_flag'],
+            'ctx_consensus_odds': market_context['consensus_odds'],
+            'ctx_steam_move_flag': market_context['steam_move_flag'],
+            'ctx_moneyline_home_prob_movement': market_context['moneyline_home_prob_movement'],
+            'ctx_prediction_variance': prediction_variance,
+            'ctx_home_advantage_factor': home_advantage_factor,
+            'ctx_away_travel_distance': away_travel_distance,
+            'ctx_away_is_b2b': int(days_rest_away <= 1),
         }
 
 
     def load_player_stats(self):
         """Load player statistics."""
         batch_files = list(self.cache_dir.glob("player_stats_batch_*.json"))
+        loaded_any = False
         for batch_file in batch_files:
             try:
                 with open(batch_file) as f:
@@ -398,12 +790,18 @@ class TrainingDataLoader:
                     for _game_id, stats in batch_data.items():
                         if isinstance(stats, list):
                             for stat in stats:
-                                player_id = stat.get('player', {}).get('id')
                                 game_date = stat.get('game', {}).get('date', '')[:10]
-                                if player_id and game_date:
-                                    self.player_stats[player_id].append((game_date, stat))
+                                if game_date:
+                                    self._record_player_game(game_date, stat)
+                                    loaded_any = True
             except Exception as e:
                 print(f"Warning loading {batch_file}: {e}")
+
+        if not loaded_any:
+            loaded_any = self._load_historical_player_stats_fallback()
+
+        if loaded_any:
+            self._load_market_context()
 
         # Sort by date
         for pid in self.player_stats:
@@ -688,28 +1086,34 @@ def train_moneyline_model(data: pd.DataFrame, tune: bool = False) -> StackingCla
 
             # Only save if improved
             if acc >= acc_baseline or ll <= ll_baseline:
-                output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
-                with open(output_path, 'wb') as f:
-                    pickle.dump(model, f)
-                print(f"  ✓ Model improved! Saved to {output_path}")
+                output_paths = [
+                    MODEL_DIR / "moneyline_stacking.pkl",
+                    MODEL_DIR / "moneyline_stacking_metalearner.pkl",
+                ]
+                _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
+                print(f"  ✓ Model improved! Saved to {output_paths[0]} and {output_paths[1]}")
             else:
                 print("  ✗ Model did not improve. Keeping baseline.")
                 return baseline_model
         except Exception as e:
             print(f"  Warning: Could not load baseline: {e}")
             # Save anyway if baseline comparison failed
-            output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
-            with open(output_path, 'wb') as f:
-                pickle.dump(model, f)
-            print(f"  Saved to {output_path}")
+            output_paths = [
+                MODEL_DIR / "moneyline_stacking.pkl",
+                MODEL_DIR / "moneyline_stacking_metalearner.pkl",
+            ]
+            _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
+            print(f"  Saved to {output_paths[0]} and {output_paths[1]}")
     else:
-        output_path = MODEL_DIR / "moneyline_stacking_metalearner.pkl"
-        with open(output_path, 'wb') as f:
-            pickle.dump(model, f)
+        output_paths = [
+            MODEL_DIR / "moneyline_stacking.pkl",
+            MODEL_DIR / "moneyline_stacking_metalearner.pkl",
+        ]
+        _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
         # Save as baseline for future comparisons
         with open(baseline_path, 'wb') as f:
             pickle.dump(model, f)
-        print(f"  Saved to {output_path}")
+        print(f"  Saved to {output_paths[0]} and {output_paths[1]}")
         print("  Also saved as baseline for future comparisons")
 
     return model
@@ -819,28 +1223,34 @@ def train_spread_model(data: pd.DataFrame, tune: bool = False) -> StackingRegres
 
             # Only save if improved
             if improvement >= 0:
-                output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
-                with open(output_path, 'wb') as f:
-                    pickle.dump(model, f)
-                print(f"  ✓ Model improved! Saved to {output_path}")
+                output_paths = [
+                    MODEL_DIR / "spread_stacking.pkl",
+                    MODEL_DIR / "spread_stacking_metalearner.pkl",
+                ]
+                _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
+                print(f"  ✓ Model improved! Saved to {output_paths[0]} and {output_paths[1]}")
             else:
                 print("  ✗ Model did not improve. Keeping baseline.")
                 return baseline_model
         except Exception as e:
             print(f"  Warning: Could not load baseline: {e}")
             # Save anyway if baseline comparison failed
-            output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
-            with open(output_path, 'wb') as f:
-                pickle.dump(model, f)
-            print(f"  Saved to {output_path}")
+            output_paths = [
+                MODEL_DIR / "spread_stacking.pkl",
+                MODEL_DIR / "spread_stacking_metalearner.pkl",
+            ]
+            _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
+            print(f"  Saved to {output_paths[0]} and {output_paths[1]}")
     else:
-        output_path = MODEL_DIR / "spread_stacking_metalearner.pkl"
-        with open(output_path, 'wb') as f:
-            pickle.dump(model, f)
+        output_paths = [
+            MODEL_DIR / "spread_stacking.pkl",
+            MODEL_DIR / "spread_stacking_metalearner.pkl",
+        ]
+        _save_inference_ready_stacking_model(model, output_paths, feature_cols, context_cols)
         # Save as baseline for future comparisons
         with open(baseline_path, 'wb') as f:
             pickle.dump(model, f)
-        print(f"  Saved to {output_path}")
+        print(f"  Saved to {output_paths[0]} and {output_paths[1]}")
         print("  Also saved as baseline for future comparisons")
 
     return model
