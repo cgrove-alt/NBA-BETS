@@ -430,7 +430,15 @@ def _calculate_prop_edge(over_prob: float, american_odds: int = -110, under_odds
             best_odds = under_odds if under_odds is not None else american_odds
 
         # Proper EV: (model_prob * decimal_odds) - 1
-        decimal_odds = _american_to_decimal(best_odds)
+        # When best_odds is available, use actual decimal odds.
+        # When we only have over_odds but picked UNDER, estimate decimal from implied prob.
+        if best_odds is not None and (under_odds is not None or pick == 'OVER'):
+            decimal_odds = _american_to_decimal(best_odds)
+        elif market_implied > 0 and market_implied < 1:
+            # Estimate decimal odds from no-vig implied probability
+            decimal_odds = 1.0 / market_implied
+        else:
+            decimal_odds = 1.909  # Default -110
         ev_per_dollar = (model_prob * decimal_odds) - 1
 
         return {
@@ -2023,8 +2031,10 @@ def predict_player_prop(
             features = get_cached_features(player_name, prop_type, opponent_id, bdl_player_id=player_id, opp_stats=opp_stats)
 
             if features:
-                # Inject only prop_line_vs_recent (consistent between training and inference).
-                # REMOVED: prop_line and prop_line_vs_season caused training-serving skew.
+                # Inject prop_line features. After the next retrain, models will no
+                # longer include prop_line or prop_line_vs_season in their feature_names
+                # and these values will be ignored. Until then, we keep injecting them
+                # for backward compatibility with the currently deployed model.
                 _season_avg_map = {
                     'points': ('season_pts_avg', 'recent_pts_avg'),
                     'rebounds': ('season_reb_avg', 'recent_reb_avg'),
@@ -2043,6 +2053,9 @@ def predict_player_prop(
                     _r_avg = (features.get('recent_pts_avg', 0) +
                               features.get('recent_reb_avg', 0) +
                               features.get('recent_ast_avg', 0))
+                # Backward compat: keep prop_line for pre-retrain models
+                features['prop_line'] = line
+                features['prop_line_vs_season'] = line - _s_avg
                 features['prop_line_vs_recent'] = line - _r_avg
 
                 # Handle ENSEMBLE format (multiple models with meta_model)

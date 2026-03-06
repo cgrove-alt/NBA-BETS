@@ -4208,13 +4208,18 @@ class PropEnsembleModel:
         from sklearn.base import clone as sklearn_clone
         from sklearn.model_selection import KFold as _KFold
 
-        n_models = len(base_predictions_train)
-        oof_meta_features = np.zeros((len(y_train), n_models))
-        model_names_list = list(self.models.keys())
+        # Only include models that trained successfully (have entries in model_metrics)
+        successful_model_names = [name for name in self.models if name in model_metrics]
+        n_successful = len(successful_model_names)
+
+        # Build name-to-index map for base_predictions_train (which only has successful models)
+        _bp_index = {name: i for i, name in enumerate(successful_model_names)}
+
+        oof_meta_features = np.zeros((len(y_train), n_successful))
 
         kf = _KFold(n_splits=5, shuffle=False)  # No shuffle for temporal consistency
         for fold_idx, (fold_train_idx, fold_val_idx) in enumerate(kf.split(X_train_scaled)):
-            for model_idx, name in enumerate(model_names_list):
+            for model_idx, name in enumerate(successful_model_names):
                 try:
                     fold_model = sklearn_clone(self.models[name])
                     if w_train is not None and hasattr(fold_model, 'fit') and 'sample_weight' in str(fold_model.fit.__code__.co_varnames):
@@ -4225,10 +4230,8 @@ class PropEnsembleModel:
                     oof_meta_features[fold_val_idx, model_idx] = fold_model.predict(X_train_scaled[fold_val_idx])
                 except Exception:
                     # Fallback to training predictions for this fold
-                    oof_meta_features[fold_val_idx, model_idx] = base_predictions_train[model_idx][fold_val_idx]
-
-        # Also build test-set meta features from the full-data base models
-        stacked_test = np.column_stack(base_predictions_test)
+                    bp_idx = _bp_index[name]
+                    oof_meta_features[fold_val_idx, model_idx] = base_predictions_train[bp_idx][fold_val_idx]
 
         # Compute inverse-RMSE weights for fallback ensemble
         model_weights = {}
