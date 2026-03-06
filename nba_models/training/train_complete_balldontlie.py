@@ -1500,6 +1500,37 @@ class EloRatingSystem:
         # Convert to spread: ~100 Elo = 3 points
         return elo_diff * 0.03
 
+    def get_elo_trend(self, team_id: int, before_date: str, window: int = 5) -> float:
+        """
+        Get a team's recent Elo momentum (change over last N games).
+
+        Positive = improving (rating going up), negative = declining.
+        Used as a feature to capture whether a team is on an upswing or downswing.
+
+        Args:
+            team_id: Team ID
+            before_date: Only consider games before this date
+            window: Number of most-recent rating changes to average
+
+        Returns:
+            Average Elo change per game over last N games (positive = improving)
+        """
+        if team_id not in self.rating_history:
+            return 0.0
+
+        history = [(d, r) for d, r in self.rating_history[team_id] if d < before_date]
+        if len(history) < 2:
+            return 0.0
+
+        history.sort(key=lambda x: x[0])
+        recent = history[-window:]
+        if len(recent) < 2:
+            return 0.0
+
+        # Average rating change per game in this window
+        total_change = recent[-1][1] - recent[0][1]
+        return total_change / max(len(recent) - 1, 1)
+
 
 # =============================================================================
 # TIER 2.1: NBA ARENA DATA (Travel & Fatigue Features)
@@ -3036,6 +3067,9 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
         away_elo = elo_system.get_rating_before_date(away_team_id, game_date)
         elo_win_prob = elo_system.predict_win_probability(home_team_id, away_team_id, before_date=game_date)
         elo_spread = elo_system.get_spread_prediction(home_team_id, away_team_id, before_date=game_date)
+        # Elo momentum: positive = team improving, negative = declining
+        home_elo_trend = elo_system.get_elo_trend(home_team_id, game_date, window=5)
+        away_elo_trend = elo_system.get_elo_trend(away_team_id, game_date, window=5)
 
         # Get last game info for travel/fatigue features
         home_team_abbrev = home_team.get('abbreviation', '')
@@ -3384,8 +3418,12 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
             'home_elo': home_elo,
             'away_elo': away_elo,
             'elo_diff': home_elo - away_elo,
-            'elo_win_prob': elo_win_prob,  # Elo-based home win probability
-            'elo_spread': elo_spread,  # Elo-based spread prediction
+            'elo_win_prob': elo_win_prob,   # Elo-based home win probability
+            'elo_spread': elo_spread,        # Elo-based spread prediction
+            # Elo momentum: is a team currently improving or declining?
+            'home_elo_trend': home_elo_trend,
+            'away_elo_trend': away_elo_trend,
+            'elo_trend_diff': home_elo_trend - away_elo_trend,  # Positive = home improving faster
 
             # === NEW: REST & FATIGUE FEATURES ===
             'home_days_rest': home_days_rest,
@@ -3394,6 +3432,18 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
             'home_is_b2b': 1 if home_is_b2b else 0,
             'away_is_b2b': 1 if away_is_b2b else 0,
             'b2b_disadvantage': (1 if away_is_b2b else 0) - (1 if home_is_b2b else 0),  # Positive = away on B2B
+
+            # === NEW: SCHEDULE DENSITY FEATURES ===
+            # 3-in-4 is harder than B2B; 4-in-5 is the worst short-rest spot.
+            # Research: 3-in-4 costs ~1.5 pts, 4-in-5 costs ~2.5 pts.
+            'home_is_3in4': home_travel_features.get('is_3_in_4', 0),
+            'away_is_3in4': away_travel_features.get('is_3_in_4', 0),
+            'home_is_4in5': home_travel_features.get('is_4_in_5', 0),
+            'away_is_4in5': away_travel_features.get('is_4_in_5', 0),
+            'schedule_density_advantage': (
+                away_travel_features.get('games_last_7_days', 0) -
+                home_travel_features.get('games_last_7_days', 0)
+            ),  # Positive = away team played more games recently
 
             # === NEW: TRAVEL FEATURES ===
             'home_travel_distance': home_travel_features['travel_distance'],
