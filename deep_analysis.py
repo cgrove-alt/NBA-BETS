@@ -8,12 +8,36 @@ import json
 import pickle
 import warnings
 import numpy as np
+from pathlib import Path
 
-ROOT = '/home/user/workspace/NBA-BETS'
+ROOT = Path(os.environ.get("NBA_BETS_ROOT", Path(__file__).resolve().parent))
 os.chdir(ROOT)
-sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, 'nba_models', 'training'))
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "nba_models" / "training"))
 warnings.filterwarnings('ignore')
+
+
+def _load_2023_24_player_batch() -> dict:
+    cache_path = ROOT / "data" / "balldontlie_cache" / "player_stats_batch_2024.json"
+    if cache_path.exists():
+        with open(cache_path) as f:
+            return json.load(f)
+
+    print("  Cache miss: player_stats_batch_2024.json not found — rebuilding from CSV...")
+    from train_from_csv import (
+        build_team_id_map,
+        _build_team_metadata,
+        load_team_games,
+        load_player_stats,
+    )
+
+    seasons = ["2023-24"]
+    team_id_map = build_team_id_map()
+    team_meta = _build_team_metadata()
+    games = load_team_games(seasons, team_id_map, team_meta)
+    game_ids = {g["id"] for g in games}
+    batch = load_player_stats(game_ids, seasons, team_id_map)
+    return {str(gid): records for gid, records in batch.items()}
 
 print("=" * 70)
 print("DEEP MODEL ANALYSIS")
@@ -61,8 +85,7 @@ print("2. PLAYER PROPS - MODEL vs NAIVE BASELINES")
 print("=" * 60)
 
 # Load baselines from batch data
-with open('data/balldontlie_cache/player_stats_batch_2024.json') as f:
-    batch = json.load(f)
+batch = _load_2023_24_player_batch()
 
 player_season = {}
 for gid, players in batch.items():
@@ -221,7 +244,9 @@ analysis = {
     'player_props': comparison,
     'improvements': improvements,
 }
-with open('backtest_results/deep_analysis.json', 'w') as f:
+output_path = ROOT / "backtest_results" / "deep_analysis.json"
+output_path.parent.mkdir(parents=True, exist_ok=True)
+with open(output_path, 'w') as f:
     json.dump(analysis, f, indent=2, default=str)
 
-print("\n\n✓ Analysis saved to backtest_results/deep_analysis.json")
+print(f"\n\n✓ Analysis saved to {output_path}")

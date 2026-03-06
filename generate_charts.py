@@ -2,10 +2,12 @@
 """
 Generate comprehensive visualizations for the NBA-BETS model analysis report.
 """
+import os
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from pathlib import Path
 
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams.update({
@@ -18,7 +20,9 @@ plt.rcParams.update({
 })
 
 COLORS = ['#4C72B0', '#DD8452', '#55A868', '#C44E52', '#8172B3', '#937860']
-OUTPUT_DIR = '/home/user/workspace/NBA-BETS/backtest_results'
+ROOT = Path(os.environ.get("NBA_BETS_ROOT", Path(__file__).resolve().parent))
+OUTPUT_DIR = ROOT / "backtest_results"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ============================================
 # CHART 1: Model RMSE vs Baselines
@@ -56,7 +60,7 @@ ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
 
 plt.tight_layout()
-plt.savefig(f'{OUTPUT_DIR}/chart_rmse_comparison.png', dpi=150, bbox_inches='tight')
+plt.savefig(OUTPUT_DIR / 'chart_rmse_comparison.png', dpi=150, bbox_inches='tight')
 plt.close()
 print("✓ Chart 1: RMSE comparison saved")
 
@@ -92,7 +96,7 @@ ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
 
 plt.tight_layout()
-plt.savefig(f'{OUTPUT_DIR}/chart_r2_scores.png', dpi=150, bbox_inches='tight')
+plt.savefig(OUTPUT_DIR / 'chart_r2_scores.png', dpi=150, bbox_inches='tight')
 plt.close()
 print("✓ Chart 2: R² scores saved")
 
@@ -142,7 +146,7 @@ ax2.spines['right'].set_visible(False)
 
 plt.suptitle('Probability Calibration Fix', fontsize=14, fontweight='bold', y=1.02)
 plt.tight_layout()
-plt.savefig(f'{OUTPUT_DIR}/chart_calibration_fix.png', dpi=150, bbox_inches='tight')
+plt.savefig(OUTPUT_DIR / 'chart_calibration_fix.png', dpi=150, bbox_inches='tight')
 plt.close()
 print("✓ Chart 3: Calibration fix saved")
 
@@ -195,7 +199,7 @@ ax.annotate('Fewer bets, better edge.\n~75% of losing bets eliminated.',
            arrowprops={'arrowstyle': '->', 'color': '#55A868'})
 
 plt.tight_layout()
-plt.savefig(f'{OUTPUT_DIR}/chart_bet_filter_impact.png', dpi=150, bbox_inches='tight')
+plt.savefig(OUTPUT_DIR / 'chart_bet_filter_impact.png', dpi=150, bbox_inches='tight')
 plt.close()
 print("✓ Chart 4: Bet filter impact saved")
 
@@ -219,7 +223,7 @@ ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
 
 plt.tight_layout()
-plt.savefig(f'{OUTPUT_DIR}/chart_ensemble_weights.png', dpi=150, bbox_inches='tight')
+plt.savefig(OUTPUT_DIR / 'chart_ensemble_weights.png', dpi=150, bbox_inches='tight')
 plt.close()
 print("✓ Chart 5: Ensemble weights saved")
 
@@ -271,7 +275,7 @@ ax.text(5, 2.65, '─── Implemented Above │ Next Steps Below ───',
         fontsize=9, ha='center', va='bottom', color='gray', style='italic')
 
 plt.tight_layout()
-plt.savefig(f'{OUTPUT_DIR}/chart_roadmap.png', dpi=150, bbox_inches='tight')
+plt.savefig(OUTPUT_DIR / 'chart_roadmap.png', dpi=150, bbox_inches='tight')
 plt.close()
 print("✓ Chart 6: Roadmap saved")
 

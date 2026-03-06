@@ -67,6 +67,23 @@ MIN_CONFIDENCE = 0.58   # Minimum calibrated win probability
 MAX_BET_PCT = 0.03      # Hard cap: 3% of bankroll per bet
 KELLY_FRACTION = 0.25   # Quarter-Kelly for conservative sizing
 
+# Confidence reliability controls
+# Early-season samples are noisier; shrink probabilities toward 50% until
+# enough games are observed to trust distribution-based confidence.
+CONFIDENCE_SHRINK_HALF_LIFE_GAMES = 40.0
+CONFIDENCE_SHRINK_MIN_FACTOR = 0.35
+
+# Minimum true EV required when real odds are available.
+# Tighter thresholds on weaker/market-efficient markets reduce false positives.
+MIN_TRUE_EV = {
+    'points': 0.03,
+    'rebounds': 0.03,
+    'assists': 0.03,
+    'pra': 0.03,
+    'moneyline': 0.04,
+    'spread': 0.04,
+}
+
 
 # ---------------------------------------------------------------------------
 # Odds conversion
@@ -113,6 +130,35 @@ def calibrate_probability(raw_prob: float, temperature: float = CALIBRATION_TEMP
     calibrated_logit = logit / temperature
     calibrated = 1 / (1 + np.exp(-calibrated_logit))
     return float(np.clip(calibrated, 0.05, 0.95))
+
+
+def _sample_size_reliability_factor(
+    games_played: int | None,
+    half_life_games: float = CONFIDENCE_SHRINK_HALF_LIFE_GAMES,
+    min_factor: float = CONFIDENCE_SHRINK_MIN_FACTOR,
+) -> float:
+    """Map sample size to confidence reliability factor in [min_factor, 1]."""
+    if games_played is None:
+        return 1.0
+
+    gp = max(0.0, float(games_played))
+    if gp <= 0:
+        return float(np.clip(min_factor, 0.0, 1.0))
+
+    reliability = 1.0 - float(np.exp(-gp / max(1.0, half_life_games)))
+    factor = min_factor + (1.0 - min_factor) * reliability
+    return float(np.clip(factor, min_factor, 1.0))
+
+
+def apply_sample_size_confidence_shrink(
+    probability: float,
+    games_played: int | None,
+) -> float:
+    """Shrink confidence toward 50% when sample size is small."""
+    p = float(np.clip(probability, 0.05, 0.95))
+    factor = _sample_size_reliability_factor(games_played)
+    adjusted = 0.5 + (p - 0.5) * factor
+    return float(np.clip(adjusted, 0.05, 0.95))
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +222,7 @@ def evaluate_bet(
         'edge': abs_edge,
         'signed_edge': signed_edge,
         'confidence': 0.5,
+        'confidence_reliability': None,
         'bet_size': 0.0,
         'tier': 'no_bet',
         'reason': '',
@@ -221,7 +268,11 @@ def evaluate_bet(
         confidence = 0.5 + min(abs_edge / (threshold * 4), 0.20)
         confidence = float(np.clip(confidence, 0.50, 0.70))
 
+    reliability_factor = _sample_size_reliability_factor(games_played)
+    confidence = apply_sample_size_confidence_shrink(confidence, games_played)
+
     result['confidence'] = confidence
+    result['confidence_reliability'] = reliability_factor
 
     # ---------- Gate 4: Minimum confidence ----------
     if confidence < MIN_CONFIDENCE:
@@ -283,10 +334,10 @@ def evaluate_bet(
     result['best_odds'] = best_odds
 
     # ---------- Gate 5: Minimum EV (when odds available) ----------
-    MIN_EV = 0.03
-    if true_ev is not None and true_ev < MIN_EV:
+    min_ev = MIN_TRUE_EV.get(prop_type, 0.03)
+    if true_ev is not None and true_ev < min_ev:
         result['reason'] = (
-            f"True EV {true_ev:.1%} below minimum {MIN_EV:.0%} "
+            f"True EV {true_ev:.1%} below minimum {min_ev:.0%} "
             f"(model: {model_prob:.1%} vs market: {market_implied_prob:.1%})"
         )
         return result
@@ -348,6 +399,7 @@ def evaluate_bets_batch(predictions: list[dict], bankroll: float = 1000.0) -> li
             bankroll=bankroll,
             over_odds=pred.get('over_odds'),
             under_odds=pred.get('under_odds'),
+            pre_calibrated=pred.get('pre_calibrated', False),
         )
         ev['input'] = pred
         results.append(ev)

@@ -20,16 +20,54 @@ import pickle
 import warnings
 import time
 import numpy as np
+from pathlib import Path
 
-ROOT = '/home/user/workspace/NBA-BETS'
+ROOT = Path(os.environ.get("NBA_BETS_ROOT", Path(__file__).resolve().parent))
 os.chdir(ROOT)
-sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, 'nba_models', 'training'))
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "nba_models" / "training"))
 warnings.filterwarnings('ignore')
 
 def load_model(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
+
+
+def _load_2023_24_games() -> list[dict]:
+    cache_path = ROOT / "data" / "balldontlie_cache" / "games_2024_full.json"
+    if cache_path.exists():
+        with open(cache_path) as f:
+            return json.load(f).get("games", [])
+
+    print("  Cache miss: games_2024_full.json not found — rebuilding from CSV...")
+    from train_from_csv import build_team_id_map, _build_team_metadata, load_team_games
+
+    team_id_map = build_team_id_map()
+    team_meta = _build_team_metadata()
+    return load_team_games(["2023-24"], team_id_map, team_meta)
+
+
+def _load_2023_24_player_batch() -> dict:
+    cache_path = ROOT / "data" / "balldontlie_cache" / "player_stats_batch_2024.json"
+    if cache_path.exists():
+        with open(cache_path) as f:
+            return json.load(f)
+
+    print("  Cache miss: player_stats_batch_2024.json not found — rebuilding from CSV...")
+    from train_from_csv import (
+        build_team_id_map,
+        _build_team_metadata,
+        load_team_games,
+        load_player_stats,
+    )
+
+    seasons = ["2023-24"]
+    team_id_map = build_team_id_map()
+    team_meta = _build_team_metadata()
+    games = load_team_games(seasons, team_id_map, team_meta)
+    game_ids = {g["id"] for g in games}
+    batch = load_player_stats(game_ids, seasons, team_id_map)
+    return {str(gid): records for gid, records in batch.items()}
 
 def main():
     print("=" * 70)
@@ -103,9 +141,7 @@ def main():
     print("\n\n--- PART 2: ATS Betting Simulation (2023-24 Season) ---")
 
     # Load game data
-    with open('data/balldontlie_cache/games_2024_full.json') as f:
-        game_data = json.load(f)
-    games = game_data.get('games', [])
+    games = _load_2023_24_games()
     print(f"Loaded {len(games)} games")
 
     # The spread model predicts the score differential (home - away)
@@ -134,8 +170,7 @@ def main():
     print("\n\n--- PART 3: Player Props Model Quality ---")
 
     # Load player box scores to compute baselines
-    with open('data/balldontlie_cache/player_stats_batch_2024.json') as f:
-        batch = json.load(f)
+    batch = _load_2023_24_player_batch()
 
     # Compute naive baseline: predict season average
     player_season = {}  # pid -> {pts: [], reb: [], ast: [], fg3m: []}
@@ -262,10 +297,12 @@ def main():
         }
     }
 
-    with open('backtest_results/model_evaluation_2023-24.json', 'w') as f:
+    output_path = ROOT / "backtest_results" / "model_evaluation_2023-24.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, 'w') as f:
         json.dump(output, f, indent=2, default=str)
 
-    print("\n\n✓ Results saved to backtest_results/model_evaluation_2023-24.json")
+    print(f"\n\n✓ Results saved to {output_path}")
 
 if __name__ == '__main__':
     main()
