@@ -90,7 +90,10 @@ from sklearn.model_selection import TimeSeriesSplit
 import argparse
 
 # Import travel fatigue calculator for Phase 2 features
-from travel_fatigue import TravelFatigueCalculator
+try:
+    from nba_data.transformers.travel_fatigue import TravelFatigueCalculator
+except ImportError:
+    from travel_fatigue import TravelFatigueCalculator
 
 # Import player impact metrics (DARKO/EPM/RAPTOR) for advanced player evaluation
 # Use module-level singleton to prevent multiple instances
