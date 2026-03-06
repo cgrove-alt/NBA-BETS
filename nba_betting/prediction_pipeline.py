@@ -52,9 +52,7 @@ MIN_EDGE = {
     'points': 2.0,
     'rebounds': 1.0,
     'assists': 0.8,
-    'threes': 999,     # Disabled — no demonstrated model edge
     'pra': 3.0,
-    'spread': 999,      # Disabled — RMSE 14.2, above market baseline ~12-13
     'moneyline': 0.05,
 }
 
@@ -212,6 +210,24 @@ def evaluate_bet(
             market_implied_prob (float | None) — devigged market probability
             best_odds           (int | None)   — American odds for the bet side
     """
+    # Gate 0: Line validation — reject nonsensical lines
+    if line is None or line <= 0:
+        return {
+            'should_bet': False,
+            'direction': 'over',
+            'edge': 0.0,
+            'signed_edge': 0.0,
+            'confidence': 0.5,
+            'confidence_reliability': None,
+            'bet_size': 0.0,
+            'tier': 'no_bet',
+            'reason': f'Invalid line ({line}) — skipping edge calculation',
+            'true_ev': None,
+            'ev_edge': None,
+            'market_implied_prob': None,
+            'best_odds': None,
+        }
+
     signed_edge = predicted - line
     abs_edge = abs(signed_edge)
     direction = 'over' if signed_edge > 0 else 'under'
@@ -321,12 +337,15 @@ def evaluate_bet(
         if direction == 'over':
             market_implied_prob = raw_implied
             best_odds = over_odds
+            ev_edge = model_prob - market_implied_prob
+            decimal_odds = american_to_decimal(best_odds)
+            true_ev = (model_prob * (decimal_odds - 1)) - (1 - model_prob)
         else:
+            # UNDER direction but only over_odds available — can't compute
+            # reliable EV. Set informational fields only; leave best_odds/true_ev
+            # as None so Kelly falls back to default -110 and EV gate is skipped.
             market_implied_prob = 1 - raw_implied
-            best_odds = over_odds
-        ev_edge = model_prob - market_implied_prob
-        decimal_odds = american_to_decimal(best_odds)
-        true_ev = (model_prob * (decimal_odds - 1)) - (1 - model_prob)
+            ev_edge = model_prob - market_implied_prob
 
     result['true_ev'] = true_ev
     result['ev_edge'] = ev_edge

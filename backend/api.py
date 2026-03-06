@@ -556,15 +556,16 @@ def get_props(game_id: str):
     home_abbrev = cached_teams.get("home")
     away_abbrev = cached_teams.get("away")
 
-    # Determine best bets (confidence >= 65, edge >= 2.0)
-    # Lowered from 80%/2.5 because the model's confidence naturally caps at ~70%
-    # The heuristic/quantile calculations produce 50-70% range realistically
+    # Determine best bets with prop-specific edge thresholds
+    BEST_BET_EDGE_THRESHOLDS = {"points": 3.0, "rebounds": 4.0, "assists": 4.0, "3pm": 5.0, "pra": 2.5}
+
     def is_best_bet(player: dict) -> bool:
         for prop_key in ["points", "rebounds", "assists", "3pm", "pra"]:
             conf = player.get(f"{prop_key}_confidence", 0) or 0
             edge = abs(player.get(f"{prop_key}_edge", 0) or 0)
             pick = player.get(f"{prop_key}_pick", "-")
-            if pick != "-" and conf >= 65 and edge >= 2.0:
+            threshold = BEST_BET_EDGE_THRESHOLDS.get(prop_key, 3.0)
+            if pick != "-" and conf >= 65 and edge >= threshold:
                 return True
         return False
 

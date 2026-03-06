@@ -616,7 +616,7 @@ class CacheManager:
     DEFAULT_TTL = {
         "games": timedelta(seconds=30),        # Real-time: 30 sec (was 5 min)
         "odds": timedelta(seconds=15),         # Real-time: 15 sec (was 30 sec)
-        "predictions": timedelta(seconds=30),  # Real-time: 30 sec (was 2 min)
+        "predictions": timedelta(seconds=300), # 5 min TTL to reduce recomputation
         "player_props": timedelta(seconds=30), # Real-time: 30 sec (was 3 min)
         "rosters": timedelta(hours=24),        # Rarely changes
         "analysis": timedelta(seconds=60),     # Real-time: 60 sec (was 10 min)

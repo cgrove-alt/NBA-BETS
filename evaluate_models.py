@@ -138,7 +138,7 @@ def main():
     # ==========================================
     # PART 2: Simulate ATS betting on 2023-24
     # ==========================================
-    print("\n\n--- PART 2: ATS Betting Simulation (2023-24 Season) ---")
+    print("\n\n--- PART 2: ATS Betting Simulation (2023-24 Season) [IN-SAMPLE] ---")
 
     # Load game data
     games = _load_2023_24_games()
@@ -158,7 +158,7 @@ def main():
             margins.append(hs - vs)
 
     margins = np.array(margins)
-    print("\n2023-24 Season Actual Margins:")
+    print("\n2023-24 Season Actual Margins [IN-SAMPLE — included in training]:")
     print(f"  Mean: {margins.mean():.2f} (home advantage)")
     print(f"  Std: {margins.std():.2f}")
     print(f"  Median: {np.median(margins):.2f}")
@@ -283,7 +283,7 @@ def main():
     # ==========================================
     output = {
         'evaluation_type': 'Model metrics + baseline comparison + betting edge estimation',
-        'data': '2023-24 NBA season (1,230 games, 32,385 player records)',
+        'data': '2023-24 NBA season [IN-SAMPLE] (1,230 games, 32,385 player records)',
         'training_data': '4 seasons (2021-22 through 2024-25)',
         'model_metrics': results,
         'baselines': {

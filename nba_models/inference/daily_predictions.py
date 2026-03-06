@@ -151,7 +151,7 @@ def compute_quantile_sigma(pred_low: float, pred_high: float, prop_type: str) ->
     if spread <= 0:
         return get_prop_std_dev(prop_type)
     quantile_sigma = spread / 2.564
-    min_sigma = get_prop_std_dev(prop_type) * 0.5
+    min_sigma = get_prop_std_dev(prop_type) * 0.35
     return max(quantile_sigma, min_sigma)
 
 
@@ -1854,7 +1854,7 @@ def get_player_props_for_game(api: BalldontlieAPI, game_id: int) -> dict[int, di
                 market_data = prop.get('market', {})
                 if isinstance(market_data, dict):
                     props_by_player[player_id][f'{prop_type}_over_odds'] = market_data.get('over_odds', -110)
-                    props_by_player[player_id][f'{prop_type}_under_odds'] = market_data.get('under_odds', -110)
+                    props_by_player[player_id][f'{prop_type}_under_odds'] = market_data.get('under_odds')
 
             accepted += 1
 
@@ -3001,7 +3001,7 @@ def main():
                             pred['team_abbrev'] = task.get('team_abbrev', '')
                             # Fix 4: Pass through actual sportsbook odds
                             pred['over_odds'] = task.get('over_odds', -110)
-                            pred['under_odds'] = task.get('under_odds', -110)
+                            pred['under_odds'] = task.get('under_odds')
                             # Track line source (odds-api vs balldontlie) and vendor (draftkings, fanduel, rebet)
                             pred['line_source'] = task.get('line_source', 'unknown')
                             pred['line_vendor'] = task.get('line_vendor', 'unknown')

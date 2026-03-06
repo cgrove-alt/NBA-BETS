@@ -3118,16 +3118,9 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
                 # Default weight is 1.0, reduced for outliers
                 example_sample_weight = 1.0
 
-                # OT NORMALIZATION: Scale stats to regulation-equivalent
-                # If player played 53 minutes (5 min OT), normalize to 48 min equivalent
+                # OT games: keep actual stats (props settle on real totals) but
+                # reduce weight since OT minutes inflate stats beyond typical variance
                 if outlier_info['outlier_type'] == 'overtime' and actual_min > 48:
-                    ot_factor = 48.0 / actual_min
-                    actual_pts = round(actual_pts * ot_factor, 1)
-                    actual_reb = round(actual_reb * ot_factor, 1)
-                    actual_ast = round(actual_ast * ot_factor, 1)
-                    actual_fg3m = round(actual_fg3m * ot_factor, 1)
-                    actual_pra = actual_pts + actual_reb + actual_ast
-                    # Also reduce weight since OT games are less representative
                     example_sample_weight *= 0.7
 
                 # BLOWOUT DETECTION: Down-weight games with 20+ point differential

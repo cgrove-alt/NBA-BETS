@@ -918,7 +918,7 @@ class TrainingDataLoader:
                 'away_streak': away_feats['streak'],
                 'win_pct_diff': home_feats['win_pct'] - away_feats['win_pct'],
                 'point_diff_diff': home_feats['point_diff_avg'] - away_feats['point_diff_avg'],
-                'expected_margin': home_feats['point_diff_avg'] - away_feats['point_diff_avg'] + 3.0,  # Home court ~3 pts
+                'expected_margin': home_feats['point_diff_avg'] - away_feats['point_diff_avg'],
                 'target': spread,
                 'game_date': game_date,  # Store date for time-decay weights
             }
@@ -952,6 +952,18 @@ class TrainingDataLoader:
 
             for i in range(5, len(games)):
                 date, stat = games[i]
+
+                # Skip low-minutes games (garbage time noise)
+                minutes = stat.get('min', 0) or 0
+                if isinstance(minutes, str):
+                    try:
+                        parts = minutes.split(':')
+                        minutes = int(parts[0]) + int(parts[1]) / 60 if len(parts) == 2 else float(minutes)
+                    except (ValueError, IndexError):
+                        minutes = 0
+                if minutes < 12:
+                    continue
+
                 prior = games[max(0, i-10):i]
 
                 # Calculate features from prior games

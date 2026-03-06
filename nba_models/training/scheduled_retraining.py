@@ -359,8 +359,9 @@ def full_retrain() -> bool:
 
         logger.info("Training completed successfully")
 
-        # Step 3b: Refresh quantile decompression constants
+        # Step 3b: Refresh quantile decompression constants (MANDATORY)
         logger.info("Recalibrating quantile decompression constants...")
+        calib_ok = False
         try:
             calib_script = PROJECT_DIR.parent.parent / "scripts" / "calibrate_quantile_decompression.py"
             if not calib_script.exists():
@@ -375,15 +376,27 @@ def full_retrain() -> bool:
                 )
                 if calib_result.returncode == 0:
                     logger.info("Quantile decompression recalibrated successfully")
+                    calib_ok = True
                 else:
-                    logger.warning(
-                        "Quantile decompression calibration failed (non-critical): %s",
+                    logger.error(
+                        "Quantile decompression calibration FAILED: %s",
                         calib_result.stderr[:300],
                     )
             else:
-                logger.warning("calibrate_quantile_decompression.py not found — skipping")
+                logger.error("calibrate_quantile_decompression.py not found")
         except Exception as calib_exc:
-            logger.warning("Quantile decompression calibration error (non-critical): %s", calib_exc)
+            logger.error("Quantile decompression calibration error: %s", calib_exc)
+
+        if not calib_ok:
+            logger.error("Calibration failed — restoring backup models to prevent stale params")
+            for backup_file in backup_dir.glob("*.pkl"):
+                shutil.copy2(backup_file, MODELS_DIR / backup_file.name)
+            send_alert(
+                "Quantile Calibration Failed",
+                "Calibration failed after training. Models restored from backup.",
+                severity='error',
+            )
+            return False
 
         # Step 4: Run validation backtest
         logger.info("Running validation backtest...")
@@ -503,6 +516,27 @@ def incremental_update() -> bool:
                 shutil.copy2(model_file, backup_dir / model_file.name)
 
             logger.info(f"Backed up {len(meta_learner_files)} meta-learner models")
+
+        # Step 2b: Regenerate out-of-fold predictions from base models
+        # Meta-learner must train on fresh OOF predictions, not stale ones
+        logger.info("Regenerating OOF predictions from base models...")
+        oof_script = PROJECT_DIR / "scripts" / "generate_oof_predictions.py"
+        if not oof_script.exists():
+            oof_script = Path(__file__).parent.parent.parent / "scripts" / "generate_oof_predictions.py"
+        if oof_script.exists():
+            oof_result = subprocess.run(
+                [sys.executable, str(oof_script)],
+                cwd=PROJECT_DIR,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if oof_result.returncode == 0:
+                logger.info("OOF predictions regenerated successfully")
+            else:
+                logger.warning("OOF regeneration failed (continuing with existing): %s", oof_result.stderr[:200])
+        else:
+            logger.warning("generate_oof_predictions.py not found — using existing OOF files")
 
         # Step 3: Run incremental training (meta-learner only)
         logger.info("Running incremental update (meta-learner only)...")

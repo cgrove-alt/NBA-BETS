@@ -37,7 +37,7 @@ PROP_STD_DEVS: dict[str, float] = {
     'rebounds': 3.1,   # Corrected from 7.0 on 2026-02-26 (was inflating Z-scores ~2x)
     'assists':  2.2,   # Calibrated from 3 seasons of player-game logs
     'threes':   1.6,   # Calibrated; Poisson approximation
-    'pra':      8.5,   # Points + Rebounds + Assists combined variance
+    'pra':      7.9,   # sqrt(6.5²+3.1²+2.2²)≈7.53, +5% correlation ≈ 7.9
 }
 
 DEFAULT_PROP_STD_DEV: float = 5.0  # fallback when prop type is unknown
