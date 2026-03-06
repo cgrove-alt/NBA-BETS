@@ -10,6 +10,7 @@ import uuid
 import time
 import logging
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -73,6 +74,7 @@ class AgentBase(ABC):
         self._messages_sent = 0
         self._run_id = ''
         self._llm_client = None
+        self._llm_errors: list = []
 
     def execute(self) -> AgentResult:
         """
@@ -108,8 +110,15 @@ class AgentBase(ABC):
             return result
 
         try:
-            # Run core logic
-            run_output = self.run()
+            # Run core logic with timeout enforcement
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(self.run)
+                try:
+                    run_output = future.result(timeout=self.MAX_EXECUTION_SECONDS)
+                except FuturesTimeoutError:
+                    raise TimeoutError(
+                        f"Agent {self.AGENT_NAME} exceeded MAX_EXECUTION_SECONDS ({self.MAX_EXECUTION_SECONDS}s)"
+                    )
 
             # Report results (send messages)
             self.report(run_output)
@@ -122,6 +131,10 @@ class AgentBase(ABC):
                 datetime.fromisoformat(completed_at) - datetime.fromisoformat(started_at)
             ).total_seconds()
 
+            # Include LLM errors in payload if any occurred
+            if self._llm_errors:
+                errors.extend(self._llm_errors)
+
             result = AgentResult(
                 agent_name=self.AGENT_NAME,
                 status=AgentStatus.COMPLETED.value,
@@ -132,6 +145,7 @@ class AgentBase(ABC):
                 tokens_used=self._tokens_used,
                 payload=run_output if isinstance(run_output, dict) else {'output': run_output},
                 reasoning=run_output.get('reasoning', '') if isinstance(run_output, dict) else '',
+                errors=errors,
             )
 
             self.guardrails.record_run(
@@ -157,6 +171,7 @@ class AgentBase(ABC):
             ).total_seconds()
 
             errors.append(str(e))
+            errors.extend(self._llm_errors)
             logger.error(f"[{self.AGENT_NAME}] Failed: {e}", exc_info=True)
 
             result = AgentResult(
@@ -219,12 +234,16 @@ class AgentBase(ABC):
         budget = self.guardrails.get_budget(self.AGENT_NAME, self.DAILY_TOKEN_BUDGET)
         estimated_input = len(system_prompt + user_message) // 4  # rough estimate
         if not budget.can_spend(estimated_input + max_tokens):
-            logger.warning(f"[{self.AGENT_NAME}] Token budget exceeded — skipping LLM call")
+            msg = f"[{self.AGENT_NAME}] Token budget exceeded — skipping LLM call"
+            logger.warning(msg)
+            self._llm_errors.append(msg)
             return ''
 
         api_key = os.environ.get('GEMINI_API_KEY')
         if not api_key:
-            logger.warning(f"[{self.AGENT_NAME}] GEMINI_API_KEY not set — skipping LLM call")
+            msg = f"[{self.AGENT_NAME}] GEMINI_API_KEY not set — skipping LLM call"
+            logger.warning(msg)
+            self._llm_errors.append(msg)
             return ''
 
         try:
@@ -261,7 +280,9 @@ class AgentBase(ABC):
             return result_text
 
         except Exception as e:
-            logger.error(f"[{self.AGENT_NAME}] LLM call failed: {e}")
+            msg = f"[{self.AGENT_NAME}] LLM call failed: {e}"
+            logger.error(msg)
+            self._llm_errors.append(msg)
             return ''
 
     def send_message(

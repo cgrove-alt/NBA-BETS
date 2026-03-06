@@ -29,6 +29,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Cached infrastructure connections
+_cached_redis = None
+_cached_pg_conn = None
+_cached_message_bus = None
+_cached_guardrails = None
+
 # Agent name -> (module_path, class_name, schedule)
 AGENT_CATALOG = {
     'pregame':      ('agents.pregame.pregame_agent',            'PreGameIntelAgent',              '0 11,17 * * *'),
@@ -48,22 +54,42 @@ def _load_agent_class(module_path: str, class_name: str):
 
 
 def _setup_infrastructure():
-    """Set up message bus and guardrails with appropriate backends."""
-    # Redis
-    redis_client = get_redis_client()
-    if redis_client:
-        message_bus = MessageBus(redis_client)
+    """Set up message bus and guardrails with appropriate backends. Caches connections."""
+    global _cached_redis, _cached_pg_conn, _cached_message_bus, _cached_guardrails
+
+    # Reuse cached PostgreSQL connection if still alive
+    pg_conn = _cached_pg_conn
+    if pg_conn is not None:
+        try:
+            cur = pg_conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+        except Exception:
+            logger.info("Cached PostgreSQL connection dead, reconnecting")
+            pg_conn = None
+
+    if pg_conn is None:
+        pg_conn = get_postgres_connection()
+        if pg_conn:
+            ensure_agent_schema(pg_conn)
+        _cached_pg_conn = pg_conn
+
+    # Reuse cached Redis / message bus
+    if _cached_message_bus is not None:
+        message_bus = _cached_message_bus
     else:
-        message_bus = InMemoryMessageBus()
+        redis_client = get_redis_client()
+        if redis_client:
+            message_bus = MessageBus(redis_client)
+        else:
+            message_bus = InMemoryMessageBus()
+        _cached_message_bus = message_bus
 
-    # PostgreSQL
-    pg_conn = get_postgres_connection()
-    if pg_conn:
-        ensure_agent_schema(pg_conn)
+    # Reuse or create guardrails
+    if _cached_guardrails is None or pg_conn is not _cached_pg_conn:
+        _cached_guardrails = Guardrails(pg_conn=pg_conn)
 
-    guardrails = Guardrails(pg_conn=pg_conn)
-
-    return message_bus, guardrails, pg_conn
+    return _cached_message_bus, _cached_guardrails, _cached_pg_conn
 
 
 def run_agent(agent_name: str, shadow: bool = False, target_date: str = None):

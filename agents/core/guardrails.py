@@ -124,38 +124,41 @@ class Guardrails:
 
     def _get_budget_pg(self, agent_name: str, daily_limit: int, today: str) -> TokenBudget:
         cur = self._pg_conn.cursor()
-        cur.execute(
-            "SELECT agent_name, daily_limit, used_today, reset_date FROM agent_token_budgets WHERE agent_name = %s",
-            (agent_name,)
-        )
-        row = cur.fetchone()
-
-        if row is None:
+        try:
             cur.execute(
-                "INSERT INTO agent_token_budgets (agent_name, daily_limit, used_today, reset_date) VALUES (%s, %s, 0, %s)",
-                (agent_name, daily_limit, today)
+                "SELECT agent_name, daily_limit, used_today, reset_date FROM agent_token_budgets WHERE agent_name = %s",
+                (agent_name,)
             )
+            row = cur.fetchone()
+
+            if row is None:
+                cur.execute(
+                    "INSERT INTO agent_token_budgets (agent_name, daily_limit, used_today, reset_date) VALUES (%s, %s, 0, %s)",
+                    (agent_name, daily_limit, today)
+                )
+                self._pg_conn.commit()
+                return TokenBudget(agent_name=agent_name, daily_limit=daily_limit, used_today=0, reset_date=today)
+
+            budget = TokenBudget(
+                agent_name=row[0],
+                daily_limit=row[1],
+                used_today=row[2],
+                reset_date=str(row[3]),
+            )
+
+            # Auto-reset if new day
+            if budget.reset_date != today:
+                cur.execute(
+                    "UPDATE agent_token_budgets SET used_today = 0, reset_date = %s WHERE agent_name = %s",
+                    (today, agent_name)
+                )
+                self._pg_conn.commit()
+                budget.used_today = 0
+                budget.reset_date = today
+
+            return budget
+        finally:
             cur.close()
-            return TokenBudget(agent_name=agent_name, daily_limit=daily_limit, used_today=0, reset_date=today)
-
-        budget = TokenBudget(
-            agent_name=row[0],
-            daily_limit=row[1],
-            used_today=row[2],
-            reset_date=str(row[3]),
-        )
-
-        # Auto-reset if new day
-        if budget.reset_date != today:
-            cur.execute(
-                "UPDATE agent_token_budgets SET used_today = 0, reset_date = %s WHERE agent_name = %s",
-                (today, agent_name)
-            )
-            budget.used_today = 0
-            budget.reset_date = today
-
-        cur.close()
-        return budget
 
     def _get_budget_sqlite(self, agent_name: str, daily_limit: int, today: str) -> TokenBudget:
         conn = self._get_sqlite_conn()
@@ -191,11 +194,14 @@ class Guardrails:
         """Persist updated budget."""
         if self._use_postgres:
             cur = self._pg_conn.cursor()
-            cur.execute(
-                "UPDATE agent_token_budgets SET used_today = %s, reset_date = %s WHERE agent_name = %s",
-                (budget.used_today, budget.reset_date, budget.agent_name)
-            )
-            cur.close()
+            try:
+                cur.execute(
+                    "UPDATE agent_token_budgets SET used_today = %s, reset_date = %s WHERE agent_name = %s",
+                    (budget.used_today, budget.reset_date, budget.agent_name)
+                )
+                self._pg_conn.commit()
+            finally:
+                cur.close()
         else:
             conn = self._get_sqlite_conn()
             conn.execute(
@@ -218,14 +224,16 @@ class Guardrails:
 
     def _check_cb_pg(self, agent_name: str, max_failures: int) -> bool:
         cur = self._pg_conn.cursor()
-        cur.execute("""
-            SELECT success FROM agent_runs
-            WHERE agent_name = %s
-            ORDER BY started_at DESC
-            LIMIT %s
-        """, (agent_name, max_failures))
-        rows = cur.fetchall()
-        cur.close()
+        try:
+            cur.execute("""
+                SELECT success FROM agent_runs
+                WHERE agent_name = %s
+                ORDER BY started_at DESC
+                LIMIT %s
+            """, (agent_name, max_failures))
+            rows = cur.fetchall()
+        finally:
+            cur.close()
 
         if len(rows) < max_failures:
             return False
@@ -265,17 +273,20 @@ class Guardrails:
 
         if self._use_postgres:
             cur = self._pg_conn.cursor()
-            cur.execute("""
-                INSERT INTO agent_runs
-                    (agent_name, run_id, started_at, completed_at, status, success,
-                     tokens_used, execution_seconds, messages_sent, errors, payload)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                agent_name, run_id, started_at, completed_at, status, success,
-                tokens_used, execution_seconds, messages_sent,
-                errors_json, payload_json,
-            ))
-            cur.close()
+            try:
+                cur.execute("""
+                    INSERT INTO agent_runs
+                        (agent_name, run_id, started_at, completed_at, status, success,
+                         tokens_used, execution_seconds, messages_sent, errors, payload)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    agent_name, run_id, started_at, completed_at, status, success,
+                    tokens_used, execution_seconds, messages_sent,
+                    errors_json, payload_json,
+                ))
+                self._pg_conn.commit()
+            finally:
+                cur.close()
         else:
             conn = self._get_sqlite_conn()
             conn.execute("""
@@ -297,12 +308,14 @@ class Guardrails:
 
         if self._use_postgres:
             cur = self._pg_conn.cursor()
-            cur.execute(
-                "SELECT agent_name, daily_limit, used_today FROM agent_token_budgets WHERE reset_date = %s",
-                (today,)
-            )
-            rows = cur.fetchall()
-            cur.close()
+            try:
+                cur.execute(
+                    "SELECT agent_name, daily_limit, used_today FROM agent_token_budgets WHERE reset_date = %s",
+                    (today,)
+                )
+                rows = cur.fetchall()
+            finally:
+                cur.close()
         else:
             conn = self._get_sqlite_conn()
             rows = conn.execute(

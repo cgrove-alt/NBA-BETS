@@ -5,6 +5,7 @@ Contains:
 1. COACH_TENDENCIES - Manual lookup table for all 30 NBA coaches
 2. CoachTendencyLearner - Class to learn/update tendencies from historical data
 """
+from __future__ import annotations
 
 from typing import Optional, Any
 from dataclasses import dataclass, field

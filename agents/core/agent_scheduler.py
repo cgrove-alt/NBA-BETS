@@ -125,6 +125,7 @@ def _init_stats():
             'last_tokens': None,
             'runs': 0,
             'failures': 0,
+            'consecutive_failures': 0,
         }
 
 
@@ -133,8 +134,8 @@ def _persist_stats():
     try:
         with open(STATUS_FILE, 'w') as f:
             json.dump(_stats, f, indent=2, default=str)
-    except Exception:
-        pass  # non-critical
+    except Exception as e:
+        logger.warning(f"Failed to persist stats: {e}")
 
 
 # Agents whose failure/recovery should trigger push notifications
@@ -227,12 +228,11 @@ def _scheduler_health_check():
     problem_agents = []
 
     for agent_name, info in _stats.get('agents', {}).items():
-        failures = info.get('failures', 0)
+        consecutive = info.get('consecutive_failures', 0)
         runs = info.get('runs', 0)
 
-        # 3+ consecutive failures (approximated by high failure ratio in recent runs)
-        if failures >= 3 and info.get('last_status') in ('failed', 'error'):
-            problem_agents.append(f"{agent_name}: {failures} failures in {runs} runs")
+        if consecutive >= 3:
+            problem_agents.append(f"{agent_name}: {consecutive} consecutive failures in {runs} runs")
 
     if problem_agents:
         msg = "Agents with repeated failures:\n" + "\n".join(f"  - {p}" for p in problem_agents)
@@ -264,10 +264,12 @@ def run_agent_job(agent_name: str):
 
         if exit_code == 0:
             agent_stats['last_status'] = 'completed'
+            agent_stats['consecutive_failures'] = 0
             logger.info(f"[{agent_name}] Completed in {duration:.1f}s")
         else:
             agent_stats['last_status'] = 'failed'
             agent_stats['failures'] = agent_stats.get('failures', 0) + 1
+            agent_stats['consecutive_failures'] = agent_stats.get('consecutive_failures', 0) + 1
             _stats['total_failures'] += 1
             logger.error(f"[{agent_name}] Failed (exit code {exit_code}) after {duration:.1f}s")
 
@@ -278,6 +280,7 @@ def run_agent_job(agent_name: str):
         agent_stats['last_status'] = 'error'
         agent_stats['last_duration_s'] = round(duration, 1)
         agent_stats['failures'] = agent_stats.get('failures', 0) + 1
+        agent_stats['consecutive_failures'] = agent_stats.get('consecutive_failures', 0) + 1
         _stats['total_failures'] += 1
         logger.error(f"[{agent_name}] Exception after {duration:.1f}s: {e}", exc_info=True)
 

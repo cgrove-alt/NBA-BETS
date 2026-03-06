@@ -209,17 +209,37 @@ class MessageBus:
 class InMemoryMessageBus(MessageBus):
     """In-memory message bus for tests and local dev when Redis is unavailable."""
 
+    _PURGE_INTERVAL = 100  # purge every N sends
+
     def __init__(self):
         self._streams = defaultdict(list)
         self._payloads = {}
         self._expiry = {}
+        self._send_count = 0
         logger.warning("Redis unavailable, using in-memory message bus")
+
+    def _purge_expired(self):
+        """Remove expired messages from all internal stores."""
+        now = time.time()
+        expired_ids = [mid for mid, exp in self._expiry.items() if exp < now]
+        for mid in expired_ids:
+            self._payloads.pop(mid, None)
+            self._expiry.pop(mid, None)
+        if expired_ids:
+            for stream_key in self._streams:
+                self._streams[stream_key] = [
+                    mid for mid in self._streams[stream_key] if mid not in expired_ids
+                ]
+            logger.debug(f"Purged {len(expired_ids)} expired messages")
 
     def send(self, message: Message) -> str:
         msg_data = message.to_dict()
         self._payloads[message.message_id] = msg_data
         self._expiry[message.message_id] = time.time() + (message.ttl_minutes * 60)
         self._streams[message.recipient].append(message.message_id)
+        self._send_count += 1
+        if self._send_count % self._PURGE_INTERVAL == 0:
+            self._purge_expired()
         logger.debug(f"Message sent (in-memory): {message.sender} -> {message.recipient} [{message.event_type}]")
         return message.message_id
 
