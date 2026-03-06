@@ -1056,7 +1056,7 @@ class DynamicKellyBettingSimulator(BettingSimulator):
         self,
         probability: float,
         odds: float,
-        edge_quality_result: Optional['EdgeQualityResult'] = None,
+        edge_quality_result: 'EdgeQualityResult' | None = None,
     ) -> float:
         """
         Calculate stake with dynamic Kelly adjustments.

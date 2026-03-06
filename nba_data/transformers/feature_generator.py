@@ -346,6 +346,77 @@ class PlayerFeatureGenerator:
         features['blowout_probability'] = 0.0
         features['is_likely_blowout'] = 0
 
+        # ==========================================
+        # EXPONENTIALLY WEIGHTED MEANS (EWMA)
+        # More weight to recent games (half-life = 3 games).
+        # recent[0] is the MOST RECENT game (sorted descending), so it receives
+        # the highest weight: weight[i] = 0.5^i → weight[0] = 1.0 (most recent).
+        # ==========================================
+        n_recent = len(recent)
+        if n_recent > 1:
+            exp_w = np.array([0.5 ** i for i in range(n_recent)])  # idx 0 = most recent = highest
+            exp_w /= exp_w.sum()
+        else:
+            exp_w = np.ones(max(n_recent, 1))
+
+        recent_pts = [get_stat(s, 'pts') for _, s in recent]
+        recent_reb = [get_stat(s, 'reb') for _, s in recent]
+        recent_ast = [get_stat(s, 'ast') for _, s in recent]
+        recent_fg3m_list = [get_stat(s, 'fg3m') for _, s in recent]
+        recent_fg3a = [get_stat(s, 'fg3a') for _, s in recent]
+
+        features['pts_ewma'] = float(np.dot(exp_w, recent_pts[:n_recent]))
+        features['reb_ewma'] = float(np.dot(exp_w, recent_reb[:n_recent]))
+        features['ast_ewma'] = float(np.dot(exp_w, recent_ast[:n_recent]))
+        features['fg3m_ewma'] = float(np.dot(exp_w, recent_fg3m_list[:n_recent]))
+
+        # EWMA trends vs season averages (hot = positive, cold = negative)
+        features['pts_ewma_vs_season'] = features['pts_ewma'] - season_pts_avg
+        features['reb_ewma_vs_season'] = features['reb_ewma'] - season_reb_avg
+        features['ast_ewma_vs_season'] = features['ast_ewma'] - season_ast_avg
+        features['fg3m_ewma_vs_season'] = features['fg3m_ewma'] - season_fg3m_avg
+
+        # ==========================================
+        # POISSON-SPECIFIC FEATURES FOR THREES
+        # 3-point makes follow a Poisson-like distribution.
+        # Lambda (rate parameter) = fg3a * fg3_pct
+        # ==========================================
+        fg3a_avg = np.mean(recent_fg3a) if recent_fg3a else 0.0
+        fg3_pct_recent = features.get('fg3_pct', 0.36)
+        recent_min_avg_val = features.get('recent_min_avg', season_min_avg)
+
+        # Poisson rate (lambda): expected 3-point makes per game
+        features['poisson_rate'] = fg3a_avg * fg3_pct_recent
+
+        # Overdispersion: actual variance / Poisson variance (pure Poisson = 1.0)
+        recent_fg3m_arr = np.array(recent_fg3m_list)
+        fg3m_var = np.var(recent_fg3m_arr) if len(recent_fg3m_arr) > 1 else 1.0
+        poisson_rate_val = max(features['poisson_rate'], 0.1)
+        features['fg3m_overdispersion'] = fg3m_var / poisson_rate_val
+
+        # Hot/cold score: last-3 vs last-10 3PM average
+        last3_fg3m_vals = [get_stat(s, 'fg3m') for _, s in last_3]
+        features['fg3m_hot_cold_score'] = np.mean(last3_fg3m_vals) - features['recent_fg3m_avg']
+
+        # 3PA rate per 36 minutes (volume signal)
+        if recent_min_avg_val > 5 and fg3a_avg > 0:
+            features['fg3a_per_36'] = (fg3a_avg / recent_min_avg_val) * 36
+        else:
+            features['fg3a_per_36'] = fg3a_avg
+
+        # Coefficient of variation for 3PM (lower = more consistent)
+        fg3m_mean = features['recent_fg3m_avg']
+        fg3m_std_val = features.get('recent_fg3m_std', 0)
+        features['fg3m_cv'] = fg3m_std_val / max(fg3m_mean, 0.1) if fg3m_mean > 0.1 else 2.0
+
+        # ==========================================
+        # OPPONENT 3PT DEFENSE FEATURES (defaults)
+        # Set to neutral defaults; overridden with real data when available.
+        # ==========================================
+        features['opp_fg3_pct_allowed'] = 0.36         # League-average 3PT% allowed
+        features['opp_3pt_defense_strength'] = 0.0     # 0 = league average
+        features['opp_fg3m_per_game_allowed'] = 12.0   # League-average ~12 3PM allowed/game
+
         return features
 
     # ==========================================

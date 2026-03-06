@@ -1245,21 +1245,53 @@ class TeamStatsCalculator:
         # For now estimate based on point differential correlation
         reb_factor = np.mean([g['point_diff'] for _, g in recent]) * 0.15  # Rough correlation
 
+        # Point differential stats
+        recent_diffs = [g['point_diff'] for _, g in recent]
+        season_diffs = [g['point_diff'] for _, g in all_games]
+        recent_pts = [g['pts'] for _, g in recent]
+
+        # Exponentially-weighted recent performance (half-life = 4 games).
+        # recent_diffs[0] is the MOST RECENT game (games sorted descending),
+        # so index 0 receives the highest weight (0.5^0 = 1.0).
+        n_r = len(recent_diffs)
+        if n_r > 1:
+            exp_w = np.array([0.5 ** i for i in range(n_r)])  # idx 0 = most recent = highest weight
+            exp_w /= exp_w.sum()
+        else:
+            exp_w = np.ones(max(n_r, 1))
+        ewma_point_diff = float(np.dot(exp_w, recent_diffs[:n_r]))
+        ewma_pts = float(np.dot(exp_w, recent_pts[:n_r]))
+
+        season_net = np.mean(season_diffs)
+        recent_net = np.mean(recent_diffs)
+
         # Calculate stats
         return {
             'season_games': len(all_games),
             'season_win_pct': np.mean([g['win'] for _, g in all_games]),
             'season_pts_avg': np.mean([g['pts'] for _, g in all_games]),
             'recent_win_pct': np.mean([g['win'] for _, g in recent]),
-            'recent_pts_avg': np.mean([g['pts'] for _, g in recent]),
-            'recent_point_diff': np.mean([g['point_diff'] for _, g in recent]),
+            'recent_pts_avg': np.mean(recent_pts),
+            'recent_point_diff': recent_net,
             'home_win_pct': np.mean([g['win'] for _, g in all_games if g['is_home']]) if any(g['is_home'] for _, g in all_games) else 0.5,
             'away_win_pct': np.mean([g['win'] for _, g in all_games if not g['is_home']]) if any(not g['is_home'] for _, g in all_games) else 0.5,
             'home_pts_avg': np.mean([g['pts'] for _, g in all_games if g['is_home']]) if any(g['is_home'] for _, g in all_games) else 100,
             'away_pts_avg': np.mean([g['pts'] for _, g in all_games if not g['is_home']]) if any(not g['is_home'] for _, g in all_games) else 100,
-            'off_rating': np.mean([g['pts'] for _, g in recent]),
-            'def_rating': np.mean([g['pts_allowed'] for _, g in recent]),
-            'net_rating': np.mean([g['point_diff'] for _, g in recent]),
+            'off_rating': np.mean(recent_pts),
+            'def_rating': np.mean(pts_allowed_recent),
+            'net_rating': recent_net,
+            # Spread-specific features
+            'point_diff_std': float(np.std(recent_diffs)) if len(recent_diffs) > 1 else 10.0,
+            'point_diff_std_season': float(np.std(season_diffs)) if len(season_diffs) > 1 else 10.0,
+            # Momentum: recent net rating vs season net rating (positive = improving)
+            'net_rating_momentum': recent_net - season_net,
+            # EWMA metrics (better for capturing current form)
+            'ewma_point_diff': ewma_point_diff,
+            'ewma_pts': ewma_pts,
+            # EWMA trend vs season average
+            'ewma_momentum': ewma_point_diff - season_net,
+            # Consistency indicator (0 = perfectly consistent, high = high variance)
+            'performance_consistency': float(np.std(recent_diffs)) if len(recent_diffs) > 1 else 10.0,
             # NEW: Enhanced defensive metrics for player props
             'pts_allowed_avg': np.mean(pts_allowed_all),
             'pts_allowed_recent': np.mean(pts_allowed_recent),
@@ -3412,6 +3444,24 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
 
             # Combined schedule spot advantage (positive = home team favored by spots)
             'schedule_spot_advantage': home_schedule_spots['schedule_spot_score'] - away_schedule_spots['schedule_spot_score'],
+
+            # === SPREAD-SPECIFIC PERFORMANCE VARIANCE FEATURES ===
+            # These capture team consistency — key for spread prediction
+            'home_point_diff_std': home_stats.get('point_diff_std', 10.0),
+            'away_point_diff_std': away_stats.get('point_diff_std', 10.0),
+            'point_diff_std_diff': home_stats.get('point_diff_std', 10.0) - away_stats.get('point_diff_std', 10.0),
+            # Momentum features (recent performance vs season average)
+            'home_net_rating_momentum': home_stats.get('net_rating_momentum', 0.0),
+            'away_net_rating_momentum': away_stats.get('net_rating_momentum', 0.0),
+            'net_rating_momentum_diff': home_stats.get('net_rating_momentum', 0.0) - away_stats.get('net_rating_momentum', 0.0),
+            # EWMA-based performance (more responsive to recent changes)
+            'home_ewma_point_diff': home_stats.get('ewma_point_diff', 0.0),
+            'away_ewma_point_diff': away_stats.get('ewma_point_diff', 0.0),
+            'ewma_point_diff_diff': home_stats.get('ewma_point_diff', 0.0) - away_stats.get('ewma_point_diff', 0.0),
+            # EWMA momentum vs season (captures in-season trajectory)
+            'home_ewma_momentum': home_stats.get('ewma_momentum', 0.0),
+            'away_ewma_momentum': away_stats.get('ewma_momentum', 0.0),
+            'ewma_momentum_diff': home_stats.get('ewma_momentum', 0.0) - away_stats.get('ewma_momentum', 0.0),
 
             # === LINE MOVEMENT FEATURES (for live predictions) ===
             # These are placeholders during training (no historical line data)

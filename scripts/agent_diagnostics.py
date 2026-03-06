@@ -267,7 +267,6 @@ def _collect_registry_guardrails():
             except Exception:
                 tripped = None
 
-            tokens_info = data["cost_summary"].get(name, {})
             data["agents"][name] = {
                 "registry_status": s.get("status", "unknown"),
                 "enabled": s.get("enabled", True),
@@ -487,7 +486,7 @@ def _collect_agent_health(scheduler_data, registry_data, pg_conn=None):
                 }
 
             cursor.close()
-        except Exception as e:
+        except Exception:
             pg_agent_data = {}
             # Fall through — use scheduler_data below
 
@@ -547,9 +546,7 @@ def _collect_agent_health(scheduler_data, registry_data, pg_conn=None):
                     health = "FAILED"
                 elif last_status == "completed" and time_since < threshold:
                     health = "HEALTHY"
-                elif last_status == "completed":
-                    health = "DEGRADED"
-                elif last_status == "failed":
+                elif last_status == "completed" or last_status == "failed":
                     health = "DEGRADED"
                 else:
                     health = "DEGRADED"
@@ -759,9 +756,7 @@ def _collect_summary(env, scheduler, registry, redis, databases, agent_health, d
         overall = "CRITICAL"
     elif healthy_count == total_agents:
         overall = "ALL_GREEN"
-    elif failed_count > 0 or not daemon.get("pid_alive"):
-        overall = "DEGRADED"
-    elif degraded_count > 0:
+    elif failed_count > 0 or not daemon.get("pid_alive") or degraded_count > 0:
         overall = "DEGRADED"
     else:
         overall = "ALL_GREEN"

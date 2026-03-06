@@ -165,7 +165,6 @@ def _compute_decompression_params(
 
     # Regression of predicted on line: predicted ≈ slope * line + intercept
     # slope < 1.0 means regression to mean (high-line players under-predicted)
-    line_mean = float(np.mean(lines))
     if np.std(lines) < 0.01:
         slope = 1.0
     else:
@@ -233,7 +232,7 @@ def run_full_calibration(min_samples: int = MIN_SAMPLES_DEFAULT, dry_run: bool =
 
     # Safety: never write stale placeholder values (slope=0.7 for ALL props)
     real_slopes = [output[p]['slope'] for p in PROP_TYPES if p in output]
-    if real_slopes and len(set(round(s, 2) for s in real_slopes)) == 1:
+    if real_slopes and len({round(s, 2) for s in real_slopes}) == 1:
         logger.warning(
             "All slopes identical (%.2f) — this looks like uninitialized defaults. "
             "Preserving existing file if present.",

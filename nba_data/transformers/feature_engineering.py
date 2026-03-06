@@ -2404,23 +2404,39 @@ class PlayerPropFeatureGenerator:
         fg3_att = [g.get("fg3_att", 0) or g.get("fg3a", 0) or 0 for g in games]  # 3PA for volume
         mins = [g.get("min", 0) or 0 for g in games]
 
+        n = len(games)
+        # Exponentially weighted averages (most recent game gets highest weight).
+        # games[0] is the most recent game (returned from API in reverse order).
+        # weight[i] = 0.5^i so weight[0] = 1.0 (most recent) is highest.
+        if n > 1:
+            exp_weights = np.array([0.5 ** i for i in range(n)])
+            exp_weights /= exp_weights.sum()
+        else:
+            exp_weights = np.ones(n)
+
         return {
-            "games_played": len(games),
+            "games_played": n,
             "pts_avg": np.mean(pts),
             "pts_std": np.std(pts),
             "pts_min": np.min(pts),
             "pts_max": np.max(pts),
+            "pts_ewma": float(np.dot(exp_weights, pts)),   # Exponentially weighted mean
             "reb_avg": np.mean(reb),
             "reb_std": np.std(reb),
+            "reb_ewma": float(np.dot(exp_weights, reb)),
             "ast_avg": np.mean(ast),
             "ast_std": np.std(ast),
+            "ast_ewma": float(np.dot(exp_weights, ast)),
             "fg3_avg": np.mean(fg3_made),
             "fg3_std": np.std(fg3_made),
+            "fg3_ewma": float(np.dot(exp_weights, fg3_made)),  # Exp-weighted 3PM
             "fg3a_avg": np.mean(fg3_att),  # 3PA average for volume context
             "fg3a_std": np.std(fg3_att),   # 3PA consistency
+            "fg3a_ewma": float(np.dot(exp_weights, fg3_att)),
             "min_avg": np.mean(mins),
             "min_std": np.std(mins),
             "pts_plus_reb_plus_ast_avg": np.mean([p + r + a for p, r, a in zip(pts, reb, ast, strict=False)]),
+            "pra_ewma": float(np.dot(exp_weights, [p + r + a for p, r, a in zip(pts, reb, ast, strict=False)])),
         }
 
     def generate_points_prop_features(self, player_id, opponent_team_id=None, last_n_games=10, game_date: str = None, player_position: str = None):
@@ -2475,12 +2491,19 @@ class PlayerPropFeatureGenerator:
             "recent_pts_min": recent_form.get("pts_min", 0) if recent_form else 0,
             "recent_pts_max": recent_form.get("pts_max", 0) if recent_form else 0,
             "recent_min_avg": recent_form.get("min_avg", 0) if recent_form else 0,
+            # Exponentially weighted mean (more weight to recent games, half-life=3)
+            "pts_ewma": recent_form.get("pts_ewma", recent_form.get("pts_avg", 0)) if recent_form else 0,
 
             # Usage rate (dynamic from recent games)
             "usage_rate": usage_rate,
 
             # Form trend (recent vs season)
             "pts_trend": (recent_form.get("pts_avg", 0) - (season_avg.get("pts_avg", 0) or 0)) if recent_form else 0,
+            # EWMA trend (more sensitive to very recent performance)
+            "pts_ewma_trend": (
+                (recent_form.get("pts_ewma", 0) - (season_avg.get("pts_avg", 0) or 0))
+                if recent_form else 0
+            ),
 
             # Consistency score (lower std = more consistent)
             "consistency_score": 1 / (1 + (recent_form.get("pts_std", 1) if recent_form else 1)),
@@ -2816,6 +2839,12 @@ class PlayerPropFeatureGenerator:
             "usage_rate": usage_rate,
         }
 
+        # Add EWMA features from recent form
+        if recent_form:
+            features["fg3_ewma"] = recent_form.get("fg3_ewma", recent_form.get("fg3_avg", 0))
+            features["fg3a_ewma"] = recent_form.get("fg3a_ewma", recent_form.get("fg3a_avg", 0))
+            features["min_ewma"] = recent_form.get("min_avg", 0)
+
         if opponent_team_id:
             # Use temporal-safe function when game_date is provided
             if game_date:
@@ -2826,28 +2855,96 @@ class PlayerPropFeatureGenerator:
             features["opp_fg3_pct_allowed"] = opp_overall.get("fg3_pct", 0) or 0
             features["opp_def_rating"] = opp_overall.get("def_rating", 110) or 110
 
+            # How many 3-pointers does this opponent allow per game?
+            # This is more actionable than raw fg3_pct since it incorporates pace.
+            opp_fg3_allowed_pg = opp_overall.get("opp_fg3m_per_game", 0) or opp_overall.get("fg3m_allowed_pg", 0)
+            if opp_fg3_allowed_pg == 0:
+                # Estimate from FG3% allowed and league avg fg3a (~33 per team game)
+                league_avg_fg3a = 33.0
+                opp_fg3_allowed_pg = opp_overall.get("fg3_pct", 0.36) * league_avg_fg3a * 0.5
+            features["opp_fg3m_per_game_allowed"] = float(opp_fg3_allowed_pg)
+
+            # 3PT defense strength index: how much easier/harder is it to hit 3s vs opponent
+            # Relative to league average fg3_pct_allowed (~36%)
+            opp_fg3_pct = opp_overall.get("fg3_pct", 0.36) or 0.36
+            league_avg_fg3_pct = 0.36
+            features["opp_3pt_defense_strength"] = (opp_fg3_pct - league_avg_fg3_pct) * 100  # positive = weak 3PT D
+
+            # Pace context: faster pace = more possessions = more 3PA
+            features["opp_pace"] = opp_overall.get("pace", 100) or 100
+
             # Position-specific defensive features for 3PM
             if player_position:
                 pos_features = self.get_position_defense_features(opponent_team_id, player_position, game_date)
                 features["opp_fg3_allowed_to_pos"] = pos_features.get("opp_fg3_allowed_to_pos", 0)
                 features["position_matchup_factor"] = pos_features.get("position_matchup_factor", 1.0)
 
-        # CRITICAL NEW FEATURES for threes
+        # ============================================================
+        # Poisson-specific features (key for threes prediction)
+        # 3-pointers are a discrete count stat; Poisson model requires:
+        #   lambda = E[3PM] = fg3a_avg × fg3_pct
+        # We add features that capture both the rate and its stability.
+        # ============================================================
+
         recent_fg3 = features.get("recent_fg3_avg", 0)
-        # For 3PM, we need to estimate season average from shooting percentage context
-        # Use recent as proxy since season_fg3_avg may not be directly available
+        recent_fg3a = features.get("recent_fg3a_avg", 0)
         season_fg3_pct = features.get("season_fg3_pct", 0)
-        if recent_fg3 > 0 and season_fg3_pct > 0:
-            # If shooting above season average, ratio > 1
-            features["recency_ratio"] = 1.0  # Default for threes (high variance prop)
-            features["variance_penalty"] = features.get("recent_fg3_std", 0) / max(recent_fg3, 0.5)
+        recent_fg3_std = features.get("recent_fg3_std", 0)
+
+        # Estimated Poisson rate (lambda): attempts × percentage
+        if recent_fg3a > 0 and season_fg3_pct > 0:
+            features["poisson_rate"] = recent_fg3a * season_fg3_pct
+        elif recent_fg3 > 0:
+            features["poisson_rate"] = recent_fg3
+        else:
+            features["poisson_rate"] = 0.0
+
+        # Overdispersion indicator: actual variance / Poisson variance
+        # For pure Poisson: Var = Mean.  Overdispersion > 1 means harder to predict.
+        poisson_rate = features["poisson_rate"]
+        if poisson_rate > 0.1:
+            features["overdispersion"] = (recent_fg3_std ** 2) / max(poisson_rate, 0.1)
+        else:
+            features["overdispersion"] = 2.0  # Default high for low-volume shooters
+
+        # Hot/cold score: last-3-game average vs last-10-game average
+        # Positive = recently hot (above-baseline Poisson rate)
+        recent_form_3 = self.calculate_player_recent_form(player_id, last_n_games=3, game_date=game_date)
+        if recent_form_3:
+            last3_fg3 = recent_form_3.get("fg3_avg", 0) or 0
+            features["fg3_hot_cold_score"] = last3_fg3 - recent_fg3
+        else:
+            features["fg3_hot_cold_score"] = 0.0
+
+        # 3PA per 36 minutes (volume rate, pace-normalised)
+        recent_min = features.get("recent_min_avg", 0)
+        if recent_min > 5 and recent_fg3a > 0:
+            features["fg3a_per_36"] = (recent_fg3a / recent_min) * 36
+        else:
+            features["fg3a_per_36"] = recent_fg3a  # Fallback
+
+        # Shooting percentage trend (recent vs season)
+        if recent_fg3a > 0:
+            features["recent_fg3_pct"] = recent_fg3 / recent_fg3a
+        else:
+            features["recent_fg3_pct"] = season_fg3_pct
+
+        # Consistency: coefficient of variation of 3PM (lower = more predictable)
+        if recent_fg3 > 0.1:
+            features["fg3_cv"] = recent_fg3_std / recent_fg3
+        else:
+            features["fg3_cv"] = 2.0  # Very inconsistent for near-zero shooters
+
+        # Recency ratio (last-5 vs season estimate)
+        if poisson_rate > 0:
+            features["recency_ratio"] = recent_fg3 / max(poisson_rate, 0.1)
         else:
             features["recency_ratio"] = 1.0
-            features["variance_penalty"] = 0.8  # Threes are inherently high variance
+
+        features["variance_penalty"] = features["fg3_cv"]
 
         # Minutes stability
         min_avg = features.get("season_min_avg", 0)
-        recent_min = features.get("recent_min_avg", 0)
         features["minutes_cv"] = abs(recent_min - min_avg) / max(min_avg, 1)
 
         return features

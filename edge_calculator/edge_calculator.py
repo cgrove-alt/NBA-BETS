@@ -11,7 +11,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from scipy.stats import norm
+import numpy as np
+from scipy.stats import norm, poisson as _poisson
 
 # Canonical constants — single source of truth for all prop std devs
 from nba_betting.constants import (
@@ -280,6 +281,31 @@ class EdgeCalculator:
     PROP_STD_DEVS: dict = _CANONICAL_PROP_STD_DEVS
     DEFAULT_PROP_STD_DEV: float = _CANONICAL_DEFAULT_STD_DEV
 
+    # Prop types that follow a discrete count distribution (Poisson is more accurate
+    # than a Normal approximation for low-mean integer stats such as 3-pointers).
+    POISSON_PROP_TYPES: frozenset = frozenset({'threes'})
+
+    @staticmethod
+    def _over_probability(predicted_value: float, line: float, prop_type: str,
+                          std_dev: float) -> float:
+        """Compute P(actual > line) using the best distribution for each prop type.
+
+        Discrete count props (threes): Poisson CDF with continuity correction.
+        Continuous props: Normal CDF with prop-specific std dev.
+        """
+        ptype = (prop_type or '').lower()
+        if ptype in ('threes',):
+            mu = max(predicted_value, 0.05)
+            k = int(line)
+            if line == k:
+                prob = 1.0 - _poisson.cdf(k - 1, mu) - _poisson.pmf(k, mu) * 0.5
+            else:
+                prob = 1.0 - _poisson.cdf(k, mu)
+        else:
+            diff = predicted_value - line
+            prob = float(norm.cdf(diff / std_dev))
+        return float(np.clip(prob, 0.05, 0.95))
+
     def calculate_edge_from_prediction(
         self,
         predicted_value: float,
@@ -291,8 +317,9 @@ class EdgeCalculator:
         """
         Calculate edge from a prediction value vs line.
 
-        Uses norm.cdf with prop-specific standard deviations for accurate
-        probability conversion, matching the approach in daily_predictions.py.
+        Uses Poisson CDF for discrete count props (threes) and Normal CDF with
+        prop-specific standard deviations for continuous props, matching the
+        approach in daily_predictions.py.
 
         Args:
             predicted_value: Model's predicted value
@@ -300,18 +327,15 @@ class EdgeCalculator:
             american_odds: Odds for the over
             model_confidence: Optional confidence from model (0-100)
             prop_type: Prop category ('points', 'rebounds', 'assists', 'threes', 'pra')
-                       Used to select calibrated std dev. Falls back to default if None.
+                       Used to select distribution type and std dev.
 
         Returns:
             EdgeResult
         """
-        diff = predicted_value - prop_line
-
-        # Use calibrated prop-specific std dev for norm.cdf conversion
         std_dev = self.PROP_STD_DEVS.get(
             prop_type.lower() if prop_type else '', self.DEFAULT_PROP_STD_DEV
         )
-        model_prob = float(norm.cdf(diff / std_dev))
+        model_prob = self._over_probability(predicted_value, prop_line, prop_type or '', std_dev)
 
         # If model confidence provided, blend it in
         if model_confidence is not None:
@@ -319,7 +343,7 @@ class EdgeCalculator:
             model_prob = 0.7 * model_prob + 0.3 * conf_prob
 
         # Clamp to valid range
-        model_prob = max(0.05, min(0.95, model_prob))
+        model_prob = float(np.clip(model_prob, 0.05, 0.95))
 
         return self.calculate_edge(
             model_probability=model_prob,

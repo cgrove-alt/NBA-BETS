@@ -442,7 +442,6 @@ class GameSimulator:
         shooter = offense.players[shooter_idx]
 
         # Adjust ratings for home court
-        off_rating = offense.off_rating * (1 + self.home_boost if is_home_offense else 1)
         def_rating = defense.def_rating * (1 - self.home_boost * 0.5 if is_home_offense else 1)
 
         # Check for turnover
