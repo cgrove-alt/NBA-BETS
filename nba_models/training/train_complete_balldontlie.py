@@ -1245,21 +1245,53 @@ class TeamStatsCalculator:
         # For now estimate based on point differential correlation
         reb_factor = np.mean([g['point_diff'] for _, g in recent]) * 0.15  # Rough correlation
 
+        # Point differential stats
+        recent_diffs = [g['point_diff'] for _, g in recent]
+        season_diffs = [g['point_diff'] for _, g in all_games]
+        recent_pts = [g['pts'] for _, g in recent]
+
+        # Exponentially-weighted recent performance (half-life = 4 games).
+        # recent_diffs[0] is the MOST RECENT game (games sorted descending),
+        # so index 0 receives the highest weight (0.5^0 = 1.0).
+        n_r = len(recent_diffs)
+        if n_r > 1:
+            exp_w = np.array([0.5 ** i for i in range(n_r)])  # idx 0 = most recent = highest weight
+            exp_w /= exp_w.sum()
+        else:
+            exp_w = np.ones(max(n_r, 1))
+        ewma_point_diff = float(np.dot(exp_w, recent_diffs[:n_r]))
+        ewma_pts = float(np.dot(exp_w, recent_pts[:n_r]))
+
+        season_net = np.mean(season_diffs)
+        recent_net = np.mean(recent_diffs)
+
         # Calculate stats
         return {
             'season_games': len(all_games),
             'season_win_pct': np.mean([g['win'] for _, g in all_games]),
             'season_pts_avg': np.mean([g['pts'] for _, g in all_games]),
             'recent_win_pct': np.mean([g['win'] for _, g in recent]),
-            'recent_pts_avg': np.mean([g['pts'] for _, g in recent]),
-            'recent_point_diff': np.mean([g['point_diff'] for _, g in recent]),
+            'recent_pts_avg': np.mean(recent_pts),
+            'recent_point_diff': recent_net,
             'home_win_pct': np.mean([g['win'] for _, g in all_games if g['is_home']]) if any(g['is_home'] for _, g in all_games) else 0.5,
             'away_win_pct': np.mean([g['win'] for _, g in all_games if not g['is_home']]) if any(not g['is_home'] for _, g in all_games) else 0.5,
             'home_pts_avg': np.mean([g['pts'] for _, g in all_games if g['is_home']]) if any(g['is_home'] for _, g in all_games) else 100,
             'away_pts_avg': np.mean([g['pts'] for _, g in all_games if not g['is_home']]) if any(not g['is_home'] for _, g in all_games) else 100,
-            'off_rating': np.mean([g['pts'] for _, g in recent]),
-            'def_rating': np.mean([g['pts_allowed'] for _, g in recent]),
-            'net_rating': np.mean([g['point_diff'] for _, g in recent]),
+            'off_rating': np.mean(recent_pts),
+            'def_rating': np.mean(pts_allowed_recent),
+            'net_rating': recent_net,
+            # Spread-specific features
+            'point_diff_std': float(np.std(recent_diffs)) if len(recent_diffs) > 1 else 10.0,
+            'point_diff_std_season': float(np.std(season_diffs)) if len(season_diffs) > 1 else 10.0,
+            # Momentum: recent net rating vs season net rating (positive = improving)
+            'net_rating_momentum': recent_net - season_net,
+            # EWMA metrics (better for capturing current form)
+            'ewma_point_diff': ewma_point_diff,
+            'ewma_pts': ewma_pts,
+            # EWMA trend vs season average
+            'ewma_momentum': ewma_point_diff - season_net,
+            # Consistency indicator (0 = perfectly consistent, high = high variance)
+            'performance_consistency': float(np.std(recent_diffs)) if len(recent_diffs) > 1 else 10.0,
             # NEW: Enhanced defensive metrics for player props
             'pts_allowed_avg': np.mean(pts_allowed_all),
             'pts_allowed_recent': np.mean(pts_allowed_recent),
@@ -1467,6 +1499,37 @@ class EloRatingSystem:
 
         # Convert to spread: ~100 Elo = 3 points
         return elo_diff * 0.03
+
+    def get_elo_trend(self, team_id: int, before_date: str, window: int = 5) -> float:
+        """
+        Get a team's recent Elo momentum (change over last N games).
+
+        Positive = improving (rating going up), negative = declining.
+        Used as a feature to capture whether a team is on an upswing or downswing.
+
+        Args:
+            team_id: Team ID
+            before_date: Only consider games before this date
+            window: Number of most-recent rating changes to average
+
+        Returns:
+            Average Elo change per game over last N games (positive = improving)
+        """
+        if team_id not in self.rating_history:
+            return 0.0
+
+        history = [(d, r) for d, r in self.rating_history[team_id] if d < before_date]
+        if len(history) < 2:
+            return 0.0
+
+        history.sort(key=lambda x: x[0])
+        recent = history[-window:]
+        if len(recent) < 2:
+            return 0.0
+
+        # Average rating change per game in this window
+        total_change = recent[-1][1] - recent[0][1]
+        return total_change / max(len(recent) - 1, 1)
 
 
 # =============================================================================
@@ -3004,6 +3067,9 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
         away_elo = elo_system.get_rating_before_date(away_team_id, game_date)
         elo_win_prob = elo_system.predict_win_probability(home_team_id, away_team_id, before_date=game_date)
         elo_spread = elo_system.get_spread_prediction(home_team_id, away_team_id, before_date=game_date)
+        # Elo momentum: positive = team improving, negative = declining
+        home_elo_trend = elo_system.get_elo_trend(home_team_id, game_date, window=5)
+        away_elo_trend = elo_system.get_elo_trend(away_team_id, game_date, window=5)
 
         # Get last game info for travel/fatigue features
         home_team_abbrev = home_team.get('abbreviation', '')
@@ -3352,8 +3418,12 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
             'home_elo': home_elo,
             'away_elo': away_elo,
             'elo_diff': home_elo - away_elo,
-            'elo_win_prob': elo_win_prob,  # Elo-based home win probability
-            'elo_spread': elo_spread,  # Elo-based spread prediction
+            'elo_win_prob': elo_win_prob,   # Elo-based home win probability
+            'elo_spread': elo_spread,        # Elo-based spread prediction
+            # Elo momentum: is a team currently improving or declining?
+            'home_elo_trend': home_elo_trend,
+            'away_elo_trend': away_elo_trend,
+            'elo_trend_diff': home_elo_trend - away_elo_trend,  # Positive = home improving faster
 
             # === NEW: REST & FATIGUE FEATURES ===
             'home_days_rest': home_days_rest,
@@ -3362,6 +3432,18 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
             'home_is_b2b': 1 if home_is_b2b else 0,
             'away_is_b2b': 1 if away_is_b2b else 0,
             'b2b_disadvantage': (1 if away_is_b2b else 0) - (1 if home_is_b2b else 0),  # Positive = away on B2B
+
+            # === NEW: SCHEDULE DENSITY FEATURES ===
+            # 3-in-4 is harder than B2B; 4-in-5 is the worst short-rest spot.
+            # Research: 3-in-4 costs ~1.5 pts, 4-in-5 costs ~2.5 pts.
+            'home_is_3in4': home_travel_features.get('is_3_in_4', 0),
+            'away_is_3in4': away_travel_features.get('is_3_in_4', 0),
+            'home_is_4in5': home_travel_features.get('is_4_in_5', 0),
+            'away_is_4in5': away_travel_features.get('is_4_in_5', 0),
+            'schedule_density_advantage': (
+                away_travel_features.get('games_last_7_days', 0) -
+                home_travel_features.get('games_last_7_days', 0)
+            ),  # Positive = away team played more games recently
 
             # === NEW: TRAVEL FEATURES ===
             'home_travel_distance': home_travel_features['travel_distance'],
@@ -3412,6 +3494,24 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
 
             # Combined schedule spot advantage (positive = home team favored by spots)
             'schedule_spot_advantage': home_schedule_spots['schedule_spot_score'] - away_schedule_spots['schedule_spot_score'],
+
+            # === SPREAD-SPECIFIC PERFORMANCE VARIANCE FEATURES ===
+            # These capture team consistency — key for spread prediction
+            'home_point_diff_std': home_stats.get('point_diff_std', 10.0),
+            'away_point_diff_std': away_stats.get('point_diff_std', 10.0),
+            'point_diff_std_diff': home_stats.get('point_diff_std', 10.0) - away_stats.get('point_diff_std', 10.0),
+            # Momentum features (recent performance vs season average)
+            'home_net_rating_momentum': home_stats.get('net_rating_momentum', 0.0),
+            'away_net_rating_momentum': away_stats.get('net_rating_momentum', 0.0),
+            'net_rating_momentum_diff': home_stats.get('net_rating_momentum', 0.0) - away_stats.get('net_rating_momentum', 0.0),
+            # EWMA-based performance (more responsive to recent changes)
+            'home_ewma_point_diff': home_stats.get('ewma_point_diff', 0.0),
+            'away_ewma_point_diff': away_stats.get('ewma_point_diff', 0.0),
+            'ewma_point_diff_diff': home_stats.get('ewma_point_diff', 0.0) - away_stats.get('ewma_point_diff', 0.0),
+            # EWMA momentum vs season (captures in-season trajectory)
+            'home_ewma_momentum': home_stats.get('ewma_momentum', 0.0),
+            'away_ewma_momentum': away_stats.get('ewma_momentum', 0.0),
+            'ewma_momentum_diff': home_stats.get('ewma_momentum', 0.0) - away_stats.get('ewma_momentum', 0.0),
 
             # === LINE MOVEMENT FEATURES (for live predictions) ===
             # These are placeholders during training (no historical line data)

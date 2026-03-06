@@ -31,6 +31,12 @@ data/balldontlie_cache/
 .tracking_cache/
 player_impact_cache/
 catboost_info/
+.odds_cache/
+data/odds_cache/
+data/injury_cache/
+.injury_cache/
+nba_data/storage/.db_cache/
+prediction_cache/
 
 # Databases (start fresh on deploy)
 *.db
@@ -58,6 +64,20 @@ htmlcov/
 # Model backups (local only)
 models_backup_*/
 
+# Optuna SQLite databases (recreated per training run)
+optuna_*.db
+optuna/
+
+# SHAP explainer cache
+shap_cache/
+
 # Claude plans (local only)
 .claude/
 .vercel
+
+# Railway build artifacts
+.nixpacks/
+.railway/
+
+# Coverage reports
+coverage.xml

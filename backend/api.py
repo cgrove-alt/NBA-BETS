@@ -3766,7 +3766,6 @@ def get_player_debug_stats(player_id: int):
     service = get_service()
     season_avg = {}
     recent = {}
-    player_info = {}
 
     if service.balldontlie:
         try:

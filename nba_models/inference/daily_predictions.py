@@ -128,6 +128,14 @@ def load_quantile_decompression() -> dict:
 
 QUANTILE_DECOMPRESSION = load_quantile_decompression()
 
+# Discrete-count prop types that use Poisson distribution instead of Normal CDF.
+# 3-point makes are integer-valued with low expected counts (mean ~2.5) — the
+# Poisson approximation is significantly more accurate than norm.cdf here and
+# avoids the over/under symmetry errors that arise when using continuous normal
+# approximations for count data.
+POISSON_PROP_TYPES: frozenset[str] = frozenset({'threes'})
+
+
 def get_prop_std_dev(prop_type: str) -> float:
     """
     Get empirically-derived standard deviation for prop type.
@@ -141,11 +149,55 @@ def get_prop_std_dev(prop_type: str) -> float:
     return PROP_STD_DEVS.get(prop_type.lower(), DEFAULT_PROP_STD_DEV)
 
 
+def over_probability(predicted_value: float, line: float, prop_type: str,
+                     sigma: float | None = None) -> float:
+    """Compute P(actual > line) using the best distribution for each prop type.
+
+    For discrete count props (threes): uses the Poisson CDF with a continuity
+    correction so that P(X > 2.5) = P(X >= 3) = 1 - poisson.cdf(2, mu).
+
+    For continuous props (points, rebounds, assists, pra): uses the normal CDF
+    with the empirically-calibrated per-prop standard deviation.
+
+    Args:
+        predicted_value: Model's predicted value (Poisson rate for threes).
+        line:            The over/under line (may be non-integer).
+        prop_type:       One of 'threes', 'points', 'rebounds', 'assists', 'pra'.
+        sigma:           Optional player-specific sigma for normal props.
+                         Falls back to PROP_STD_DEVS constant when None.
+
+    Returns:
+        Over probability in [0.05, 0.95] (clamped to avoid degenerate Kelly).
+    """
+    from scipy.stats import poisson, norm as _norm
+
+    ptype = prop_type.lower() if prop_type else ''
+
+    if ptype in POISSON_PROP_TYPES:
+        # Poisson: mu must be positive; clamp to avoid log(0) in the PMF.
+        mu = max(predicted_value, 0.05)
+        # Continuity correction: for line=2.5, P(over) = P(X >= 3) = 1 - P(X <= 2)
+        # For integer lines (e.g. 3.0): use P(X > 3) = P(X >= 4) = 1 - P(X <= 3)
+        k = int(line)  # floor
+        if line == k:
+            # Exact integer line — half of ties go over by convention
+            prob = 1.0 - poisson.cdf(k - 1, mu) - poisson.pmf(k, mu) * 0.5
+        else:
+            prob = 1.0 - poisson.cdf(k, mu)  # P(X >= k+1)
+    else:
+        std_dev = sigma if sigma is not None else get_prop_std_dev(ptype)
+        diff = predicted_value - line
+        prob = float(_norm.cdf(diff / std_dev))
+
+    return float(np.clip(prob, 0.05, 0.95))
+
+
 def compute_quantile_sigma(pred_low: float, pred_high: float, prop_type: str) -> float:
     """Derive player-specific sigma from quantile model's 10th-90th percentile spread.
 
     For normal distribution: P90 - P10 = 2 * 1.282 * sigma = 2.564 * sigma.
     Floor at 50% of fixed PROP_STD_DEVS to prevent overconfidence.
+    Not used for Poisson prop types.
     """
     spread = pred_high - pred_low
     if spread <= 0:
@@ -494,7 +546,7 @@ except ImportError:
     HAS_TRACKING_DATA = False
 
 
-def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> tuple[Optional['ShotAtlas'], Optional['RotationTracker']]:
+def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> tuple['ShotAtlas' | None, 'RotationTracker' | None]:
     """
     Fetch tracking data for a team's recent games.
 
@@ -2050,10 +2102,9 @@ def predict_player_prop(
                         # Fallback to season average from features
                         predicted_value = features.get('season_pts_avg', 15.0)
 
-                    # Convert to probability using normal CDF
-                    std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                    z_score = (predicted_value - line) / std
-                    over_prob = float(norm.cdf(z_score))
+                    # Convert to probability using Poisson (threes) or Normal CDF
+                    std = get_prop_std_dev(prop_type)
+                    over_prob = over_probability(predicted_value, line, prop_type, sigma=std)
 
                 # Handle StackingRegressor format (has 'base_models' key)
                 elif isinstance(model_data, dict) and 'base_models' in model_data and 'meta_model' in model_data:
@@ -2088,10 +2139,9 @@ def predict_player_prop(
                     else:
                         predicted_value = features.get('season_pts_avg', 15.0)
 
-                    # Convert to probability using normal CDF
-                    std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                    z_score = (predicted_value - line) / std
-                    over_prob = float(norm.cdf(z_score))
+                    # Convert to probability using Poisson (threes) or Normal CDF
+                    std = get_prop_std_dev(prop_type)
+                    over_prob = over_probability(predicted_value, line, prop_type, sigma=std)
 
                 # Handle dict format with single model
                 elif isinstance(model_data, dict) and 'model' in model_data:
@@ -2112,10 +2162,9 @@ def predict_player_prop(
                     # Predict (regression model predicts stat value)
                     predicted_value = float(model.predict(X_scaled)[0])
 
-                    # Convert to probability using normal CDF
-                    std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                    z_score = (predicted_value - line) / std
-                    over_prob = float(norm.cdf(z_score))
+                    # Convert to probability using Poisson (threes) or Normal CDF
+                    std = get_prop_std_dev(prop_type)
+                    over_prob = over_probability(predicted_value, line, prop_type, sigma=std)
 
                 # Handle model object with predict method
                 elif hasattr(model_data, 'predict'):
@@ -2125,9 +2174,8 @@ def predict_player_prop(
                         over_prob = result['over_probability']
                     elif 'predicted_value' in result:
                         predicted_value = result['predicted_value']
-                        std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                        z_score = (predicted_value - line) / std
-                        over_prob = float(norm.cdf(z_score))
+                        std = get_prop_std_dev(prop_type)
+                        over_prob = over_probability(predicted_value, line, prop_type, sigma=std)
 
         except Exception:
             pass  # Fall through to return defaults
@@ -2188,10 +2236,10 @@ def predict_player_prop(
     # Save original prediction for total adjustment cap
     original_predicted_value = predicted_value
 
-    # Recalculate over_prob with quantile-derived sigma (if we have a prediction)
+    # Recalculate over_prob with quantile-derived sigma (if we have a prediction).
+    # Poisson distribution is used automatically for threes via over_probability().
     if predicted_value is not None:
-        z_score = (predicted_value - line) / effective_sigma
-        over_prob = float(norm.cdf(z_score))
+        over_prob = over_probability(predicted_value, line, prop_type, sigma=effective_sigma)
 
     # Phase 3: Minutes Oracle adjustment — per-minute rate scaling
     minutes_dist = None
@@ -2232,8 +2280,7 @@ def predict_player_prop(
                     predicted_value = adjusted_value
 
                     # Recalculate probability with adjusted value
-                    z_score = (predicted_value - line) / effective_sigma
-                    over_prob = float(norm.cdf(z_score))
+                    over_prob = over_probability(predicted_value, line, prop_type, sigma=effective_sigma)
 
     # Apply injury-based adjustments to predicted value
     injury_boost_info = {'boost_factor': 1.0, 'reasons': []}
@@ -2255,8 +2302,7 @@ def predict_player_prop(
                 predicted_value = adjusted_value
 
                 # Recalculate probability with adjusted value
-                z_score = (predicted_value - line) / effective_sigma
-                over_prob = float(norm.cdf(z_score))
+                over_prob = over_probability(predicted_value, line, prop_type, sigma=effective_sigma)
         except Exception:
             pass  # Continue without injury adjustment if it fails
 
@@ -2308,8 +2354,7 @@ def predict_player_prop(
                 if calibration_applied.get('total_value_adjustment', 0) != 0:
                     predicted_value = calibration_applied['adjusted_value']
                     # Recalculate over_prob with corrected value
-                    z_score = (predicted_value - line) / effective_sigma
-                    over_prob = float(norm.cdf(z_score))
+                    over_prob = over_probability(predicted_value, line, prop_type, sigma=effective_sigma)
         except Exception:
             pass  # Never block predictions on calibration failure
 
@@ -2320,8 +2365,7 @@ def predict_player_prop(
         upper = original_predicted_value + max_total
         if predicted_value < lower or predicted_value > upper:
             predicted_value = max(lower, min(upper, predicted_value))
-            z_score = (predicted_value - line) / effective_sigma
-            over_prob = float(norm.cdf(z_score))
+            over_prob = over_probability(predicted_value, line, prop_type, sigma=effective_sigma)
 
     # Phase 4: Single edge computation after all adjustments (minutes + injury + calibration)
     edge_info = _calculate_prop_edge(over_prob, american_odds, under_odds=under_odds)

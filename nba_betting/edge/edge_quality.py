@@ -8,6 +8,7 @@ and reliability of betting edges, combining multiple factors:
 - Feature stability and consistency
 - Historical edge performance in similar situations
 - Closing Line Value (CLV) prediction
+- Prop-type variance penalty (Poisson overdispersion for threes)
 
 A higher edge quality score indicates greater confidence in the edge being real.
 """
@@ -17,6 +18,11 @@ from __future__ import annotations
 import numpy as np
 from dataclasses import dataclass
 from enum import Enum
+
+# Maximum overdispersion for threes before applying a confidence penalty.
+# Pure Poisson has overdispersion = 1.0; NBA 3-point data typically shows 1.5–3.0.
+# Above 3.5 suggests a very inconsistent shooter (high-variance bet).
+_MAX_POISSON_OVERDISPERSION = 3.5
 
 
 class EdgeTier(Enum):
@@ -450,6 +456,58 @@ class EdgeQualityScorer:
 
         return min(100, max(0, score)), factors
 
+    def calculate_prop_variance_adjustment(
+        self,
+        prop_type: str,
+        overdispersion: float | None = None,
+        coefficient_of_variation: float | None = None,
+    ) -> tuple[float, list[str]]:
+        """
+        Adjust edge quality score based on the inherent variance of the prop type.
+
+        For threes (Poisson): penalise high overdispersion (actual variance >> Poisson rate).
+        For all props: penalise high coefficient-of-variation (inconsistent player).
+
+        Args:
+            prop_type: 'points', 'rebounds', 'assists', 'threes', 'pra'
+            overdispersion: Actual Var / Poisson rate (threes only, 1.0 = perfect Poisson)
+            coefficient_of_variation: Std / Mean of recent stat (0 = consistent)
+
+        Returns:
+            (adjustment in [-20, +5], list of reason strings)
+        """
+        factors: list[str] = []
+        adjustment = 0.0
+        ptype = (prop_type or '').lower()
+
+        if ptype == 'threes' and overdispersion is not None:
+            if overdispersion > _MAX_POISSON_OVERDISPERSION:
+                penalty = min(20, (overdispersion - _MAX_POISSON_OVERDISPERSION) * 5)
+                adjustment -= penalty
+                factors.append(
+                    f"High 3PM overdispersion ({overdispersion:.1f}×) — "
+                    "very inconsistent shooter, Poisson approximation unreliable"
+                )
+            elif overdispersion > 2.0:
+                adjustment -= 8
+                factors.append(f"Moderate 3PM overdispersion ({overdispersion:.1f}×)")
+            elif overdispersion < 1.5:
+                adjustment += 5
+                factors.append(f"Low 3PM overdispersion ({overdispersion:.1f}×) — consistent shooter")
+
+        if coefficient_of_variation is not None:
+            if coefficient_of_variation > 1.0:
+                adjustment -= 10
+                factors.append(f"High stat variance (CV={coefficient_of_variation:.1f}) — unpredictable")
+            elif coefficient_of_variation > 0.6:
+                adjustment -= 4
+                factors.append(f"Moderate stat variance (CV={coefficient_of_variation:.1f})")
+            elif coefficient_of_variation < 0.3:
+                adjustment += 3
+                factors.append(f"Low stat variance (CV={coefficient_of_variation:.1f}) — consistent")
+
+        return adjustment, factors
+
     def evaluate_edge(
         self,
         # Core prediction data
@@ -481,6 +539,11 @@ class EdgeQualityScorer:
         playoff_implications: bool = False,
         injury_impact_score: float = 0.0,
         travel_fatigue_score: float = 0.0,
+
+        # Prop variance data (new)
+        prop_type: str | None = None,
+        poisson_overdispersion: float | None = None,
+        coefficient_of_variation: float | None = None,
     ) -> EdgeQualityResult:
         """
         Comprehensive edge quality evaluation.
@@ -590,6 +653,21 @@ class EdgeQualityScorer:
             detailed_scores[k] * self.WEIGHTS[k]
             for k in self.WEIGHTS
         )
+
+        # 7. Prop-type variance adjustment (applies after weighted sum)
+        if prop_type is not None:
+            variance_adj, variance_factors = self.calculate_prop_variance_adjustment(
+                prop_type=prop_type,
+                overdispersion=poisson_overdispersion,
+                coefficient_of_variation=coefficient_of_variation,
+            )
+            overall_score += variance_adj
+            detailed_scores['prop_variance_adjustment'] = variance_adj
+            for f in variance_factors:
+                if variance_adj < 0:
+                    all_factors_negative.append(f)
+                else:
+                    all_factors_positive.append(f)
 
         # Apply edge magnitude bonus/penalty
         if edge > 0.10:
