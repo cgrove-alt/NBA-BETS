@@ -71,6 +71,7 @@ for _p in (_this_dir, _this_dir.parent, _this_dir.parent.parent, _this_dir.paren
         break
 
 MODELS_DIR = PROJECT_DIR / "models"
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR = PROJECT_DIR / "logs"
 DATA_DIR = PROJECT_DIR / "data" / "balldontlie_cache"
 BACKTEST_RESULTS = PROJECT_DIR / "backtest_results"
@@ -322,7 +323,7 @@ def full_retrain() -> bool:
 
         # Step 2: Backup existing models
         backup_dir = MODELS_DIR / f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        backup_dir.mkdir(exist_ok=True)
+        backup_dir.mkdir(parents=True, exist_ok=True)
 
         for model_file in MODELS_DIR.glob("*.pkl"):
             shutil.copy2(model_file, backup_dir / model_file.name)
@@ -496,7 +497,7 @@ def incremental_update() -> bool:
         meta_learner_files = list(MODELS_DIR.glob("*meta_learner*.pkl"))
         if meta_learner_files:
             backup_dir = MODELS_DIR / f"backup_incremental_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            backup_dir.mkdir(exist_ok=True)
+            backup_dir.mkdir(parents=True, exist_ok=True)
 
             for model_file in meta_learner_files:
                 shutil.copy2(model_file, backup_dir / model_file.name)
