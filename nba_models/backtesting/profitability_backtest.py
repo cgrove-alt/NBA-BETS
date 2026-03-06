@@ -63,6 +63,8 @@ TEST_SEASON = "2023-24"
 CONTEXT_SEASONS = ["2022-23", "2023-24"]
 OUTPUT_DIR = os.path.join(ROOT, "data", "backtest_results")
 MIN_MINUTES = 15  # Skip garbage-time-only players
+MAX_BETS_PER_PLAYER_SAMPLE = 1
+DEFAULT_PROGRESS_INTERVAL = 500
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +164,14 @@ def simulate_prop_line(features: dict, prop_type: str) -> float:
     return round(line * 2) / 2  # nearest 0.5
 
 
+def _candidate_rank_score(ev_result: dict) -> float:
+    """Rank trade candidates by EV first, confidence fallback."""
+    true_ev = ev_result.get("true_ev")
+    if isinstance(true_ev, (int, float)):
+        return float(true_ev)
+    return float(ev_result.get("confidence", 0.5)) - 0.5
+
+
 # ---------------------------------------------------------------------------
 # Main backtest loop
 # ---------------------------------------------------------------------------
@@ -242,6 +252,19 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
     import time as _time
     _sim_start = _time.time()
     _progress.update({"phase": "simulation", "current": 0, "total": len(test_data), "trades": 0, "started": _sim_start})
+    max_bets_per_player_sample = max(
+        1,
+        int(getattr(args, "max_bets_per_player_sample", MAX_BETS_PER_PLAYER_SAMPLE)),
+    )
+    progress_interval = max(
+        1,
+        int(getattr(args, "progress_interval", DEFAULT_PROGRESS_INTERVAL)),
+    )
+    logger.info(
+        "Execution caps: max_bets_per_player_sample=%d, progress_interval=%d",
+        max_bets_per_player_sample,
+        progress_interval,
+    )
 
     for i, sample in enumerate(test_data):
         game_date = sample["game_date"]
@@ -258,6 +281,7 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
 
         diag["eligible_samples"] += 1
 
+        player_candidates: list[dict] = []
         for prop_type in PROP_TYPES:
             if prop_type not in ensemble_models:
                 diag[f"skip_no_model_{prop_type}"] += 1
@@ -361,6 +385,9 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
                 "pra": sample.get("actual_pra", 0),
             }
             actual_value = actual_map.get(prop_type, 0)
+            if actual_value == prop_line:
+                diag[f"skip_push_{prop_type}"] += 1
+                continue
 
             direction = ev_result["direction"]
             won = (
@@ -369,19 +396,14 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
                 else actual_value < prop_line
             )
 
-            # Push (actual == line) → skip
-            if actual_value == prop_line:
-                continue
-
             bet_size = ev_result["bet_size"]
             if bet_size <= 0:
+                diag[f"skip_zero_bet_size_{prop_type}"] += 1
                 continue
 
             # P&L at -110 odds
             pnl = bet_size * (100.0 / 110.0) if won else -bet_size
-            bankroll += pnl
-
-            trades.append(
+            player_candidates.append(
                 {
                     "date": game_date,
                     "player": player_name,
@@ -396,14 +418,29 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
                     "bet_size": round(bet_size, 2),
                     "won": bool(won),
                     "pnl": round(pnl, 2),
-                    "bankroll": round(bankroll, 2),
+                    "bankroll": None,
+                    "rank_score": _candidate_rank_score(ev_result),
                 }
             )
+
+        if player_candidates:
+            player_candidates.sort(key=lambda x: (x["rank_score"], x["edge"]), reverse=True)
+            selected = player_candidates[:max_bets_per_player_sample]
+            skipped = len(player_candidates) - len(selected)
+            if skipped > 0:
+                diag["skipped_player_sample_cap"] += skipped
+
+            for trade in selected:
+                bankroll += trade["pnl"]
+                trade["bankroll"] = round(bankroll, 2)
+                trade.pop("rank_score", None)
+                trades.append(trade)
+                diag[f"executed_{trade['prop_type']}"] += 1
 
         # Record end-of-day bankroll
         daily_bankroll[game_date] = round(bankroll, 2)
 
-        if (i + 1) % 500 == 0:
+        if (i + 1) % progress_interval == 0:
             elapsed = _time.time() - _sim_start
             rate = (i + 1) / elapsed if elapsed > 0 else 0
             eta = (len(test_data) - i - 1) / rate if rate > 0 else 0
@@ -428,7 +465,12 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
 
     # ── 5. Report ─────────────────────────────────────────────────────────
     logger.info("Step 5/5: Generating report …")
-    results = generate_report(trades, daily_bankroll)
+    results = generate_report(
+        trades,
+        daily_bankroll,
+        max_bets_per_player_sample=max_bets_per_player_sample,
+        progress_interval=progress_interval,
+    )
     if results:
         results["diagnostics"] = dict(diag)
     return results
@@ -437,7 +479,12 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
 # ---------------------------------------------------------------------------
 # Report generation
 # ---------------------------------------------------------------------------
-def generate_report(trades: list[dict], daily_bankroll: dict[str, float]) -> dict:
+def generate_report(
+    trades: list[dict],
+    daily_bankroll: dict[str, float],
+    max_bets_per_player_sample: int = MAX_BETS_PER_PLAYER_SAMPLE,
+    progress_interval: int = DEFAULT_PROGRESS_INTERVAL,
+) -> dict:
     """Build JSON results, text report, and bankroll chart."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -530,10 +577,16 @@ def generate_report(trades: list[dict], daily_bankroll: dict[str, float]) -> dic
         "test_season": TEST_SEASON,
         "initial_bankroll": INITIAL_BANKROLL,
         "final_bankroll": round(final_bankroll, 2),
+        "simulation_settings": {
+            "max_bets_per_player_sample": max_bets_per_player_sample,
+            "progress_interval": progress_interval,
+        },
         "caveats": [
             "Model weights were trained on data including the test season "
             "(in-sample model). Features are walk-forward safe (point-in-time). "
             "Treat ROI as an upper-bound estimate.",
+            f"At most {max_bets_per_player_sample} prop bet(s) executed per "
+            "player-game sample to reduce same-player correlation risk.",
             "Prop lines are simulated (70% season avg + 30% recent avg, "
             "rounded to 0.5). Real lines may differ.",
             "OT-normalised actuals used for settlement (matches training). "
@@ -737,6 +790,8 @@ def _save_bankroll_chart(df: pd.DataFrame, daily_bankroll: dict[str, float]) -> 
 # Entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
+    global INITIAL_BANKROLL, TEST_SEASON, MAX_BETS_PER_PLAYER_SAMPLE, DEFAULT_PROGRESS_INTERVAL
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -755,11 +810,24 @@ def main() -> int:
         default="2023-24",
         help="Test season label (default: 2023-24)",
     )
+    parser.add_argument(
+        "--max-bets-per-player-sample",
+        type=int,
+        default=MAX_BETS_PER_PLAYER_SAMPLE,
+        help="Max prop bets per player-game sample (default: 1)",
+    )
+    parser.add_argument(
+        "--progress-interval",
+        type=int,
+        default=DEFAULT_PROGRESS_INTERVAL,
+        help="Progress log interval in samples (default: 500)",
+    )
     args = parser.parse_args()
 
-    global INITIAL_BANKROLL, TEST_SEASON
     INITIAL_BANKROLL = args.bankroll
     TEST_SEASON = args.season
+    MAX_BETS_PER_PLAYER_SAMPLE = max(1, int(args.max_bets_per_player_sample))
+    DEFAULT_PROGRESS_INTERVAL = max(1, int(args.progress_interval))
 
     results = run_backtest(args)
 

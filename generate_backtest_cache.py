@@ -8,10 +8,10 @@ import numpy as np
 from pathlib import Path
 from collections import defaultdict
 
-ROOT = '/home/user/workspace/NBA-BETS'
+ROOT = Path(os.environ.get("NBA_BETS_ROOT", Path(__file__).resolve().parent))
 os.chdir(ROOT)
-sys.path.insert(0, os.path.join(ROOT, 'nba_models', 'training'))
-sys.path.insert(0, ROOT)
+sys.path.insert(0, str(ROOT / "nba_models" / "training"))
+sys.path.insert(0, str(ROOT))
 
 from train_from_csv import build_team_id_map, _build_team_metadata, _safe_int
 
