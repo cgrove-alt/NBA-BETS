@@ -159,10 +159,21 @@ for stat_name, prop_name in [('pts','points'), ('reb','rebounds'), ('ast','assis
     # we have a viable over/under edge
 
 print("\n  DIAGNOSIS:")
-print(f"  Points: {comparison['points']['pct_improve_vs_avg']:+.1f}% vs season avg (GOOD - small but real edge)")
-print(f"  Rebounds: {comparison['rebounds']['pct_improve_vs_avg']:+.1f}% vs season avg (GOOD)")
-print(f"  Assists: {comparison['assists']['pct_improve_vs_avg']:+.1f}% vs season avg (WEAK)")
-print(f"  Threes: {comparison['threes']['pct_improve_vs_avg']:+.1f}% vs season avg (ZERO EDGE - threes are too random)")
+
+
+def _edge_label(pct_improvement: float) -> str:
+    if pct_improvement >= 3.0:
+        return "STRONG POSITIVE EDGE"
+    if pct_improvement > 0.5:
+        return "MODEST POSITIVE EDGE"
+    if pct_improvement >= -1.0:
+        return "NEAR BASELINE (NO CLEAR EDGE)"
+    return "UNDERPERFORMING BASELINE"
+
+
+for _prop in ["points", "rebounds", "assists", "threes"]:
+    _pct = comparison[_prop]["pct_improve_vs_avg"]
+    print(f"  {_prop.title():<8}: {_pct:+.1f}% vs season avg ({_edge_label(_pct)})")
 
 # ============================================
 # 3. OVER/UNDER ACCURACY SIMULATION
