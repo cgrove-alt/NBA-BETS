@@ -17,6 +17,12 @@ from __future__ import annotations
 import os
 import sys
 import json
+
+# Ensure project root is on sys.path so nba_data, travel_fatigue etc. are importable
+# when this script is invoked via subprocess from scheduled_retraining.py
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 import pickle
 import warnings
 import time
