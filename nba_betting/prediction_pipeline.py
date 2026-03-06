@@ -24,6 +24,8 @@ from __future__ import annotations
 import numpy as np
 from typing import Optional
 
+from nba_betting.constants import KELLY_FRACTIONS, MAX_BET_FRACTION
+
 try:
     from nba_betting.odds.devig import american_to_implied, multiplicative_devig
 except ImportError:
@@ -379,7 +381,9 @@ def evaluate_bet(
         )
         return result
 
-    bet_fraction = min(kelly_full * KELLY_FRACTION, MAX_BET_PCT)
+    # Use tiered Kelly fractions from constants (elite/strong/moderate/low)
+    kelly_tier_fraction = KELLY_FRACTIONS.get(tier, 0.25)
+    bet_fraction = min(kelly_full * kelly_tier_fraction, MAX_BET_FRACTION)
     bet_size = round(bankroll * bet_fraction, 2)
 
     # ---------- All gates passed ----------

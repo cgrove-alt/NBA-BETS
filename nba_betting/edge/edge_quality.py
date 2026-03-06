@@ -117,8 +117,8 @@ class EdgeQualityScorer:
         # All models agree on direction (>50% or <50%)?
         all_same_direction = all(p > 0.5 for p in probs) or all(p < 0.5 for p in probs)
 
-        # Calculate coefficient of variation for disagreement
-        std_dev / max(abs(mean_prob - 0.5), 0.01)
+        # Coefficient of variation for disagreement
+        cv = std_dev / max(abs(mean_prob - 0.5), 0.01)
 
         # Base score from standard deviation
         # STD < 0.02 = excellent (95-100)

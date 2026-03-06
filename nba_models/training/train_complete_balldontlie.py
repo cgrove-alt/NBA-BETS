@@ -69,9 +69,11 @@ except ImportError:
 try:
     import lightgbm as lgb
     from lightgbm import LGBMClassifier, LGBMRegressor
+    from lightgbm import early_stopping as _lgb_early_stop
     HAS_LIGHTGBM = True
 except (ImportError, OSError) as e:
     HAS_LIGHTGBM = False
+    _lgb_early_stop = None
     print(f"Note: LightGBM not available ({type(e).__name__}). Install with: pip install lightgbm")
 
 # Optuna for hyperparameter optimization
@@ -4060,6 +4062,7 @@ class PropEnsembleModel:
             'min_child_weight': 5, 'subsample': 0.8, 'colsample_bytree': 0.8,
             'reg_alpha': 0.5, 'reg_lambda': 2.0, 'random_state': 42,
             'n_jobs': -1, 'verbosity': 0,
+            'early_stopping_rounds': 20,
         }
         lgb_defaults = {
             'n_estimators': 200, 'max_depth': 6, 'learning_rate': 0.05,
@@ -4162,13 +4165,24 @@ class PropEnsembleModel:
         model_metrics = {}
 
         print(f"    Training {len(self.models)} base models...")
+        _EARLY_STOPPING_MODELS = {'xgboost', 'lightgbm'}
         for name, model in self.models.items():
             try:
+                # Add early stopping for gradient boosting models
+                _fit_kwargs = {}
+                if name in _EARLY_STOPPING_MODELS:
+                    if name == 'xgboost':
+                        _fit_kwargs['eval_set'] = [(X_test_scaled, y_test)]
+                        _fit_kwargs['verbose'] = False
+                    elif name == 'lightgbm':
+                        _fit_kwargs['eval_set'] = [(X_test_scaled, y_test)]
+                        _fit_kwargs['callbacks'] = [_lgb_early_stop(20)] if HAS_LIGHTGBM else []
+
                 # Train with sample weights if supported
                 if w_train is not None and hasattr(model, 'fit') and 'sample_weight' in str(model.fit.__code__.co_varnames):
-                    model.fit(X_train_scaled, y_train, sample_weight=w_train)
+                    model.fit(X_train_scaled, y_train, sample_weight=w_train, **_fit_kwargs)
                 else:
-                    model.fit(X_train_scaled, y_train)
+                    model.fit(X_train_scaled, y_train, **_fit_kwargs)
 
                 # Get predictions for stacking
                 train_pred = model.predict(X_train_scaled)
@@ -4188,48 +4202,66 @@ class PropEnsembleModel:
             except Exception as e:
                 print(f"      Error training {name}: {e}")
 
-        # Create stacked features (base model predictions)
-        stacked_train = np.column_stack(base_predictions_train)
-        np.column_stack(base_predictions_test)
+        # Generate out-of-fold predictions for meta-learner training.
+        # This prevents the meta-learner from overfitting to training data
+        # by ensuring it only sees predictions on held-out data.
+        from sklearn.base import clone as sklearn_clone
+        from sklearn.model_selection import KFold as _KFold
 
-        # Use inverse-RMSE weighted average instead of meta-learner
-        # This avoids the issue of meta-learner overfitting to training predictions
+        n_models = len(base_predictions_train)
+        oof_meta_features = np.zeros((len(y_train), n_models))
+        model_names_list = list(self.models.keys())
+
+        kf = _KFold(n_splits=5, shuffle=False)  # No shuffle for temporal consistency
+        for fold_idx, (fold_train_idx, fold_val_idx) in enumerate(kf.split(X_train_scaled)):
+            for model_idx, name in enumerate(model_names_list):
+                try:
+                    fold_model = sklearn_clone(self.models[name])
+                    if w_train is not None and hasattr(fold_model, 'fit') and 'sample_weight' in str(fold_model.fit.__code__.co_varnames):
+                        fold_model.fit(X_train_scaled[fold_train_idx], y_train[fold_train_idx],
+                                      sample_weight=w_train[fold_train_idx])
+                    else:
+                        fold_model.fit(X_train_scaled[fold_train_idx], y_train[fold_train_idx])
+                    oof_meta_features[fold_val_idx, model_idx] = fold_model.predict(X_train_scaled[fold_val_idx])
+                except Exception:
+                    # Fallback to training predictions for this fold
+                    oof_meta_features[fold_val_idx, model_idx] = base_predictions_train[model_idx][fold_val_idx]
+
+        # Also build test-set meta features from the full-data base models
+        stacked_test = np.column_stack(base_predictions_test)
+
+        # Compute inverse-RMSE weights for fallback ensemble
         model_weights = {}
         total_inverse_rmse = 0
         for name, metrics in model_metrics.items():
-            # Inverse RMSE weighting - better models get higher weight
-            inv_rmse = 1.0 / (metrics['rmse'] + 0.1)  # +0.1 to avoid division issues
+            inv_rmse = 1.0 / (metrics['rmse'] + 0.1)
             model_weights[name] = inv_rmse
             total_inverse_rmse += inv_rmse
-
-        # Normalize weights
         self.model_weights = {k: v / total_inverse_rmse for k, v in model_weights.items()}
 
-        # Calculate weighted ensemble predictions
+        # Calculate weighted ensemble predictions for metrics
         ensemble_pred = np.zeros(len(y_test))
         for i, (name, _) in enumerate(self.models.items()):
             weight = self.model_weights.get(name, 1.0 / len(self.models))
             ensemble_pred += weight * base_predictions_test[i]
 
-        # TIER 2.4: Upgraded meta-learner from Ridge to XGBoost for better stacking
-        # XGBoost can learn non-linear combinations of base model predictions
+        # Train meta-learner on out-of-fold predictions (not leaked training predictions)
         if HAS_XGBOOST:
             self.meta_model = XGBRegressor(
-                n_estimators=50,        # Small ensemble for meta-learner
-                max_depth=2,            # Very shallow - just learning model weights
+                n_estimators=50,
+                max_depth=2,
                 learning_rate=0.1,
-                min_child_weight=5,     # Prevent overfitting
+                min_child_weight=5,
                 subsample=0.8,
-                colsample_bytree=1.0,   # Use all base model predictions
-                reg_alpha=0.5,          # L1 regularization
-                reg_lambda=1.0,         # L2 regularization
+                colsample_bytree=1.0,
+                reg_alpha=0.5,
+                reg_lambda=1.0,
                 random_state=42,
                 n_jobs=-1,
             )
         else:
-            # Fallback to Ridge if XGBoost not available
             self.meta_model = Ridge(alpha=1.0)
-        self.meta_model.fit(stacked_train, y_train)
+        self.meta_model.fit(oof_meta_features, y_train)
 
         # Calculate ensemble metrics
         ensemble_rmse = np.sqrt(mean_squared_error(y_test, ensemble_pred))
@@ -5331,15 +5363,16 @@ def train_all_models(
     print(f"  Weights: {', '.join([f'{k}={v:.2f}' for k, v in model_weights.items()])}")
     scaler_ml = StandardScaler()
 
-    # Split data with stratification
+    # Temporal split: use chronological order (not random) to prevent future leakage.
+    # Prop models already use temporal splits; this aligns moneyline with the same approach.
+    split_idx = int(len(X_team) * 0.8)
     if sample_weights is not None:
-        X_train, X_test, y_train, y_test, w_train, w_test = train_test_split(
-            X_team, y_ml, sample_weights, test_size=0.2, random_state=42, stratify=y_ml
-        )
+        X_train, X_test = X_team.iloc[:split_idx], X_team.iloc[split_idx:]
+        y_train, y_test = y_ml[:split_idx], y_ml[split_idx:]
+        w_train = sample_weights[:split_idx]
     else:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_team, y_ml, test_size=0.2, random_state=42, stratify=y_ml
-        )
+        X_train, X_test = X_team.iloc[:split_idx], X_team.iloc[split_idx:]
+        y_train, y_test = y_ml[:split_idx], y_ml[split_idx:]
         w_train = None
 
     feature_names = list(X_team.columns)
@@ -5878,32 +5911,35 @@ def train_all_models(
     }
 
     def _inject_prop_line_features(X_df, prop_name):
-        """Inject prop_line + derived features into feature DataFrame for training.
+        """Inject prop_line derived features into feature DataFrame for training.
 
-        Uses season average as proxy for market line. This gives tree models an
-        anchor for each player's expected output level, preventing regression-to-mean
-        compression.
+        Uses season average as proxy for market line. Only includes features that
+        are consistent between training and inference:
+        - prop_line_vs_recent: difference between line proxy and recent average
+          (at inference, real market line vs recent average — same semantic meaning)
+
+        REMOVED: prop_line and prop_line_vs_season caused training-serving skew:
+        - prop_line was always season_avg at training, but real market line at inference
+        - prop_line_vs_season was always 0.0 at training — useless constant feature
         """
         X_with_line = X_df.copy()
         mapping = PROP_LINE_SEASON_AVG_MAP.get(prop_name)
 
         if mapping is not None:
             season_col, recent_col = mapping
-            X_with_line['prop_line'] = X_with_line[season_col].fillna(0)
-            X_with_line['prop_line_vs_season'] = 0.0  # line == season avg at training time
+            line_proxy = X_with_line[season_col].fillna(0)
             X_with_line['prop_line_vs_recent'] = (
-                X_with_line['prop_line'] - X_with_line[recent_col].fillna(X_with_line[season_col])
+                line_proxy - X_with_line[recent_col].fillna(X_with_line[season_col])
             )
         else:
             # PRA: sum of component season avgs
-            X_with_line['prop_line'] = (
+            line_proxy = (
                 X_with_line['season_pts_avg'].fillna(0) +
                 X_with_line['season_reb_avg'].fillna(0) +
                 X_with_line['season_ast_avg'].fillna(0)
             )
-            X_with_line['prop_line_vs_season'] = 0.0
             X_with_line['prop_line_vs_recent'] = (
-                X_with_line['prop_line'] - (
+                line_proxy - (
                     X_with_line['recent_pts_avg'].fillna(0) +
                     X_with_line['recent_reb_avg'].fillna(0) +
                     X_with_line['recent_ast_avg'].fillna(0)
@@ -6056,6 +6092,125 @@ def train_all_models(
         except Exception as e:
             print(f"  Error training quantile model for {prop_name}: {e}")
             results[f'quantile_{prop_name}'] = {'error': str(e)}
+
+    # Compute and save quantile decompression parameters per prop type.
+    # These measure how much the quantile models compress predictions toward the mean.
+    print("\n--- Computing Quantile Decompression Parameters ---")
+    decomp_params = {}
+    for prop_name, target_col in prop_types:
+        try:
+            y = np.array([d[target_col] for d in player_data])
+            X_with_line = _inject_prop_line_features(X_player, prop_name)
+            quantile_path = save_dir / f'player_{prop_name}_quantile.pkl'
+            if not quantile_path.exists():
+                continue
+            with open(quantile_path, 'rb') as f:
+                q_data = pickle.load(f)
+            q_model = q_data.get('model')
+            if q_model is None or not hasattr(q_model, 'quantile_models'):
+                continue
+
+            # Use the test portion to measure compression
+            split_idx = int(len(X_with_line) * 0.8)
+            X_test_q = X_with_line.iloc[split_idx:]
+            y_test_q = y[split_idx:]
+
+            feature_names_q = q_data.get('feature_names', list(X_with_line.columns))
+            X_test_aligned = X_test_q[feature_names_q].fillna(0)
+            scaler_q = getattr(q_model, 'scaler', None)
+            X_scaled_q = scaler_q.transform(X_test_aligned) if scaler_q else X_test_aligned.values
+
+            if 0.5 in q_model.quantile_models:
+                medians = q_model.quantile_models[0.5].predict(X_scaled_q)
+                # Compute slope and mean_gap from median predictions vs actual lines
+                # Use season avg as proxy for "line" in training context
+                mapping = PROP_LINE_SEASON_AVG_MAP.get(prop_name)
+                if mapping:
+                    lines = X_test_q[mapping[0]].fillna(0).values
+                else:
+                    lines = (X_test_q['season_pts_avg'].fillna(0) +
+                             X_test_q['season_reb_avg'].fillna(0) +
+                             X_test_q['season_ast_avg'].fillna(0)).values
+
+                valid = lines > 0
+                if valid.sum() > 20:
+                    from numpy.polynomial.polynomial import polyfit
+                    coeffs = polyfit(lines[valid], medians[valid], 1)
+                    slope = float(coeffs[1])
+                    mean_gap = float(np.mean(medians[valid] - lines[valid]))
+                    mean_line = float(np.mean(lines[valid]))
+                    decomp_params[prop_name] = {
+                        'slope': round(slope, 3),
+                        'mean_gap': round(mean_gap, 2),
+                        'mean_line': round(mean_line, 1),
+                    }
+                    print(f"  {prop_name}: slope={slope:.3f}, mean_gap={mean_gap:.2f}, mean_line={mean_line:.1f}")
+        except Exception as e:
+            print(f"  Error computing decompression for {prop_name}: {e}")
+
+    if decomp_params:
+        import json
+        decomp_path = save_dir / 'quantile_decompression.json'
+        with open(decomp_path, 'w') as f:
+            json.dump(decomp_params, f, indent=2)
+        print(f"  Saved decompression parameters to {decomp_path}")
+
+    # Train and save Platt calibrator on held-out validation predictions.
+    # This allows data_service to map raw model confidence to calibrated probabilities.
+    print("\n--- Training Platt Calibrator ---")
+    try:
+        from nba_models.models.calibration import PlattScaling
+        # Collect all test-set predictions and actuals across prop types
+        all_probs = []
+        all_actuals = []
+        for prop_name, target_col in prop_types:
+            y = np.array([d[target_col] for d in player_data])
+            X_with_line = _inject_prop_line_features(X_player, prop_name)
+            q_path = save_dir / f'player_{prop_name}_quantile.pkl'
+            if not q_path.exists():
+                continue
+            with open(q_path, 'rb') as f:
+                q_data = pickle.load(f)
+            q_model = q_data.get('model')
+            if q_model is None or not hasattr(q_model, 'quantile_models') or 0.5 not in q_model.quantile_models:
+                continue
+            split_idx = int(len(X_with_line) * 0.8)
+            X_val = X_with_line.iloc[split_idx:]
+            y_val = y[split_idx:]
+            fn = q_data.get('feature_names', list(X_with_line.columns))
+            X_aligned = X_val[fn].fillna(0)
+            sc = getattr(q_model, 'scaler', None)
+            X_sc = sc.transform(X_aligned) if sc else X_aligned.values
+            medians = q_model.quantile_models[0.5].predict(X_sc)
+            mapping = PROP_LINE_SEASON_AVG_MAP.get(prop_name)
+            if mapping:
+                lines = X_val[mapping[0]].fillna(0).values
+            else:
+                lines = (X_val['season_pts_avg'].fillna(0) +
+                         X_val['season_reb_avg'].fillna(0) +
+                         X_val['season_ast_avg'].fillna(0)).values
+            from scipy.stats import norm as _norm
+            from nba_betting.constants import PROP_STD_DEVS as _PROP_STD_DEVS
+            _std = _PROP_STD_DEVS.get(prop_name, 5.0)
+            for i in range(len(medians)):
+                if lines[i] > 0:
+                    z = (medians[i] - lines[i]) / _std
+                    over_prob = float(_norm.cdf(z))
+                    # Actual: did the player go over?
+                    actual_over = 1 if y_val[i] > lines[i] else 0
+                    all_probs.append(over_prob)
+                    all_actuals.append(actual_over)
+        if len(all_probs) > 100:
+            calibrator = PlattScaling()
+            calibrator.fit(np.array(all_probs), np.array(all_actuals))
+            cal_path = save_dir / 'prop_platt_calibrator.pkl'
+            with open(cal_path, 'wb') as f:
+                pickle.dump(calibrator, f)
+            print(f"  Platt calibrator saved to {cal_path} (n={len(all_probs)} samples)")
+        else:
+            print(f"  Not enough samples for calibrator ({len(all_probs)})")
+    except Exception as e:
+        print(f"  Error training Platt calibrator: {e}")
 
     return results
 

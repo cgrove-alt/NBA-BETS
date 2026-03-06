@@ -565,7 +565,7 @@ def get_props(game_id: str):
             edge = abs(player.get(f"{prop_key}_edge", 0) or 0)
             pick = player.get(f"{prop_key}_pick", "-")
             threshold = BEST_BET_EDGE_THRESHOLDS.get(prop_key, 3.0)
-            if pick != "-" and conf >= 65 and edge >= threshold:
+            if pick != "-" and conf >= 60 and edge >= threshold:
                 return True
         return False
 

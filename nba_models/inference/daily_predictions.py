@@ -155,7 +155,7 @@ def compute_quantile_sigma(pred_low: float, pred_high: float, prop_type: str) ->
     return max(quantile_sigma, min_sigma)
 
 
-def decompress_quantile_prediction(predicted_value: float, line: float, prop_type: str) -> float:
+def decompress_quantile_prediction(predicted_value: float, line: float, prop_type: str, player_season_avg: float = None) -> float:
     """Correct regression-to-mean compression in quantile model predictions.
 
     The quantile models predict with slope < 1.0 relative to the line, meaning
@@ -184,7 +184,10 @@ def decompress_quantile_prediction(predicted_value: float, line: float, prop_typ
         return predicted_value
 
     level_fix = -mean_gap
-    return predicted_value + slope_fix * (line - mean_line) + level_fix
+    # Use player's season average as anchor when available (more accurate than
+    # universal mean_line). Falls back to mean_line if no player-specific anchor.
+    anchor = player_season_avg if player_season_avg is not None else mean_line
+    return predicted_value + slope_fix * (line - anchor) + level_fix
 
 
 # Import performance optimizations (Task 4.1)
@@ -382,12 +385,18 @@ def _calculate_prop_edge(over_prob: float, american_odds: int = -110, under_odds
         }
     else:
         # Legacy fallback: devig both sides using the actual odds provided
+        def _american_to_raw(odds):
+            if odds > 0:
+                return 100 / (odds + 100)
+            return abs(odds) / (abs(odds) + 100)
+
+        def _american_to_decimal(odds):
+            if odds > 0:
+                return 1 + odds / 100
+            return 1 + 100 / abs(odds)
+
         if under_odds is not None:
             # Proper devig when both sides are available
-            def _american_to_raw(odds):
-                if odds > 0:
-                    return 100 / (odds + 100)
-                return abs(odds) / (abs(odds) + 100)
             raw_over_implied = _american_to_raw(american_odds)
             raw_under_implied = _american_to_raw(under_odds)
             total_implied = raw_over_implied + raw_under_implied
@@ -401,20 +410,28 @@ def _calculate_prop_edge(over_prob: float, american_odds: int = -110, under_odds
             under_edge = (under_prob - nv_under_implied) * 100
         else:
             # Single-side fallback: use raw implied probability of the over side
-            def _american_to_raw_single(odds):
-                if odds > 0:
-                    return 100 / (odds + 100)
-                return abs(odds) / (abs(odds) + 100)
-            over_implied = _american_to_raw_single(american_odds)
+            over_implied = _american_to_raw(american_odds)
+            nv_over_implied = over_implied
+            nv_under_implied = 1.0 - over_implied
             over_edge = (over_prob - over_implied) * 100
             under_edge = (under_prob - (1.0 - over_implied)) * 100
 
         if over_edge >= under_edge:
             pick = 'OVER'
             edge = over_edge
+            model_prob = over_prob
+            market_implied = nv_over_implied
+            best_odds = american_odds
         else:
             pick = 'UNDER'
             edge = under_edge
+            model_prob = under_prob
+            market_implied = nv_under_implied
+            best_odds = under_odds if under_odds is not None else american_odds
+
+        # Proper EV: (model_prob * decimal_odds) - 1
+        decimal_odds = _american_to_decimal(best_odds)
+        ev_per_dollar = (model_prob * decimal_odds) - 1
 
         return {
             'over_edge': over_edge,
@@ -422,9 +439,9 @@ def _calculate_prop_edge(over_prob: float, american_odds: int = -110, under_odds
             'pick': pick,
             'edge': edge,
             'edge_quality': 'strong' if edge >= 5 else 'moderate' if edge >= 3 else 'marginal' if edge >= 2 else 'none',
-            'ev_per_dollar': edge / 100,
-            'implied_probability': over_edge / 100 + over_prob if pick == 'OVER' else under_edge / 100 + under_prob,
-            'model_probability': over_prob if pick == 'OVER' else under_prob,
+            'ev_per_dollar': ev_per_dollar,
+            'implied_probability': market_implied,
+            'model_probability': model_prob,
             'has_edge': edge >= 2,
         }
 
@@ -684,6 +701,7 @@ def generate_complete_prop_features(
     opponent_team_id: int,
     is_home: bool = False,
     vegas_total: float = None,
+    opp_stats: dict = None,
 ) -> dict | None:
     """
     Generate ALL 150 features matching what the model was trained on.
@@ -762,58 +780,69 @@ def generate_complete_prop_features(
     if not base_features:
         return None
 
-    # Add opponent features (use defaults for now, can be enhanced)
+    # Add opponent features — use real stats when opp_stats provided, else league avg
+    _opp = opp_stats or {}
+    _def_rating = _opp.get('def_rating', 114.0)
+    _off_rating = _opp.get('off_rating', 114.0)
+    _pace = _opp.get('pace', 100.0)
+    _pts_allowed = _opp.get('pts_allowed', 114.0)
+    _win_pct = _opp.get('win_pct', 0.5)
+
+    # Scale position-specific stats by opponent defense relative to league average
+    _def_scale = _def_rating / 114.0 if _def_rating > 0 else 1.0
+
     opponent_features = {
-        'opp_def_rating': 114.0,  # League average
-        'opp_off_rating': 114.0,
-        'opp_net_rating': 0.0,
-        'opp_pts_allowed': 114.0,
-        'opp_pts_allowed_recent': 114.0,
-        'opp_pts_allowed_std': 8.0,
-        'opp_pace': 100.0,
-        'opp_pace_season': 100.0,
-        'opp_def_strength': 0.0,
+        'opp_def_rating': _def_rating,
+        'opp_off_rating': _off_rating,
+        'opp_net_rating': _off_rating - _def_rating,
+        'opp_pts_allowed': _pts_allowed,
+        'opp_pts_allowed_recent': _opp.get('pts_allowed_recent', _pts_allowed),
+        'opp_pts_allowed_std': _opp.get('pts_allowed_std', 8.0),
+        'opp_pace': _pace,
+        'opp_pace_season': _opp.get('pace_season', _pace),
+        'opp_def_strength': (_def_rating - 114.0) / 114.0,
         'opp_location_def': 0.0,
-        'opp_win_pct': 0.5,
-        'opp_recent_win_pct': 0.5,
+        'opp_win_pct': _win_pct,
+        'opp_recent_win_pct': _opp.get('recent_win_pct', _win_pct),
         'is_home': 1 if is_home else 0,
-        'team_pace': 100.0,
-        'team_off_rating': 114.0,
-        # Position-specific opponent allowed stats (use league averages)
-        'opp_pts_allowed_to_guards': 18.0,
-        'opp_reb_allowed_to_guards': 3.5,
-        'opp_ast_allowed_to_guards': 5.5,
-        'opp_fg3m_allowed_to_guards': 2.0,
-        'opp_pts_allowed_to_forwards': 16.0,
-        'opp_reb_allowed_to_forwards': 6.5,
-        'opp_ast_allowed_to_forwards': 3.0,
-        'opp_fg3m_allowed_to_forwards': 1.5,
-        'opp_pts_allowed_to_centers': 14.0,
-        'opp_reb_allowed_to_centers': 9.0,
-        'opp_ast_allowed_to_centers': 2.5,
-        'opp_fg3m_allowed_to_centers': 0.5,
+        'team_pace': _opp.get('team_pace', _pace),
+        'team_off_rating': _opp.get('team_off_rating', 114.0),
+        # Position-specific: scale league averages by opponent defensive strength
+        'opp_pts_allowed_to_guards': 18.0 * _def_scale,
+        'opp_reb_allowed_to_guards': 3.5 * _def_scale,
+        'opp_ast_allowed_to_guards': 5.5 * _def_scale,
+        'opp_fg3m_allowed_to_guards': 2.0 * _def_scale,
+        'opp_pts_allowed_to_forwards': 16.0 * _def_scale,
+        'opp_reb_allowed_to_forwards': 6.5 * _def_scale,
+        'opp_ast_allowed_to_forwards': 3.0 * _def_scale,
+        'opp_fg3m_allowed_to_forwards': 1.5 * _def_scale,
+        'opp_pts_allowed_to_centers': 14.0 * _def_scale,
+        'opp_reb_allowed_to_centers': 9.0 * _def_scale,
+        'opp_ast_allowed_to_centers': 2.5 * _def_scale,
+        'opp_fg3m_allowed_to_centers': 0.5 * _def_scale,
         'opp_pts_vs_pos_std': 3.0,
-        'opp_pts_vs_pos_diff': 0.0,
-        'opp_reb_vs_pos_diff': 0.0,
-        'opp_ast_vs_pos_diff': 0.0,
-        'opp_fg3m_vs_pos_diff': 0.0,
-        # Opponent-adjusted features (IMPROVEMENT 3, from comprehensive_backtest)
-        # Defaults to league averages (factor=1.0); live API can override
-        'opp_pts_allowed_avg': 15.0,
-        'opp_reb_allowed_avg': 5.5,
-        'opp_ast_allowed_avg': 3.5,
-        'opp_pts_factor': 1.0,
-        'opp_reb_factor': 1.0,
-        'opp_ast_factor': 1.0,
+        'opp_pts_vs_pos_diff': (_def_rating - 114.0) * 0.15,
+        'opp_reb_vs_pos_diff': (_def_rating - 114.0) * 0.05,
+        'opp_ast_vs_pos_diff': (_def_rating - 114.0) * 0.04,
+        'opp_fg3m_vs_pos_diff': (_def_rating - 114.0) * 0.02,
+        # Opponent-adjusted factors based on real defensive strength
+        'opp_pts_allowed_avg': 15.0 * _def_scale,
+        'opp_reb_allowed_avg': 5.5 * _def_scale,
+        'opp_ast_allowed_avg': 3.5 * _def_scale,
+        'opp_pts_factor': _def_scale,
+        'opp_reb_factor': _def_scale,
+        'opp_ast_factor': _def_scale,
     }
     base_features.update(opponent_features)
 
-    # Add pace-adjusted features
+    # Add pace-adjusted features with real pace data
+    _team_pace = _opp.get('team_pace', _pace)
+    _opp_pace = _pace
     try:
         pace_features = calculate_pace_adjusted_features(
             player_features=base_features,
-            team_pace=100.0,
-            opponent_pace=100.0,
+            team_pace=_team_pace,
+            opponent_pace=_opp_pace,
             vegas_spread=0.0
         )
         base_features.update(pace_features)
@@ -906,7 +935,7 @@ def apply_injury_adjustments(
 
 def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
                         bdl_player_id: int = None, is_home: bool = False,
-                        vegas_total: float = None) -> dict:
+                        vegas_total: float = None, opp_stats: dict = None) -> dict:
     """
     Get cached features or generate new ones using Balldontlie data.
 
@@ -943,6 +972,7 @@ def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
                 opponent_team_id=opponent_id,
                 is_home=is_home,
                 vegas_total=vegas_total,
+                opp_stats=opp_stats,
             )
             if features:
                 _player_feature_cache[cache_key] = features
@@ -1949,6 +1979,7 @@ def predict_player_prop(
     game_context: dict = None,  # Game context for minutes oracle
     american_odds: int = -110,  # Phase 4: actual odds for edge calc
     under_odds: int = None,  # Phase 4: under side odds for devigging
+    opp_stats: dict = None,  # Real opponent defensive stats
 ) -> dict:
     """
     Predict over/under probability for a player prop.
@@ -1989,12 +2020,11 @@ def predict_player_prop(
     if model_data and use_api_features:
         try:
             # Get cached features (or generate new ones) - use Balldontlie ID for fast lookup
-            features = get_cached_features(player_name, prop_type, opponent_id, bdl_player_id=player_id)
+            features = get_cached_features(player_name, prop_type, opponent_id, bdl_player_id=player_id, opp_stats=opp_stats)
 
             if features:
-                # Inject prop_line features using actual market line
-                # At inference, we use the real sportsbook line (not season avg proxy)
-                features['prop_line'] = line
+                # Inject only prop_line_vs_recent (consistent between training and inference).
+                # REMOVED: prop_line and prop_line_vs_season caused training-serving skew.
                 _season_avg_map = {
                     'points': ('season_pts_avg', 'recent_pts_avg'),
                     'rebounds': ('season_reb_avg', 'recent_reb_avg'),
@@ -2013,7 +2043,6 @@ def predict_player_prop(
                     _r_avg = (features.get('recent_pts_avg', 0) +
                               features.get('recent_reb_avg', 0) +
                               features.get('recent_ast_avg', 0))
-                features['prop_line_vs_season'] = line - _s_avg
                 features['prop_line_vs_recent'] = line - _r_avg
 
                 # Handle ENSEMBLE format (multiple models with meta_model)
@@ -2177,7 +2206,11 @@ def predict_player_prop(
 
                 # Correct regression-to-mean compression in quantile predictions.
                 # POINTS slope=0.724 means high scorers are predicted 3-9 pts too low.
-                predicted_value = decompress_quantile_prediction(predicted_value, line, prop_type)
+                # Use player's season average as decompression anchor (defined earlier)
+                predicted_value = decompress_quantile_prediction(
+                    predicted_value, line, prop_type,
+                    player_season_avg=_s_avg if features else None
+                )
 
                 # Derive player-specific sigma from quantile spread
                 quantile_sigma = compute_quantile_sigma(pred_low, pred_high, prop_type)
@@ -2215,11 +2248,9 @@ def predict_player_prop(
 
             # Only adjust if we have meaningful baseline and prediction
             if avg_minutes > 10 and predicted_minutes > 0:
-                # Use raw quantile median for rate calculation to avoid amplifying
-                # the decompression correction. The per-minute rate should reflect
-                # model-estimated production, not the decompression adjustment.
-                rate_base = pred_median if pred_median is not None else predicted_value
-                rate = rate_base / avg_minutes
+                # Use post-decompression predicted_value for consistent rate calculation.
+                # The rate should reflect the final predicted production level.
+                rate = predicted_value / avg_minutes
                 minutes_delta = rate * (predicted_minutes - avg_minutes)
                 adjusted_value = predicted_value + minutes_delta
 

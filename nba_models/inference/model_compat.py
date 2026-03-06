@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def prepare_loaded_model_artifact(data: Any) -> Any:
@@ -60,12 +63,18 @@ def get_context_feature_names(model: Any) -> list[str]:
 
 def predict_binary_probability(model: Any, features: dict[str, float | int]) -> float | None:
     """Predict positive-class probability from heterogeneous model artifacts."""
-    return _predict_value(model, features, task="classification")
+    result = _predict_value(model, features, task="classification")
+    if result is None:
+        logger.warning("predict_binary_probability returned None (model type=%s)", type(model).__name__)
+    return result
 
 
 def predict_regression_value(model: Any, features: dict[str, float | int]) -> float | None:
     """Predict scalar regression output from heterogeneous model artifacts."""
-    return _predict_value(model, features, task="regression")
+    result = _predict_value(model, features, task="regression")
+    if result is None:
+        logger.warning("predict_regression_value returned None (model type=%s)", type(model).__name__)
+    return result
 
 
 def _predict_value(
@@ -95,6 +104,7 @@ def _predict_value(
 
     feature_names = get_feature_names(model)
     if not feature_names:
+        logger.warning("Model has no feature_names — cannot make prediction (type=%s)", type(model).__name__)
         return None
 
     feature_frame = _build_feature_frame(features, feature_names)

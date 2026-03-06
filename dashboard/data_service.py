@@ -419,20 +419,20 @@ except ImportError:
     HAS_CALIBRATION = False
     print("Warning: calibration module not available, using raw probabilities")
 
-# Prop calibrator DISABLED - the old calibrator was trained on stale data (39% win rate)
-# and flattens all confidence to 39%. Direction calibration from PropTracker now handles
-# confidence adjustment dynamically based on recent model performance.
-# To re-enable: uncomment the calibrator loading code below
+# Load Platt-calibrated prop calibrator if available (generated during model retrain).
+# Falls back to uncalibrated confidence if no calibrator file exists.
 PROP_CALIBRATOR = None
-# try:
-#     if HAS_CALIBRATION:
-#         _prop_cal = ModelCalibrator('prop_predictions')
-#         _prop_cal.load('models/calibration')
-#         PROP_CALIBRATOR = _prop_cal
-#         print(f"Prop calibrator loaded (method: {_prop_cal.best_method})")
-# except Exception as e:
-#     print(f"Warning: Could not load prop calibrator: {e}")
-print("Prop calibrator disabled - using direction calibration from PropTracker")
+_calibrator_path = Path(__file__).parent.parent / 'models' / 'prop_platt_calibrator.pkl'
+if _calibrator_path.exists():
+    try:
+        with open(_calibrator_path, 'rb') as _f:
+            PROP_CALIBRATOR = pickle.load(_f)
+        print(f"Platt prop calibrator loaded from {_calibrator_path}")
+    except Exception as _e:
+        print(f"Warning: Could not load prop calibrator: {_e}")
+        PROP_CALIBRATOR = None
+else:
+    print("No prop calibrator found — using raw confidence (retrain to generate one)")
 
 
 # Model wrapper classes for unpickling
@@ -507,6 +507,14 @@ class EnsembleMoneylineWrapper:
             if col not in X.columns:
                 X[col] = 0
         X = X[self.feature_names]
+        # Use feature-specific defaults for NaN instead of blanket 0
+        _FEATURE_DEFAULTS = {
+            'opp_def_rating': 114.0, 'opp_off_rating': 114.0, 'opp_pace': 100.0,
+            'opp_pts_allowed': 114.0, 'opp_win_pct': 0.5, 'is_home': 0,
+        }
+        for col, default in _FEATURE_DEFAULTS.items():
+            if col in X.columns:
+                X[col] = X[col].fillna(default)
         X_clean = X.fillna(0)
         X_scaled = self.scaler.transform(X_clean)
 
@@ -616,7 +624,7 @@ class CacheManager:
     DEFAULT_TTL = {
         "games": timedelta(seconds=30),        # Real-time: 30 sec (was 5 min)
         "odds": timedelta(seconds=15),         # Real-time: 15 sec (was 30 sec)
-        "predictions": timedelta(seconds=300), # 5 min TTL to reduce recomputation
+        "predictions": timedelta(seconds=60),  # 1 min TTL for fresher predictions
         "player_props": timedelta(seconds=30), # Real-time: 30 sec (was 3 min)
         "rosters": timedelta(hours=24),        # Rarely changes
         "analysis": timedelta(seconds=60),     # Real-time: 60 sec (was 10 min)
@@ -704,7 +712,7 @@ class DataService:
         # Opponent stats cache (30 min TTL - defensive ratings don't change mid-game)
         self._opponent_stats_cache = {}  # team_abbrev -> {def_rating, off_rating, pace, ...}
         self._opponent_stats_timestamp = None
-        self._opponent_stats_ttl = timedelta(minutes=30)
+        self._opponent_stats_ttl = timedelta(minutes=5)
 
         # SportsDataIO BAKER projections cache with TTL tracking (Phase 6)
         self._baker_projections_cache = {}  # date -> {player_name: {points, rebounds, assists, ...}}
@@ -4228,23 +4236,21 @@ class DataService:
             print(f"Minutes Oracle prediction error for player {player.get('id')}: {e}")
             return fallback
 
-    def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None, threshold: float = 5.0) -> tuple[str, float]:
+    def _determine_prop_pick(self, prediction: float, line: float, prop_type: str = None,
+                              threshold: float = 5.0, over_odds: int = None, under_odds: int = None) -> tuple[str, float]:
         """Determine OVER/UNDER pick based on ML model prediction vs Vegas line.
 
-        The ML model's prediction is compared directly to the Vegas line.
-        No artificial bias corrections - let the model speak for itself.
+        When over/under odds are available, devig to get no-vig probabilities and
+        compute edge against fair market line. Without odds, falls back to percentage
+        edge against the raw line.
 
         Args:
             prediction: ML model's predicted value
             line: Vegas betting line
             prop_type: Type of prop (points, rebounds, etc.)
-            threshold: Minimum edge % to make a pick (default 5%, TIER1 players use 3%)
-
-        The model uses 50+ features including:
-        - Season and recent averages
-        - Position encoding
-        - Advanced stats
-        - Opponent defensive metrics
+            threshold: Minimum edge % to make a pick (default 5%)
+            over_odds: American odds for over side (e.g., -110)
+            under_odds: American odds for under side (e.g., -110)
         """
         if line <= 0:
             return "-", 0.0
@@ -4761,8 +4767,8 @@ class DataService:
                 # if form_unstable:
                 #     pick, edge = "-", 0
 
-                # Use 3% threshold to allow more actionable picks (was 8%, filtered too many)
-                threshold = 3.0
+                # Use 5% edge threshold as interim (lower than original 8% but not as loose as 3%)
+                threshold = 5.0
                 pick, edge = self._determine_prop_pick(pred_value, line, prop_type=model_key, threshold=threshold)
 
                 # DISABLED: Direction calibration was crushing confidence to 50%
@@ -4774,23 +4780,26 @@ class DataService:
                 #     if dir_cal != 1.0:
                 #         confidence *= dir_cal
 
+                # Apply confidence penalty for estimated lines (not real sportsbook data)
+                if not used_real_line:
+                    confidence *= 0.85
+
                 # Keep in valid range - WIDENED from 55-65% to 50-85%
                 # Let accurate predictions express higher confidence
                 confidence = max(50.0, min(85.0, confidence))
             else:
                 pick, edge = "-", 0  # No pick without a valid line
 
-            # DISABLED: Prop calibration was over-aggressively compressing all confidences toward 50%
-            # This caused 0 Best Bets to appear since none met the 80% threshold
-            # Use raw confidence instead - it has proper distribution from 50-85%
+            # Apply Platt calibration if a trained calibrator is available.
+            # The calibrator maps raw confidence to calibrated win probability.
             calibrated_confidence = confidence
-            # if PROP_CALIBRATOR is not None and confidence > 0:
-            #     try:
-            #         # Confidence is 0-100, calibrator expects 0-1
-            #         calibrated_prob = PROP_CALIBRATOR.calibrate(confidence / 100.0)
-            #         calibrated_confidence = calibrated_prob * 100.0
-            #     except Exception:
-            #         pass  # Use uncalibrated if calibration fails
+            if PROP_CALIBRATOR is not None and confidence > 0:
+                try:
+                    # Confidence is 0-100, calibrator expects 0-1
+                    calibrated_prob = PROP_CALIBRATOR.calibrate(confidence / 100.0)
+                    calibrated_confidence = calibrated_prob * 100.0
+                except Exception:
+                    pass  # Use uncalibrated if calibration fails
 
             prop_key = prop_label.lower().replace(" ", "_")
             result[f"{prop_key}_line"] = line
