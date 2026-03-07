@@ -10,10 +10,14 @@ Locally, this loads from the .env file at the project root.
 python-dotenv's load_dotenv() never overwrites existing env vars, so it's
 always safe to call — production values always take precedence.
 """
-import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Resolve .env relative to this file (project root)
-_env_path = Path(__file__).parent / ".env"
-load_dotenv(_env_path)
+try:
+    from dotenv import load_dotenv
+    # Resolve .env relative to this file (project root)
+    _env_path = Path(__file__).parent / ".env"
+    load_dotenv(_env_path)
+except ImportError:
+    # On Railway/production, python-dotenv may not be installed.
+    # Env vars are injected by the platform, so this is fine.
+    pass
