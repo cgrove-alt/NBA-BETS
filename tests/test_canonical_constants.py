@@ -63,7 +63,7 @@ class TestPropStdDevs:
 
     def test_pra_std_dev_correct(self):
         from nba_betting.constants import PROP_STD_DEVS
-        assert PROP_STD_DEVS['pra'] == 8.5
+        assert PROP_STD_DEVS['pra'] == 7.9
 
     def test_all_std_devs_positive(self):
         from nba_betting.constants import PROP_STD_DEVS
