@@ -84,7 +84,7 @@ INCREMENTAL_TRAIN_SCRIPT = PROJECT_DIR / "train_stacking_model.py"
 BACKTEST_SCRIPT = PROJECT_DIR / "comprehensive_backtest.py"
 
 # Thresholds
-MAX_TRAINING_TIME = int(os.getenv('MAX_TRAINING_TIME', 7200))  # 2 hours
+MAX_TRAINING_TIME = int(os.getenv('MAX_TRAINING_TIME', 14400))  # 4 hours
 MIN_DAYS_BETWEEN_FULL_RETRAIN = 14
 MIN_DAYS_BETWEEN_INCREMENTAL = 3
 PERFORMANCE_DEGRADATION_THRESHOLD = 0.05  # 5% RMSE increase triggers alert

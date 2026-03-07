@@ -1488,7 +1488,7 @@ def trigger_retrain(
             else:
                 cmd = [sys.executable, "scheduled_retraining.py", "--full"]
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=14400)
             app.state._retrain_result = {
                 "success": result.returncode == 0,
                 "exit_code": result.returncode,
@@ -1496,7 +1496,7 @@ def trigger_retrain(
                 "stderr_tail": (result.stderr or "")[-1000:],
             }
         except subprocess.TimeoutExpired:
-            app.state._retrain_result = {"success": False, "error": "Timed out after 2 hours"}
+            app.state._retrain_result = {"success": False, "error": "Timed out after 4 hours"}
         except Exception as e:
             app.state._retrain_result = {"success": False, "error": str(e)}
         finally:
