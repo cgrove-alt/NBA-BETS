@@ -201,7 +201,7 @@ def run_training():
     # Build command: train_from_csv accepts --seasons, train_complete does not
     cmd = [sys.executable, str(train_script)]
     if train_script.name == 'train_from_csv.py':
-        cmd += ['--seasons', '2023', '2024']
+        cmd += ['--seasons', '2023', '2024', '2025']
 
     try:
         result = subprocess.run(

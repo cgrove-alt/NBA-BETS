@@ -12,7 +12,7 @@ permissions:
 jobs:
   retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 150  # CSV-based training can take 60-90 minutes
+    timeout-minutes: 240  # OOF cross-validation can take 2-4 hours
 
     steps:
       - name: Checkout repository
@@ -37,7 +37,7 @@ jobs:
           BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
         run: |
           set -o pipefail
-          python scheduled_retrain.py --quick --force 2>&1 | tee logs/retrain_output.log
+          python train_complete_balldontlie.py 2>&1 | tee logs/retrain_output.log
 
       - name: Update retrain history
         if: success()
