@@ -1528,6 +1528,72 @@ def get_retrain_job_status():
     }
 
 
+@app.post("/api/predictions/trigger")
+def trigger_predictions(api_key: str | None = None):
+    """Trigger daily prediction generation in the background."""
+    import subprocess
+    import threading
+    import uuid
+    from datetime import datetime
+
+    expected_key = os.environ.get("API_KEY")
+    if expected_key and api_key != expected_key:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
+
+    if hasattr(app.state, "_predictions_running") and app.state._predictions_running:
+        return {
+            "status": "already_running",
+            "message": "Predictions are already being generated.",
+        }
+
+    job_id = str(uuid.uuid4())[:8]
+    app.state._predictions_running = True
+    app.state._predictions_job_id = job_id
+    app.state._predictions_started = datetime.now().isoformat()
+
+    def _run_predictions():
+        try:
+            cmd = [sys.executable, "daily_predictions.py"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            app.state._predictions_result = {
+                "success": result.returncode == 0,
+                "exit_code": result.returncode,
+                "stdout_tail": (result.stdout or "")[-2000:],
+                "stderr_tail": (result.stderr or "")[-1000:],
+            }
+        except subprocess.TimeoutExpired:
+            app.state._predictions_result = {"success": False, "error": "Timed out after 10 minutes"}
+        except Exception as e:
+            app.state._predictions_result = {"success": False, "error": str(e)}
+        finally:
+            app.state._predictions_running = False
+
+    thread = threading.Thread(target=_run_predictions, daemon=True)
+    thread.start()
+
+    return {
+        "status": "started",
+        "job_id": job_id,
+        "message": "Predictions started in background. Poll GET /api/predictions/job for progress.",
+        "started_at": app.state._predictions_started,
+    }
+
+
+@app.get("/api/predictions/job")
+def get_predictions_job_status():
+    """Check status of a running or recently completed predictions job."""
+    from datetime import datetime
+
+    return {
+        "running": getattr(app.state, "_predictions_running", False),
+        "job_id": getattr(app.state, "_predictions_job_id", None),
+        "started_at": getattr(app.state, "_predictions_started", None),
+        "result": getattr(app.state, "_predictions_result", None),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
 # ============== DAILY PREDICTIONS ENDPOINT ==============
 
 @app.get("/api/predictions/{date}", response_model=DailyPredictionsResponse)
