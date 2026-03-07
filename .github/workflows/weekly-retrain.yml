@@ -32,6 +32,16 @@ jobs:
       - name: Create logs directory
         run: mkdir -p logs
 
+      - name: Validate required secrets
+        env:
+          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: |
+          if [ -z "$BALLDONTLIE_API_KEY" ]; then
+            echo "::error::BALLDONTLIE_API_KEY secret is not set. Add it at: Settings > Secrets > Actions"
+            exit 1
+          fi
+          echo "All required secrets validated."
+
       - name: Run scheduled retraining
         env:
           BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
