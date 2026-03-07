@@ -41,7 +41,7 @@ export function Dashboard() {
 
   // Fetch best bets across all games
   // Note: Model confidence outputs range 50-70%, so use lower thresholds
-  const { data: bestBetsData, isLoading: bestBetsLoading } = useQuery({
+  const { data: bestBetsData, isLoading: bestBetsLoading, isRefetching: bestBetsRefetching } = useQuery({
     queryKey: ['bestBets'],
     queryFn: () => getBestBets({ minConfidence: 50, minEdge: 3 }),
     staleTime: 5 * 60 * 1000,
@@ -168,7 +168,7 @@ export function Dashboard() {
                 onExpand={handleExpandBet}
               />
             </>
-          ) : games.length > 0 && emptyRetryCount.current > 0 && emptyRetryCount.current <= 12 ? (
+          ) : games.length > 0 && bestBetsRefetching ? (
             <Card className="p-8 text-center">
               <Loader2 className="w-6 h-6 text-[#00d4ff] animate-spin mx-auto mb-3" />
               <p className="text-text-muted">Generating predictions...</p>
