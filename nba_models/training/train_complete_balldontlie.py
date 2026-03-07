@@ -6125,7 +6125,6 @@ def train_all_models(
             # Use the test portion to measure compression
             split_idx = int(len(X_with_line) * 0.8)
             X_test_q = X_with_line.iloc[split_idx:]
-            y_test_q = y[split_idx:]
 
             feature_names_q = q_data.get('feature_names', list(X_with_line.columns))
             X_test_aligned = X_test_q[feature_names_q].fillna(0)
@@ -6161,7 +6160,6 @@ def train_all_models(
             print(f"  Error computing decompression for {prop_name}: {e}")
 
     if decomp_params:
-        import json
         decomp_path = save_dir / 'quantile_decompression.json'
         with open(decomp_path, 'w') as f:
             json.dump(decomp_params, f, indent=2)

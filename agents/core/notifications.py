@@ -153,7 +153,7 @@ def send_briefing(formatted_text: str, briefing_date: str, play_count: int) -> b
         # Include key content
         if current_section == "YESTERDAY'S RESULTS" and stripped.startswith('Record:'):
             body_lines.insert(0, stripped)
-        elif current_section == 'PLAYS' and stripped.startswith('['):
+        elif current_section == 'PLAYS' and stripped.startswith('['):  # noqa: SIM114
             body_lines.append(stripped)
         elif current_section == 'ALERTS' and stripped and stripped != 'ALERTS':
             body_lines.append(stripped)

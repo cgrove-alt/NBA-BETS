@@ -289,7 +289,7 @@ def summarize_game_market_snapshot(raw: dict) -> dict:
                     elif outcome.get("name") == "Under":
                         totals_under_odds.append(outcome.get("price"))
 
-    summary = {
+    return {
         "book_count": len(bookmakers),
         "spread": {
             "home_line": _median_or_none(spread_home_lines),
@@ -307,7 +307,6 @@ def summarize_game_market_snapshot(raw: dict) -> dict:
             "under_odds": _median_or_none(totals_under_odds),
         },
     }
-    return summary
 
 
 def fetch_game_markets(

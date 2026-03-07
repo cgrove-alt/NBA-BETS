@@ -22,7 +22,7 @@ import numpy as np
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Any
+from typing import Any
 from collections.abc import Callable
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -1056,7 +1056,7 @@ class DynamicKellyBettingSimulator(BettingSimulator):
         self,
         probability: float,
         odds: float,
-        edge_quality_result: Optional['EdgeQualityResult'] = None,
+        edge_quality_result: EdgeQualityResult | None = None,
     ) -> float:
         """
         Calculate stake with dynamic Kelly adjustments.

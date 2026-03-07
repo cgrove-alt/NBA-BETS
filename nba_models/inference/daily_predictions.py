@@ -519,7 +519,7 @@ except ImportError:
     HAS_TRACKING_DATA = False
 
 
-def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> tuple[Optional['ShotAtlas'], Optional['RotationTracker']]:
+def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> tuple['ShotAtlas | None', 'RotationTracker | None']:
     """
     Fetch tracking data for a team's recent games.
 

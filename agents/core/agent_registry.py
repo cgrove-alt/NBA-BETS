@@ -68,7 +68,7 @@ class AgentRegistry:
 
         logger.info(f"Agent registered: {agent_name} ({agent_class})")
 
-    def get_agent(self, name: str) -> Optional[dict]:
+    def get_agent(self, name: str) -> dict | None:
         """Get agent info by name."""
         # Try in-memory first
         with AgentRegistry._lock:

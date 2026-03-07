@@ -15,13 +15,13 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def query_yesterday_record(yesterday_str: str) -> Optional[dict]:
+def query_yesterday_record(yesterday_str: str) -> dict | None:
     """Query yesterday's prediction results from PostgreSQL, calibration.db, or bet_tracking.db.
 
     Returns a structured dict with overall, by_bet_type, by_confidence,
     clv_summary, and date fields — or None if no data is available.
     """
-    record: Optional[dict] = None
+    record: dict | None = None
 
     # --- Attempt 0: PostgreSQL paper_trades (production / Railway) ---
     if os.environ.get('DATABASE_URL'):
