@@ -51,10 +51,10 @@ CALIBRATION_TEMPERATURE = 2.0
 
 # Minimum edges required to place a bet (Improvement 2)
 MIN_EDGE = {
-    'points': 2.0,
-    'rebounds': 1.0,
-    'assists': 0.8,
-    'pra': 3.0,
+    'points': 3.0,
+    'rebounds': 2.0,
+    'assists': 2.0,
+    'pra': 4.0,
     'moneyline': 0.05,
 }
 
@@ -63,7 +63,7 @@ DISABLED_PROPS = ['threes', 'spread']
 
 # Bet sizing constraints (Improvement 2)
 MIN_GAMES = 10          # Minimum player sample size
-MIN_CONFIDENCE = 0.58   # Minimum calibrated win probability
+MIN_CONFIDENCE = 0.62   # Minimum calibrated win probability
 MAX_BET_PCT = 0.03      # Hard cap: 3% of bankroll per bet
 KELLY_FRACTION = 0.25   # Quarter-Kelly for conservative sizing
 

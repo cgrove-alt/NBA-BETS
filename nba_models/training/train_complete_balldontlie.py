@@ -6318,6 +6318,16 @@ def main():
             optimized = " (Optuna)" if metrics.get('optuna_optimized') else ""
             print(f"  {prop_name} Props: {metrics['rmse']:.2f} RMSE, {metrics['r2']:.3f} R²{optimized}")
 
+    # Post-retrain: recalibrate quantile decompression parameters
+    print("\n  Running quantile decompression calibration...")
+    try:
+        import subprocess
+        calibration_script = os.path.join(_project_root, "scripts", "calibrate_quantile_decompression.py")
+        subprocess.run([sys.executable, calibration_script], timeout=120, check=False)
+        print("  Quantile decompression calibration complete.")
+    except Exception as e:
+        print(f"  Warning: Quantile decompression calibration failed: {e}")
+
     print("\n" + "="*60)
     print("All models saved to 'models/' directory")
     print("Run 'python3 app.py' to use for predictions")

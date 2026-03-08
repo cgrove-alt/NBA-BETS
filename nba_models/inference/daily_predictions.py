@@ -151,7 +151,7 @@ def compute_quantile_sigma(pred_low: float, pred_high: float, prop_type: str) ->
     if spread <= 0:
         return get_prop_std_dev(prop_type)
     quantile_sigma = spread / 2.564
-    min_sigma = get_prop_std_dev(prop_type) * 0.35
+    min_sigma = get_prop_std_dev(prop_type) * 0.60
     return max(quantile_sigma, min_sigma)
 
 
@@ -274,17 +274,17 @@ except ImportError:
 def get_edge_quality_tier(confidence_score: float, edge: float) -> str:
     """Map confidence score (0-100) + edge magnitude to edge quality tier."""
     abs_edge = abs(edge)
-    if abs_edge >= 20 and confidence_score >= 40:
+    if abs_edge >= 20 and confidence_score >= 75:
         return 'elite'
-    if abs_edge >= 12 and confidence_score >= 40:
+    if abs_edge >= 12 and confidence_score >= 70:
         return 'strong'
-    if abs_edge >= 6 and confidence_score >= 40:
+    if abs_edge >= 8 and confidence_score >= 65:
         return 'moderate'
-    if confidence_score >= 80 and abs_edge >= 3:
+    if confidence_score >= 75 and abs_edge >= 5:
         return 'strong'
-    if confidence_score >= 60 and abs_edge >= 3:
+    if confidence_score >= 65 and abs_edge >= 5:
         return 'moderate'
-    if abs_edge >= 3:
+    if abs_edge >= 5 and confidence_score >= 55:
         return 'weak'
     return 'avoid'
 
@@ -446,7 +446,7 @@ def _calculate_prop_edge(over_prob: float, american_odds: int = -110, under_odds
             'under_edge': under_edge,
             'pick': pick,
             'edge': edge,
-            'edge_quality': 'strong' if edge >= 5 else 'moderate' if edge >= 3 else 'marginal' if edge >= 2 else 'none',
+            'edge_quality': 'elite' if edge >= 20 else 'strong' if edge >= 12 else 'moderate' if edge >= 6 else 'weak' if edge >= 3 else 'avoid',
             'ev_per_dollar': ev_per_dollar,
             'implied_probability': market_implied,
             'model_probability': model_prob,
@@ -465,9 +465,11 @@ def get_signal_from_edge(edge: float, edge_quality: str = None) -> str:
     Returns:
         Signal string: 'BET', 'LEAN', 'PASS', or 'FADE'
     """
-    if edge_quality in ('strong', 'moderate'):
+    if edge_quality == 'elite':
         return 'BET'
-    if edge_quality == 'marginal':
+    if edge_quality == 'strong' and edge >= 8:
+        return 'BET'
+    if edge_quality in ('strong', 'moderate'):
         return 'LEAN'
     if edge < -5:
         return 'FADE'
@@ -2172,7 +2174,7 @@ def predict_player_prop(
                         over_prob = float(norm.cdf(z_score))
 
         except Exception:
-            pass  # Fall through to return defaults
+            logger.warning("Ensemble prediction failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Quantile model: run BEFORE adjustments so we can derive player-specific sigma
     pred_low = None
@@ -2229,7 +2231,7 @@ def predict_player_prop(
                 quantile_sigma = compute_quantile_sigma(pred_low, pred_high, prop_type)
                 effective_sigma = quantile_sigma
         except Exception:
-            pass
+            logger.warning("Quantile model failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Save original prediction for total adjustment cap
     original_predicted_value = predicted_value
@@ -2302,7 +2304,7 @@ def predict_player_prop(
                 z_score = (predicted_value - line) / effective_sigma
                 over_prob = float(norm.cdf(z_score))
         except Exception:
-            pass  # Continue without injury adjustment if it fails
+            logger.debug("Injury boost failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Phase 5: Apply calibration bias corrections BEFORE edge computation
     calibration_applied = {}
@@ -2355,7 +2357,7 @@ def predict_player_prop(
                     z_score = (predicted_value - line) / effective_sigma
                     over_prob = float(norm.cdf(z_score))
         except Exception:
-            pass  # Never block predictions on calibration failure
+            logger.debug("Calibration adjustment failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Total cap: all adjustments (minutes + injury + calibration) stay within ±25% of original
     if predicted_value is not None and original_predicted_value is not None and original_predicted_value != 0:
@@ -2439,7 +2441,7 @@ def predict_player_prop(
                 confidence_score = conf_result['adjusted_confidence']
                 confidence_score = max(40.0, min(90.0, confidence_score))
         except Exception:
-            pass  # Never block predictions on calibration failure
+            logger.debug("Confidence calibration failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Calculate edge quality tier based on confidence + edge magnitude (Task 2.4)
     edge_quality_tier = get_edge_quality_tier(confidence_score, edge)
@@ -2516,7 +2518,9 @@ def predict_player_prop(
                 # Use pipeline bet size (% of $1000 bankroll, same as legacy)
                 suggested_bet_size = (bet_filter_result['bet_size'] / 1000.0) * 100
         except Exception:
-            pass  # Never block predictions on filter failure
+            logger.warning("Bet filter failed for %s %s — defaulting to PASS", player_name, prop_type, exc_info=True)
+            bet_recommendation = 'PASS'
+            suggested_bet_size = 0.0
 
     return {
         'player': player_name,

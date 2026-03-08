@@ -20,11 +20,11 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 MIN_EDGE_THRESHOLDS = {
-    'points': 2.0,     # Need 2+ point edge for points props
-    'rebounds': 1.0,   # Need 1+ rebound edge
-    'assists': 0.8,    # Need 0.8+ assist edge
+    'points': 3.0,     # Need 3+ point edge for points props
+    'rebounds': 2.0,   # Need 2+ rebound edge
+    'assists': 2.0,    # Need 2+ assist edge (14% hit rate demands higher bar)
     'threes': 999,     # Effectively disabled (R²=0.31, no edge vs naive baseline)
-    'pra': 3.0,        # Need 3+ PRA edge
+    'pra': 4.0,        # Need 4+ PRA edge
     'spread': 999,      # Effectively disabled (RMSE 14.2, above market ~12-13)
     'moneyline': 0.05, # Need 5% probability edge
 }
@@ -42,7 +42,7 @@ MIN_EV_THRESHOLDS = {
 }
 
 MIN_GAMES_PLAYED = 10  # Minimum games for reliable player predictions
-MIN_CONFIDENCE = 0.58  # Minimum calibrated probability to bet
+MIN_CONFIDENCE = 0.62  # Minimum calibrated probability to bet
 
 DISABLED_PROPS = ['threes', 'spread']  # Props where model has no demonstrated edge
 

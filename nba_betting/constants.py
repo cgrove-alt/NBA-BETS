@@ -86,7 +86,9 @@ KELLY_FRACTIONS: dict[str, float] = {
     'elite':    0.50,   # 50% fractional Kelly for elite edges
     'strong':   0.35,   # 35% fractional Kelly
     'moderate': 0.25,   # 25% fractional Kelly
-    'low':      0.00,   # Do not bet marginal edges
+    'low':      0.00,   # Legacy key — kept for backward compatibility
+    'weak':     0.00,   # Returned by prediction_pipeline.evaluate_bet()
+    'avoid':    0.00,   # Returned by get_edge_quality_tier() in daily_predictions
 }
 
 MAX_BET_FRACTION: float = 0.03    # 3% of bankroll maximum per bet

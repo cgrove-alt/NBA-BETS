@@ -1082,8 +1082,8 @@ def get_game_odds(game_id: str):
 
 @app.get("/api/best-bets", response_model=BestBetsResponse)
 def get_best_bets(
-    min_confidence: float = Query(55.0, ge=0, le=100, description="Minimum confidence threshold (model outputs 50-70%)"),
-    min_edge: float = Query(4.0, ge=0, description="Minimum edge threshold (percentage)"),
+    min_confidence: float = Query(65.0, ge=0, le=100, description="Minimum confidence threshold (model outputs 50-70%)"),
+    min_edge: float = Query(6.0, ge=0, description="Minimum edge threshold (percentage)"),
     prop_types: str | None = Query(None, description="Comma-separated prop types to filter"),
     pick_type: str | None = Query(None, description="Filter by OVER or UNDER"),
     sort_by: str = Query("quality", description="Sort order: quality, confidence, or edge"),
@@ -1350,6 +1350,9 @@ def get_best_bets(
             key=lambda x: (x.confidence - 50) * math.log1p(abs(x.edge_pct)),
             reverse=True
         )
+
+    # Hard cap: never return more than 25 best bets
+    best_bets = best_bets[:25]
 
     # Assign rank after sorting (1 = best)
     for i, bet in enumerate(best_bets):
@@ -2273,8 +2276,8 @@ def _load_settings() -> dict:
     import json
     defaults = {
         "bankroll": 5000.0,
-        "min_edge": 5.0,
-        "min_confidence": 55.0,
+        "min_edge": 6.0,
+        "min_confidence": 65.0,
         "kelly_fraction": 0.25,
         "max_exposure": 10.0,
         "default_bet_size": 100.0,
