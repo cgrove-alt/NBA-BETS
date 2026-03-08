@@ -1555,7 +1555,7 @@ def trigger_predictions(api_key: str | None = None):
     def _run_predictions():
         try:
             cmd = [sys.executable, "daily_predictions.py"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
             app.state._predictions_result = {
                 "success": result.returncode == 0,
                 "exit_code": result.returncode,
@@ -1563,7 +1563,7 @@ def trigger_predictions(api_key: str | None = None):
                 "stderr_tail": (result.stderr or "")[-1000:],
             }
         except subprocess.TimeoutExpired:
-            app.state._predictions_result = {"success": False, "error": "Timed out after 10 minutes"}
+            app.state._predictions_result = {"success": False, "error": "Timed out after 30 minutes"}
         except Exception as e:
             app.state._predictions_result = {"success": False, "error": str(e)}
         finally:
