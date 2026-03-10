@@ -33,14 +33,32 @@ from __future__ import annotations
 #
 # Do NOT change these without re-running the calibration script.
 PROP_STD_DEVS: dict[str, float] = {
-    'points':   6.5,   # Empirically-derived from NBA historical data
-    'rebounds': 3.1,   # Corrected from 7.0 on 2026-02-26 (was inflating Z-scores ~2x)
-    'assists':  2.2,   # Calibrated from 3 seasons of player-game logs
-    'threes':   1.6,   # Calibrated; Poisson approximation
-    'pra':      7.9,   # sqrt(6.5²+3.1²+2.2²)≈7.53, +5% correlation ≈ 7.9
+    'points':   6.16,  # From backtest RMSE: sqrt(6.31² - 1.38²) = 6.16
+    'rebounds': 2.67,  # From backtest RMSE: 2.67 (bias ≈ 0, so RMSE ≈ σ)
+    'assists':  1.95,  # From backtest RMSE: sqrt(2.83² - 2.05²) = 1.95
+    'threes':   1.36,  # From backtest RMSE: sqrt(1.44² - 0.48²) = 1.36
+    'pra':      7.97,  # From backtest RMSE: sqrt(7.98² - 0.45²) = 7.97
 }
 
 DEFAULT_PROP_STD_DEV: float = 5.0  # fallback when prop type is unknown
+
+# ---------------------------------------------------------------------------
+# Per-prop bias corrections (from 67K-prediction backtest)
+# ---------------------------------------------------------------------------
+# Positive = model under-predicts → add to predicted value before z-score.
+# Negative = model over-predicts → subtract from predicted value.
+PROP_BIAS_CORRECTION: dict[str, float] = {
+    'points':   1.38,   # Model under-predicts points by 1.38
+    'rebounds':  0.015,  # Nearly unbiased
+    'assists':   2.05,   # Massive under-prediction
+    'threes':    0.48,   # Slight under-prediction
+    'pra':      -0.45,   # Slight over-prediction
+}
+
+# ---------------------------------------------------------------------------
+# Disabled prop types (no demonstrated model edge)
+# ---------------------------------------------------------------------------
+DISABLED_PROPS: list[str] = ['threes', 'spread', 'assists']
 
 # ---------------------------------------------------------------------------
 # Edge quality tiers

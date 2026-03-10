@@ -17,6 +17,7 @@ from scipy.stats import norm
 from nba_betting.constants import (
     PROP_STD_DEVS as _CANONICAL_PROP_STD_DEVS,
     DEFAULT_PROP_STD_DEV as _CANONICAL_DEFAULT_STD_DEV,
+    PROP_BIAS_CORRECTION as _CANONICAL_PROP_BIAS_CORRECTION,
     EDGE_QUALITY_THRESHOLDS,
 )
 
@@ -279,6 +280,7 @@ class EdgeCalculator:
     # Prop-specific standard deviations — pulled from nba_betting.constants (single source of truth)
     PROP_STD_DEVS: dict = _CANONICAL_PROP_STD_DEVS
     DEFAULT_PROP_STD_DEV: float = _CANONICAL_DEFAULT_STD_DEV
+    PROP_BIAS_CORRECTION: dict = _CANONICAL_PROP_BIAS_CORRECTION
 
     def calculate_edge_from_prediction(
         self,
@@ -308,10 +310,10 @@ class EdgeCalculator:
         diff = predicted_value - prop_line
 
         # Use calibrated prop-specific std dev for norm.cdf conversion
-        std_dev = self.PROP_STD_DEVS.get(
-            prop_type.lower() if prop_type else '', self.DEFAULT_PROP_STD_DEV
-        )
-        model_prob = float(norm.cdf(diff / std_dev))
+        prop_key = prop_type.lower() if prop_type else ''
+        std_dev = self.PROP_STD_DEVS.get(prop_key, self.DEFAULT_PROP_STD_DEV)
+        bias_fix = self.PROP_BIAS_CORRECTION.get(prop_key, 0.0)
+        model_prob = float(norm.cdf((diff + bias_fix) / std_dev))
 
         # If model confidence provided, blend it in
         if model_confidence is not None:

@@ -38,32 +38,35 @@ class TestPropStdDevs:
         )
 
     def test_points_std_dev_correct(self):
-        """Points std dev must be 6.5 — corrected empirical value."""
+        """Points std dev must be 6.16 — derived from backtest RMSE."""
         from nba_betting.constants import PROP_STD_DEVS
-        assert PROP_STD_DEVS['points'] == 6.5, (
-            f"points std dev is {PROP_STD_DEVS['points']}, expected 6.5. "
-            "Do NOT revert to old 5.5 value — it was never calibrated."
+        assert PROP_STD_DEVS['points'] == 6.16, (
+            f"points std dev is {PROP_STD_DEVS['points']}, expected 6.16. "
+            "Derived from backtest RMSE: sqrt(6.31² - 1.38²) = 6.16."
         )
 
     def test_rebounds_std_dev_corrected(self):
-        """Rebounds std dev must be 3.1 — corrected from 7.0 which inflated Z-scores 2x."""
+        """Rebounds std dev must be 2.67 — derived from backtest RMSE."""
         from nba_betting.constants import PROP_STD_DEVS
-        assert PROP_STD_DEVS['rebounds'] == 3.1, (
-            f"rebounds std dev is {PROP_STD_DEVS['rebounds']}, expected 3.1. "
-            "Old value of 7.0 caused 76.7% avg over_prob (massive miscalibration)."
+        assert PROP_STD_DEVS['rebounds'] == 2.67, (
+            f"rebounds std dev is {PROP_STD_DEVS['rebounds']}, expected 2.67. "
+            "Derived from backtest RMSE: 2.67 (bias ≈ 0, so RMSE ≈ σ)."
         )
 
     def test_assists_std_dev_correct(self):
+        """Assists std dev must be 1.95 — derived from backtest RMSE."""
         from nba_betting.constants import PROP_STD_DEVS
-        assert PROP_STD_DEVS['assists'] == 2.2
+        assert PROP_STD_DEVS['assists'] == 1.95
 
     def test_threes_std_dev_correct(self):
+        """Threes std dev must be 1.36 — derived from backtest RMSE."""
         from nba_betting.constants import PROP_STD_DEVS
-        assert PROP_STD_DEVS['threes'] == 1.6
+        assert PROP_STD_DEVS['threes'] == 1.36
 
     def test_pra_std_dev_correct(self):
+        """PRA std dev must be 7.97 — derived from backtest RMSE."""
         from nba_betting.constants import PROP_STD_DEVS
-        assert PROP_STD_DEVS['pra'] == 7.9
+        assert PROP_STD_DEVS['pra'] == 7.97
 
     def test_all_std_devs_positive(self):
         from nba_betting.constants import PROP_STD_DEVS
@@ -113,10 +116,10 @@ class TestEdgeCalculatorUsesCanonicalStdDevs:
             )
 
     def test_edge_from_prediction_uses_correct_rebounds_std(self):
-        """Verify that edge calculation for rebounds uses 3.1 std dev in practice."""
+        """Verify that edge calculation for rebounds uses correct std dev + bias correction."""
         from scipy.stats import norm
         from edge_calculator.edge_calculator import EdgeCalculator
-        from nba_betting.constants import PROP_STD_DEVS
+        from nba_betting.constants import PROP_STD_DEVS, PROP_BIAS_CORRECTION
 
         calc = EdgeCalculator()
         diff = 2.0  # model predicts 2 rebounds above line
@@ -125,10 +128,12 @@ class TestEdgeCalculatorUsesCanonicalStdDevs:
             prop_line=5.0,
             prop_type='rebounds',
         )
-        expected_prob = float(norm.cdf(diff / PROP_STD_DEVS['rebounds']))
+        bias_fix = PROP_BIAS_CORRECTION.get('rebounds', 0.0)
+        expected_prob = float(norm.cdf((diff + bias_fix) / PROP_STD_DEVS['rebounds']))
         assert abs(result.model_probability - expected_prob) < 0.005, (
             f"Rebounds edge probability {result.model_probability:.4f} != "
-            f"expected {expected_prob:.4f} using std={PROP_STD_DEVS['rebounds']}"
+            f"expected {expected_prob:.4f} using std={PROP_STD_DEVS['rebounds']}, "
+            f"bias={bias_fix}"
         )
 
 

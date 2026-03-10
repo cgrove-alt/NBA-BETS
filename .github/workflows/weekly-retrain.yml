@@ -49,6 +49,12 @@ jobs:
           set -o pipefail
           python train_complete_balldontlie.py 2>&1 | tee logs/retrain_output.log
 
+      - name: Run post-retrain calibration
+        if: success()
+        run: |
+          python scripts/calibrate_quantile_decompression.py 2>&1 | tee -a logs/retrain_output.log
+          python scripts/build_probability_calibration.py 2>&1 | tee -a logs/retrain_output.log
+
       - name: Update retrain history
         if: success()
         run: |
@@ -103,6 +109,8 @@ jobs:
 
           # Add model files (logs/ is gitignored, so force-add retrain history)
           git add models/*.pkl
+          git add models/probability_calibrators/*.pkl models/probability_calibrators/*.json || true
+          git add models/quantile_decompression.json || true
           git add -f logs/retrain_history.json || true
 
           # Check if there are changes to commit

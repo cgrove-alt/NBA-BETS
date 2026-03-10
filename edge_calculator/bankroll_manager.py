@@ -9,6 +9,7 @@ Responsibilities:
 
 Database: PostgreSQL-primary (Railway), SQLite fallback (local dev).
 """
+from __future__ import annotations
 
 import json
 import logging

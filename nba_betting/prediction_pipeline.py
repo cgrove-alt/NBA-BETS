@@ -24,7 +24,7 @@ from __future__ import annotations
 import numpy as np
 from typing import Optional
 
-from nba_betting.constants import KELLY_FRACTIONS, MAX_BET_FRACTION
+from nba_betting.constants import DISABLED_PROPS, KELLY_FRACTIONS, MAX_BET_FRACTION
 
 try:
     from nba_betting.odds.devig import american_to_implied, multiplicative_devig
@@ -58,8 +58,7 @@ MIN_EDGE = {
     'moneyline': 0.05,
 }
 
-# Disabled prop types (Improvement 2)
-DISABLED_PROPS = ['threes', 'spread']
+# DISABLED_PROPS imported from nba_betting.constants (single source of truth)
 
 # Bet sizing constraints (Improvement 2)
 MIN_GAMES = 10          # Minimum player sample size

@@ -6,6 +6,7 @@ The decision layer that:
 2. Calculates edge and optimal bet size
 3. Generates human-readable recommendations with reasoning
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime
@@ -412,12 +413,12 @@ class BetRecommender:
         # Determine pick (OVER or UNDER)
         pick = 'OVER' if prediction > line else 'UNDER'
 
-        # Calculate probability using norm.cdf with prop-specific std devs
+        # Calculate probability using norm.cdf with prop-specific std devs + bias correction
         diff = prediction - line
-        std_dev = EdgeCalculator.PROP_STD_DEVS.get(
-            prop_type.lower() if prop_type else '', EdgeCalculator.DEFAULT_PROP_STD_DEV
-        )
-        model_prob = float(norm.cdf(diff / std_dev))
+        prop_key = prop_type.lower() if prop_type else ''
+        std_dev = EdgeCalculator.PROP_STD_DEVS.get(prop_key, EdgeCalculator.DEFAULT_PROP_STD_DEV)
+        bias_fix = EdgeCalculator.PROP_BIAS_CORRECTION.get(prop_key, 0.0)
+        model_prob = float(norm.cdf((diff + bias_fix) / std_dev))
 
         if model_confidence:
             conf_prob = model_confidence / 100

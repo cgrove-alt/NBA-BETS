@@ -36,8 +36,10 @@ ET = ZoneInfo('America/New_York')
 # integration scripts and operational log filters.
 logger = logging.getLogger("daily_predictions")
 
-# Suppress logging noise
-logging.disable(logging.WARNING)
+# Suppress noisy third-party loggers (but keep our own warnings visible)
+logging.getLogger("urllib3").setLevel(logging.ERROR)
+logging.getLogger("httpcore").setLevel(logging.ERROR)
+logging.getLogger("httpx").setLevel(logging.ERROR)
 
 # Import our modules
 from balldontlie_api import BalldontlieAPI
@@ -79,9 +81,11 @@ from nba_models.models.model_trainer import QuantilePropModel  # noqa: F401
 from nba_betting.constants import (
     PROP_STD_DEVS,
     DEFAULT_PROP_STD_DEV,
+    PROP_BIAS_CORRECTION,
     QUANTILE_DECOMPRESSION_DEFAULTS,
     QUANTILE_TARGET_SLOPE,
 )
+from nba_models.models.model_classes import smart_fillna
 from nba_models.inference.model_compat import (
     get_context_feature_names,
     get_feature_names,
@@ -89,6 +93,57 @@ from nba_models.inference.model_compat import (
     predict_regression_value,
     prepare_loaded_model_artifact,
 )
+
+
+# ---------------------------------------------------------------------------
+# Empirical probability calibration (Phase 4)
+# ---------------------------------------------------------------------------
+_CALIBRATORS: dict = {}
+
+
+def _load_calibrator(prop_type: str):
+    """Load cached isotonic calibrator for a prop type."""
+    if prop_type in _CALIBRATORS:
+        return _CALIBRATORS[prop_type]
+    cal_dir = Path(__file__).resolve().parent.parent.parent / "models" / "probability_calibrators"
+    pkl_path = cal_dir / f"{prop_type}_isotonic.pkl"
+    json_path = cal_dir / f"{prop_type}_lookup.json"
+    if pkl_path.exists():
+        try:
+            with open(pkl_path, "rb") as f:
+                _CALIBRATORS[prop_type] = ("pkl", pickle.load(f))
+                return _CALIBRATORS[prop_type]
+        except Exception:
+            logger.warning("Failed to load isotonic calibrator for %s", prop_type)
+    if json_path.exists():
+        try:
+            import json as _json
+            with open(json_path) as f:
+                _CALIBRATORS[prop_type] = ("json", _json.load(f))
+                return _CALIBRATORS[prop_type]
+        except Exception:
+            logger.warning("Failed to load JSON calibrator for %s", prop_type)
+    _CALIBRATORS[prop_type] = None
+    return None
+
+
+def apply_empirical_calibration(over_prob: float, prop_type: str) -> float:
+    """Apply empirical isotonic calibration to raw over_prob."""
+    cal = _load_calibrator(prop_type.lower())
+    if cal is None:
+        return over_prob
+    kind, obj = cal
+    if kind == "pkl":
+        try:
+            return float(obj.predict([over_prob])[0])
+        except Exception:
+            logger.warning("Isotonic predict failed for %s", prop_type)
+            return over_prob
+    elif kind == "json":
+        # JSON lookup table at 1% increments
+        pct = max(1, min(99, int(round(over_prob * 100))))
+        return obj.get(str(pct), over_prob)
+    return over_prob
 
 
 def load_quantile_decompression() -> dict:
@@ -151,8 +206,9 @@ def compute_quantile_sigma(pred_low: float, pred_high: float, prop_type: str) ->
     if spread <= 0:
         return get_prop_std_dev(prop_type)
     quantile_sigma = spread / 2.564
-    min_sigma = get_prop_std_dev(prop_type) * 0.60
-    return max(quantile_sigma, min_sigma)
+    min_sigma = get_prop_std_dev(prop_type) * 0.75  # Prevent overconfidence
+    max_sigma = get_prop_std_dev(prop_type) * 1.50  # Prevent under-confidence
+    return min(max(quantile_sigma, min_sigma), max_sigma)
 
 
 def decompress_quantile_prediction(predicted_value: float, line: float, prop_type: str, player_season_avg: float = None) -> float:
@@ -2069,8 +2125,8 @@ def predict_player_prop(
                     feature_names = model_data.get('feature_names', [])
 
                     # Build feature array matching training features
-                    X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
-                    X = X[feature_names].fillna(0)
+                    X = pd.DataFrame([{k: features.get(k, np.nan) for k in feature_names}])
+                    X = smart_fillna(X[feature_names])
 
                     # Scale if scaler available
                     X_scaled = scaler.transform(X) if scaler is not None else X.values
@@ -2096,7 +2152,7 @@ def predict_player_prop(
 
                     # Convert to probability using normal CDF
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                    z_score = (predicted_value - line) / std
+                    z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
                     over_prob = float(norm.cdf(z_score))
 
                 # Handle StackingRegressor format (has 'base_models' key)
@@ -2107,8 +2163,8 @@ def predict_player_prop(
                     feature_names = model_data.get('feature_names', [])
 
                     # Build feature array matching training features
-                    X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
-                    X = X[feature_names].fillna(0)
+                    X = pd.DataFrame([{k: features.get(k, np.nan) for k in feature_names}])
+                    X = smart_fillna(X[feature_names])
 
                     # Scale if scaler available
                     X_scaled = scaler.transform(X) if scaler is not None else X.values
@@ -2134,7 +2190,7 @@ def predict_player_prop(
 
                     # Convert to probability using normal CDF
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                    z_score = (predicted_value - line) / std
+                    z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
                     over_prob = float(norm.cdf(z_score))
 
                 # Handle dict format with single model
@@ -2144,11 +2200,8 @@ def predict_player_prop(
                     feature_names = model_data.get('feature_names', [])
 
                     # Build feature array matching training features
-                    X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
-                    for col in feature_names:
-                        if col not in X.columns:
-                            X[col] = 0
-                    X = X[feature_names].fillna(0)
+                    X = pd.DataFrame([{k: features.get(k, np.nan) for k in feature_names}])
+                    X = smart_fillna(X[feature_names])
 
                     # Scale if scaler available
                     X_scaled = scaler.transform(X) if scaler is not None else X.values
@@ -2158,7 +2211,7 @@ def predict_player_prop(
 
                     # Convert to probability using normal CDF
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                    z_score = (predicted_value - line) / std
+                    z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
                     over_prob = float(norm.cdf(z_score))
 
                 # Handle model object with predict method
@@ -2170,7 +2223,7 @@ def predict_player_prop(
                     elif 'predicted_value' in result:
                         predicted_value = result['predicted_value']
                         std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
-                        z_score = (predicted_value - line) / std
+                        z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
                         over_prob = float(norm.cdf(z_score))
 
         except Exception:
@@ -2204,8 +2257,8 @@ def predict_player_prop(
                 feature_names = []
 
             if quantile_models and feature_names:
-                X = pd.DataFrame([{k: features.get(k, 0) for k in feature_names}])
-                X = X[feature_names].fillna(0)
+                X = pd.DataFrame([{k: features.get(k, np.nan) for k in feature_names}])
+                X = smart_fillna(X[feature_names])
                 X_scaled = scaler.transform(X) if scaler is not None else X.values
 
                 pred_low = float(quantile_models[0.1].predict(X_scaled)[0])
@@ -2236,9 +2289,10 @@ def predict_player_prop(
     # Save original prediction for total adjustment cap
     original_predicted_value = predicted_value
 
-    # Recalculate over_prob with quantile-derived sigma (if we have a prediction)
+    # Recalculate over_prob with quantile-derived sigma and bias correction
     if predicted_value is not None:
-        z_score = (predicted_value - line) / effective_sigma
+        bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
+        z_score = (predicted_value + bias_fix - line) / effective_sigma
         over_prob = float(norm.cdf(z_score))
 
     # Phase 3: Minutes Oracle adjustment — per-minute rate scaling
@@ -2278,7 +2332,8 @@ def predict_player_prop(
                     predicted_value = adjusted_value
 
                     # Recalculate probability with adjusted value
-                    z_score = (predicted_value - line) / effective_sigma
+                    bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
+                    z_score = (predicted_value + bias_fix - line) / effective_sigma
                     over_prob = float(norm.cdf(z_score))
 
     # Apply injury-based adjustments to predicted value
@@ -2301,10 +2356,11 @@ def predict_player_prop(
                 predicted_value = adjusted_value
 
                 # Recalculate probability with adjusted value
-                z_score = (predicted_value - line) / effective_sigma
+                bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
+                z_score = (predicted_value + bias_fix - line) / effective_sigma
                 over_prob = float(norm.cdf(z_score))
         except Exception:
-            logger.debug("Injury boost failed for %s %s", player_name, prop_type, exc_info=True)
+            logger.warning("Injury boost failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Phase 5: Apply calibration bias corrections BEFORE edge computation
     calibration_applied = {}
@@ -2354,10 +2410,11 @@ def predict_player_prop(
                 if calibration_applied.get('total_value_adjustment', 0) != 0:
                     predicted_value = calibration_applied['adjusted_value']
                     # Recalculate over_prob with corrected value
-                    z_score = (predicted_value - line) / effective_sigma
+                    bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
+                    z_score = (predicted_value + bias_fix - line) / effective_sigma
                     over_prob = float(norm.cdf(z_score))
         except Exception:
-            logger.debug("Calibration adjustment failed for %s %s", player_name, prop_type, exc_info=True)
+            logger.warning("Calibration adjustment failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Total cap: all adjustments (minutes + injury + calibration) stay within ±25% of original
     if predicted_value is not None and original_predicted_value is not None and original_predicted_value != 0:
@@ -2366,8 +2423,13 @@ def predict_player_prop(
         upper = original_predicted_value + max_total
         if predicted_value < lower or predicted_value > upper:
             predicted_value = max(lower, min(upper, predicted_value))
-            z_score = (predicted_value - line) / effective_sigma
+            bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
+            z_score = (predicted_value + bias_fix - line) / effective_sigma
             over_prob = float(norm.cdf(z_score))
+
+    # Apply empirical probability calibration (isotonic regression from backtest)
+    if over_prob is not None:
+        over_prob = apply_empirical_calibration(over_prob, prop_type)
 
     # Phase 4: Single edge computation after all adjustments (minutes + injury + calibration)
     edge_info = _calculate_prop_edge(over_prob, american_odds, under_odds=under_odds)
@@ -2441,7 +2503,7 @@ def predict_player_prop(
                 confidence_score = conf_result['adjusted_confidence']
                 confidence_score = max(40.0, min(90.0, confidence_score))
         except Exception:
-            logger.debug("Confidence calibration failed for %s %s", player_name, prop_type, exc_info=True)
+            logger.warning("Confidence calibration failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Calculate edge quality tier based on confidence + edge magnitude (Task 2.4)
     edge_quality_tier = get_edge_quality_tier(confidence_score, edge)

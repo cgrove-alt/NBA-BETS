@@ -14,6 +14,7 @@ Improvement 2: Bet Selection Filter
 """
 
 import numpy as np
+from nba_betting.constants import DISABLED_PROPS
 
 # ---------------------------------------------------------------------------
 # Thresholds
@@ -44,7 +45,7 @@ MIN_EV_THRESHOLDS = {
 MIN_GAMES_PLAYED = 10  # Minimum games for reliable player predictions
 MIN_CONFIDENCE = 0.62  # Minimum calibrated probability to bet
 
-DISABLED_PROPS = ['threes', 'spread']  # Props where model has no demonstrated edge
+# DISABLED_PROPS imported from nba_betting.constants (single source of truth)
 
 
 # ---------------------------------------------------------------------------
