@@ -4,6 +4,8 @@ Central registry tracking all agents.
 Stores agent metadata, schedules, and status in PostgreSQL (or in-memory fallback).
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 from datetime import datetime, timezone

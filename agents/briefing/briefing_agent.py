@@ -8,6 +8,8 @@ just actionable intelligence.
 Trigger: Noon + 6 PM ET (after orchestrator, then 1hr before typical tip-off).
 """
 
+from __future__ import annotations
+
 import os
 import json
 import logging

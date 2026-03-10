@@ -9,6 +9,8 @@ Main application that orchestrates the complete betting workflow:
 5. Output comprehensive daily bet slip with betting strategy
 """
 
+from __future__ import annotations
+
 import load_env  # noqa: F401  — load .env before any code reads os.environ
 import json
 import math

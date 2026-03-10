@@ -3828,6 +3828,45 @@ def get_real_lines_backtest_status():
     }
 
 
+# ============== SETTLEMENT ENDPOINTS ==============
+
+@app.post("/api/settlement/nightly")
+def run_nightly_settlement():
+    """Manual trigger for nightly settlement: paper trades + calibration outcomes.
+
+    Settles yesterday's paper trades against actual box-score stats and runs
+    the calibration nightly job to track prediction accuracy.
+    """
+    from datetime import date, timedelta
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    result: dict[str, Any] = {"date": yesterday, "paper_trades": {}, "calibration": {}}
+
+    # 1. Paper trade settlement
+    try:
+        from nba_betting.settle_trades import settle_date
+        settled = settle_date(yesterday)
+        result["paper_trades"] = {"status": "ok", "trades_settled": settled}
+    except Exception as e:
+        result["paper_trades"] = {"status": "error", "error": str(e)}
+
+    # 2. Calibration outcome tracking
+    try:
+        from calibration_tracker import CalibrationService
+        svc = CalibrationService()
+        svc.run_nightly_job(yesterday)
+        result["calibration"] = {"status": "ok"}
+    except Exception as e:
+        result["calibration"] = {"status": "error", "error": str(e)}
+
+    has_error = (
+        result["paper_trades"].get("status") == "error"
+        or result["calibration"].get("status") == "error"
+    )
+    result["status"] = "partial_error" if has_error else "ok"
+    return result
+
+
 # ============== DEBUG ENDPOINTS ==============
 
 @app.get("/api/debug/player/{player_id}/stats")

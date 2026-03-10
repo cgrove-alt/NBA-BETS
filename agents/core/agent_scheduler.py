@@ -483,11 +483,14 @@ def print_status():
         print(f"  {'-'*13:<15} {'-'*10:<12} {'-'*20:<22} {'-'*5:>5} {'-'*5:>5}")
         for name in AGENT_SCHEDULES:
             info = agents.get(name, {})
-            last_run = info.get('last_run', '-')
-            if last_run and last_run != '-':
+            last_run = info.get('last_run') or '-'
+            if last_run != '-':
                 last_run = last_run[:19]  # trim microseconds
-            print(f"  {name:<15} {info.get('last_status', '-'):<12} "
-                  f"{last_run:<22} {info.get('runs', 0):>5} {info.get('failures', 0):>5}")
+            last_status = info.get('last_status') or '-'
+            runs = info.get('runs') or 0
+            failures = info.get('failures') or 0
+            print(f"  {name:<15} {last_status:<12} "
+                  f"{last_run:<22} {runs:>5} {failures:>5}")
         print()
         print("  Schedules:")
         for name, (_, desc) in AGENT_SCHEDULES.items():

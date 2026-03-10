@@ -222,14 +222,14 @@ except ImportError:
 try:
     from calibration_tracker import CalibrationService
     HAS_CALIBRATION = True
-except ImportError:
+except (ImportError, TypeError):
     HAS_CALIBRATION = False
 
 # Phase 5: Calibration adjuster for bias correction
 try:
     from calibration_tracker import CalibrationAdjuster, CalibrationDatabase
     HAS_CALIBRATION_ADJUSTER = True
-except ImportError:
+except (ImportError, TypeError):
     HAS_CALIBRATION_ADJUSTER = False
 
 # Phase 5: Lazy-init singleton for calibration adjuster

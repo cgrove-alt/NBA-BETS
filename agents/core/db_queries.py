@@ -5,6 +5,8 @@ Used by both the briefing agent (direct DB fallback) and backend/api.py.
 Queries calibration.db and bet_tracking.db — no FastAPI dependencies.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
