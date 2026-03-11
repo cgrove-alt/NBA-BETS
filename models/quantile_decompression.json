@@ -1,8 +1,4 @@
 {
-  "_comment": "Quantile model decompression constants. Generated from production prediction analysis.",
-  "_instructions": "Regenerate after every model retrain: python3 scripts/calibrate_quantile_decompression.py",
-  "_last_updated": "2026-03-05",
-  "_method": "Regression of quantile p50 predictions vs prop lines on production data",
   "points": {
     "slope": 0.724,
     "mean_gap": -3.15,
@@ -24,8 +20,10 @@
     "mean_line": 2.5
   },
   "pra": {
-    "slope": 0.80,
+    "slope": 0.8,
     "mean_gap": -1.0,
     "mean_line": 30.0
-  }
+  },
+  "_comment": "Quantile decompression constants. Regenerate after each retrain.",
+  "_last_updated": "2026-03-11T08:32:23Z"
 }
