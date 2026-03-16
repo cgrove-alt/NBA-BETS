@@ -31,6 +31,7 @@ ignore = [
     "B018",   # Useless expression (legacy code)
     "F401",   # Unused imports (many intentional for feature detection in try/except)
     "UP007",  # Use X | Y for type annotations (not available in Python 3.9)
+    "UP045",  # Use X | Y for type aliases (not available in Python 3.9)
     "UP037",  # Remove quotes from type annotation (forward references needed)
     "PTH100", # os.path.abspath -> Path.resolve (style preference)
     "PTH103", # os.makedirs -> Path.mkdir (style preference)
