@@ -29,6 +29,7 @@ jobs:
       - name: Settle yesterday's predictions
         env:
           BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python -c "
           from nba_betting.settle_trades import settle_yesterday
@@ -40,6 +41,7 @@ jobs:
         env:
           BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           set -o pipefail
           TARGET_DATE=$(date -u +%Y-%m-%d)

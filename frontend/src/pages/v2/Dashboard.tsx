@@ -40,21 +40,17 @@ export function Dashboard() {
   });
 
   // Fetch best bets across all games
-  // Note: Model confidence outputs range 50-70%, so use lower thresholds
+  // Batch model confidence range is 40-52
   const { data: bestBetsData, isLoading: bestBetsLoading, isRefetching: bestBetsRefetching } = useQuery({
     queryKey: ['bestBets'],
-    queryFn: () => getBestBets({ minConfidence: 50, minEdge: 3 }),
+    queryFn: () => getBestBets({ minConfidence: 40, minEdge: 3 }),
     staleTime: 5 * 60 * 1000,
-    // After a deploy, props generate in the background. Retry every 5s
-    // up to 12 times (60s max) until real-time data arrives.
-    // With the PostgreSQL fallback, the first response should already have data,
-    // but keep retrying to upgrade from precomputed to real-time predictions.
+    // Precomputed (batch) predictions are the preferred data source.
+    // Only retry if we have no data at all (e.g. predictions haven't been generated yet).
     refetchInterval: (query) => {
       const bets = query.state.data?.best_bets;
-      const source = query.state.data?.data_source;
       const hasGames = (gamesData?.games?.length ?? 0) > 0;
-      // Retry if: no bets at all, OR data is precomputed (waiting for real-time)
-      if (hasGames && (!bets || bets.length === 0 || source === 'precomputed')) {
+      if (hasGames && (!bets || bets.length === 0)) {
         emptyRetryCount.current++;
         return emptyRetryCount.current <= 12 ? 5000 : false;
       }

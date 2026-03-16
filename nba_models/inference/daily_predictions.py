@@ -3472,7 +3472,7 @@ def main():
                             safe_val(row.get('bet_recommendation')),
                             safe_val(row.get('pick')),
                             safe_val(row.get('uncertainty_flag')),
-                            safe_val(row.get('injury_boost')),
+                            bool(safe_val(row.get('injury_boost')) and float(str(safe_val(row.get('injury_boost')))) > 1.0),
                             safe_val(row.get('line_source')),
                             safe_val(row.get('line_vendor')),
                         ))
