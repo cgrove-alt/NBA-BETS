@@ -62,11 +62,7 @@ jobs:
           git pull --rebase  # Avoid conflicts with retrain commits
           git add data/predictions/ || true
           if ! git diff --staged --quiet; then
-            COMMIT_MSG="Daily predictions $(date +%Y-%m-%d)
-
-Automated predictions via GitHub Actions.
-Run ID: ${{ github.run_id }}"
-            git commit -m "$COMMIT_MSG"
+            git commit -m "Daily predictions $(date +%Y-%m-%d)" -m "Automated predictions via GitHub Actions. Run ID: ${{ github.run_id }}"
             git push
           else
             echo "No prediction files to commit"
