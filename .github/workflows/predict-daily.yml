@@ -4,10 +4,6 @@ on:
   schedule:
     - cron: '0 14 * * *'  # 2 PM UTC / 10 AM ET (after daily retrain at 8 AM UTC)
   workflow_dispatch:
-    inputs:
-      date:
-        description: 'Prediction date (YYYY-MM-DD), defaults to today'
-        required: false
 
 permissions:
   contents: write
@@ -46,10 +42,7 @@ jobs:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
         run: |
           set -o pipefail
-          TARGET_DATE="${{ github.event.inputs.date }}"
-          if [ -z "$TARGET_DATE" ]; then
-            TARGET_DATE=$(date -u +%Y-%m-%d)
-          fi
+          TARGET_DATE=$(date -u +%Y-%m-%d)
           python daily_predictions.py --date "$TARGET_DATE" --output-dir data/predictions 2>&1 | tee logs/predictions_output.log
 
       - uses: actions/upload-artifact@v4
