@@ -59,10 +59,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/predictions/ logs/predictions_output.log || true
+          git add data/predictions/ || true
           if ! git diff --staged --quiet; then
             git commit -m "Daily predictions $(date +%Y-%m-%d)" -m "Automated predictions via GitHub Actions. Run ID: ${{ github.run_id }}"
-            git pull --rebase origin main
             git push
           else
             echo "No prediction files to commit"
