@@ -125,7 +125,7 @@ def test_predict_regression_value_passes_context_features_to_context_models():
 
 
 def test_preserve_model_context_features_restores_filtered_context():
-    from daily_predictions import preserve_model_context_features
+    from nba_models.inference.daily_predictions import preserve_model_context_features
 
     model = ContextAwareRegressor()
     filtered = {"net_rating_diff": 6.0}
