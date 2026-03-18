@@ -95,17 +95,18 @@ class TestGetSignalFromEdge:
     """Tests for signal classification."""
 
     def test_signal_bet(self):
-        """Strong edge quality → BET."""
+        """Elite quality or strong+high edge → BET."""
         from nba_models.inference.daily_predictions import get_signal_from_edge
 
-        assert get_signal_from_edge(6.0, 'strong') == 'BET'
-        assert get_signal_from_edge(3.5, 'moderate') == 'BET'
+        assert get_signal_from_edge(10.0, 'elite') == 'BET'
+        assert get_signal_from_edge(8.0, 'strong') == 'BET'
 
     def test_signal_lean(self):
-        """Marginal edge quality → LEAN."""
+        """Strong or moderate quality (below BET threshold) → LEAN."""
         from nba_models.inference.daily_predictions import get_signal_from_edge
 
-        assert get_signal_from_edge(2.5, 'marginal') == 'LEAN'
+        assert get_signal_from_edge(6.0, 'strong') == 'LEAN'
+        assert get_signal_from_edge(3.5, 'moderate') == 'LEAN'
 
     def test_signal_pass(self):
         """Low edge, no quality → PASS."""
