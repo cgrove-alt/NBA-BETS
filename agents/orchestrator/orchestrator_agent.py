@@ -528,7 +528,7 @@ class PredictionOrchestratorAgent(AgentBase):
                             row.get('bet_recommendation'),
                             row.get('pick'),
                             row.get('uncertainty_flag'),
-                            bool(row.get('injury_boost') and float(str(row.get('injury_boost'))) > 1.0),
+                            row.get('injury_boost'),
                             row.get('line_source'),
                             row.get('line_vendor'),
                         ))

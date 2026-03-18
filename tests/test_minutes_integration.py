@@ -57,7 +57,7 @@ class TestMinutesOracleLoading:
         if not Path("models/minutes_oracle.pkl").exists():
             pytest.skip("minutes_oracle.pkl not found")
 
-        from nba_models.inference.daily_predictions import load_models
+        from daily_predictions import load_models
         models = load_models()
         assert 'minutes_oracle' in models
         assert 'minutes_feature_gen' in models
@@ -167,7 +167,7 @@ class TestPredictMinutesDistributionHelper:
         if not Path("models/minutes_oracle.pkl").exists():
             pytest.skip("minutes_oracle.pkl not found")
 
-        from nba_models.inference.daily_predictions import predict_minutes_distribution, load_models
+        from daily_predictions import predict_minutes_distribution, load_models
         models = load_models()
 
         if 'minutes_oracle' not in models:
@@ -187,7 +187,7 @@ class TestPredictMinutesDistributionHelper:
 
     def test_predict_minutes_distribution_fallback(self):
         """Returns None when oracle unavailable."""
-        from nba_models.inference.daily_predictions import predict_minutes_distribution
+        from daily_predictions import predict_minutes_distribution
 
         # Empty models dict = no oracle
         result = predict_minutes_distribution(
@@ -293,7 +293,7 @@ class TestPredictionOutputIncludesMinutes:
 
     def test_prediction_output_includes_minutes_fields(self):
         """Return dict has minutes_distribution, predicted_minutes, minutes_uncertainty."""
-        from nba_models.inference.daily_predictions import predict_player_prop
+        from daily_predictions import predict_player_prop
 
         # Run with minimal setup (no API features)
         result = predict_player_prop(

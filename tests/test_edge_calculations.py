@@ -311,9 +311,9 @@ class TestEdgeCalculatorModule:
     """Test the edge_calculator.py calculate_edge_from_prediction with norm.cdf."""
 
     def test_prop_uses_norm_cdf(self):
-        """calculate_edge_from_prediction should use norm.cdf with canonical std devs and bias correction."""
+        """calculate_edge_from_prediction should use norm.cdf with canonical std devs."""
         from edge_calculator.edge_calculator import EdgeCalculator
-        from nba_betting.constants import PROP_STD_DEVS, PROP_BIAS_CORRECTION
+        from nba_betting.constants import PROP_STD_DEVS
 
         calc = EdgeCalculator()
         result = calc.calculate_edge_from_prediction(
@@ -322,12 +322,11 @@ class TestEdgeCalculatorModule:
             american_odds=-110,
             prop_type='points',
         )
-        # diff = 28.0 - 24.5 = 3.5, bias_fix = PROP_BIAS_CORRECTION['points']
+        # Use the canonical std dev (6.5) — NOT the old hardcoded 5.5
         pts_std = PROP_STD_DEVS['points']
-        bias_fix = PROP_BIAS_CORRECTION.get('points', 0.0)
-        expected_prob = float(norm.cdf((3.5 + bias_fix) / pts_std))
+        expected_prob = float(norm.cdf(3.5 / pts_std))
         assert abs(result.model_probability - expected_prob) < 0.01, (
-            f"Expected norm.cdf((3.5 + {bias_fix}) / {pts_std}) = {expected_prob:.4f}, "
+            f"Expected norm.cdf(3.5 / {pts_std}) = {expected_prob:.4f}, "
             f"got {result.model_probability:.4f}"
         )
 

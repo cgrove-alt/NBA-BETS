@@ -160,23 +160,5 @@
     "success": true,
     "trigger": "github_actions",
     "run_id": "23106373516"
-  },
-  {
-    "timestamp": "2026-03-16T08:43:27.068281",
-    "success": true,
-    "trigger": "github_actions",
-    "run_id": "23134117986"
-  },
-  {
-    "timestamp": "2026-03-17T08:36:51.150300",
-    "success": true,
-    "trigger": "github_actions",
-    "run_id": "23184561285"
-  },
-  {
-    "timestamp": "2026-03-18T08:36:01.190868",
-    "success": true,
-    "trigger": "github_actions",
-    "run_id": "23235071103"
   }
 ]

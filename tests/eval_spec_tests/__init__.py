@@ -1,1 +1,0 @@
-# Evaluation specification gate tests

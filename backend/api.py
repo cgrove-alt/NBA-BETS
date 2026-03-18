@@ -1082,7 +1082,7 @@ def get_game_odds(game_id: str):
 
 @app.get("/api/best-bets", response_model=BestBetsResponse)
 def get_best_bets(
-    min_confidence: float = Query(40.0, ge=0, le=100, description="Minimum confidence threshold (batch model outputs 40-52%)"),
+    min_confidence: float = Query(65.0, ge=0, le=100, description="Minimum confidence threshold (model outputs 50-70%)"),
     min_edge: float = Query(6.0, ge=0, description="Minimum edge threshold (percentage)"),
     prop_types: str | None = Query(None, description="Comma-separated prop types to filter"),
     pick_type: str | None = Query(None, description="Filter by OVER or UNDER"),
@@ -1093,11 +1093,6 @@ def get_best_bets(
 
     Returns ALL bets meeting quality standards, sorted by user-selected criteria.
     Sort options: quality (confidence * edge), confidence, or edge.
-
-    Data source priority:
-      1. Pre-computed batch predictions from PostgreSQL (daily_predictions.py output)
-      2. Real-time in-memory predictions from DataService (on-demand generation)
-    This ensures the frontend matches the batch pipeline output when available.
     """
     service = get_service()
 
@@ -1105,55 +1100,10 @@ def get_best_bets(
     games = service.get_todays_games()
     best_bets = []
 
-    # Parse prop types filter
-    prop_type_filter = None
-    if prop_types:
-        prop_type_filter = [p.strip() for p in prop_types.split(",")]
-
-    from datetime import datetime as _dt
-    today_et = _dt.now(ET).strftime('%Y-%m-%d')
-    warnings = []
-
-    # ── Priority 1: Try pre-computed batch predictions from PostgreSQL ──
-    # The daily batch pipeline (daily_predictions.py) uses the full model stack:
-    # quantile decompression, empirical calibration, EdgeCalculator with devigging,
-    # and ML Minutes Oracle.  When this data exists, prefer it over the real-time
-    # pipeline which uses simpler heuristics.
-    precomputed_bets = _load_best_bets_from_postgres(
-        date=today_et,
-        min_confidence=min_confidence,
-        min_edge=min_edge,
-        prop_types=prop_type_filter,
-        pick_type=pick_type,
-        sort_by=sort_by,
-        games=games,
-        warnings=warnings,
-        bettable_only=bettable_only,
-    )
-    if precomputed_bets:
-        # Hard cap: never return more than 25 best bets
-        precomputed_bets = precomputed_bets[:25]
-        for i, bet in enumerate(precomputed_bets):
-            bet.rank = i + 1
-        return BestBetsResponse(
-            best_bets=precomputed_bets,
-            count=len(precomputed_bets),
-            filters={
-                "min_confidence": min_confidence,
-                "min_edge": min_edge,
-                "prop_types": prop_type_filter,
-                "pick_type": pick_type,
-                "sort_by": sort_by,
-                "bettable_only": bettable_only,
-            },
-            data_source="precomputed",
-            warnings=warnings,
-            locked_games=[],
-        )
-
-    # ── Priority 2: Fall back to real-time DataService predictions ──
     # Ensure prop generation is running — if no games have props,
     # trigger generation so subsequent calls return data.
+    # This makes the endpoint self-sufficient instead of depending on
+    # /api/games being called first.
     any_ready = False
     for game in games:
         gid = str(game.get("game_id", ""))
@@ -1180,7 +1130,13 @@ def get_best_bets(
                     except Exception as e:
                         print(f"Warning: Auto-prop generation failed for game {gid}: {e}")
 
+    # Parse prop types filter
+    prop_type_filter = None
+    if prop_types:
+        prop_type_filter = [p.strip() for p in prop_types.split(",")]
+
     locked_game_ids = set()
+    warnings = []
 
     for game in games:
         game_id = str(game.get("game_id", ""))
@@ -1340,6 +1296,8 @@ def get_best_bets(
 
     # Determine data source for response metadata
     data_source = "realtime"
+    from datetime import datetime as _dt
+    today_et = _dt.now(ET).strftime('%Y-%m-%d')
 
     # Per-game fallback: load PostgreSQL predictions for locked/errored games
     if locked_game_ids:
@@ -1359,6 +1317,23 @@ def get_best_bets(
             best_bets.extend(locked_bets)
             data_source = "mixed"
             print(f"Loaded {len(locked_bets)} bets from PostgreSQL for {len(locked_game_ids)} locked game(s)")
+
+    # Full fallback: if still no bets at all, try PostgreSQL for ALL games
+    if not best_bets:
+        fallback_bets = _load_best_bets_from_postgres(
+            date=today_et,
+            min_confidence=min_confidence,
+            min_edge=min_edge,
+            prop_types=prop_type_filter,
+            pick_type=pick_type,
+            sort_by=sort_by,
+            games=games,
+            warnings=warnings,
+            bettable_only=bettable_only,
+        )
+        if fallback_bets:
+            best_bets = fallback_bets
+            data_source = "precomputed"
 
     # Sort based on user preference (real-time bets need sorting;
     # fallback bets are already sorted but re-sort for consistency)
@@ -1815,10 +1790,11 @@ def _load_best_bets_from_postgres(
     warnings: list[str] | None = None,
     bettable_only: bool = False,
 ) -> list[BestBet] | None:
-    """Load best bets from PostgreSQL predictions_history (batch pipeline).
+    """Load best bets from PostgreSQL predictions_history as a fallback.
 
-    Primary data source for /api/best-bets. Returns pre-computed predictions
-    from the daily batch pipeline which uses the full profitable model stack.
+    Used when real-time DataService props haven't finished generating yet
+    (cold start, deploy, API hiccup). Returns pre-computed predictions from
+    the daily prediction pipeline.
 
     Args:
         date: Date string YYYY-MM-DD
@@ -1860,6 +1836,7 @@ def _load_best_bets_from_postgres(
             FROM predictions_history
             WHERE date = %s
               AND pick IS NOT NULL AND pick != ''
+              AND bet_recommendation IN ('BET', 'LEAN')
             ORDER BY confidence_score DESC NULLS LAST
         """, (date,))
         rows = cur.fetchall()

@@ -2665,7 +2665,6 @@ def main():
     parser.add_argument("--date", type=str, help="Date in YYYY-MM-DD format")
     parser.add_argument("--no-warmup", action="store_true", help="Skip cache warmup")
     parser.add_argument("--clear-cache", action="store_true", help="Clear cache before running")
-    parser.add_argument("--output-dir", type=str, help="Directory for output files (CSV + JSON)")
     parser.add_argument(
         "--prop-source",
         choices=["odds-api", "balldontlie", "hybrid"],
@@ -3310,12 +3309,7 @@ def main():
     if all_player_props:
         try:
             import pandas as pd
-            if args.output_dir:
-                output_path = Path(args.output_dir)
-                output_path.mkdir(parents=True, exist_ok=True)
-            else:
-                output_path = Path()
-            csv_filename = output_path / f"predictions_{target_date}.csv"
+            csv_filename = f"predictions_{target_date}.csv"
 
             # Build DataFrame with all enhanced columns
             csv_data = []
@@ -3371,10 +3365,7 @@ def main():
             # Fill NaN values with empty strings to prevent JSON serialization issues in API
             df = df.fillna('')
             df.to_csv(csv_filename, index=False)
-            json_filename = output_path / f"predictions_{target_date}.json"
-            df.to_json(json_filename, orient='records', indent=2)
             print(f"\n  Predictions saved to: {csv_filename}")
-            print(f"  JSON saved to: {json_filename}")
             print(f"  Total props: {len(all_player_props)}")
 
             # RAILWAY FIX: Also save to PostgreSQL database (persists across deployments)
@@ -3472,7 +3463,7 @@ def main():
                             safe_val(row.get('bet_recommendation')),
                             safe_val(row.get('pick')),
                             safe_val(row.get('uncertainty_flag')),
-                            bool(safe_val(row.get('injury_boost')) and float(str(safe_val(row.get('injury_boost')))) > 1.0),
+                            safe_val(row.get('injury_boost')),
                             safe_val(row.get('line_source')),
                             safe_val(row.get('line_vendor')),
                         ))

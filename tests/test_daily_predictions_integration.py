@@ -14,7 +14,7 @@ def test_imports():
     print("[Test 1] Testing imports...")
 
     try:
-        from nba_models.inference.daily_predictions import (
+        from daily_predictions import (
             logger,
             fetch_current_injuries,
             is_player_available,
@@ -39,7 +39,7 @@ def test_logger_defined():
     print("\n[Test 2] Testing logger definition...")
 
     try:
-        from nba_models.inference.daily_predictions import logger
+        from daily_predictions import logger
 
         # Verify it's a Logger instance
         import logging
@@ -66,7 +66,7 @@ def test_injury_lookup_logic():
     print("\n[Test 3] Testing injury lookup code path...")
 
     try:
-        from nba_models.inference.daily_predictions import logger, InjuryStatus
+        from daily_predictions import logger, InjuryStatus
 
         # Simulate the code path from lines 1691-1717
         # This is the exact logic that would fail with undefined logger
@@ -113,7 +113,7 @@ def test_injury_integration_workflow():
     print("\n[Test 4] Testing full injury integration workflow...")
 
     try:
-        from nba_models.inference.daily_predictions import (
+        from daily_predictions import (
             fetch_current_injuries,
             is_player_available,
             InjuryStatus,
