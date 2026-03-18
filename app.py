@@ -917,9 +917,9 @@ class Orchestrator:
         implied_probability: float,
         bet_type: str,
         home_away: str = "home",
-        analysis: Optional['GameAnalysis'] = None,
+        analysis: 'GameAnalysis | None' = None,
         line_movement: dict | None = None,
-    ) -> Optional['EdgeQualityResult']:
+    ) -> 'EdgeQualityResult | None':
         """
         Evaluate edge quality for a bet using the EdgeQualityScorer.
 

@@ -49,15 +49,13 @@ def generate_clv_report(days: int = 7) -> dict:
     sharp_result = analyzer.is_model_sharp()
     is_sharp = sharp_result[0] if isinstance(sharp_result, tuple) else sharp_result
 
-    report = {
+    return {
         "report_date": datetime.now().isoformat(),
         "period_days": days,
         "summary": summary,
         "is_model_sharp": is_sharp,
         "assessment": _assess_clv(summary, is_sharp),
     }
-
-    return report
 
 
 def _assess_clv(summary: dict, is_sharp: bool) -> str:

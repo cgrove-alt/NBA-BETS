@@ -3,4 +3,4 @@
 from nba_models.inference.daily_predictions import *  # noqa: F401,F403
 
 if __name__ == "__main__":
-    main()
+    main()  # noqa: F405
