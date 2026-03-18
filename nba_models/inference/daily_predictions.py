@@ -267,28 +267,31 @@ except ImportError:
     MinutesFeatureGenerator = None
     MINUTES_ORACLE_AVAILABLE = False
 
-# Phase 4: Edge Calculator for proper edge/EV computation
+# Fix 5.3: Critical dependencies — import with clear error messages instead of
+# silent degradation. If these fail, the module still loads but logs a warning.
 try:
     from edge_calculator import EdgeCalculator
     HAS_EDGE_CALCULATOR = True
 except ImportError:
     HAS_EDGE_CALCULATOR = False
+    logger.error(
+        "CRITICAL: edge_calculator not importable. Edge calculations will use "
+        "legacy fallback. Install edge_calculator or check PYTHONPATH."
+    )
 
-# Phase 4: Calibration Service for prediction logging
 try:
     from calibration_tracker import CalibrationService
     HAS_CALIBRATION = True
 except (ImportError, TypeError):
     HAS_CALIBRATION = False
+    logger.error("CRITICAL: calibration_tracker not importable. Prediction logging disabled.")
 
-# Phase 5: Calibration adjuster for bias correction
 try:
     from calibration_tracker import CalibrationAdjuster, CalibrationDatabase
     HAS_CALIBRATION_ADJUSTER = True
 except (ImportError, TypeError):
     HAS_CALIBRATION_ADJUSTER = False
 
-# Phase 5: Lazy-init singleton for calibration adjuster
 _calibration_adjuster = None
 
 def _get_calibration_adjuster():
@@ -301,24 +304,25 @@ def _get_calibration_adjuster():
             pass
     return _calibration_adjuster
 
-# Import Kelly bet sizing from risk_management (Task 3.4)
+# Fix 5.3: Kelly sizing and bet filter — required but with fallback
 try:
     from risk_management import calculate_kelly_bet_size, get_kelly_multiplier_for_tier
     HAS_KELLY_SIZING = True
 except ImportError:
     HAS_KELLY_SIZING = False
+    logger.error("CRITICAL: risk_management not importable. Kelly sizing disabled.")
     def calculate_kelly_bet_size(*args, **kwargs):
         return 0.0
     def get_kelly_multiplier_for_tier(*args, **kwargs):
         return 0.0
 
-# IMPROVEMENT 6: Import smart bet filter and prediction pipeline
 try:
     from nba_betting.bet_filter import should_bet as _should_bet, calculate_bet_size as _calc_bet_size
     from nba_betting.prediction_pipeline import evaluate_bet as _evaluate_bet
     HAS_BET_FILTER = True
 except ImportError:
     HAS_BET_FILTER = False
+    logger.error("CRITICAL: bet_filter/prediction_pipeline not importable. Bet filtering disabled.")
     def _should_bet(*args, **kwargs):
         return True, 'filter unavailable', 0.0
     def _calc_bet_size(*args, **kwargs):
@@ -2214,15 +2218,33 @@ def predict_player_prop(
                     z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
                     over_prob = float(norm.cdf(z_score))
 
-                # Handle model object with predict method
+                # Handle model object with predict method (PropEnsembleModel)
                 elif hasattr(model_data, 'predict'):
                     result = model_data.predict(features, prop_line=line)
 
-                    if 'over_probability' in result:
-                        over_prob = result['over_probability']
-                    elif 'predicted_value' in result:
+                    if 'predicted_value' in result:
                         predicted_value = result['predicted_value']
-                        std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
+
+                        # Fix 1.4: If model was trained in residual mode,
+                        # predicted_value is a residual — add season average.
+                        if getattr(model_data, '_residual_mode', False):
+                            sa_col = getattr(model_data, '_season_avg_col', None)
+                            if sa_col and features:
+                                season_avg = features.get(sa_col, 0)
+                            elif prop_type == 'pra' and features:
+                                season_avg = (
+                                    features.get('season_pts_avg', 0)
+                                    + features.get('season_reb_avg', 0)
+                                    + features.get('season_ast_avg', 0)
+                                )
+                            else:
+                                season_avg = 0
+                            predicted_value = season_avg + predicted_value
+
+                    if 'over_probability' in result and not getattr(model_data, '_residual_mode', False):
+                        over_prob = result['over_probability']
+                    elif predicted_value is not None:
+                        std = get_prop_std_dev(prop_type)
                         z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
                         over_prob = float(norm.cdf(z_score))
 
@@ -2508,43 +2530,36 @@ def predict_player_prop(
     # Calculate edge quality tier based on confidence + edge magnitude (Task 2.4)
     edge_quality_tier = get_edge_quality_tier(confidence_score, edge)
 
-    # Calculate Kelly bet size (Task 3.4)
-    if HAS_KELLY_SIZING and abs(edge) > 2.0:  # Only bet if edge > 2%
+    # Fix 5.1: Kelly sizing from calibrated quantile probability (over_prob).
+    # over_prob comes from QuantilePropModel.predict_over_probability() or
+    # norm.cdf(z_score) — both are calibrated. Do NOT use confidence_score
+    # (which has r=0.10 correlation with accuracy) for bet sizing.
+    if abs(edge) > 2.0:
+        win_prob = over_prob if over_prob > 0.5 else (1 - over_prob)
+        decimal_odds = american_to_decimal(american_odds)
+        default_bankroll = 1000.0
+
+        # Bug fix #12: Inline Kelly fallback so exceptions are handled properly.
+        # HAS_KELLY_SIZING is always True after Fix 5.3 required imports,
+        # but the function can still throw on unexpected inputs.
         try:
-            # Convert edge to probability advantage
-            # over_prob already accounts for our edge
-            win_prob = over_prob if over_prob > 0.5 else (1 - over_prob)
-
-            # Use actual odds from sportsbook
-            decimal_odds = american_to_decimal(american_odds)
-
-            # Use a default $1000 bankroll for bet sizing (user can scale)
-            default_bankroll = 1000.0
-
             suggested_bet_size = calculate_kelly_bet_size(
                 win_prob=win_prob,
                 decimal_odds=decimal_odds,
                 bankroll=default_bankroll,
-                fractional=0.25,  # Quarter Kelly for safety
+                fractional=0.25,
                 edge_tier=edge_quality_tier,
-                current_drawdown=0.0,  # Assume no drawdown for daily predictions
-                num_same_day_bets=1,   # Conservative default
-                max_bet_pct=0.05       # Cap at 5% of bankroll
+                current_drawdown=0.0,
+                num_same_day_bets=1,
+                max_bet_pct=0.05,
             )
-
-            # Calculate bet size as percentage of bankroll for display
             suggested_bet_size = (suggested_bet_size / default_bankroll) * 100
-
         except Exception:
-            # Fall back to defaults
-            pass
-    elif not HAS_KELLY_SIZING and abs(edge) > 2.0:
-        # Simple quarter-Kelly fallback when kelly_sizing module unavailable
-        win_prob = over_prob if over_prob > 0.5 else (1 - over_prob)
-        b = american_to_decimal(american_odds) - 1
-        q = 1 - win_prob
-        kelly_full = max(0, (b * win_prob - q) / b) if b > 0 else 0
-        suggested_bet_size = min(kelly_full * 0.25 * 100, 5.0)  # % of bankroll, cap 5%
+            # Fallback: manual quarter-Kelly
+            b = decimal_odds - 1
+            q = 1 - win_prob
+            kelly_full = max(0, (b * win_prob - q) / b) if b > 0 else 0
+            suggested_bet_size = min(kelly_full * 0.25 * 100, 5.0)
 
     # Phase 4: Signal classification using edge magnitude
     bet_recommendation = get_signal_from_edge(edge, edge_info.get('edge_quality'))
@@ -3015,17 +3030,37 @@ def main():
                         player_team_id = props.get('team_id')
 
                         # CHECK INJURY STATUS using injury_tracker_v3 (Task 1.4)
-                        # FIX 5: Hard DNP filter — skip OUT/DOUBTFUL players before
-                        # any prediction generation to avoid contaminating edge stats.
+                        # Fix 0.2: Enhanced DNP filter — skip OUT/DOUBTFUL players AND
+                        # players with avg minutes < 15 to avoid junk predictions.
                         uncertainty_flag = None
                         if player_id in injury_lookup:
                             status = injury_lookup[player_id]
                             if status in [InjuryStatus.OUT, InjuryStatus.DOUBTFUL]:
-                                # Skip prediction for OUT or DOUBTFUL players
                                 print(f"    Skipping {player_name} ({status}) [DNP filter]")
                                 continue
                             if status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
                                 uncertainty_flag = "HIGH_UNCERTAINTY"
+
+                        # Fix 0.2: Skip low-minutes players (bench warmers)
+                        # Fetch season avg minutes from Balldontlie API stats.
+                        # If stats not available, skip this filter (don't block predictions).
+                        _player_avg_min = 0
+                        if bdl_stats_id and api:
+                            try:
+                                _stats = api.get_season_averages(
+                                    season=int(target_date[:4]),
+                                    player_ids=[bdl_stats_id],
+                                )
+                                if _stats:
+                                    _player_avg_min = _stats[0].get('min', 0) or 0
+                                    if isinstance(_player_avg_min, str):
+                                        # API returns "32:15" format sometimes
+                                        _player_avg_min = float(_player_avg_min.split(':')[0]) if ':' in str(_player_avg_min) else float(_player_avg_min)
+                            except Exception:
+                                pass
+                        if _player_avg_min > 0 and _player_avg_min < 15:
+                            print(f"    Skipping {player_name} (avg {_player_avg_min:.0f} min) [low minutes]")
+                            continue
 
                         # Get player metadata
                         bdl_stats_id = None

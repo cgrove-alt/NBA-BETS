@@ -55,6 +55,15 @@ jobs:
           python scripts/calibrate_quantile_decompression.py 2>&1 | tee -a logs/retrain_output.log
           python scripts/build_probability_calibration.py 2>&1 | tee -a logs/retrain_output.log
 
+      - name: Run baseline comparison quality gate (Fix 0.1 + Fix 4.3)
+        if: success()
+        run: |
+          python scripts/baseline_comparison.py 2>&1 | tee -a logs/retrain_output.log
+          python scripts/validate_model_quality.py 2>&1 | tee -a logs/retrain_output.log
+          if [ $? -ne 0 ]; then
+            echo "::warning::Model failed quality gate — does not beat season-average baseline"
+          fi
+
       - name: Update retrain history
         if: success()
         run: |

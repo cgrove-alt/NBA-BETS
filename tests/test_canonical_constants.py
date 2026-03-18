@@ -220,13 +220,14 @@ class TestQuantileDecompressionDefaults:
                 f"{prop} slope={slope} outside expected range [0.2, 1.2]"
             )
 
-    def test_points_slope_indicates_compression(self):
-        """Points model has the most regression-to-mean (slope ≈ 0.72)."""
+    def test_points_slope_identity_after_fix_2_2(self):
+        """Fix 2.2: Decompression disabled — LightGBM quantile loss + reduced
+        features address compression at the source."""
         from nba_betting.constants import QUANTILE_DECOMPRESSION_DEFAULTS
         slope = QUANTILE_DECOMPRESSION_DEFAULTS['points']['slope']
-        assert slope < 0.90, (
-            f"Points slope={slope} — expected < 0.90 (regression to mean). "
-            "If it's near 1.0, decompression is unnecessary. Re-run calibration."
+        assert slope == 1.0, (
+            f"Points slope={slope} — expected 1.0 (identity/no decompression). "
+            "Fix 2.2 disabled decompression. If slope != 1.0, check constants.py."
         )
 
 

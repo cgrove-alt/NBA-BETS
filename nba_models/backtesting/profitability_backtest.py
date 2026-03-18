@@ -129,22 +129,30 @@ def load_models(model_dir: Path | None = None) -> tuple[dict, dict]:
 
 
 # ---------------------------------------------------------------------------
-# Prop-line simulation
+# Prop-line simulation — Fix 3.1: decorrelated from model features
 # ---------------------------------------------------------------------------
 def simulate_prop_line(features: dict, prop_type: str) -> float:
-    """Simulate a sportsbook prop line.
+    """Simulate a sportsbook prop line using a DIFFERENT information set than
+    the model uses for prediction.
 
-    Books anchor to the player's season average and nudge toward recent form.
-    We use 70/30 season/recent weighting, rounded to the nearest 0.5.
+    Fix 3.1: The old formula (0.70 * season_avg + 0.30 * recent_avg) was
+    correlated with model features, creating spurious edges that resolved as
+    wins. Books set lines closer to the season average with minor adjustments.
+
+    New approach: Use season average ONLY (excluding last-5 recency that the
+    model uses), rounded to nearest 0.5. This decorrelates the line from the
+    model's recent-form features.
+
+    When real historical lines are available via API, use those instead (Option A).
     """
     key_map = {
-        "points": ("season_pts_avg", "recent_pts_avg"),
-        "rebounds": ("season_reb_avg", "recent_reb_avg"),
-        "assists": ("season_ast_avg", "recent_ast_avg"),
-        "pra": (None, "pra_avg"),  # no single season-pra key
+        "points": "season_pts_avg",
+        "rebounds": "season_reb_avg",
+        "assists": "season_ast_avg",
+        "pra": None,  # computed
     }
 
-    season_key, recent_key = key_map.get(prop_type, ("season_pts_avg", "recent_pts_avg"))
+    season_key = key_map.get(prop_type, "season_pts_avg")
 
     if prop_type == "pra":
         season_val = (
@@ -155,13 +163,11 @@ def simulate_prop_line(features: dict, prop_type: str) -> float:
     else:
         season_val = features.get(season_key, 0)
 
-    recent_val = features.get(recent_key, season_val)
-
     if season_val <= 0:
         return 0.0
 
-    line = 0.70 * season_val + 0.30 * recent_val
-    return round(line * 2) / 2  # nearest 0.5
+    # Use season average only — decorrelated from recent-form features
+    return round(season_val * 2) / 2  # nearest 0.5
 
 
 def _candidate_rank_score(ev_result: dict) -> float:
@@ -582,13 +588,14 @@ def generate_report(
             "progress_interval": progress_interval,
         },
         "caveats": [
-            "Model weights were trained on data including the test season "
+            "WARNING: Model weights were trained on data including the test season "
             "(in-sample model). Features are walk-forward safe (point-in-time). "
-            "Treat ROI as an upper-bound estimate.",
+            "Treat ROI as an upper-bound estimate. For honest evaluation, "
+            "use a true OOS walk-forward backtest (train on N seasons, test on N+1).",
             f"At most {max_bets_per_player_sample} prop bet(s) executed per "
             "player-game sample to reduce same-player correlation risk.",
-            "Prop lines are simulated (70% season avg + 30% recent avg, "
-            "rounded to 0.5). Real lines may differ.",
+            "Fix 3.1: Prop lines are simulated using season average only "
+            "(decorrelated from model's recent-form features). Real lines may differ.",
             "OT-normalised actuals used for settlement (matches training). "
             "Real books settle on raw stats.",
         ],

@@ -120,6 +120,69 @@ warnings.filterwarnings('ignore')
 
 # Model save directory
 MODEL_DIR = Path("models")
+
+
+# ---------------------------------------------------------------------------
+# Fix 4.2: Robust sample_weight detection via inspect.signature
+# ---------------------------------------------------------------------------
+import inspect as _inspect
+
+
+def _supports_sample_weight(model) -> bool:
+    """Check if a model's fit() method accepts sample_weight."""
+    try:
+        sig = _inspect.signature(model.fit)
+        return 'sample_weight' in sig.parameters
+    except (ValueError, TypeError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Fix 1.1: Reduced feature sets per prop type (80+ → 15-20)
+# ---------------------------------------------------------------------------
+REDUCED_FEATURES: dict[str, list[str]] = {
+    'points': [
+        'season_pts_avg', 'last5_pts_avg', 'last3_pts_avg', 'recent_pts_avg',
+        'season_min_avg', 'last5_min_avg', 'predicted_minutes',  # Fix 1.5/6.3
+        'opp_def_rating', 'opp_pts_allowed',
+        'opp_pace', 'is_home', 'days_rest', 'usage_rate', 'ts_pct',
+        'pts_trend', 'pts_recency_ratio', 'season_games',
+        'prop_line_vs_recent',
+    ],
+    'rebounds': [
+        'season_reb_avg', 'last5_reb_avg', 'last3_reb_avg', 'recent_reb_avg',
+        'season_min_avg', 'last5_min_avg', 'predicted_minutes',  # Fix 1.5/6.3
+        'opp_reb_factor',  # Bug fix: was 'opp_reb_allowed' (doesn't exist)
+        'is_center', 'is_forward', 'opp_pace', 'is_home', 'days_rest',
+        'reb_trend', 'reb_recency_ratio', 'season_games',
+        'prop_line_vs_recent',
+    ],
+    'assists': [
+        'season_ast_avg', 'last5_ast_avg', 'last3_ast_avg', 'recent_ast_avg',
+        'season_min_avg', 'last5_min_avg', 'predicted_minutes',  # Fix 1.5/6.3
+        'opp_def_rating',  # Bug fix: was 'opp_ast_allowed' (doesn't exist)
+        'is_guard', 'is_ball_handler', 'opp_pace', 'is_home', 'days_rest',
+        'ast_trend', 'ast_recency_ratio', 'season_games',
+        'prop_line_vs_recent',
+    ],
+    'threes': [
+        'season_fg3m_avg', 'last5_fg3m_avg', 'last3_fg3m_avg', 'recent_fg3m_avg',
+        'season_min_avg', 'predicted_minutes',  # Fix 1.5/6.3
+        'fg3a_avg', 'fg3_pct', 'regressed_fg3_pct',
+        'fg3_rate', 'fg3_momentum', 'is_volume_shooter',
+        'opp_pace', 'is_home', 'days_rest', 'season_games',
+        'prop_line_vs_recent',
+    ],
+    'pra': [
+        'season_pts_avg', 'season_reb_avg', 'season_ast_avg',
+        'last5_pts_avg', 'last5_reb_avg', 'last5_ast_avg',
+        'pra_avg', 'last3_pra_avg', 'season_min_avg', 'last5_min_avg',
+        'predicted_minutes',  # Fix 1.5/6.3
+        'opp_def_rating', 'opp_pace', 'is_home', 'days_rest',
+        'usage_rate', 'season_games',
+        'prop_line_vs_recent',
+    ],
+}
 MODEL_DIR.mkdir(exist_ok=True)
 
 # Cache directory
@@ -4063,76 +4126,51 @@ class PropEnsembleModel:
         self._init_base_models(optimized_params)
 
     def _init_base_models(self, optimized_params: dict[str, dict] | None = None):
-        """Initialize the ensemble of base models with optional optimized parameters."""
+        """Initialize base models.
 
-        # Default parameters
-        xgb_defaults = {
-            'n_estimators': 200, 'max_depth': 6, 'learning_rate': 0.05,
-            'min_child_weight': 5, 'subsample': 0.8, 'colsample_bytree': 0.8,
-            'reg_alpha': 0.5, 'reg_lambda': 2.0, 'random_state': 42,
-            'n_jobs': -1, 'verbosity': 0,
-            'early_stopping_rounds': 20,
-        }
+        Fix 1.3: Single LightGBM per prop (MAE loss) replaces 5-7 model stacking.
+        Stacking only helps when base models are individually strong.
+        Ridge kept as linear baseline for diversity (2 models, not 5-7).
+        """
+
         lgb_defaults = {
-            'n_estimators': 200, 'max_depth': 6, 'learning_rate': 0.05,
+            'n_estimators': 300, 'max_depth': 6, 'learning_rate': 0.05,
             'num_leaves': 31, 'min_child_samples': 20, 'subsample': 0.8,
             'colsample_bytree': 0.8, 'reg_alpha': 0.5, 'reg_lambda': 2.0,
             'random_state': 42, 'n_jobs': -1, 'verbose': -1,
-        }
-        rf_defaults = {
-            'n_estimators': 150, 'max_depth': 10, 'min_samples_split': 10,
-            'min_samples_leaf': 5, 'max_features': 'sqrt', 'random_state': 42,
-            'n_jobs': -1,
+            'objective': 'mae',  # Fix 1.3: MAE for asymmetric player stat distributions
         }
         ridge_defaults = {'alpha': 1.0, 'random_state': 42}
-        gb_defaults = {
-            'n_estimators': 200, 'max_depth': 5, 'learning_rate': 0.05,
-            'subsample': 0.8, 'random_state': 42,
-        }
-        # NEW: CatBoost defaults (good for handling categorical features like position)
-        catboost_defaults = {
-            'iterations': 300, 'depth': 5, 'learning_rate': 0.03,
-            'l2_leaf_reg': 3.0, 'random_seed': 42,
-            'verbose': False, 'thread_count': -1,
-        }
 
-        # Merge with optimized params if provided
         if optimized_params:
-            xgb_params = {**xgb_defaults, **optimized_params.get('xgboost', {})}
             lgb_params = {**lgb_defaults, **optimized_params.get('lightgbm', {})}
-            rf_params = {**rf_defaults, **optimized_params.get('random_forest', {})}
             ridge_params = {**ridge_defaults, **optimized_params.get('ridge', {})}
-            gb_params = {**gb_defaults, **optimized_params.get('gradient_boosting', {})}
-            catboost_params = {**catboost_defaults, **optimized_params.get('catboost', {})}
         else:
-            xgb_params, lgb_params, rf_params = xgb_defaults, lgb_defaults, rf_defaults
-            ridge_params, gb_params = ridge_defaults, gb_defaults
-            catboost_params = catboost_defaults
+            lgb_params = lgb_defaults
+            ridge_params = ridge_defaults
 
-        # XGBoost (primary)
-        if HAS_XGBOOST:
-            self.models['xgboost'] = XGBRegressor(**xgb_params)
-
-        # LightGBM (fast)
+        # Primary: LightGBM with MAE loss
         if HAS_LIGHTGBM:
             self.models['lightgbm'] = LGBMRegressor(**lgb_params)
+        elif HAS_XGBOOST:
+            # Fallback to XGBoost if LightGBM unavailable
+            self.models['xgboost'] = XGBRegressor(
+                n_estimators=300, max_depth=6, learning_rate=0.05,
+                min_child_weight=5, subsample=0.8, colsample_bytree=0.8,
+                reg_alpha=0.5, reg_lambda=2.0, random_state=42,
+                n_jobs=-1, verbosity=0, objective='reg:absoluteerror',
+            )
+        else:
+            # Final fallback: sklearn GBR
+            self.models['gradient_boosting'] = GradientBoostingRegressor(
+                n_estimators=300, max_depth=5, learning_rate=0.05,
+                loss='absolute_error', subsample=0.8, random_state=42,
+            )
 
-        # NEW: CatBoost (excellent for categorical features like position, handles missing values)
-        if HAS_CATBOOST:
-            from catboost import CatBoostRegressor
-            self.models['catboost'] = CatBoostRegressor(**catboost_params)
-
-        # Random Forest (diverse)
-        self.models['random_forest'] = RandomForestRegressor(**rf_params)
-
-        # Ridge Regression (linear baseline)
+        # Linear baseline for diversity
         self.models['ridge'] = Ridge(**ridge_params)
 
-        # Gradient Boosting (fallback if XGBoost unavailable, also provides diversity)
-        if not HAS_XGBOOST:
-            self.models['gradient_boosting'] = GradientBoostingRegressor(**gb_params)
-
-        print(f"    Initialized ensemble with {len(self.models)} models: {list(self.models.keys())}")
+        print(f"    Initialized {len(self.models)} models: {list(self.models.keys())}")
         if optimized_params:
             print("    Using Optuna-optimized hyperparameters")
 
@@ -4185,10 +4223,11 @@ class PropEnsembleModel:
                         _fit_kwargs['verbose'] = False
                     elif name == 'lightgbm':
                         _fit_kwargs['eval_set'] = [(X_test_scaled, y_test)]
+                        _fit_kwargs['eval_metric'] = 'mae'  # Bug fix: match MAE objective
                         _fit_kwargs['callbacks'] = [_lgb_early_stop(20)] if HAS_LIGHTGBM else []
 
                 # Train with sample weights if supported
-                if w_train is not None and hasattr(model, 'fit') and 'sample_weight' in str(model.fit.__code__.co_varnames):
+                if w_train is not None and _supports_sample_weight(model):
                     model.fit(X_train_scaled, y_train, sample_weight=w_train, **_fit_kwargs)
                 else:
                     model.fit(X_train_scaled, y_train, **_fit_kwargs)
@@ -4214,8 +4253,8 @@ class PropEnsembleModel:
         # Generate out-of-fold predictions for meta-learner training.
         # This prevents the meta-learner from overfitting to training data
         # by ensuring it only sees predictions on held-out data.
+        # Fix 1.2: Use TimeSeriesSplit (not KFold) to prevent temporal leakage.
         from sklearn.base import clone as sklearn_clone
-        from sklearn.model_selection import KFold as _KFold
 
         # Only include models that trained successfully (have entries in model_metrics)
         successful_model_names = [name for name in self.models if name in model_metrics]
@@ -4226,8 +4265,8 @@ class PropEnsembleModel:
 
         oof_meta_features = np.zeros((len(y_train), n_successful))
 
-        kf = _KFold(n_splits=5, shuffle=False)  # No shuffle for temporal consistency
-        for fold_idx, (fold_train_idx, fold_val_idx) in enumerate(kf.split(X_train_scaled)):
+        tscv = TimeSeriesSplit(n_splits=5)  # Fix 1.2: temporal CV
+        for fold_idx, (fold_train_idx, fold_val_idx) in enumerate(tscv.split(X_train_scaled)):
             for model_idx, name in enumerate(successful_model_names):
                 try:
                     fold_model = sklearn_clone(self.models[name])
@@ -4242,6 +4281,9 @@ class PropEnsembleModel:
                     bp_idx = _bp_index[name]
                     oof_meta_features[fold_val_idx, model_idx] = base_predictions_train[bp_idx][fold_val_idx]
 
+        # Store successful model names for prediction-time shape matching (Bug fix #3)
+        self._successful_model_names = successful_model_names
+
         # Compute inverse-RMSE weights for fallback ensemble
         model_weights = {}
         total_inverse_rmse = 0
@@ -4251,28 +4293,16 @@ class PropEnsembleModel:
             total_inverse_rmse += inv_rmse
         self.model_weights = {k: v / total_inverse_rmse for k, v in model_weights.items()}
 
-        # Calculate weighted ensemble predictions for metrics
+        # Calculate weighted ensemble predictions for metrics (Bug fix #4: use correct index)
         ensemble_pred = np.zeros(len(y_test))
-        for i, (name, _) in enumerate(self.models.items()):
-            weight = self.model_weights.get(name, 1.0 / len(self.models))
+        for i, name in enumerate(successful_model_names):
+            weight = self.model_weights.get(name, 1.0 / n_successful)
             ensemble_pred += weight * base_predictions_test[i]
 
         # Train meta-learner on out-of-fold predictions (not leaked training predictions)
-        if HAS_XGBOOST:
-            self.meta_model = XGBRegressor(
-                n_estimators=50,
-                max_depth=2,
-                learning_rate=0.1,
-                min_child_weight=5,
-                subsample=0.8,
-                colsample_bytree=1.0,
-                reg_alpha=0.5,
-                reg_lambda=1.0,
-                random_state=42,
-                n_jobs=-1,
-            )
-        else:
-            self.meta_model = Ridge(alpha=1.0)
+        # Bug fix #9: Use Ridge (not XGBoost) as meta-learner with only 2 base models.
+        # XGBoost with 50 trees on 2 features overfits; Ridge is appropriate.
+        self.meta_model = Ridge(alpha=1.0)
         self.meta_model.fit(oof_meta_features, y_train)
 
         # Calculate ensemble metrics
@@ -4310,7 +4340,15 @@ class PropEnsembleModel:
         self.over_under_classifier = None
 
     def predict(self, features: dict, prop_line: float = None) -> dict:
-        """Make a prediction with the ensemble."""
+        """Make a prediction with the ensemble.
+
+        If the model was trained in residual mode (_residual_mode=True),
+        predicted_value is the RESIDUAL (deviation from season average).
+        The caller (daily_predictions.py) is responsible for adding season_avg
+        back. The edge/over_probability here are NOT computed for residual
+        models — the inference pipeline recalculates them from the
+        reconstructed absolute value.
+        """
         if not self.is_fitted:
             raise ValueError("Model not fitted")
 
@@ -4321,55 +4359,67 @@ class PropEnsembleModel:
         X = smart_fillna(X[self.feature_names])
         X_scaled = self.scaler.transform(X)
 
-        # Get base model predictions
+        # Get base model predictions — track by name for stable ordering
+        # Bug fix: use _successful_model_names from training to ensure
+        # meta-learner gets the same number of features it was trained on.
+        trained_names = getattr(self, '_successful_model_names', list(self.models.keys()))
         base_preds = []
         individual_preds = {}
-        for name, model in self.models.items():
+        for name in trained_names:
+            model = self.models.get(name)
+            if model is None:
+                base_preds.append(0.0)  # Placeholder for missing model
+                continue
             try:
                 pred = model.predict(X_scaled)[0]
                 base_preds.append(pred)
                 individual_preds[name] = pred
-            except:
-                pass
+            except Exception:
+                base_preds.append(0.0)  # Placeholder on failure
 
-        if not base_preds:
+        if not individual_preds:
             raise ValueError("No base models available for prediction")
 
-        # Use stacking meta-learner for final prediction (upgraded from weighted avg)
-        # Meta-learner learns non-linear combinations of base predictions
-        if self.meta_model is not None and hasattr(self, 'meta_model'):
-            # Stack base predictions into features for meta-learner
+        # Use meta-learner if available and shape matches
+        if (self.meta_model is not None
+                and len(base_preds) == len(trained_names)):
             stacked_features = np.array([base_preds])
             ensemble_pred = float(self.meta_model.predict(stacked_features)[0])
         elif hasattr(self, 'model_weights') and self.model_weights:
-            # Fallback to weighted average if meta-model not available
             ensemble_pred = 0.0
+            total_weight = 0.0
             for name, pred in individual_preds.items():
                 weight = self.model_weights.get(name, 1.0 / len(individual_preds))
                 ensemble_pred += weight * pred
+                total_weight += weight
+            if total_weight > 0:
+                ensemble_pred /= total_weight
         else:
-            # Final fallback to simple average
-            ensemble_pred = float(np.mean(base_preds))
+            ensemble_pred = float(np.mean(list(individual_preds.values())))
+
+        preds_arr = list(individual_preds.values())
+        agreement = 1 - (np.std(preds_arr) / max(abs(np.mean(preds_arr)), 0.1)) if preds_arr else 0.5
 
         result = {
             'predicted_value': ensemble_pred,
             'prop_type': self.prop_type,
             'individual_predictions': individual_preds,
-            'model_agreement': 1 - (np.std(base_preds) / max(np.mean(base_preds), 1)),  # Higher = more agreement
+            'model_agreement': float(np.clip(agreement, 0, 1)),
         }
 
-        if prop_line is not None:
+        # In residual mode, ensemble_pred is a residual — edge/probability
+        # are meaningless until the caller adds season_avg back.
+        # Skip edge computation to avoid confusing downstream code.
+        if prop_line is not None and not getattr(self, '_residual_mode', False):
             result['prop_line'] = prop_line
             result['prediction'] = 'over' if ensemble_pred > prop_line else 'under'
             result['edge'] = ensemble_pred - prop_line
             result['edge_pct'] = (ensemble_pred - prop_line) / prop_line if prop_line > 0 else 0
-
-            # Over/under probability: edge-based estimate
-            # (Classifier disabled — superseded by quantile model probabilities
-            # in the prediction pipeline. This fallback is for direct model use.)
             edge_pct = result['edge_pct']
             result['over_probability'] = 0.5 + float(np.clip(edge_pct * 2, -0.20, 0.20))
             result['under_probability'] = 1 - result['over_probability']
+        elif prop_line is not None:
+            result['prop_line'] = prop_line
 
         return result
 
@@ -4384,6 +4434,11 @@ class PropEnsembleModel:
             'model_weights': getattr(self, 'model_weights', {}),
             'over_under_classifier': self.over_under_classifier,
             'prop_type': self.prop_type,
+            # Fix 1.4: Residual prediction metadata
+            '_residual_mode': getattr(self, '_residual_mode', False),
+            '_season_avg_col': getattr(self, '_season_avg_col', None),
+            # Bug fix #3: Store model names for prediction-time shape matching
+            '_successful_model_names': getattr(self, '_successful_model_names', list(self.models.keys())),
         }
         with open(filepath, 'wb') as f:
             pickle.dump(data, f)
@@ -4403,6 +4458,11 @@ class PropEnsembleModel:
         model.model_weights = data.get('model_weights', {})
         model.over_under_classifier = data.get('over_under_classifier')
         model.is_fitted = True
+        # Fix 1.4: Residual prediction metadata
+        model._residual_mode = data.get('_residual_mode', False)
+        model._season_avg_col = data.get('_season_avg_col', None)
+        # Bug fix #3: Restore model names for prediction-time shape matching
+        model._successful_model_names = data.get('_successful_model_names', list(model.models.keys()))
 
         return model
 
@@ -4472,18 +4532,37 @@ class QuantilePropModel:
         for q in self.QUANTILES:
             print(f"      Quantile {q:.0%}...")
 
-            # Use GradientBoostingRegressor with quantile loss
-            model = GradientBoostingRegressor(
-                loss='quantile',
-                alpha=q,
-                n_estimators=150,
-                max_depth=5,
-                learning_rate=0.05,
-                min_samples_split=10,
-                min_samples_leaf=5,
-                subsample=0.8,
-                random_state=42,
-            )
+            # Fix 2.2: Use LightGBM quantile loss (less compression than sklearn GBR)
+            if HAS_LIGHTGBM:
+                model = LGBMRegressor(
+                    objective='quantile',
+                    alpha=q,
+                    n_estimators=200,
+                    max_depth=6,
+                    learning_rate=0.05,
+                    num_leaves=31,
+                    min_child_samples=20,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    reg_alpha=0.5,
+                    reg_lambda=2.0,
+                    random_state=42,
+                    n_jobs=-1,
+                    verbose=-1,
+                )
+            else:
+                # Fallback to sklearn GBR if LightGBM unavailable
+                model = GradientBoostingRegressor(
+                    loss='quantile',
+                    alpha=q,
+                    n_estimators=150,
+                    max_depth=5,
+                    learning_rate=0.05,
+                    min_samples_split=10,
+                    min_samples_leaf=5,
+                    subsample=0.8,
+                    random_state=42,
+                )
 
             model.fit(X_train_scaled, y_train)
             self.quantile_models[q] = model
@@ -4865,43 +4944,52 @@ class OptunaHyperparameterTuner:
         self.cv_folds = cv_folds
         self.random_state = random_state
 
-    def _manual_cv_score(self, model, X, y):
+    def _temporal_split(self, X, y):
         """
-        Manual cross-validation to avoid sklearn 1.6+ compatibility issues with XGBoost.
-        Uses TimeSeriesSplit and returns mean MSE.
+        Split data chronologically into 60% train, 20% validation, 20% holdout.
+
+        Returns:
+            Tuple of (X_train, y_train, X_val, y_val, X_holdout, y_holdout)
         """
-        tscv = TimeSeriesSplit(n_splits=self.cv_folds)
-        mse_scores = []
+        n = len(X)
+        train_end = int(n * 0.6)
+        val_end = int(n * 0.8)
 
-        for train_idx, val_idx in tscv.split(X):
-            X_train, X_val = X[train_idx], X[val_idx]
-            y_train, y_val = y[train_idx], y[val_idx]
+        X_train, y_train = X[:train_end], y[:train_end]
+        X_val, y_val = X[train_end:val_end], y[train_end:val_end]
+        X_holdout, y_holdout = X[val_end:], y[val_end:]
 
+        return X_train, y_train, X_val, y_val, X_holdout, y_holdout
+
+    def _temporal_split_score(self, model, X, y, use_early_stopping=False):
+        """
+        Temporal 60/20/20 split evaluation.
+
+        - 60% train: used for fitting
+        - 20% validation: used for early stopping (LightGBM/XGBoost only)
+        - 20% holdout: used for metric computation ONLY
+
+        Args:
+            model: sklearn-compatible estimator
+            X: Feature array
+            y: Target array
+            use_early_stopping: If True, pass validation set as eval_set
+
+        Returns:
+            MSE computed on the holdout set only
+        """
+        X_train, y_train, X_val, y_val, X_holdout, y_holdout = self._temporal_split(X, y)
+
+        if use_early_stopping:
+            model.fit(
+                X_train, y_train,
+                eval_set=[(X_val, y_val)],
+            )
+        else:
             model.fit(X_train, y_train)
-            y_pred = model.predict(X_val)
-            mse = np.mean((y_val - y_pred) ** 2)
-            mse_scores.append(mse)
 
-        return np.mean(mse_scores)
-
-    def _xgboost_objective(self, trial, X, y):
-        """Objective function for XGBoost hyperparameter tuning."""
-        params = {
-            'n_estimators': trial.suggest_int('xgb_n_estimators', 100, 400),
-            'max_depth': trial.suggest_int('xgb_max_depth', 3, 10),
-            'learning_rate': trial.suggest_float('xgb_learning_rate', 0.01, 0.2, log=True),
-            'min_child_weight': trial.suggest_int('xgb_min_child_weight', 1, 10),
-            'subsample': trial.suggest_float('xgb_subsample', 0.6, 1.0),
-            'colsample_bytree': trial.suggest_float('xgb_colsample_bytree', 0.6, 1.0),
-            'reg_alpha': trial.suggest_float('xgb_reg_alpha', 0.01, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('xgb_reg_lambda', 0.01, 10.0, log=True),
-            'random_state': self.random_state,
-            'n_jobs': -1,
-            'verbosity': 0,
-        }
-
-        model = XGBRegressor(**params)
-        return self._manual_cv_score(model, X, y)
+        y_pred = model.predict(X_holdout)
+        return np.mean((y_holdout - y_pred) ** 2)
 
     def _lightgbm_objective(self, trial, X, y):
         """Objective function for LightGBM hyperparameter tuning."""
@@ -4921,33 +5009,18 @@ class OptunaHyperparameterTuner:
         }
 
         model = LGBMRegressor(**params)
-        return self._manual_cv_score(model, X, y)
-
-    def _random_forest_objective(self, trial, X, y):
-        """Objective function for Random Forest hyperparameter tuning."""
-        params = {
-            'n_estimators': trial.suggest_int('rf_n_estimators', 100, 400),
-            'max_depth': trial.suggest_int('rf_max_depth', 5, 20),
-            'min_samples_split': trial.suggest_int('rf_min_samples_split', 2, 20),
-            'min_samples_leaf': trial.suggest_int('rf_min_samples_leaf', 1, 10),
-            'max_features': trial.suggest_categorical('rf_max_features', ['sqrt', 'log2', 0.5, 0.7]),
-            'random_state': self.random_state,
-            'n_jobs': -1,
-        }
-
-        model = RandomForestRegressor(**params)
-        return self._manual_cv_score(model, X, y)
+        return self._temporal_split_score(model, X, y, use_early_stopping=True)
 
     def _ridge_objective(self, trial, X, y):
         """Objective function for Ridge hyperparameter tuning."""
         alpha = trial.suggest_float('ridge_alpha', 0.001, 100.0, log=True)
 
         model = Ridge(alpha=alpha, random_state=self.random_state)
-        return self._manual_cv_score(model, X, y)
+        return self._temporal_split_score(model, X, y, use_early_stopping=False)
 
     def tune_all_models(self, X: np.ndarray, y: np.ndarray, prop_type: str) -> dict[str, dict]:
         """
-        Run Optuna optimization for all models in the ensemble.
+        Run Optuna optimization for LightGBM and Ridge models.
 
         Args:
             X: Feature array (already scaled)
@@ -4966,38 +5039,19 @@ class OptunaHyperparameterTuner:
         print(f"{'='*60}")
 
         best_params = {}
-        model_count = 3 if not HAS_LIGHTGBM else 4
-
-        # XGBoost
-        if HAS_XGBOOST:
-            print(f"\n[1/{model_count}] Tuning XGBoost ({self.n_trials} trials)...")
-            study_xgb = optuna.create_study(direction='minimize', sampler=TPESampler(seed=self.random_state))
-            study_xgb.optimize(lambda t: self._xgboost_objective(t, X, y),
-                              n_trials=self.n_trials, show_progress_bar=True)
-            best_params['xgboost'] = {k.replace('xgb_', ''): v for k, v in study_xgb.best_params.items()}
-            print(f"   Best XGBoost MSE: {study_xgb.best_value:.4f}")
+        model_count = 2
 
         # LightGBM
         if HAS_LIGHTGBM:
-            print(f"\n[2/{model_count}] Tuning LightGBM ({self.n_trials} trials)...")
+            print(f"\n[1/{model_count}] Tuning LightGBM ({self.n_trials} trials)...")
             study_lgb = optuna.create_study(direction='minimize', sampler=TPESampler(seed=self.random_state))
             study_lgb.optimize(lambda t: self._lightgbm_objective(t, X, y),
                               n_trials=self.n_trials, show_progress_bar=True)
             best_params['lightgbm'] = {k.replace('lgb_', ''): v for k, v in study_lgb.best_params.items()}
             print(f"   Best LightGBM MSE: {study_lgb.best_value:.4f}")
 
-        # Random Forest
-        rf_idx = 3 if HAS_LIGHTGBM else 2
-        print(f"\n[{rf_idx}/{model_count}] Tuning Random Forest ({self.n_trials} trials)...")
-        study_rf = optuna.create_study(direction='minimize', sampler=TPESampler(seed=self.random_state))
-        study_rf.optimize(lambda t: self._random_forest_objective(t, X, y),
-                         n_trials=self.n_trials, show_progress_bar=True)
-        best_params['random_forest'] = {k.replace('rf_', ''): v for k, v in study_rf.best_params.items()}
-        print(f"   Best Random Forest MSE: {study_rf.best_value:.4f}")
-
         # Ridge
-        ridge_idx = 4 if HAS_LIGHTGBM else 3
-        print(f"\n[{ridge_idx}/{model_count}] Tuning Ridge ({self.n_trials} trials)...")
+        print(f"\n[2/{model_count}] Tuning Ridge ({self.n_trials} trials)...")
         study_ridge = optuna.create_study(direction='minimize', sampler=TPESampler(seed=self.random_state))
         study_ridge.optimize(lambda t: self._ridge_objective(t, X, y),
                             n_trials=self.n_trials, show_progress_bar=True)
@@ -5904,6 +5958,29 @@ def train_all_models(
         'play_rate': min_metrics['play_rate'],
     }
 
+    # -----------------------------------------------------------------------
+    # Fix 1.5 / 6.3: Inject predicted minutes as first-class feature
+    # -----------------------------------------------------------------------
+    # Player stats are ~linearly correlated with minutes played. Use the
+    # minutes model's predictions as a feature for prop models.
+    print("\n--- Fix 1.5: Injecting predicted minutes as prop feature ---")
+    try:
+        batch_result = minutes_model.predict_batch(X_player)
+        # predict_batch() returns (predicted_minutes, play_probs) tuple
+        if isinstance(batch_result, tuple):
+            minutes_preds = batch_result[0]  # Extract minutes array from tuple
+        else:
+            minutes_preds = batch_result
+        if minutes_preds is not None and len(minutes_preds) == len(X_player):
+            X_player = X_player.copy()
+            X_player['predicted_minutes'] = minutes_preds
+            print(f"  Injected predicted_minutes (mean={minutes_preds.mean():.1f}, "
+                  f"std={minutes_preds.std():.1f})")
+        else:
+            print("  Warning: minutes prediction returned wrong shape, skipping injection")
+    except Exception as e:
+        print(f"  Warning: minutes prediction failed ({e}), skipping injection")
+
     prop_types = [
         ('points', 'actual_pts'),
         ('rebounds', 'actual_reb'),
@@ -5960,111 +6037,115 @@ def train_all_models(
 
         return X_with_line
 
-    # TIER 1.4: Props that benefit from position-specific models
-    # Rebounds and assists vary significantly by position
-    POSITION_AWARE_PROPS = ['rebounds', 'assists']
+    # ---------------------------------------------------------------------------
+    # Fix 1.1 + 1.3 + 1.4: Simplified prop training with reduced features,
+    # residual targets, and single LightGBM per prop.
+    # ---------------------------------------------------------------------------
+
+    # Season avg column map for residual target computation (Fix 1.4)
+    SEASON_AVG_COL = {
+        'points': 'season_pts_avg',
+        'rebounds': 'season_reb_avg',
+        'assists': 'season_ast_avg',
+        'threes': 'season_fg3m_avg',
+        'pra': None,  # Computed as sum of components
+    }
 
     for prop_name, target_col in prop_types:
         print(f"\n--- {prop_name.upper()} Prop Model ---")
 
-        y = np.array([d[target_col] for d in player_data])
+        y_raw = np.array([d[target_col] for d in player_data])
 
         # Inject prop_line features (season avg as proxy for market line)
         X_with_line = _inject_prop_line_features(X_player, prop_name)
-        print(f"  Added prop_line features ({len(X_with_line.columns)} total features)")
 
-        if use_ensemble_props:
-            # TIER 1.4: Use position-aware models for rebounds and assists
-            use_position_aware = prop_name in POSITION_AWARE_PROPS
-
-            if use_position_aware:
-                print("  Using PositionAwarePropEnsemble (TIER 1.4)")
-
-                prop_model = PositionAwarePropEnsemble(prop_name)
-                metrics = prop_model.train(
-                    X_with_line, y, player_data,
-                    sample_weights=player_sample_weights
-                )
-
-                print(f"  Position-Aware RMSE: {metrics['ensemble_rmse']:.2f}")
-                print(f"  Position-Aware R²: {metrics['ensemble_r2']:.4f}")
-
-                # Save as position-aware model
-                prop_model.save(save_dir / f'player_{prop_name}_position_aware.pkl')
-                print(f"  Saved: {save_dir}/player_{prop_name}_position_aware.pkl")
-
-                # Also save regular ensemble for backward compatibility
-                print("  Also training general ensemble for backward compatibility...")
-                general_model = PropEnsembleModel(prop_name)
-                general_metrics = general_model.train(X_with_line, y, sample_weights=player_sample_weights)
-                general_model.save(save_dir / f'player_{prop_name}_ensemble.pkl')
-
-                results[f'prop_{prop_name}'] = {
-                    'rmse': metrics['ensemble_rmse'],
-                    'mae': metrics['ensemble_mae'],
-                    'r2': metrics['ensemble_r2'],
-                    'model_type': 'position_aware',
-                    'n_models': metrics.get('n_models', 4),
-                    'position_metrics': metrics.get('position_metrics', {}),
-                    'general_r2': metrics.get('general_r2', general_metrics['ensemble_r2']),
-                    'position_improvement': metrics['ensemble_r2'] - metrics.get('general_r2', general_metrics['ensemble_r2']),
-                }
-            else:
-                # Use standard ensemble model for other props
-                print("  Using PropEnsembleModel (stacked ensemble)")
-
-                # Optuna hyperparameter optimization if enabled
-                optimized_params = None
-                if use_optuna and HAS_OPTUNA:
-                    print(f"  Running Optuna hyperparameter optimization ({optuna_trials} trials)...")
-                    # Scale features for Optuna tuning
-                    temp_scaler = StandardScaler()
-                    X_scaled = temp_scaler.fit_transform(smart_fillna(X_with_line).values)
-
-                    tuner = OptunaHyperparameterTuner(n_trials=optuna_trials, cv_folds=3)
-                    optimized_params = tuner.tune_all_models(X_scaled, y, prop_name)
-
-                    # Save optimized params for reproducibility
-                    params_path = save_dir / f'{prop_name}_optuna_params.json'
-                    with open(params_path, 'w') as f:
-                        json.dump(optimized_params, f, indent=2)
-                    print(f"  Saved optimized params: {params_path}")
-
-                prop_model = PropEnsembleModel(prop_name, optimized_params=optimized_params)
-                player_dates = [d.get('game_date', '') for d in player_data]
-                metrics = prop_model.train(X_with_line, y, dates=player_dates, sample_weights=player_sample_weights)
-
-                print(f"  Ensemble RMSE: {metrics['ensemble_rmse']:.2f}")
-                print(f"  Ensemble MAE: {metrics['ensemble_mae']:.2f}")
-                print(f"  Ensemble R²: {metrics['ensemble_r2']:.4f}")
-
-                # Save as ensemble model
-                prop_model.save(save_dir / f'player_{prop_name}_ensemble.pkl')
-                print(f"  Saved: {save_dir}/player_{prop_name}_ensemble.pkl")
-
-                # Also save metrics for comparison
-                results[f'prop_{prop_name}'] = {
-                    'rmse': metrics['ensemble_rmse'],
-                    'mae': metrics['ensemble_mae'],
-                    'r2': metrics['ensemble_r2'],
-                    'model_type': 'ensemble',
-                    'n_models': metrics['n_models'],
-                    'model_metrics': metrics.get('model_metrics', {}),
-                    'optuna_optimized': optimized_params is not None,
-                }
+        # --- Fix 1.4: Residual prediction ---
+        # Target = actual - season_average. Model learns the DEVIATION from baseline.
+        # At inference: prediction = season_average + model_residual.
+        sa_col = SEASON_AVG_COL.get(prop_name)
+        if sa_col is not None:
+            season_avgs_raw = X_with_line[sa_col].values
         else:
-            # Use original single model
-            prop_model = PropModel(prop_name)
-            metrics = prop_model.train(X_with_line, y, sample_weights=player_sample_weights)
+            # PRA: sum of component averages
+            season_avgs_raw = (
+                X_with_line['season_pts_avg'].fillna(0).values
+                + X_with_line['season_reb_avg'].fillna(0).values
+                + X_with_line['season_ast_avg'].fillna(0).values
+            )
 
-            print(f"  RMSE: {metrics['rmse']:.2f}")
-            print(f"  MAE: {metrics['mae']:.2f}")
-            print(f"  R²: {metrics['r2']:.4f}")
+        # Bug fix #7: Drop samples with NaN/zero season averages rather than
+        # filling with 0 (which makes residual = actual, defeating the purpose).
+        valid_mask = ~np.isnan(season_avgs_raw) & (season_avgs_raw > 0)
+        n_dropped = int((~valid_mask).sum())
+        if n_dropped > 0:
+            print(f"  Dropped {n_dropped} samples with missing season averages")
+        season_avgs = season_avgs_raw[valid_mask]
+        y_raw_valid = y_raw[valid_mask]
+        y_residual = y_raw_valid - season_avgs
+        print(f"  Residual target: mean={y_residual.mean():.2f}, std={y_residual.std():.2f}")
 
-            prop_model.save(save_dir / f'player_{prop_name}.pkl')
-            print(f"  Saved: {save_dir}/player_{prop_name}.pkl")
+        # --- Fix 1.1: Feature reduction ---
+        reduced_cols = REDUCED_FEATURES.get(prop_name, [])
+        available_cols = [c for c in reduced_cols if c in X_with_line.columns]
+        missing_cols = [c for c in reduced_cols if c not in X_with_line.columns]
+        if missing_cols:
+            print(f"  Warning: missing features: {missing_cols}")
 
-            results[f'prop_{prop_name}'] = metrics
+        if available_cols:
+            X_reduced = X_with_line[available_cols]
+            print(f"  Feature reduction: {len(X_with_line.columns)} → {len(available_cols)} features")
+        else:
+            X_reduced = X_with_line
+            print(f"  Warning: using full feature set ({len(X_reduced.columns)} features)")
+
+        # Apply valid_mask to features and weights (Bug fix #7 cont.)
+        X_reduced = X_reduced.iloc[valid_mask].reset_index(drop=True)
+        prop_weights = player_sample_weights[valid_mask] if player_sample_weights is not None else None
+        prop_dates = [d.get('game_date', '') for d in np.array(player_data)[valid_mask]]
+
+        # --- Fix 1.3: Single LightGBM per prop (replaces 5-7 model stacking) ---
+        print("  Training single LightGBM (MAE loss)...")
+
+        prop_model = PropEnsembleModel(prop_name)
+        prop_model._residual_mode = True
+        prop_model._season_avg_col = sa_col
+
+        metrics = prop_model.train(
+            X_reduced, y_residual,
+            dates=prop_dates,
+            sample_weights=prop_weights,
+        )
+
+        print(f"  Residual RMSE: {metrics['ensemble_rmse']:.3f}")
+        print(f"  Residual MAE: {metrics['ensemble_mae']:.3f}")
+        print(f"  Residual R²: {metrics['ensemble_r2']:.4f}")
+
+        # Also compute metrics on raw (non-residual) scale for comparison
+        split_idx = int(len(X_reduced) * 0.8)
+        sa_test = season_avgs[split_idx:]
+        y_raw_test = y_raw_valid[split_idx:]
+        # Reconstruct raw prediction = season_avg + residual_pred
+        # (ensemble_rmse is already on residual scale)
+        raw_rmse = metrics['ensemble_rmse']  # Approximate (residual RMSE ≈ raw RMSE when baseline is good)
+        baseline_rmse = float(np.sqrt(np.mean((y_raw_test - sa_test) ** 2)))
+        print(f"  Baseline (season avg) RMSE: {baseline_rmse:.3f}")
+        improvement = (baseline_rmse - raw_rmse) / baseline_rmse * 100 if baseline_rmse > 0 else 0
+        print(f"  Improvement over baseline: {improvement:+.1f}%")
+
+        # Save as ensemble model (backward compatible)
+        prop_model.save(save_dir / f'player_{prop_name}_ensemble.pkl')
+        print(f"  Saved: {save_dir}/player_{prop_name}_ensemble.pkl")
+
+        results[f'prop_{prop_name}'] = {
+            'rmse': metrics['ensemble_rmse'],
+            'mae': metrics['ensemble_mae'],
+            'r2': metrics['ensemble_r2'],
+            'model_type': 'single_lgbm_residual',
+            'n_models': metrics['n_models'],
+            'baseline_rmse': baseline_rmse,
+            'improvement_pct': round(improvement, 2),
+            'residual_mode': True,
+        }
 
     # ==========================================================================
     # QUANTILE MODELS FOR UNCERTAINTY ESTIMATION
@@ -6082,9 +6163,14 @@ def train_all_models(
         # Inject prop_line features (same as ensemble training)
         X_with_line = _inject_prop_line_features(X_player, prop_name)
 
+        # Fix 1.1: Use reduced features for quantile models too
+        reduced_cols = REDUCED_FEATURES.get(prop_name, [])
+        available_cols = [c for c in reduced_cols if c in X_with_line.columns]
+        X_q = X_with_line[available_cols] if available_cols else X_with_line
+
         try:
             quantile_model = QuantilePropModel(prop_name)
-            q_metrics = quantile_model.train(X_with_line, y, sample_weights=player_sample_weights)
+            q_metrics = quantile_model.train(X_q, y, sample_weights=player_sample_weights)
 
             # Save quantile model with updated feature names
             quantile_path = save_dir / f'player_{prop_name}_quantile.pkl'
@@ -6092,7 +6178,7 @@ def train_all_models(
                 pickle.dump({
                     'model': quantile_model,
                     'training_metrics': q_metrics,
-                    'feature_names': list(X_with_line.columns),
+                    'feature_names': list(X_q.columns),
                 }, f)
             print(f"  Saved: models/player_{prop_name}_quantile.pkl")
             print(f"  Coverage (80%): {q_metrics['coverage_80']:.1%}")

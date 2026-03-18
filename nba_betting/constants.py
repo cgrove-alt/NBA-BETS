@@ -43,22 +43,27 @@ PROP_STD_DEVS: dict[str, float] = {
 DEFAULT_PROP_STD_DEV: float = 5.0  # fallback when prop type is unknown
 
 # ---------------------------------------------------------------------------
-# Per-prop bias corrections (from 67K-prediction backtest)
+# Per-prop bias corrections — DISABLED (Fix 2.1)
 # ---------------------------------------------------------------------------
-# Positive = model under-predicts → add to predicted value before z-score.
-# Negative = model over-predicts → subtract from predicted value.
+# Removed: contradictory corrections (+1.38 in constants, -0.986 in fix2,
+# +5.89 in Phase 3 validation). Hardcoded bias corrections mask root cause.
+# Fix 1.4 (residual prediction) eliminates bias at the source.
 PROP_BIAS_CORRECTION: dict[str, float] = {
-    'points':   1.38,   # Model under-predicts points by 1.38
-    'rebounds':  0.015,  # Nearly unbiased
-    'assists':   2.05,   # Massive under-prediction
-    'threes':    0.48,   # Slight under-prediction
-    'pra':      -0.45,   # Slight over-prediction
+    'points':   0.0,
+    'rebounds':  0.0,
+    'assists':   0.0,
+    'threes':    0.0,
+    'pra':       0.0,
 }
 
 # ---------------------------------------------------------------------------
 # Disabled prop types (no demonstrated model edge)
 # ---------------------------------------------------------------------------
-DISABLED_PROPS: list[str] = ['threes', 'spread', 'assists']
+# ALL props disabled until Fix 0.1 baseline_comparison.py proves R² > 0.02
+# and RMSE < season-average RMSE on out-of-sample data.
+# Audit evidence: points R²=-0.41, rebounds R²=0.03, assists R²=-1.08,
+# threes R²=-0.64, pra R²=-0.19. No prop type beats a simple average.
+DISABLED_PROPS: list[str] = ['points', 'rebounds', 'assists', 'threes', 'pra', 'spread']
 
 # ---------------------------------------------------------------------------
 # Edge quality tiers
@@ -113,25 +118,21 @@ MAX_BET_FRACTION: float = 0.03    # 3% of bankroll maximum per bet
 MIN_BET_FRACTION: float = 0.005   # 0.5% of bankroll minimum
 
 # ---------------------------------------------------------------------------
-# Quantile decompression defaults
+# Quantile decompression defaults — DISABLED (Fix 2.2)
 # ---------------------------------------------------------------------------
-# When models/quantile_decompression.json is not present (e.g., first run),
-# these defaults are used. Regenerate the JSON after each model retrain:
-#
-#     python3 scripts/calibrate_quantile_decompression.py
-#
-# mean_gap = average (predicted_median - line); negative = under-prediction
-# slope    = regression slope of predicted_median on line; < 1.0 = compression
-# mean_line = average prop line across players (used for slope correction)
+# Removed: decompression was patching a symptom (quantile compression from
+# sklearn GBR with 80+ noisy features). Fix 1.1 (feature reduction) and
+# Fix 1.3 (LightGBM quantile loss) address the root cause.
+# Identity transform: slope=1.0, mean_gap=0.0 → no decompression applied.
 QUANTILE_DECOMPRESSION_DEFAULTS: dict[str, dict[str, float]] = {
-    'points':   {'slope': 0.724, 'mean_gap': -3.15, 'mean_line': 19.9},
-    'rebounds': {'slope': 0.805, 'mean_gap':  0.00, 'mean_line':  5.1},
-    'assists':  {'slope': 0.644, 'mean_gap':  0.38, 'mean_line':  4.1},
-    'threes':   {'slope': 0.850, 'mean_gap':  0.00, 'mean_line':  2.5},
-    'pra':      {'slope': 0.800, 'mean_gap': -1.00, 'mean_line': 30.0},
+    'points':   {'slope': 1.0, 'mean_gap': 0.0, 'mean_line': 19.9},
+    'rebounds': {'slope': 1.0, 'mean_gap': 0.0, 'mean_line':  5.1},
+    'assists':  {'slope': 1.0, 'mean_gap': 0.0, 'mean_line':  4.1},
+    'threes':   {'slope': 1.0, 'mean_gap': 0.0, 'mean_line':  2.5},
+    'pra':      {'slope': 1.0, 'mean_gap': 0.0, 'mean_line': 30.0},
 }
 
-QUANTILE_TARGET_SLOPE: float = 0.85  # target after decompression
+QUANTILE_TARGET_SLOPE: float = 1.0  # identity (no decompression)
 
 # ---------------------------------------------------------------------------
 # Exposure / correlation limits
