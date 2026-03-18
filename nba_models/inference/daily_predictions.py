@@ -3041,27 +3041,6 @@ def main():
                             if status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
                                 uncertainty_flag = "HIGH_UNCERTAINTY"
 
-                        # Fix 0.2: Skip low-minutes players (bench warmers)
-                        # Fetch season avg minutes from Balldontlie API stats.
-                        # If stats not available, skip this filter (don't block predictions).
-                        _player_avg_min = 0
-                        if bdl_stats_id and api:
-                            try:
-                                _stats = api.get_season_averages(
-                                    season=int(target_date[:4]),
-                                    player_ids=[bdl_stats_id],
-                                )
-                                if _stats:
-                                    _player_avg_min = _stats[0].get('min', 0) or 0
-                                    if isinstance(_player_avg_min, str):
-                                        # API returns "32:15" format sometimes
-                                        _player_avg_min = float(_player_avg_min.split(':')[0]) if ':' in str(_player_avg_min) else float(_player_avg_min)
-                            except Exception:
-                                pass
-                        if _player_avg_min > 0 and _player_avg_min < 15:
-                            print(f"    Skipping {player_name} (avg {_player_avg_min:.0f} min) [low minutes]")
-                            continue
-
                         # Get player metadata
                         bdl_stats_id = None
                         player_position = 'G'
@@ -3072,6 +3051,23 @@ def main():
                                     if p.get('id') == bdl_stats_id:
                                         player_position = p.get('position', 'G') or 'G'
                                         break
+
+                        # Fix 0.2: Skip low-minutes players (bench warmers)
+                        if bdl_stats_id and api:
+                            try:
+                                _stats = api.get_season_averages(
+                                    season=int(target_date[:4]),
+                                    player_ids=[bdl_stats_id],
+                                )
+                                if _stats:
+                                    _player_avg_min = _stats[0].get('min', 0) or 0
+                                    if isinstance(_player_avg_min, str):
+                                        _player_avg_min = float(str(_player_avg_min).split(':')[0])
+                                    if 0 < _player_avg_min < 15:
+                                        print(f"    Skipping {player_name} (avg {_player_avg_min:.0f} min) [low minutes]")
+                                        continue
+                            except Exception:
+                                pass
 
                         # Determine opponent/teammate injuries
                         if player_team_id == home_team_id:
