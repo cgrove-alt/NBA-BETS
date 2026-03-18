@@ -196,6 +196,11 @@ def run_comparison(season: str = "2023-24") -> dict:
             try:
                 pred_result = model.predict(features, prop_line=s_avg)
                 model_pred = pred_result.get("predicted_value", 0)
+
+                # If model was trained in residual mode, predicted_value is
+                # a residual (deviation from season avg). Add season avg back.
+                if getattr(model, '_residual_mode', False):
+                    model_pred = s_avg + model_pred
             except Exception:
                 continue
 

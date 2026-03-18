@@ -384,6 +384,18 @@ def evaluate_window(window: dict) -> dict | None:
 
             predicted_value = prediction.get("predicted_value", 0)
 
+            # If model was trained in residual mode, add season avg back
+            if getattr(model, '_residual_mode', False):
+                sa_col = getattr(model, '_season_avg_col', None)
+                if sa_col and prop_type != 'pra':
+                    predicted_value = features.get(sa_col, 0) + predicted_value
+                elif prop_type == 'pra':
+                    predicted_value = (
+                        features.get('season_pts_avg', 0)
+                        + features.get('season_reb_avg', 0)
+                        + features.get('season_ast_avg', 0)
+                    ) + predicted_value
+
             # Record for regression metrics
             prop_results[prop_type]["predicted"].append(predicted_value)
             prop_results[prop_type]["actual"].append(actual_value)

@@ -317,6 +317,18 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
                 continue
 
             predicted_value = prediction.get("predicted_value", 0)
+
+            # If model was trained in residual mode, add season avg back
+            if getattr(model, '_residual_mode', False):
+                sa_col = getattr(model, '_season_avg_col', None)
+                if sa_col and prop_type != 'pra':
+                    predicted_value = features.get(sa_col, 0) + predicted_value
+                elif prop_type == 'pra':
+                    predicted_value = (
+                        features.get('season_pts_avg', 0)
+                        + features.get('season_reb_avg', 0)
+                        + features.get('season_ast_avg', 0)
+                    ) + predicted_value
             edge = abs(predicted_value - prop_line)
 
             diag[f"predictions_ok_{prop_type}"] += 1
