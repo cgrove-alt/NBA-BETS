@@ -1,0 +1,124 @@
+{
+  "run_date": "2026-03-20T18:43:30.825398",
+  "n_windows": 1,
+  "windows": [
+    {
+      "window": "Window 1",
+      "train_seasons": [
+        "2021-22",
+        "2022-23"
+      ],
+      "test_season": "2023-24",
+      "train_time_sec": 48.1,
+      "test_samples": 19120,
+      "diagnostics": {
+        "total_samples": 19120,
+        "skip_zero_line_assists": 167,
+        "skip_zero_line_points": 9,
+        "skip_zero_line_rebounds": 23,
+        "skip_zero_line_pra": 2
+      },
+      "by_prop_type": {
+        "points": {
+          "n_predictions": 19111,
+          "rmse": 6.5,
+          "mae": 5.075,
+          "r2": 0.4331,
+          "bias": 0.526,
+          "baseline_rmse": 7.023,
+          "directional_accuracy": 0.5997
+        },
+        "rebounds": {
+          "n_predictions": 19097,
+          "rmse": 2.643,
+          "mae": 2.029,
+          "r2": 0.4187,
+          "bias": 0.078,
+          "baseline_rmse": 2.888,
+          "directional_accuracy": 0.6018
+        },
+        "assists": {
+          "n_predictions": 18953,
+          "rmse": 2.074,
+          "mae": 1.545,
+          "r2": 0.4406,
+          "bias": -0.17,
+          "baseline_rmse": 2.193,
+          "directional_accuracy": 0.6012
+        },
+        "pra": {
+          "n_predictions": 19118,
+          "rmse": 8.12,
+          "mae": 6.374,
+          "r2": 0.4992,
+          "bias": 0.239,
+          "baseline_rmse": 9.397,
+          "directional_accuracy": 0.6514
+        }
+      },
+      "betting": {
+        "total_trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0,
+        "total_wagered": 0,
+        "total_pnl": 0,
+        "roi": 0
+      }
+    }
+  ],
+  "aggregate": {
+    "by_prop_type": {
+      "points": {
+        "n_predictions": 19111,
+        "rmse": 6.5,
+        "mae": 5.075,
+        "r2": 0.4331,
+        "bias": 0.526,
+        "directional_accuracy": 0.5997,
+        "total_trades": 0,
+        "trade_win_rate": 0
+      },
+      "rebounds": {
+        "n_predictions": 19097,
+        "rmse": 2.643,
+        "mae": 2.029,
+        "r2": 0.4187,
+        "bias": 0.078,
+        "directional_accuracy": 0.6018,
+        "total_trades": 0,
+        "trade_win_rate": 0
+      },
+      "assists": {
+        "n_predictions": 18953,
+        "rmse": 2.074,
+        "mae": 1.545,
+        "r2": 0.4406,
+        "bias": -0.17,
+        "directional_accuracy": 0.6012,
+        "total_trades": 0,
+        "trade_win_rate": 0
+      },
+      "pra": {
+        "n_predictions": 19118,
+        "rmse": 8.12,
+        "mae": 6.374,
+        "r2": 0.4992,
+        "bias": 0.239,
+        "directional_accuracy": 0.6514,
+        "total_trades": 0,
+        "trade_win_rate": 0
+      }
+    },
+    "betting": {
+      "total_trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": 0,
+      "total_wagered": 0,
+      "total_pnl": 0,
+      "roi": 0
+    }
+  },
+  "total_runtime_sec": 572.9
+}

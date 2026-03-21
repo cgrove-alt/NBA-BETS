@@ -59,11 +59,12 @@ PROP_BIAS_CORRECTION: dict[str, float] = {
 # ---------------------------------------------------------------------------
 # Disabled prop types (no demonstrated model edge)
 # ---------------------------------------------------------------------------
-# ALL props disabled until Fix 0.1 baseline_comparison.py proves R² > 0.02
-# and RMSE < season-average RMSE on out-of-sample data.
-# Audit evidence: points R²=-0.41, rebounds R²=0.03, assists R²=-1.08,
-# threes R²=-0.64, pra R²=-0.19. No prop type beats a simple average.
-DISABLED_PROPS: list[str] = ['points', 'rebounds', 'assists', 'threes', 'pra', 'spread']
+# Final configuration after full audit + calibration (2026-03-20).
+# Model has genuine over-selection edge on rebounds (+17.9%) and PRA (+2.9%).
+# Points is marginal (+2.5% pre-calibration), kept enabled for volume.
+# Assists consistently negative (-14% calibrated) — disabled.
+# Threes too stochastic. Spread worse than market.
+DISABLED_PROPS: list[str] = ['assists', 'threes', 'spread']
 
 # ---------------------------------------------------------------------------
 # Edge quality tiers

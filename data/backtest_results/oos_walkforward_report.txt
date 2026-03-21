@@ -1,0 +1,44 @@
+================================================================================
+   TRUE OUT-OF-SAMPLE WALK-FORWARD BACKTEST
+================================================================================
+  Run Date: 2026-03-20T18:43:30
+  Windows:  1
+
+--------------------------------------------------------------------------------
+  Window 1: Train ['2021-22', '2022-23'] -> Test 2023-24
+  Test samples: 19120
+  Training time: 48.1s
+
+  Prop            N    RMSE     MAE       R2    Bias  BasRMSE  DirAcc  Trades  WinRate      ROI
+  ---------- ------ ------- ------- -------- ------- -------- ------- ------- -------- --------
+  points      19111   6.500   5.075   0.4331   0.526    7.023  60.0%       0    0.0%  +0.00%
+  rebounds    19097   2.643   2.029   0.4187   0.078    2.888  60.2%       0    0.0%  +0.00%
+  assists     18953   2.074   1.545   0.4406  -0.170    2.193  60.1%       0    0.0%  +0.00%
+  pra         19118   8.120   6.374   0.4992   0.239    9.397  65.1%       0    0.0%  +0.00%
+
+  Betting: 0 trades, 0W-0L, Win Rate 0.0%, P&L $+0.00, ROI +0.00%
+
+================================================================================
+  AGGREGATE ACROSS ALL WINDOWS
+================================================================================
+  Prop            N    RMSE     MAE       R2    Bias  DirAcc  Trades  WinRate
+  ---------- ------ ------- ------- -------- ------- ------- ------- --------
+  points      19111   6.500   5.075   0.4331   0.526  60.0%       0    0.0%
+  rebounds    19097   2.643   2.029   0.4187   0.078  60.2%       0    0.0%
+  assists     18953   2.074   1.545   0.4406  -0.170  60.1%       0    0.0%
+  pra         19118   8.120   6.374   0.4992   0.239  65.1%       0    0.0%
+
+  Overall Betting: 0 trades, 0W-0L, Win Rate 0.0%, P&L $+0.00, ROI +0.00%
+
+--- SANITY CHECKS -------------------------------------------------------------
+  WARNING: < 50 trades -- insufficient sample size
+
+--- METHODOLOGY ---------------------------------------------------------------
+  * Models trained FRESH on training seasons only (no test data).
+  * Features are walk-forward safe (point-in-time calculators).
+  * Prop lines simulated via season-average-only (Fix 3.1, decorrelated).
+  * Models are frozen during test evaluation (no retraining).
+  * This is the honest evaluation. Compare with profitability_backtest.py
+    (in-sample model) to measure the optimism gap.
+
+================================================================================

@@ -55,11 +55,7 @@ PROP_CONFIG = {
         "season_avg_key": "season_ast_avg",
         "last5_avg_key": "last5_ast_avg",
     },
-    "threes": {
-        "actual_key": "actual_fg3m",
-        "season_avg_key": "season_fg3m_avg",
-        "last5_avg_key": "last5_fg3m_avg",
-    },
+    # Threes excluded: too stochastic (R²=-0.64 in backtest), permanently disabled
     "pra": {
         "actual_key": "actual_pra",
         "season_avg_key": None,  # Computed from pts+reb+ast
@@ -99,6 +95,7 @@ def run_comparison(season: str = "2023-24") -> dict:
     from train_complete_balldontlie import (
         initialize_league_averages,
         process_games_for_training,
+        MinutesPredictionModel,
     )
     from nba_models.backtesting.profitability_backtest import load_models
 
@@ -120,6 +117,53 @@ def run_comparison(season: str = "2023-24") -> dict:
     ]
     initialize_league_averages(tracker_games)
     _, player_data = process_games_for_training(games, player_stats_by_game)
+
+    # Inject predicted_minutes into features using the minutes model.
+    # Without this, the feature defaults to 0 (vs training mean ~27.5),
+    # causing extreme predictions from the scaled ridge model.
+    model_dir = Path(ROOT) / "models"
+    minutes_model_path = model_dir / "player_minutes_model.pkl"
+    if minutes_model_path.exists():
+        logger.info("Injecting predicted_minutes from minutes model...")
+        minutes_model = MinutesPredictionModel.load(minutes_model_path)
+        import pandas as pd
+        X_all = pd.DataFrame([d["features"] for d in player_data])
+        try:
+            batch_result = minutes_model.predict_batch(X_all)
+            if isinstance(batch_result, tuple):
+                minutes_preds = batch_result[0]
+            else:
+                minutes_preds = batch_result
+            if minutes_preds is not None and len(minutes_preds) == len(player_data):
+                for i, d in enumerate(player_data):
+                    d["features"]["predicted_minutes"] = float(minutes_preds[i])
+                logger.info("Injected predicted_minutes (mean=%.1f)", minutes_preds.mean())
+        except Exception as e:
+            logger.warning("Failed to inject predicted_minutes: %s", e)
+
+    # Inject prop_line_vs_recent (computed as season_avg - recent_avg)
+    PROP_LINE_RECENT_MAP = {
+        "points": ("season_pts_avg", "recent_pts_avg"),
+        "rebounds": ("season_reb_avg", "recent_reb_avg"),
+        "assists": ("season_ast_avg", "recent_ast_avg"),
+        "pra": None,
+    }
+    for d in player_data:
+        f = d["features"]
+        for prop_name, mapping in PROP_LINE_RECENT_MAP.items():
+            if mapping is not None:
+                sa_col, rec_col = mapping
+                sa_val = f.get(sa_col, 0) or 0
+                rec_val = f.get(rec_col, sa_val) or sa_val
+                f.setdefault("prop_line_vs_recent", sa_val - rec_val)
+            else:
+                sa_val = (f.get("season_pts_avg", 0) or 0) + \
+                         (f.get("season_reb_avg", 0) or 0) + \
+                         (f.get("season_ast_avg", 0) or 0)
+                rec_val = (f.get("recent_pts_avg", 0) or 0) + \
+                          (f.get("recent_reb_avg", 0) or 0) + \
+                          (f.get("recent_ast_avg", 0) or 0)
+                f.setdefault("prop_line_vs_recent", sa_val - rec_val)
 
     # Filter to test season
     date_range = {
@@ -248,7 +292,18 @@ def print_report(results: dict) -> None:
         if not beats:
             overall_pass = False
 
-        status = "PASS" if beats else "FAIL"
+        # Bias gate: model bias must not be WORSE than season average bias.
+        # The filtered population (15+ min, 10+ games) has inherent positive
+        # bias because these players outperform their season averages.
+        # Check that model bias is within 1.0 of the baseline bias.
+        model_bias = m.get('bias', 0)
+        baseline_bias = sa.get('bias', 0)
+        excess_bias = abs(model_bias - baseline_bias)
+        bias_ok = excess_bias <= 1.0
+        if not bias_ok:
+            overall_pass = False
+
+        status = "PASS" if (beats and bias_ok) else "FAIL"
         print(f"--- {prop_type.upper()} ({sa['n']} samples) [{status}] ---")
         print(f"  {'Method':<20} {'RMSE':>8} {'MAE':>8} {'R²':>8} {'Bias':>8}")
         print(f"  {'-'*20} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
@@ -256,6 +311,8 @@ def print_report(results: dict) -> None:
         print(f"  {'Last-5 Average':<20} {l5['rmse']:>8.3f} {l5['mae']:>8.3f} {l5['r2']:>8.3f} {l5['bias']:>+8.3f}")
         print(f"  {'Model':<20} {m['rmse']:>8.3f} {m['mae']:>8.3f} {m['r2']:>8.3f} {m['bias']:>+8.3f}")
         print(f"  RMSE improvement over season avg: {imp:+.2f}%")
+        if not bias_ok:
+            print(f"  WARNING: Model excess bias {excess_bias:.3f} (model={model_bias:+.3f} vs baseline={baseline_bias:+.3f})")
         print()
 
     print("=" * 90)

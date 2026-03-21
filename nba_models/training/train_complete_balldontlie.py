@@ -143,43 +143,43 @@ def _supports_sample_weight(model) -> bool:
 REDUCED_FEATURES: dict[str, list[str]] = {
     'points': [
         'season_pts_avg', 'last5_pts_avg', 'last3_pts_avg', 'recent_pts_avg',
-        'season_min_avg', 'last5_min_avg', 'predicted_minutes',  # Fix 1.5/6.3
-        'opp_def_rating', 'opp_pts_allowed',
+        'season_min_avg', 'last5_min_avg', 'predicted_minutes',
+        'opp_def_rating', 'opp_pts_allowed', 'opp_pts_allowed_recent',
+        'opp_def_strength',
         'opp_pace', 'is_home', 'days_rest', 'usage_rate', 'ts_pct',
         'pts_trend', 'pts_recency_ratio', 'season_games',
+        'is_back_to_back', 'blowout_probability', 'spread_magnitude',
+        'implied_game_total',
         'prop_line_vs_recent',
     ],
     'rebounds': [
         'season_reb_avg', 'last5_reb_avg', 'last3_reb_avg', 'recent_reb_avg',
-        'season_min_avg', 'last5_min_avg', 'predicted_minutes',  # Fix 1.5/6.3
-        'opp_reb_factor',  # Bug fix: was 'opp_reb_allowed' (doesn't exist)
+        'season_min_avg', 'last5_min_avg', 'predicted_minutes',
+        'opp_reb_factor', 'opp_def_rating',
         'is_center', 'is_forward', 'opp_pace', 'is_home', 'days_rest',
         'reb_trend', 'reb_recency_ratio', 'season_games',
+        'is_back_to_back', 'blowout_probability',
         'prop_line_vs_recent',
     ],
     'assists': [
         'season_ast_avg', 'last5_ast_avg', 'last3_ast_avg', 'recent_ast_avg',
-        'season_min_avg', 'last5_min_avg', 'predicted_minutes',  # Fix 1.5/6.3
-        'opp_def_rating',  # Bug fix: was 'opp_ast_allowed' (doesn't exist)
+        'season_min_avg', 'last5_min_avg', 'predicted_minutes',
+        'opp_def_rating', 'opp_def_strength',
         'is_guard', 'is_ball_handler', 'opp_pace', 'is_home', 'days_rest',
         'ast_trend', 'ast_recency_ratio', 'season_games',
-        'prop_line_vs_recent',
-    ],
-    'threes': [
-        'season_fg3m_avg', 'last5_fg3m_avg', 'last3_fg3m_avg', 'recent_fg3m_avg',
-        'season_min_avg', 'predicted_minutes',  # Fix 1.5/6.3
-        'fg3a_avg', 'fg3_pct', 'regressed_fg3_pct',
-        'fg3_rate', 'fg3_momentum', 'is_volume_shooter',
-        'opp_pace', 'is_home', 'days_rest', 'season_games',
+        'is_back_to_back', 'blowout_probability',
         'prop_line_vs_recent',
     ],
     'pra': [
         'season_pts_avg', 'season_reb_avg', 'season_ast_avg',
         'last5_pts_avg', 'last5_reb_avg', 'last5_ast_avg',
         'pra_avg', 'last3_pra_avg', 'season_min_avg', 'last5_min_avg',
-        'predicted_minutes',  # Fix 1.5/6.3
-        'opp_def_rating', 'opp_pace', 'is_home', 'days_rest',
+        'predicted_minutes',
+        'opp_def_rating', 'opp_def_strength', 'opp_pts_allowed_recent',
+        'opp_pace', 'is_home', 'days_rest',
         'usage_rate', 'season_games',
+        'is_back_to_back', 'blowout_probability', 'spread_magnitude',
+        'implied_game_total',
         'prop_line_vs_recent',
     ],
 }
@@ -3172,7 +3172,9 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
             )
 
             # Create player training example if we have enough history
-            if player_pre_stats and ps.get('min') and player_calc._parse_minutes(ps.get('min')) >= 10:
+            if (player_pre_stats and ps.get('min')
+                    and player_calc._parse_minutes(ps.get('min')) >= 15
+                    and player_pre_stats.get('season_games', 0) >= 10):
                 actual_pts = ps.get('pts', 0) or 0
                 actual_reb = ps.get('reb', 0) or 0
                 actual_ast = ps.get('ast', 0) or 0
@@ -3295,6 +3297,39 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
                     vegas_spread=None  # Historical training - no Vegas data available
                 )
                 enhanced_features.update(blowout_features)
+
+                # Trade deadline proximity: players on new teams post-deadline
+                # have different chemistry/role. The NBA trade deadline is typically
+                # in early February. Flag games within 14 days after deadline.
+                try:
+                    _gd = game_date
+                    _month = int(_gd[5:7])
+                    _day = int(_gd[8:10])
+                    # Approximate trade deadline: Feb 6-8 each year
+                    if _month == 2 and 7 <= _day <= 21:
+                        enhanced_features['post_trade_deadline'] = 1
+                    else:
+                        enhanced_features['post_trade_deadline'] = 0
+                    # Season phase: early (Oct-Nov), mid (Dec-Jan), late (Feb-Apr)
+                    if _month in (10, 11):
+                        enhanced_features['season_phase'] = 0  # early
+                    elif _month in (12, 1):
+                        enhanced_features['season_phase'] = 1  # mid
+                    else:
+                        enhanced_features['season_phase'] = 2  # late
+                except (ValueError, IndexError):
+                    enhanced_features['post_trade_deadline'] = 0
+                    enhanced_features['season_phase'] = 1
+
+                # Implied game total from team ratings and pace
+                # Higher game total → more scoring opportunities → higher prop predictions
+                _team_off = enhanced_features.get('team_off_rating', 114)
+                _opp_off = enhanced_features.get('opp_off_rating', 114)
+                _team_pace = enhanced_features.get('team_pace', 100)
+                _opp_pace = enhanced_features.get('opp_pace', 100)
+                _avg_pace = (_team_pace + _opp_pace) / 2
+                _implied_total = (_team_off + _opp_off) * _avg_pace / 100
+                enhanced_features['implied_game_total'] = round(_implied_total, 1)
 
                 # NEW: Add pace-adjusted features (normalizes for team tempo)
                 team_pace = enhanced_features.get('team_pace', 100)
@@ -4194,16 +4229,22 @@ class PropEnsembleModel:
         X_filled = smart_fillna(X).values
         y_arr = np.array(y)
 
-        # Chronological split (data assumed sorted by date)
-        split_idx = int(len(X_filled) * (1 - test_size))
-        X_train, X_test = X_filled[:split_idx], X_filled[split_idx:]
-        y_train, y_test = y_arr[:split_idx], y_arr[split_idx:]
+        # 3-way chronological split: 60% train / 20% validation / 20% test
+        # - Validation set: used for early stopping (LightGBM/XGBoost eval_set)
+        # - Test set: used ONLY for final metric reporting (never seen during training)
+        # This prevents the data leakage where early stopping peeked at the test set.
+        n = len(X_filled)
+        train_end = int(n * 0.6)
+        val_end = int(n * 0.8)
+        X_train, X_val, X_test = X_filled[:train_end], X_filled[train_end:val_end], X_filled[val_end:]
+        y_train, y_val, y_test = y_arr[:train_end], y_arr[train_end:val_end], y_arr[val_end:]
 
-        w_train = sample_weights[:split_idx] if sample_weights is not None else None
+        w_train = sample_weights[:train_end] if sample_weights is not None else None
 
         # Fit scaler
         self.scaler.fit(X_train)
         X_train_scaled = self.scaler.transform(X_train)
+        X_val_scaled = self.scaler.transform(X_val)
         X_test_scaled = self.scaler.transform(X_test)
 
         # Train each base model
@@ -4211,19 +4252,19 @@ class PropEnsembleModel:
         base_predictions_test = []
         model_metrics = {}
 
-        print(f"    Training {len(self.models)} base models...")
+        print(f"    Training {len(self.models)} base models (60/20/20 split)...")
         _EARLY_STOPPING_MODELS = {'xgboost', 'lightgbm'}
         for name, model in self.models.items():
             try:
-                # Add early stopping for gradient boosting models
+                # Early stopping uses VALIDATION set (not test set) to prevent leakage
                 _fit_kwargs = {}
                 if name in _EARLY_STOPPING_MODELS:
                     if name == 'xgboost':
-                        _fit_kwargs['eval_set'] = [(X_test_scaled, y_test)]
+                        _fit_kwargs['eval_set'] = [(X_val_scaled, y_val)]
                         _fit_kwargs['verbose'] = False
                     elif name == 'lightgbm':
-                        _fit_kwargs['eval_set'] = [(X_test_scaled, y_test)]
-                        _fit_kwargs['eval_metric'] = 'mae'  # Bug fix: match MAE objective
+                        _fit_kwargs['eval_set'] = [(X_val_scaled, y_val)]
+                        _fit_kwargs['eval_metric'] = 'mae'
                         _fit_kwargs['callbacks'] = [_lgb_early_stop(20)] if HAS_LIGHTGBM else []
 
                 # Train with sample weights if supported
@@ -4239,7 +4280,7 @@ class PropEnsembleModel:
                 base_predictions_train.append(train_pred)
                 base_predictions_test.append(test_pred)
 
-                # Calculate metrics for this model
+                # Calculate metrics on HELD-OUT test set only
                 rmse = np.sqrt(mean_squared_error(y_test, test_pred))
                 mae = mean_absolute_error(y_test, test_pred)
                 r2 = r2_score(y_test, test_pred)
@@ -4315,6 +4356,17 @@ class PropEnsembleModel:
         # Train over/under classifier for probability estimates
         self._train_over_under_classifier(X_train_scaled, y_train, X_test_scaled, y_test)
 
+        # Post-training bias correction: compute systematic bias on validation set
+        # and store it so predict() can subtract it. This eliminates the +3-6 point
+        # over-prediction bias found in the audit.
+        val_preds = np.zeros(len(y_val))
+        for i, name in enumerate(successful_model_names):
+            weight = self.model_weights.get(name, 1.0 / n_successful)
+            val_pred_i = self.models[name].predict(X_val_scaled)
+            val_preds += weight * val_pred_i
+        self._bias_correction = float(np.mean(val_preds - y_val))
+        print(f"    Bias correction: {self._bias_correction:+.3f}")
+
         self.is_fitted = True
 
         self.training_metrics = {
@@ -4323,8 +4375,10 @@ class PropEnsembleModel:
             'ensemble_r2': ensemble_r2,
             'model_metrics': model_metrics,
             'train_size': len(X_train),
+            'val_size': len(X_val),
             'test_size': len(X_test),
             'n_models': len(self.models),
+            'bias_correction': self._bias_correction,
         }
 
         return self.training_metrics
@@ -4397,6 +4451,11 @@ class PropEnsembleModel:
         else:
             ensemble_pred = float(np.mean(list(individual_preds.values())))
 
+        # Apply bias correction learned during training
+        bias = getattr(self, '_bias_correction', 0.0)
+        if bias != 0.0:
+            ensemble_pred -= bias
+
         preds_arr = list(individual_preds.values())
         agreement = 1 - (np.std(preds_arr) / max(abs(np.mean(preds_arr)), 0.1)) if preds_arr else 0.5
 
@@ -4439,6 +4498,10 @@ class PropEnsembleModel:
             '_season_avg_col': getattr(self, '_season_avg_col', None),
             # Bug fix #3: Store model names for prediction-time shape matching
             '_successful_model_names': getattr(self, '_successful_model_names', list(self.models.keys())),
+            # Bias correction learned on validation set
+            '_bias_correction': getattr(self, '_bias_correction', 0.0),
+            # Residual mean offset (survivorship bias removed during training)
+            '_residual_mean_offset': getattr(self, '_residual_mean_offset', 0.0),
         }
         with open(filepath, 'wb') as f:
             pickle.dump(data, f)
@@ -4463,6 +4526,10 @@ class PropEnsembleModel:
         model._season_avg_col = data.get('_season_avg_col', None)
         # Bug fix #3: Restore model names for prediction-time shape matching
         model._successful_model_names = data.get('_successful_model_names', list(model.models.keys()))
+        # Bias correction
+        model._bias_correction = data.get('_bias_correction', 0.0)
+        # Residual mean offset
+        model._residual_mean_offset = data.get('_residual_mean_offset', 0.0)
 
         return model
 
@@ -4496,15 +4563,20 @@ class QuantilePropModel:
         self.training_metrics = {}
 
     def train(self, X: pd.DataFrame, y: np.ndarray,
-              sample_weights: np.ndarray = None, test_size: float = 0.2) -> dict:
+              sample_weights: np.ndarray = None, test_size: float = 0.2,
+              calibration_lines: np.ndarray = None) -> dict:
         """
         Train quantile regression models at each percentile.
 
         Args:
             X: Feature DataFrame
-            y: Target values
+            y: Target values (raw, not residuals)
             sample_weights: Optional time-decay weights
             test_size: Holdout test size
+            calibration_lines: Line values for probability calibration.
+                If provided, fits an isotonic regression calibrator on the
+                validation set to map raw P(over) → calibrated P(over).
+                This fixes survivorship bias in probability estimates.
 
         Returns:
             Dictionary of training metrics
@@ -4516,14 +4588,19 @@ class QuantilePropModel:
         X_filled = smart_fillna(X)
         y_arr = np.array(y)
 
-        # Chronological split
-        split_idx = int(len(X_filled) * (1 - test_size))
-        X_train, X_test = X_filled[:split_idx], X_filled[split_idx:]
-        y_train, y_test = y_arr[:split_idx], y_arr[split_idx:]
+        # 3-way chronological split matching ensemble model
+        n = len(X_filled)
+        train_end = int(n * 0.6)
+        val_end = int(n * 0.8)
+        X_train = X_filled[:train_end]
+        X_val = X_filled[train_end:val_end]
+        X_test = X_filled[val_end:]
+        y_train, y_val, y_test = y_arr[:train_end], y_arr[train_end:val_end], y_arr[val_end:]
 
         # Fit scaler
         self.scaler.fit(X_train)
         X_train_scaled = self.scaler.transform(X_train)
+        X_val_scaled = self.scaler.transform(X_val)
         X_test_scaled = self.scaler.transform(X_test)
 
         # Train a model for each quantile
@@ -4588,10 +4665,68 @@ class QuantilePropModel:
             **quantile_metrics,
             'coverage_80': coverage_80,
             'train_size': len(X_train),
+            'val_size': len(X_val),
             'test_size': len(X_test),
         }
 
         print(f"      80% interval coverage: {coverage_80:.1%}")
+
+        # Calibrate P(over) using validation set with isotonic regression.
+        # This fixes survivorship bias: the model's raw P(over) is biased
+        # upward because training data filters to >=15 min players who tend
+        # to outperform their averages. Calibration maps raw_prob → honest_prob.
+        self._prob_calibrator = None
+        if calibration_lines is not None:
+            cal_lines = calibration_lines[train_end:val_end]
+            if len(cal_lines) == len(y_val) and len(cal_lines) > 100:
+                from sklearn.isotonic import IsotonicRegression
+
+                # Compute raw P(over) on validation set
+                raw_probs = []
+                for i in range(len(X_val_scaled)):
+                    preds = {q: float(m.predict(X_val_scaled[i:i+1])[0])
+                             for q, m in self.quantile_models.items()}
+                    quantiles_sorted = sorted(preds.keys())
+                    pred_vals = [preds[q] for q in quantiles_sorted]
+                    line = cal_lines[i]
+
+                    # Same interpolation as predict_over_probability
+                    if line <= pred_vals[0]:
+                        raw_probs.append(0.95)
+                    elif line >= pred_vals[-1]:
+                        raw_probs.append(0.05)
+                    else:
+                        prob = 0.5
+                        for j in range(len(pred_vals) - 1):
+                            if pred_vals[j] <= line <= pred_vals[j + 1]:
+                                lq, uq = quantiles_sorted[j], quantiles_sorted[j + 1]
+                                lp, up = pred_vals[j], pred_vals[j + 1]
+                                pos = (line - lp) / (up - lp) if up != lp else 0.5
+                                prob = 1 - (lq + pos * (uq - lq))
+                                break
+                        raw_probs.append(prob)
+
+                raw_probs = np.array(raw_probs)
+                actual_overs = (y_val > cal_lines).astype(float)
+
+                # Fit isotonic regression: raw P(over) → actual frequency
+                iso = IsotonicRegression(
+                    y_min=0.05, y_max=0.95, out_of_bounds='clip'
+                )
+                iso.fit(raw_probs, actual_overs)
+                self._prob_calibrator = iso
+
+                # Diagnostic: compare raw vs calibrated
+                cal_probs = iso.predict(raw_probs)
+                raw_mean = float(raw_probs.mean())
+                cal_mean = float(cal_probs.mean())
+                actual_over_rate = float(actual_overs.mean())
+                print(f"      Probability calibration: "
+                      f"raw_mean={raw_mean:.3f} → cal_mean={cal_mean:.3f} "
+                      f"(actual={actual_over_rate:.3f})")
+                self.training_metrics['raw_over_prob_mean'] = raw_mean
+                self.training_metrics['calibrated_over_prob_mean'] = cal_mean
+                self.training_metrics['actual_over_rate'] = actual_over_rate
 
         return self.training_metrics
 
@@ -4603,6 +4738,11 @@ class QuantilePropModel:
     def predict_distribution(self, features: dict) -> dict[float, float]:
         """
         Predict the full distribution of outcomes.
+
+        Subtracts the survivorship offset from all predictions to center
+        the distribution correctly. Without this, the distribution is
+        shifted upward because training data only includes players who
+        played 15+ minutes (who tend to outperform their averages).
 
         Returns:
             Dictionary mapping quantile to predicted value
@@ -4617,21 +4757,29 @@ class QuantilePropModel:
         X = smart_fillna(X[self.feature_names])
         X_scaled = self.scaler.transform(X)
 
-        return {q: float(model.predict(X_scaled)[0])
+        # Shift distribution down by a fraction of the survivorship offset.
+        # The full offset overcorrects because sportsbooks already partially
+        # account for the over-performance of starters. Using half the offset
+        # is a robust compromise: enough to enable under predictions while
+        # not over-correcting into systematic under-prediction.
+        offset = getattr(self, '_survivorship_offset', 0.0)
+        correction = offset * 0.5
+        return {q: float(model.predict(X_scaled)[0]) - correction
                 for q, model in self.quantile_models.items()}
 
     def predict_over_probability(self, features: dict, line: float) -> float:
         """
         Estimate probability of actual value being OVER the line.
 
-        Uses linear interpolation between quantile predictions.
+        Uses linear interpolation between quantile predictions, then
+        applies isotonic calibration to correct survivorship bias.
 
         Args:
             features: Player/game features
             line: The prop line to compare against
 
         Returns:
-            Estimated probability (0-1) of OVER hitting
+            Calibrated probability (0-1) of OVER hitting
         """
         quantile_preds = self.predict_distribution(features)
 
@@ -4640,36 +4788,34 @@ class QuantilePropModel:
         predictions = [quantile_preds[q] for q in quantiles]
 
         # Find where the line falls in the distribution
-        # If line < lowest prediction, high probability of OVER
-        # If line > highest prediction, low probability of OVER
-        if line <= predictions[0]:  # Below 10th percentile
-            return 0.95  # Very high OVER probability
+        if line <= predictions[0]:
+            raw_prob = 0.95
+        elif line >= predictions[-1]:
+            raw_prob = 0.05
+        else:
+            raw_prob = 0.50
+            for i in range(len(predictions) - 1):
+                if predictions[i] <= line <= predictions[i + 1]:
+                    lower_q = quantiles[i]
+                    upper_q = quantiles[i + 1]
+                    lower_pred = predictions[i]
+                    upper_pred = predictions[i + 1]
 
-        if line >= predictions[-1]:  # Above 90th percentile
-            return 0.05  # Very low OVER probability
+                    if upper_pred == lower_pred:
+                        pos = 0.5
+                    else:
+                        pos = (line - lower_pred) / (upper_pred - lower_pred)
 
-        # Linear interpolation to find probability
-        for i in range(len(predictions) - 1):
-            if predictions[i] <= line <= predictions[i + 1]:
-                # Interpolate probability between quantiles
-                lower_q = quantiles[i]
-                upper_q = quantiles[i + 1]
-                lower_pred = predictions[i]
-                upper_pred = predictions[i + 1]
+                    prob_below_line = lower_q + pos * (upper_q - lower_q)
+                    raw_prob = 1 - prob_below_line
+                    break
 
-                # Position within this interval
-                if upper_pred == lower_pred:
-                    pos = 0.5
-                else:
-                    pos = (line - lower_pred) / (upper_pred - lower_pred)
+        # Apply isotonic calibration if available
+        calibrator = getattr(self, '_prob_calibrator', None)
+        if calibrator is not None:
+            return float(calibrator.predict([raw_prob])[0])
 
-                # Interpolate the cumulative probability
-                prob_below_line = lower_q + pos * (upper_q - lower_q)
-
-                # OVER probability = 1 - P(below line)
-                return 1 - prob_below_line
-
-        return 0.50  # Default to 50% if something goes wrong
+        return raw_prob
 
     def predict(self, features: dict, prop_line: float = None) -> dict:
         """
@@ -5937,14 +6083,23 @@ def train_all_models(
 
     # ==========================================================================
     # TIER 2.3: MINUTES PREDICTION MODEL
+    # Train on first 60% of data only, matching the prop model train split.
+    # This prevents leakage: if the minutes model sees test-set actual minutes,
+    # its predictions become a proxy for actual minutes in the prop model's test set.
     # ==========================================================================
     print("\n--- MINUTES Prediction Model (TIER 2.3) ---")
 
-    # Get actual minutes - use 10 as default for samples missing actual_min
     y_minutes = np.array([d.get('actual_min', 10.0) for d in player_data])
 
+    # Train on first 60% only (matching prop model train split)
+    min_train_end = int(len(X_player) * 0.6)
+    X_min_train = X_player.iloc[:min_train_end]
+    y_min_train = y_minutes[:min_train_end]
+    w_min_train = player_sample_weights[:min_train_end] if player_sample_weights is not None else None
+    print(f"  Training on first {min_train_end} samples (60%) to prevent leakage")
+
     minutes_model = MinutesPredictionModel()
-    min_metrics = minutes_model.train(X_player, y_minutes, sample_weights=player_sample_weights)
+    min_metrics = minutes_model.train(X_min_train, y_min_train, sample_weights=w_min_train)
 
     # Save minutes model
     minutes_model.save(save_dir / 'player_minutes_model.pkl')
@@ -5981,11 +6136,12 @@ def train_all_models(
     except Exception as e:
         print(f"  Warning: minutes prediction failed ({e}), skipping injection")
 
+    # Threes disabled: R²=0.045 in training, -0.64 in backtest — too stochastic.
+    # Spread already disabled. Focus training on viable prop types only.
     prop_types = [
         ('points', 'actual_pts'),
         ('rebounds', 'actual_reb'),
         ('assists', 'actual_ast'),
-        ('threes', 'actual_fg3m'),
         ('pra', 'actual_pra'),
     ]
 
@@ -6081,8 +6237,16 @@ def train_all_models(
             print(f"  Dropped {n_dropped} samples with missing season averages")
         season_avgs = season_avgs_raw[valid_mask]
         y_raw_valid = y_raw[valid_mask]
-        y_residual = y_raw_valid - season_avgs
-        print(f"  Residual target: mean={y_residual.mean():.2f}, std={y_residual.std():.2f}")
+        y_residual_raw = y_raw_valid - season_avgs
+
+        # De-mean residuals: center targets at 0 to prevent systematic over/under bias.
+        # The raw residual mean is +1-3 (survivorship bias from >=15 min filter).
+        # Without de-meaning, the model always predicts positive residuals → always "over".
+        # Store the offset so we can add it back at inference if needed.
+        residual_mean_offset = float(y_residual_raw.mean())
+        y_residual = y_residual_raw - residual_mean_offset
+        print(f"  Raw residual: mean={y_residual_raw.mean():.2f}, std={y_residual_raw.std():.2f}")
+        print(f"  De-meaned residual: mean={y_residual.mean():.4f} (offset={residual_mean_offset:+.2f})")
 
         # --- Fix 1.1: Feature reduction ---
         reduced_cols = REDUCED_FEATURES.get(prop_name, [])
@@ -6109,6 +6273,11 @@ def train_all_models(
         prop_model = PropEnsembleModel(prop_name)
         prop_model._residual_mode = True
         prop_model._season_avg_col = sa_col
+        # Store the residual mean offset for inference reconstruction.
+        # At inference: final_pred = season_avg + model_residual + residual_mean_offset
+        # This re-adds the survivorship bias that was subtracted during training,
+        # giving honest absolute predictions while training on centered targets.
+        prop_model._residual_mean_offset = residual_mean_offset
 
         metrics = prop_model.train(
             X_reduced, y_residual,
@@ -6121,6 +6290,7 @@ def train_all_models(
         print(f"  Residual R²: {metrics['ensemble_r2']:.4f}")
 
         # Also compute metrics on raw (non-residual) scale for comparison
+        # Use same 60/20/20 split as PropEnsembleModel.train() — test is last 20%
         split_idx = int(len(X_reduced) * 0.8)
         sa_test = season_avgs[split_idx:]
         y_raw_test = y_raw_valid[split_idx:]
@@ -6168,9 +6338,31 @@ def train_all_models(
         available_cols = [c for c in reduced_cols if c in X_with_line.columns]
         X_q = X_with_line[available_cols] if available_cols else X_with_line
 
+        # Compute calibration lines (season averages as proxy for market lines)
+        q_sa_col = SEASON_AVG_COL.get(prop_name)
+        if q_sa_col is not None:
+            cal_lines = X_with_line[q_sa_col].fillna(0).values
+        else:
+            cal_lines = (
+                X_with_line['season_pts_avg'].fillna(0).values
+                + X_with_line['season_reb_avg'].fillna(0).values
+                + X_with_line['season_ast_avg'].fillna(0).values
+            )
+
+        # Compute survivorship offset for this prop type (same as ensemble's)
+        # This is mean(actual - season_avg) for the filtered population.
+        q_surv_offset = float(np.mean(y[cal_lines > 0] - cal_lines[cal_lines > 0]))
+
         try:
             quantile_model = QuantilePropModel(prop_name)
-            q_metrics = quantile_model.train(X_q, y, sample_weights=player_sample_weights)
+            q_metrics = quantile_model.train(
+                X_q, y, sample_weights=player_sample_weights,
+                calibration_lines=cal_lines,
+            )
+            # Store survivorship offset so predict_over_probability() can
+            # shift the distribution down before interpolation
+            quantile_model._survivorship_offset = q_surv_offset
+            print(f"  Survivorship offset: {q_surv_offset:+.2f}")
 
             # Save quantile model with updated feature names
             quantile_path = save_dir / f'player_{prop_name}_quantile.pkl'

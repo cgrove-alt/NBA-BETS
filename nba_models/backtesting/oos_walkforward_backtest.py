@@ -166,6 +166,7 @@ def train_fresh_models(
     from train_complete_balldontlie import (
         PropEnsembleModel,
         QuantilePropModel,
+        MinutesPredictionModel,
         REDUCED_FEATURES,
         smart_fillna,
         calculate_time_decay_weights,
@@ -182,6 +183,28 @@ def train_fresh_models(
     logger.info("  Training data: %d samples (up to %s)", len(train_data), train_date_end)
 
     X_all = pd.DataFrame([d["features"] for d in train_data])
+
+    # Train minutes model on first 60% of train data (matching main pipeline)
+    # and inject predicted_minutes into ALL player_data (train + test)
+    min_train_end = int(len(train_data) * 0.6)
+    y_minutes = np.array([d.get("actual_min", 10.0) for d in train_data])
+    min_model = MinutesPredictionModel()
+    try:
+        min_model.train(
+            X_all.iloc[:min_train_end], y_minutes[:min_train_end],
+        )
+        # Predict for all data (train + future test)
+        X_full = pd.DataFrame([d["features"] for d in player_data])
+        batch = min_model.predict_batch(X_full)
+        min_preds = batch[0] if isinstance(batch, tuple) else batch
+        if min_preds is not None and len(min_preds) == len(player_data):
+            for i, d in enumerate(player_data):
+                d["features"]["predicted_minutes"] = float(min_preds[i])
+            # Re-create X_all with injected feature
+            X_all = pd.DataFrame([d["features"] for d in train_data])
+            logger.info("  Injected predicted_minutes (mean=%.1f)", min_preds.mean())
+    except Exception as e:
+        logger.warning("  Minutes model failed: %s", e)
 
     # Time-decay weights
     player_dates = [d.get("game_date", "") for d in train_data]
@@ -244,7 +267,23 @@ def train_fresh_models(
         # --- Quantile model (trains on raw target, not residual) ---
         try:
             q_model = QuantilePropModel(prop_name)
-            q_model.train(X_reduced, y_raw, sample_weights=sample_weights)
+            # Compute calibration lines (season averages)
+            _q_sa_col = SEASON_AVG_COL.get(prop_name)
+            if _q_sa_col is not None:
+                _cal_lines = X_with_line[_q_sa_col].fillna(0).values
+            else:
+                _cal_lines = (
+                    X_with_line['season_pts_avg'].fillna(0).values
+                    + X_with_line['season_reb_avg'].fillna(0).values
+                    + X_with_line['season_ast_avg'].fillna(0).values
+                )
+            q_model.train(X_reduced, y_raw, sample_weights=sample_weights,
+                          calibration_lines=_cal_lines)
+            # Compute and store survivorship offset
+            _valid = _cal_lines > 0
+            q_model._survivorship_offset = float(
+                np.mean(y_raw[_valid] - _cal_lines[_valid])
+            )
             quantile_models[prop_name] = q_model
             logger.info("    %s quantile: trained OK", prop_name)
         except Exception as exc:
@@ -356,6 +395,12 @@ def evaluate_window(window: dict) -> dict | None:
             diag["skipped_low_minutes"] += 1
             continue
 
+        # Skip bench players: require season avg minutes >= 25
+        season_min_avg = features.get("season_min_avg", 0) or 0
+        if season_min_avg < 25:
+            diag["skipped_bench_player"] += 1
+            continue
+
         for prop_type in PROP_TYPES:
             if prop_type not in ensemble_models:
                 continue
@@ -384,7 +429,7 @@ def evaluate_window(window: dict) -> dict | None:
 
             predicted_value = prediction.get("predicted_value", 0)
 
-            # If model was trained in residual mode, add season avg back
+            # If model was trained in residual mode, add season avg back (no offset)
             if getattr(model, '_residual_mode', False):
                 sa_col = getattr(model, '_season_avg_col', None)
                 if sa_col and prop_type != 'pra':

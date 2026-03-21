@@ -2239,6 +2239,11 @@ def predict_player_prop(
                                 )
                             else:
                                 season_avg = 0
+                            # DO NOT add residual_mean_offset back. The offset
+                            # represents survivorship bias (+1.87 for points) that
+                            # was removed during training. Adding it back makes
+                            # predictions always exceed sportsbook lines → always over.
+                            # The model's bias_correction already handles calibration.
                             predicted_value = season_avg + predicted_value
 
                     if 'over_probability' in result and not getattr(model_data, '_residual_mode', False):
@@ -2305,14 +2310,27 @@ def predict_player_prop(
                 # Derive player-specific sigma from quantile spread
                 quantile_sigma = compute_quantile_sigma(pred_low, pred_high, prop_type)
                 effective_sigma = quantile_sigma
+
+                # Use quantile model's interpolation-based probability instead of
+                # norm.cdf heuristic. This gives principled P(X > line) from the
+                # actual predicted distribution, not a Gaussian assumption.
+                if quantile_model_obj and hasattr(quantile_model_obj, 'predict_over_probability'):
+                    try:
+                        over_prob = quantile_model_obj.predict_over_probability(features, line)
+                    except Exception:
+                        # Fall back to norm.cdf if quantile prob fails
+                        bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
+                        z_score = (predicted_value + bias_fix - line) / effective_sigma
+                        over_prob = float(norm.cdf(z_score))
         except Exception:
             logger.warning("Quantile model failed for %s %s", player_name, prop_type, exc_info=True)
 
     # Save original prediction for total adjustment cap
     original_predicted_value = predicted_value
 
-    # Recalculate over_prob with quantile-derived sigma and bias correction
-    if predicted_value is not None:
+    # Recalculate over_prob with quantile-derived sigma ONLY if quantile model
+    # didn't already set it via predict_over_probability above
+    if predicted_value is not None and not (quantile_model_dict and features and use_api_features):
         bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
         z_score = (predicted_value + bias_fix - line) / effective_sigma
         over_prob = float(norm.cdf(z_score))
@@ -2336,6 +2354,10 @@ def predict_player_prop(
                 avg_minutes = features.get('season_min_avg', 0) or features.get('recent_min_avg', 0) or 0
 
             predicted_minutes = minutes_dist.get('p50', avg_minutes)
+
+            # DNP filter: skip predictions for players predicted to play < 15 minutes
+            if 0 < predicted_minutes < 15:
+                return None
 
             # Only adjust if we have meaningful baseline and prediction
             if avg_minutes > 10 and predicted_minutes > 0:
@@ -2574,7 +2596,71 @@ def predict_player_prop(
             if features is not None and isinstance(features, dict):
                 _season_games = features.get('season_games')
 
-            # over_prob comes from quantile-derived CDF (norm.cdf(z_score))
+            # Gate: only bet on starter-level players (predicted minutes >= 25)
+            _pred_mins = minutes_dist.get('p50') if minutes_dist else None
+            if _pred_mins is not None and _pred_mins < 25:
+                bet_recommendation = 'PASS'
+                suggested_bet_size = 0.0
+                bet_filter_result = {
+                    'should_bet': False,
+                    'reason': f'Predicted minutes {_pred_mins:.0f} < 25 (starter-level gate)',
+                    'tier': 'no_bet',
+                }
+                return {
+                    'player_name': player_name,
+                    'player_id': player_id,
+                    'prop_type': prop_type,
+                    'line': line,
+                    'predicted_value': predicted_value,
+                    'over_probability': over_prob,
+                    'confidence_score': 50.0,
+                    'edge_quality_tier': 'none',
+                    'suggested_bet_size': 0.0,
+                    'bet_recommendation': 'PASS',
+                    'signal': 'PASS',
+                    'bet_filter': bet_filter_result,
+                    'bet_filter_passed': False,
+                    'bet_filter_tier': 'no_bet',
+                    'predicted_minutes': _pred_mins,
+                }
+
+            # Narrow-interval gate: only bet when the quantile model's 80% CI
+            # width is less than 2x the edge. If uncertainty is too wide relative
+            # to edge, the signal is drowned in noise.
+            if pred_low is not None and pred_high is not None and predicted_value is not None:
+                ci_width_80 = pred_high - pred_low  # 10th to 90th percentile
+                edge_abs = abs(predicted_value - line)
+                if edge_abs > 0 and ci_width_80 > 2.0 * edge_abs:
+                    bet_recommendation = 'PASS'
+                    suggested_bet_size = 0.0
+                    bet_filter_result = {
+                        'should_bet': False,
+                        'reason': (
+                            f'CI width {ci_width_80:.1f} > 2x edge {edge_abs:.1f} '
+                            f'(narrow-interval gate)'
+                        ),
+                        'tier': 'no_bet',
+                    }
+                    # Skip evaluate_bet entirely — this is clearly noise
+                    return {
+                        'player_name': player_name,
+                        'player_id': player_id,
+                        'prop_type': prop_type,
+                        'line': line,
+                        'predicted_value': predicted_value,
+                        'over_probability': over_prob,
+                        'confidence_score': 50.0,
+                        'edge_quality_tier': 'none',
+                        'suggested_bet_size': 0.0,
+                        'bet_recommendation': 'PASS',
+                        'signal': 'PASS',
+                        'bet_filter': bet_filter_result,
+                        'bet_filter_passed': False,
+                        'bet_filter_tier': 'no_bet',
+                        'predicted_minutes': minutes_dist.get('p50') if minutes_dist else None,
+                    }
+
+            # over_prob comes from quantile-derived CDF or predict_over_probability
             # and is already calibrated — skip temperature scaling.
             bet_filter_result = _evaluate_bet(
                 prop_type=prop_type.lower(),

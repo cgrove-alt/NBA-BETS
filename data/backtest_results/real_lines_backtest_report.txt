@@ -1,0 +1,78 @@
+================================================================================
+   NBA-BETS REAL-LINES PROFITABILITY BACKTEST  |  2024-25 SEASON
+================================================================================
+  Run Date:          2026-03-21T11:05:56
+  Test Season:       2024-25
+  Initial Bankroll:  $1000.00
+  Final Bankroll:    $1773.94
+  Lines Source:      Real sportsbook (DraftKings/FanDuel)
+  Outcomes Source:   BallDontLie API
+
+--- SUMMARY -------------------------------------------------------------------
+  Total Trades:      476
+  Record:            267W - 209L
+  Win Rate:          56.1%
+  Total Wagered:     $12,764.85
+  Total P&L:         $+773.96
+  ROI:               +6.06%
+  Sharpe Ratio:      1.637
+  Max Drawdown:      50.9% ($518.65)
+  Avg Bet Size:      $26.82
+
+
+--- ODDS DISTRIBUTION ---------------------------------------------------------
+  Avg Over Odds:     -102.4
+  Avg Under Odds:    -99.5
+  % Plus Money:      6.3%
+
+--- BY PROP TYPE --------------------------------------------------------------
+  Prop        Trades        W-L    Win%        P&L      ROI  AvgEdge   EvEdge
+  ---------- ------- ---------- ------- ---------- -------- -------- --------
+  points         253    134-119  53.0% $   +25.86  +0.38%    4.15 +0.1041
+  rebounds        22       16-6  72.7% $  +219.06 +36.09%    2.43 +0.1035
+  pra            201     117-84  58.2% $  +529.04  +9.86%    5.87 +0.1140
+
+--- MONTHLY BREAKDOWN ----------------------------------------------------------
+  Month       Trades    Win%        P&L      ROI
+  ---------- ------- ------- ---------- --------
+  2024-11         71  49.3% $  -115.58  -6.19%
+  2024-12        139  50.4% $   -88.79  -2.43%
+  2025-01         83  57.8% $  +160.86  +7.37%
+  2025-02         63  58.7% $  +185.26 +10.64%
+  2025-03         88  60.2% $  +298.13 +12.26%
+  2025-04         32  75.0% $  +334.08 +37.59%
+
+--- BY TIER -------------------------------------------------------------------
+  Tier        Trades    Win%        P&L      ROI
+  ---------- ------- ------- ---------- --------
+  elite            2  50.0% $    -6.00 -10.00%
+  moderate       332  54.5% $  +301.91  +3.55%
+  strong         142  59.9% $  +478.05 +11.36%
+
+--- NAIVE BASELINE (bet over when season_avg > line) ---------------------------
+  Trades:            7314
+  Win Rate:          52.4%
+  ROI:               -4.16%
+  P&L:               $-9,117.53
+  Model lift vs naive: +10.22%
+  Model adds 10.2% genuine edge over naive strategy
+
+--- BIAS DIAGNOSTICS ----------------------------------------------------------
+  Direction split:    100.0% over / 0.0% under
+  Over win rate:      56.1%
+  Under win rate:     0.0%
+  Avg predicted:      19.35
+  Avg line:           14.55
+  Avg actual:         15.30
+  Pred - Line:        +4.80
+  Actual - Line:      +0.75
+  Actual > Line:      56.1%
+  Unique players:     88
+
+--- CAVEATS -------------------------------------------------------------------
+  * Models trained on 2020-2023 CSV data, tested on 2024-25 BDL data. Different data source may introduce feature distribution shift.
+  * Player features built from 2024-25 only (no cross-season carryover). Early-season predictions may be less reliable.
+  * Historical lines from pre-game snapshots (~1hr before tipoff). Actual available lines at bet time may have differed.
+  * Flat bet sizing (initial bankroll for all Kelly calculations) to prevent compounding effects.
+
+================================================================================

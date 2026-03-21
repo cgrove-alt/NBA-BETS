@@ -198,6 +198,7 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
     from train_complete_balldontlie import (
         initialize_league_averages,
         process_games_for_training,
+        MinutesPredictionModel,
     )
     from nba_betting.prediction_pipeline import evaluate_bet
 
@@ -226,6 +227,32 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
     initialize_league_averages(tracker_games)
 
     _, player_data = process_games_for_training(games, player_stats_by_game)
+
+    # Inject predicted_minutes and prop_line_vs_recent to match training features
+    _model_dir = model_dir or Path(ROOT) / "models"
+    _min_path = _model_dir / "player_minutes_model.pkl"
+    if _min_path.exists():
+        logger.info("Injecting predicted_minutes from minutes model...")
+        _min_model = MinutesPredictionModel.load(_min_path)
+        _X_all = pd.DataFrame([d["features"] for d in player_data])
+        try:
+            _batch = _min_model.predict_batch(_X_all)
+            _min_preds = _batch[0] if isinstance(_batch, tuple) else _batch
+            if _min_preds is not None and len(_min_preds) == len(player_data):
+                for _i, _d in enumerate(player_data):
+                    _d["features"]["predicted_minutes"] = float(_min_preds[_i])
+                logger.info("Injected predicted_minutes (mean=%.1f)", _min_preds.mean())
+        except Exception as _e:
+            logger.warning("Failed to inject predicted_minutes: %s", _e)
+
+    for _d in player_data:
+        _f = _d["features"]
+        for _sa, _rec in [
+            ("season_pts_avg", "recent_pts_avg"),
+            ("season_reb_avg", "recent_reb_avg"),
+            ("season_ast_avg", "recent_ast_avg"),
+        ]:
+            _f.setdefault("prop_line_vs_recent", (_f.get(_sa, 0) or 0) - (_f.get(_rec, 0) or 0))
 
     # Filter to test season (Oct 2023 – Apr 2024)
     test_data = [
@@ -285,6 +312,12 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
             diag["skipped_low_minutes"] += 1
             continue
 
+        # Skip bench players: require season avg minutes >= 25
+        season_min_avg = features.get("season_min_avg", 0) or 0
+        if season_min_avg < 25:
+            diag["skipped_bench_player"] += 1
+            continue
+
         diag["eligible_samples"] += 1
 
         player_candidates: list[dict] = []
@@ -318,7 +351,7 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
 
             predicted_value = prediction.get("predicted_value", 0)
 
-            # If model was trained in residual mode, add season avg back
+            # If model was trained in residual mode, add season avg back (no offset)
             if getattr(model, '_residual_mode', False):
                 sa_col = getattr(model, '_season_avg_col', None)
                 if sa_col and prop_type != 'pra':

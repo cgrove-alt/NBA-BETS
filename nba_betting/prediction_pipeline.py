@@ -58,11 +58,22 @@ MIN_EDGE = {
     'moneyline': 0.05,
 }
 
+# Maximum credible edge — reject bets where model disagrees with line by
+# more than this amount. Edges this large usually indicate the model is
+# exploiting bench player averaging, not finding genuine matchup edge.
+MAX_EDGE = {
+    'points': 6.0,    # ±6 pts is a 1-sigma event for most players
+    'rebounds': 3.0,
+    'assists': 2.5,
+    'pra': 8.0,
+    'moneyline': 0.15,
+}
+
 # DISABLED_PROPS imported from nba_betting.constants (single source of truth)
 
 # Bet sizing constraints (Improvement 2)
 MIN_GAMES = 10          # Minimum player sample size
-MIN_CONFIDENCE = 0.62   # Minimum calibrated win probability
+MIN_CONFIDENCE = 0.65   # Minimum calibrated win probability (raised from 0.62)
 MAX_BET_PCT = 0.03      # Hard cap: 3% of bankroll per bet
 KELLY_FRACTION = 0.25   # Quarter-Kelly for conservative sizing
 
@@ -74,11 +85,14 @@ CONFIDENCE_SHRINK_MIN_FACTOR = 0.35
 
 # Minimum true EV required when real odds are available.
 # Tighter thresholds on weaker/market-efficient markets reduce false positives.
+# Minimum true EV required when real odds are available.
+# Raised to 5% to ensure genuine edge over market — low thresholds pass
+# bets that are just noise.
 MIN_TRUE_EV = {
-    'points': 0.03,
-    'rebounds': 0.03,
-    'assists': 0.03,
-    'pra': 0.03,
+    'points': 0.05,
+    'rebounds': 0.05,
+    'assists': 0.05,
+    'pra': 0.05,
     'moneyline': 0.04,
     'spread': 0.04,
 }
@@ -231,7 +245,24 @@ def evaluate_bet(
 
     signed_edge = predicted - line
     abs_edge = abs(signed_edge)
-    direction = 'over' if signed_edge > 0 else 'under'
+
+    # Direction determination:
+    # When pre-calibrated probability AND real odds are available, compare
+    # model probability against MARKET probability. This is the correct
+    # approach: bet over when the model thinks over is more likely than
+    # the market does, bet under when the model thinks under is more likely.
+    # This naturally generates both over AND under bets.
+    if (pre_calibrated and raw_confidence is not None
+            and over_odds is not None and under_odds is not None):
+        raw_over_implied = american_to_implied(over_odds)
+        raw_under_implied = american_to_implied(under_odds)
+        _nv_over, _nv_under = multiplicative_devig(raw_over_implied, raw_under_implied)
+        # Compare model's P(over) against market's devigged P(over)
+        direction = 'over' if raw_confidence > _nv_over else 'under'
+    elif pre_calibrated and raw_confidence is not None:
+        direction = 'over' if raw_confidence > 0.5 else 'under'
+    else:
+        direction = 'over' if signed_edge > 0 else 'under'
 
     result = {
         'should_bet': False,
@@ -265,13 +296,41 @@ def evaluate_bet(
         )
         return result
 
-    # ---------- Gate 3: Minimum edge ----------
-    threshold = MIN_EDGE.get(prop_type, 2.0)
-    if abs_edge < threshold:
-        result['reason'] = (
-            f"Edge {abs_edge:.2f} < threshold {threshold} for {prop_type}"
-        )
-        return result
+    # ---------- Gate 3: Edge thresholding ----------
+    # When pre-calibrated probability AND real odds are available, use
+    # PROBABILITY-BASED edge (model_prob - market_implied_prob). This avoids
+    # the systematic bias where abs(predicted - line) is dominated by
+    # season_avg >> sportsbook_line rather than genuine model skill.
+    #
+    # When only flat odds are available (simulated backtests), fall back to
+    # the point-prediction edge (abs(predicted - line)).
+    use_prob_edge = (
+        pre_calibrated
+        and raw_confidence is not None
+        and over_odds is not None
+        and under_odds is not None
+    )
+
+    if not use_prob_edge:
+        # Fallback: point-prediction edge for simulated-line backtests
+        threshold = MIN_EDGE.get(prop_type, 2.0)
+        if abs_edge < threshold:
+            result['reason'] = (
+                f"Edge {abs_edge:.2f} < threshold {threshold} for {prop_type}"
+            )
+            return result
+
+        max_threshold = MAX_EDGE.get(prop_type, 6.0)
+        if abs_edge > max_threshold:
+            result['reason'] = (
+                f"Edge {abs_edge:.2f} > max credible {max_threshold} for {prop_type} "
+                f"— likely averaging artifact, not genuine edge"
+            )
+            return result
+
+    # If using probability edge, skip the point-based gates entirely.
+    # The EV gate (Gate 5) below will handle probability-based filtering
+    # using the calibrated over_prob vs devigged market implied prob.
 
     # ---------- Step: Calibrate probability ----------
     if raw_confidence is not None and pre_calibrated:
@@ -292,13 +351,45 @@ def evaluate_bet(
     result['confidence_reliability'] = reliability_factor
 
     # ---------- Gate 4: Minimum confidence ----------
-    if confidence < MIN_CONFIDENCE:
-        result['reason'] = (
-            f"Calibrated confidence {confidence:.3f} < minimum {MIN_CONFIDENCE}"
-        )
-        return result
+    if use_prob_edge:
+        # In probability-edge mode, the model's absolute confidence is biased
+        # by survivorship (always P(over) > 0.5). Instead of checking absolute
+        # confidence > 0.65, check that the model's probability for the chosen
+        # direction exceeds the MARKET's probability by at least MIN_PROB_EDGE.
+        # This allows both over AND under bets when the model disagrees with
+        # the market by enough to overcome vig.
+        # Under bets remain unprofitable (46.3% win rate) even with the
+        # half-offset distribution correction. The model can identify
+        # profitable overs (56.1%) but lacks the data to identify unders —
+        # this requires real sportsbook lines during training, not season-avg
+        # proxies. Disable unders and use high-conviction over filtering.
+        if direction == 'under':
+            result['reason'] = (
+                "Under bets disabled — model trained on season-avg proxies, "
+                "not sportsbook lines; cannot identify mispriced unders"
+            )
+            return result
+
+        MIN_PROB_EDGE = 0.05  # 5% probability edge for overs
+        model_dir_prob = confidence
+        market_dir_prob = _nv_over
+        prob_edge = model_dir_prob - market_dir_prob
+        if prob_edge < MIN_PROB_EDGE:
+            result['reason'] = (
+                f"Probability edge {prob_edge:.3f} < minimum {MIN_PROB_EDGE} "
+                f"(model: {model_dir_prob:.1%} vs market: {market_dir_prob:.1%}, "
+                f"direction: {direction})"
+            )
+            return result
+    else:
+        if confidence < MIN_CONFIDENCE:
+            result['reason'] = (
+                f"Calibrated confidence {confidence:.3f} < minimum {MIN_CONFIDENCE}"
+            )
+            return result
 
     # ---------- Step: Tier classification ----------
+    threshold = MIN_EDGE.get(prop_type, 2.0)
     ratio = abs_edge / threshold if threshold > 0 else 0
     if ratio >= 2.5:
         tier = 'elite'

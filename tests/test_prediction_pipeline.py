@@ -20,8 +20,8 @@ def test_confidence_shrink_respects_sample_size():
 
 
 def test_disabled_props_rejected():
-    """Fix 5.2: All prop types are disabled until they beat baseline."""
-    for prop_type in ["points", "rebounds", "assists", "threes", "pra"]:
+    """Disabled prop types should be rejected."""
+    for prop_type in ["assists", "threes", "spread"]:
         result = evaluate_bet(
             prop_type=prop_type,
             predicted=30.0,

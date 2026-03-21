@@ -61,7 +61,7 @@ INITIAL_BANKROLL = 1000.0
 PROP_TYPES = ["points", "rebounds", "assists", "pra"]
 TEST_SEASON_LABEL = "2024-25"
 TEST_SEASON_INT = 2024
-CONTEXT_SEASONS = ["2024-25"]
+CONTEXT_SEASONS = ["2023-24", "2024-25"]
 LINES_DIR = os.path.join(ROOT, "data", "historical_lines")
 OUTPUT_DIR = os.path.join(ROOT, "data", "backtest_results")
 MIN_MINUTES = 15
@@ -380,6 +380,7 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
     from train_complete_balldontlie import (
         initialize_league_averages,
         process_games_for_training,
+        MinutesPredictionModel,
     )
     from nba_betting.prediction_pipeline import evaluate_bet
 
@@ -416,6 +417,32 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
 
     _, player_data = process_games_for_training(games, player_stats_by_game)
 
+    # Inject predicted_minutes and prop_line_vs_recent to match training features
+    _model_dir = model_dir or Path(ROOT) / "models"
+    _min_path = _model_dir / "player_minutes_model.pkl"
+    if _min_path.exists():
+        logger.info("Injecting predicted_minutes from minutes model...")
+        _min_model = MinutesPredictionModel.load(_min_path)
+        _X_all = pd.DataFrame([d["features"] for d in player_data])
+        try:
+            _batch = _min_model.predict_batch(_X_all)
+            _min_preds = _batch[0] if isinstance(_batch, tuple) else _batch
+            if _min_preds is not None and len(_min_preds) == len(player_data):
+                for _i, _d in enumerate(player_data):
+                    _d["features"]["predicted_minutes"] = float(_min_preds[_i])
+                logger.info("Injected predicted_minutes (mean=%.1f)", _min_preds.mean())
+        except Exception as _e:
+            logger.warning("Failed to inject predicted_minutes: %s", _e)
+
+    for _d in player_data:
+        _f = _d["features"]
+        for _sa, _rec in [
+            ("season_pts_avg", "recent_pts_avg"),
+            ("season_reb_avg", "recent_reb_avg"),
+            ("season_ast_avg", "recent_ast_avg"),
+        ]:
+            _f.setdefault("prop_line_vs_recent", (_f.get(_sa, 0) or 0) - (_f.get(_rec, 0) or 0))
+
     # Filter to test season (Oct 2024 – Jun 2025)
     test_data = [
         p
@@ -437,12 +464,53 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
     logger.info("Step 4/6: Loading historical sportsbook lines ...")
     lines_by_date = load_historical_lines()
 
-    # ── 5. Load models ─────────────────────────────────────────────────
-    logger.info("Step 5/6: Loading trained models ...")
-    ensemble_models, quantile_models = load_models(model_dir=model_dir)
-    if not ensemble_models and not quantile_models:
-        logger.error("No models loaded — cannot run backtest.")
-        return None
+    # ── 5. Load or train models ────────────────────────────────────────
+    oos_mode = getattr(args, "oos", False)
+
+    if oos_mode:
+        # TRUE OUT-OF-SAMPLE: train fresh models on data BEFORE test season.
+        # This trains on 2021-2024 CSV data and tests on 2024-25 real lines.
+        logger.info("Step 5/6: OOS MODE — training fresh models on pre-2024 data ...")
+        from nba_models.backtesting.oos_walkforward_backtest import train_fresh_models
+
+        # Also load CSV player stats for pre-2024 seasons (training data)
+        train_seasons = ["2021-22", "2022-23", "2023-24"]
+        csv_games = load_team_games(train_seasons, team_id_map, team_meta)
+        csv_game_ids = {g["id"] for g in csv_games}
+        csv_player_stats = load_player_stats(csv_game_ids, train_seasons, team_id_map)
+
+        logger.info("  CSV training data: %d games", len(csv_games))
+
+        # Build training features from CSV data
+        _tracker_train = [
+            {"game_date": g["date"], "home_score": g["home_team_score"],
+             "away_score": g["visitor_team_score"]}
+            for g in csv_games
+        ]
+        initialize_league_averages(_tracker_train)
+        _, train_player_data = process_games_for_training(csv_games, csv_player_stats)
+        logger.info("  Training samples: %d", len(train_player_data))
+
+        # Train fresh models using OOS walk-forward infrastructure
+        train_date_end = "2024-06-30"  # Train on data up to end of 2023-24 season
+        ensemble_models, quantile_models = train_fresh_models(
+            train_player_data, train_date_end
+        )
+
+        if not ensemble_models:
+            logger.error("No models trained — cannot run backtest.")
+            return None
+        logger.info("  Trained fresh models: %s", list(ensemble_models.keys()))
+
+        # Re-initialize league averages for the full context (train + test)
+        initialize_league_averages(tracker_games)
+    else:
+        logger.info("Step 5/6: Loading pre-trained models ...")
+        ensemble_models, quantile_models = load_models(model_dir=model_dir)
+        if not ensemble_models and not quantile_models:
+            logger.error("No models loaded — cannot run backtest.")
+            return None
+
     logger.info("Ensemble: %s | Quantile: %s",
                 list(ensemble_models.keys()), list(quantile_models.keys()))
 
@@ -453,6 +521,10 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
     trades: list[dict] = []
     daily_bankroll: dict[str, float] = {}
     diag = defaultdict(int)
+
+    # Naive baseline: bet "over" on every eligible prop where season_avg > line
+    naive_trades: list[dict] = []
+    naive_bankroll = INITIAL_BANKROLL
 
     sim_start = _time.time()
     sorted_dates = sorted(lines_by_date.keys())
@@ -512,7 +584,60 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
                     diag["skip_low_games"] += 1
                     continue
 
+                # Skip bench players: require season avg minutes >= 25
+                # Bench player lines are set far below their averages,
+                # creating false edge that doesn't reflect genuine prediction skill.
+                season_min_avg = features.get("season_min_avg", 0) or 0
+                if season_min_avg < 25:
+                    diag["skip_bench_player"] += 1
+                    continue
+
                 diag[f"eligible_{prop_type}"] += 1
+
+                # --- Naive baseline: bet over if season_avg > line ---
+                sa_key_map = {
+                    "points": "season_pts_avg",
+                    "rebounds": "season_reb_avg",
+                    "assists": "season_ast_avg",
+                    "pra": None,
+                }
+                sa_key = sa_key_map.get(prop_type)
+                if sa_key:
+                    naive_season_avg = features.get(sa_key, 0) or 0
+                else:
+                    naive_season_avg = (
+                        (features.get("season_pts_avg", 0) or 0)
+                        + (features.get("season_reb_avg", 0) or 0)
+                        + (features.get("season_ast_avg", 0) or 0)
+                    )
+
+                actual_map_naive = {
+                    "points": sample.get("actual_pts", 0),
+                    "rebounds": sample.get("actual_reb", 0),
+                    "assists": sample.get("actual_ast", 0),
+                    "pra": sample.get("actual_pra", 0),
+                }
+                naive_actual = actual_map_naive.get(prop_type, 0)
+
+                if naive_season_avg > prop_line and naive_actual != prop_line:
+                    naive_won = naive_actual > prop_line
+                    naive_bet_size = 30.0
+                    if over_odds and over_odds != 0:
+                        if over_odds > 0:
+                            naive_payout = naive_bet_size * over_odds / 100.0
+                        else:
+                            naive_payout = naive_bet_size * 100.0 / abs(over_odds)
+                    else:
+                        naive_payout = naive_bet_size * 100.0 / 110.0
+                    naive_pnl = naive_payout if naive_won else -naive_bet_size
+                    naive_bankroll += naive_pnl
+                    naive_trades.append({
+                        "won": naive_won,
+                        "pnl": naive_pnl,
+                        "bet_size": naive_bet_size,
+                        "date": game_date,
+                        "prop_type": prop_type,
+                    })
 
                 # Model prediction
                 if prop_type not in ensemble_models:
@@ -529,6 +654,18 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
                     continue
 
                 predicted_value = prediction.get("predicted_value", 0)
+
+                # If model was trained in residual mode, add season avg back (no offset)
+                if getattr(model, '_residual_mode', False):
+                    sa_col = getattr(model, '_season_avg_col', None)
+                    if sa_col and prop_type != 'pra':
+                        predicted_value = features.get(sa_col, 0) + predicted_value
+                    elif prop_type == 'pra':
+                        predicted_value = (
+                            features.get('season_pts_avg', 0)
+                            + features.get('season_reb_avg', 0)
+                            + features.get('season_ast_avg', 0)
+                        ) + predicted_value
 
                 # Get calibrated over-probability from quantile model
                 over_prob = None
@@ -683,12 +820,42 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
         len(trades), bankroll,
     )
 
+    # ── Naive baseline summary ────────────────────────────────────────
+    if naive_trades:
+        naive_total = len(naive_trades)
+        naive_wins = sum(1 for t in naive_trades if t["won"])
+        naive_wagered = sum(t["bet_size"] for t in naive_trades)
+        naive_pnl_total = sum(t["pnl"] for t in naive_trades)
+        naive_wr = naive_wins / naive_total if naive_total > 0 else 0
+        naive_roi = naive_pnl_total / naive_wagered if naive_wagered > 0 else 0
+        logger.info("=== NAIVE BASELINE (bet over when season_avg > line) ===")
+        logger.info("  Trades: %d | Win Rate: %.1f%% | ROI: %+.2f%% | P&L: $%+.2f",
+                     naive_total, naive_wr * 100, naive_roi * 100, naive_pnl_total)
+
     # ── Report ─────────────────────────────────────────────────────────
     results = generate_report(trades, daily_bankroll)
     if results:
+        # Add naive baseline to results
+        if naive_trades:
+            results["naive_baseline"] = {
+                "trades": naive_total,
+                "wins": naive_wins,
+                "win_rate": round(naive_wr, 4),
+                "total_wagered": round(naive_wagered, 2),
+                "total_pnl": round(naive_pnl_total, 2),
+                "roi": round(naive_roi, 4),
+            }
+
         results["diagnostics"] = {
             k: v for k, v in diag.items() if not k.startswith("_")
         }
+
+        # Re-generate text report now that naive_baseline is included
+        report = _format_text_report(results)
+        txt_path = os.path.join(OUTPUT_DIR, "real_lines_backtest_report.txt")
+        with open(txt_path, "w") as f:
+            f.write(report)
+
     return results
 
 
@@ -840,6 +1007,29 @@ def generate_report(
         "bankroll_curve": dict(sorted(daily_bankroll.items())),
     }
 
+    # Bias diagnostics — detect systematic issues
+    over_trades = df[df["direction"] == "over"]
+    under_trades = df[df["direction"] == "under"]
+    results["bias_diagnostics"] = {
+        "over_pct": round(len(over_trades) / total, 4) if total > 0 else 0,
+        "under_pct": round(len(under_trades) / total, 4) if total > 0 else 0,
+        "over_win_rate": round(float(over_trades["won"].mean()), 4) if len(over_trades) > 0 else 0,
+        "under_win_rate": round(float(under_trades["won"].mean()), 4) if len(under_trades) > 0 else 0,
+        "avg_predicted": round(float(df["predicted"].mean()), 2),
+        "avg_line": round(float(df["prop_line"].mean()), 2),
+        "avg_actual": round(float(df["actual"].mean()), 2),
+        "pred_minus_line": round(float((df["predicted"] - df["prop_line"]).mean()), 2),
+        "actual_minus_line": round(float((df["actual"] - df["prop_line"]).mean()), 2),
+        "actual_over_line_pct": round(float((df["actual"] > df["prop_line"]).mean()), 4),
+        "unique_players": int(df["player"].nunique()),
+    }
+
+    # Save trade log for analysis
+    trade_log_path = os.path.join(OUTPUT_DIR, "real_lines_trade_log.json")
+    with open(trade_log_path, "w") as f:
+        json.dump(trades, f, indent=2)
+    logger.info("Trade log → %s (%d trades)", trade_log_path, len(trades))
+
     # Save JSON
     json_path = os.path.join(OUTPUT_DIR, "real_lines_backtest_results.json")
     with open(json_path, "w") as f:
@@ -948,6 +1138,40 @@ def _format_text_report(results: dict) -> str:
         )
 
     lines.append("")
+    # Naive baseline comparison
+    nb = results.get("naive_baseline", {})
+    if nb:
+        lines.append("--- NAIVE BASELINE (bet over when season_avg > line) " + "-" * 27)
+        lines.append(f"  Trades:            {nb.get('trades', 0)}")
+        lines.append(f"  Win Rate:          {nb.get('win_rate', 0):.1%}")
+        lines.append(f"  ROI:               {nb.get('roi', 0):+.2%}")
+        lines.append(f"  P&L:               ${nb.get('total_pnl', 0):+,.2f}")
+        model_roi = s.get("roi", 0)
+        naive_roi = nb.get("roi", 0)
+        lift = model_roi - naive_roi
+        lines.append(f"  Model lift vs naive: {lift:+.2%}")
+        if lift < 0.02:
+            lines.append("  *** Model does NOT beat naive baseline by 2%+ — no genuine edge ***")
+        else:
+            lines.append(f"  Model adds {lift:.1%} genuine edge over naive strategy")
+        lines.append("")
+
+    # Bias diagnostics
+    bd = results.get("bias_diagnostics", {})
+    if bd:
+        lines.append("--- BIAS DIAGNOSTICS " + "-" * 58)
+        lines.append(f"  Direction split:    {bd.get('over_pct', 0):.1%} over / {bd.get('under_pct', 0):.1%} under")
+        lines.append(f"  Over win rate:      {bd.get('over_win_rate', 0):.1%}")
+        lines.append(f"  Under win rate:     {bd.get('under_win_rate', 0):.1%}")
+        lines.append(f"  Avg predicted:      {bd.get('avg_predicted', 0):.2f}")
+        lines.append(f"  Avg line:           {bd.get('avg_line', 0):.2f}")
+        lines.append(f"  Avg actual:         {bd.get('avg_actual', 0):.2f}")
+        lines.append(f"  Pred - Line:        {bd.get('pred_minus_line', 0):+.2f}")
+        lines.append(f"  Actual - Line:      {bd.get('actual_minus_line', 0):+.2f}")
+        lines.append(f"  Actual > Line:      {bd.get('actual_over_line_pct', 0):.1%}")
+        lines.append(f"  Unique players:     {bd.get('unique_players', 0)}")
+        lines.append("")
+
     lines.append("--- CAVEATS " + "-" * 67)
     for caveat in results.get("caveats", []):
         lines.append(f"  * {caveat}")
@@ -1049,6 +1273,11 @@ def main() -> int:
         type=str,
         default=None,
         help="Custom model directory (default: models/)",
+    )
+    parser.add_argument(
+        "--oos",
+        action="store_true",
+        help="True OOS mode: train fresh models on pre-2024 data only",
     )
     args = parser.parse_args()
 
