@@ -1,0 +1,1592 @@
+{
+  "date": "2024-04-06",
+  "games": [
+    {
+      "bdl_game_id": 22301127,
+      "odds_api_event_id": "06d0be459ad524173cb82a9f227323ef",
+      "home_team": "Los Angeles Lakers",
+      "away_team": "Cleveland Cavaliers",
+      "home_abbrev": "LAL",
+      "away_abbrev": "CLE",
+      "commence_time": "2024-04-06T19:30:00Z",
+      "snapshot_timestamp": "2024-04-06T18:30:00Z",
+      "player_props": [
+        {
+          "player_name": "Anthony Davis",
+          "prop_type": "assists",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": -135,
+          "under_odds": 105
+        },
+        {
+          "player_name": "Austin Reaves",
+          "prop_type": "assists",
+          "line": 5.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Caris LeVert",
+          "prop_type": "assists",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "D'Angelo Russell",
+          "prop_type": "assists",
+          "line": 5.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Darius Garland",
+          "prop_type": "assists",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": -145,
+          "under_odds": 114
+        },
+        {
+          "player_name": "Donovan Mitchell",
+          "prop_type": "assists",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -140,
+          "under_odds": 110
+        },
+        {
+          "player_name": "Evan Mobley",
+          "prop_type": "assists",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": 145,
+          "under_odds": -190
+        },
+        {
+          "player_name": "Jarrett Allen",
+          "prop_type": "assists",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": 150,
+          "under_odds": -195
+        },
+        {
+          "player_name": "LeBron James",
+          "prop_type": "assists",
+          "line": 7.5,
+          "bookmaker": "draftkings",
+          "over_odds": -140,
+          "under_odds": 110
+        },
+        {
+          "player_name": "Max Strus",
+          "prop_type": "assists",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Anthony Davis",
+          "prop_type": "points",
+          "line": 23.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Austin Reaves",
+          "prop_type": "points",
+          "line": 15.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Caris LeVert",
+          "prop_type": "points",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "D'Angelo Russell",
+          "prop_type": "points",
+          "line": 17.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Darius Garland",
+          "prop_type": "points",
+          "line": 16.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Donovan Mitchell",
+          "prop_type": "points",
+          "line": 23.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Evan Mobley",
+          "prop_type": "points",
+          "line": 15.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Georges Niang",
+          "prop_type": "points",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Jarrett Allen",
+          "prop_type": "points",
+          "line": 17.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "LeBron James",
+          "prop_type": "points",
+          "line": 24.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Max Strus",
+          "prop_type": "points",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Rui Hachimura",
+          "prop_type": "points",
+          "line": 13.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Anthony Davis",
+          "prop_type": "pra",
+          "line": 40.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Austin Reaves",
+          "prop_type": "pra",
+          "line": 25.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Caris LeVert",
+          "prop_type": "pra",
+          "line": 19.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "D'Angelo Russell",
+          "prop_type": "pra",
+          "line": 26.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Darius Garland",
+          "prop_type": "pra",
+          "line": 25.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Donovan Mitchell",
+          "prop_type": "pra",
+          "line": 33.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Evan Mobley",
+          "prop_type": "pra",
+          "line": 27.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Jarrett Allen",
+          "prop_type": "pra",
+          "line": 29.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "LeBron James",
+          "prop_type": "pra",
+          "line": 39.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Max Strus",
+          "prop_type": "pra",
+          "line": 17.5,
+          "bookmaker": "draftkings",
+          "over_odds": -140,
+          "under_odds": 110
+        },
+        {
+          "player_name": "Rui Hachimura",
+          "prop_type": "pra",
+          "line": 19.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Anthony Davis",
+          "prop_type": "rebounds",
+          "line": 13.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Austin Reaves",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Caris LeVert",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "D'Angelo Russell",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": 130,
+          "under_odds": -166
+        },
+        {
+          "player_name": "Darius Garland",
+          "prop_type": "rebounds",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Donovan Mitchell",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -175,
+          "under_odds": 135
+        },
+        {
+          "player_name": "Evan Mobley",
+          "prop_type": "rebounds",
+          "line": 8.5,
+          "bookmaker": "draftkings",
+          "over_odds": -135,
+          "under_odds": 105
+        },
+        {
+          "player_name": "Georges Niang",
+          "prop_type": "rebounds",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Jarrett Allen",
+          "prop_type": "rebounds",
+          "line": 9.5,
+          "bookmaker": "draftkings",
+          "over_odds": -140,
+          "under_odds": 110
+        },
+        {
+          "player_name": "Jaxson Hayes",
+          "prop_type": "rebounds",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "LeBron James",
+          "prop_type": "rebounds",
+          "line": 7.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Max Strus",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -150,
+          "under_odds": 120
+        },
+        {
+          "player_name": "Rui Hachimura",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Taurean Prince",
+          "prop_type": "rebounds",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": 110,
+          "under_odds": -140
+        },
+        {
+          "player_name": "Spencer Dinwiddie",
+          "prop_type": "points",
+          "line": 4.5,
+          "bookmaker": "mybookieag",
+          "over_odds": -125,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Gabe Vincent",
+          "prop_type": "points",
+          "line": 3.5,
+          "bookmaker": "mybookieag",
+          "over_odds": -120,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Taurean Prince",
+          "prop_type": "points",
+          "line": 5.5,
+          "bookmaker": "mybookieag",
+          "over_odds": 105,
+          "under_odds": -150
+        },
+        {
+          "player_name": "Jaxson Hayes",
+          "prop_type": "points",
+          "line": 3.5,
+          "bookmaker": "mybookieag",
+          "over_odds": -110,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Spencer Dinwiddie",
+          "prop_type": "rebounds",
+          "line": 1.5,
+          "bookmaker": "mybookieag",
+          "over_odds": -135,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Rui Hachimura",
+          "prop_type": "assists",
+          "line": 0.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -254,
+          "under_odds": 178
+        },
+        {
+          "player_name": "Georges Niang",
+          "prop_type": "assists",
+          "line": 0.5,
+          "bookmaker": "betmgm",
+          "over_odds": -140,
+          "under_odds": 105
+        },
+        {
+          "player_name": "Spencer Dinwiddie",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "betmgm",
+          "over_odds": -135,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Taurean Prince",
+          "prop_type": "assists",
+          "line": 0.5,
+          "bookmaker": "betmgm",
+          "over_odds": -165,
+          "under_odds": 125
+        },
+        {
+          "player_name": "Gabe Vincent",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "betmgm",
+          "over_odds": 110,
+          "under_odds": -145
+        },
+        {
+          "player_name": "Georges Niang",
+          "prop_type": "pra",
+          "line": 10.5,
+          "bookmaker": "betmgm",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Spencer Dinwiddie",
+          "prop_type": "pra",
+          "line": 8.5,
+          "bookmaker": "betmgm",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Taurean Prince",
+          "prop_type": "pra",
+          "line": 8.5,
+          "bookmaker": "betmgm",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Gabe Vincent",
+          "prop_type": "pra",
+          "line": 6.5,
+          "bookmaker": "betmgm",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Jaxson Hayes",
+          "prop_type": "pra",
+          "line": 6.5,
+          "bookmaker": "betmgm",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Gabe Vincent",
+          "prop_type": "rebounds",
+          "line": 0.5,
+          "bookmaker": "betmgm",
+          "over_odds": -160,
+          "under_odds": 120
+        }
+      ]
+    },
+    {
+      "bdl_game_id": 22301128,
+      "odds_api_event_id": "aaf4c40667de66fe6104d44af9459327",
+      "home_team": "Brooklyn Nets",
+      "away_team": "Detroit Pistons",
+      "home_abbrev": "BKN",
+      "away_abbrev": "DET",
+      "commence_time": "2024-04-06T23:00:00Z",
+      "snapshot_timestamp": "2024-04-06T22:00:00Z",
+      "player_props": [
+        {
+          "player_name": "Cam Thomas",
+          "prop_type": "assists",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -145,
+          "under_odds": 114
+        },
+        {
+          "player_name": "Dennis Schroder",
+          "prop_type": "assists",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": -135,
+          "under_odds": 105
+        },
+        {
+          "player_name": "Jaden Ivey",
+          "prop_type": "assists",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": 120,
+          "under_odds": -150
+        },
+        {
+          "player_name": "Malachi Flynn",
+          "prop_type": "assists",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -135,
+          "under_odds": 105
+        },
+        {
+          "player_name": "Marcus Sasser",
+          "prop_type": "assists",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -140,
+          "under_odds": 110
+        },
+        {
+          "player_name": "Mikal Bridges",
+          "prop_type": "assists",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -135,
+          "under_odds": 105
+        },
+        {
+          "player_name": "Cam Thomas",
+          "prop_type": "points",
+          "line": 26.5,
+          "bookmaker": "draftkings",
+          "over_odds": 110,
+          "under_odds": -140
+        },
+        {
+          "player_name": "Dennis Schroder",
+          "prop_type": "points",
+          "line": 15.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Dorian Finney-Smith",
+          "prop_type": "points",
+          "line": 7.5,
+          "bookmaker": "draftkings",
+          "over_odds": -150,
+          "under_odds": 120
+        },
+        {
+          "player_name": "Jaden Ivey",
+          "prop_type": "points",
+          "line": 19.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Jalen Duren",
+          "prop_type": "points",
+          "line": 13.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Malachi Flynn",
+          "prop_type": "points",
+          "line": 12.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Marcus Sasser",
+          "prop_type": "points",
+          "line": 12.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Mikal Bridges",
+          "prop_type": "points",
+          "line": 18.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Nicolas Claxton",
+          "prop_type": "points",
+          "line": 11.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Trendon Watford",
+          "prop_type": "points",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "over_odds": -145,
+          "under_odds": 114
+        },
+        {
+          "player_name": "Cam Thomas",
+          "prop_type": "pra",
+          "line": 34.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Dennis Schroder",
+          "prop_type": "pra",
+          "line": 25.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Jaden Ivey",
+          "prop_type": "pra",
+          "line": 27.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Jalen Duren",
+          "prop_type": "pra",
+          "line": 26.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Malachi Flynn",
+          "prop_type": "pra",
+          "line": 19.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Marcus Sasser",
+          "prop_type": "pra",
+          "line": 20.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Mikal Bridges",
+          "prop_type": "pra",
+          "line": 27.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Nicolas Claxton",
+          "prop_type": "pra",
+          "line": 23.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Trendon Watford",
+          "prop_type": "pra",
+          "line": 18.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Cam Thomas",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": 135,
+          "under_odds": -175
+        },
+        {
+          "player_name": "Dennis Schroder",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": 105,
+          "under_odds": -135
+        },
+        {
+          "player_name": "Dorian Finney-Smith",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Jaden Ivey",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Jalen Duren",
+          "prop_type": "rebounds",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Malachi Flynn",
+          "prop_type": "rebounds",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": -150,
+          "under_odds": 120
+        },
+        {
+          "player_name": "Marcus Sasser",
+          "prop_type": "rebounds",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": -145,
+          "under_odds": 114
+        },
+        {
+          "player_name": "Mikal Bridges",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Nicolas Claxton",
+          "prop_type": "rebounds",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Trendon Watford",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -135,
+          "under_odds": 105
+        },
+        {
+          "player_name": "Troy Brown Jr",
+          "prop_type": "points",
+          "line": 5.5,
+          "bookmaker": "fanduel",
+          "over_odds": -118,
+          "under_odds": -104
+        },
+        {
+          "player_name": "Tosan Evbuomwan",
+          "prop_type": "points",
+          "line": 7.5,
+          "bookmaker": "fanduel",
+          "over_odds": 104,
+          "under_odds": -128
+        },
+        {
+          "player_name": "Chimezie Metu",
+          "prop_type": "points",
+          "line": 8.5,
+          "bookmaker": "fanduel",
+          "over_odds": -115,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Troy Brown Jr",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "fanduel",
+          "over_odds": -115,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Tosan Evbuomwan",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "fanduel",
+          "over_odds": -106,
+          "under_odds": -114
+        },
+        {
+          "player_name": "Dorian Finney-Smith",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -160,
+          "under_odds": 116
+        },
+        {
+          "player_name": "Jalen Duren",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -142,
+          "under_odds": 104
+        },
+        {
+          "player_name": "Nicolas Claxton",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -179,
+          "under_odds": 129
+        },
+        {
+          "player_name": "Tosan Evbuomwan",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Troy Brown Jr",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "James Wiseman",
+          "prop_type": "points",
+          "line": 7.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Dorian Finney-Smith",
+          "prop_type": "pra",
+          "line": 14.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -129,
+          "under_odds": -106
+        },
+        {
+          "player_name": "Tosan Evbuomwan",
+          "prop_type": "pra",
+          "line": 13.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Troy Brown Jr",
+          "prop_type": "pra",
+          "line": 11.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Chimezie Metu",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": -140,
+          "under_odds": 105
+        },
+        {
+          "player_name": "James Wiseman",
+          "prop_type": "rebounds",
+          "line": 5.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Trendon Watford",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "betmgm",
+          "over_odds": -175,
+          "under_odds": 135
+        }
+      ]
+    },
+    {
+      "bdl_game_id": 22301129,
+      "odds_api_event_id": "f7ee13050aa1d8103c5ed8fa4662bcc4",
+      "home_team": "Memphis Grizzlies",
+      "away_team": "Philadelphia 76ers",
+      "home_abbrev": "MEM",
+      "away_abbrev": "PHI",
+      "commence_time": "2024-04-07T00:00:00Z",
+      "snapshot_timestamp": "2024-04-06T23:00:00Z",
+      "player_props": [
+        {
+          "player_name": "Joel Embiid",
+          "prop_type": "assists",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Tyrese Maxey",
+          "prop_type": "assists",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": 114,
+          "under_odds": -145
+        },
+        {
+          "player_name": "Joel Embiid",
+          "prop_type": "points",
+          "line": 27.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Kelly Oubre Jr",
+          "prop_type": "points",
+          "line": 17.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Tyrese Maxey",
+          "prop_type": "points",
+          "line": 24.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Joel Embiid",
+          "prop_type": "pra",
+          "line": 42.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Kelly Oubre Jr",
+          "prop_type": "pra",
+          "line": 24.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Tyrese Maxey",
+          "prop_type": "pra",
+          "line": 34.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Joel Embiid",
+          "prop_type": "rebounds",
+          "line": 9.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Kelly Oubre Jr",
+          "prop_type": "rebounds",
+          "line": 5.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Tyrese Maxey",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Tobias Harris",
+          "prop_type": "points",
+          "line": 16.5,
+          "bookmaker": "fanduel",
+          "over_odds": -105,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Tobias Harris",
+          "prop_type": "rebounds",
+          "line": 6.5,
+          "bookmaker": "fanduel",
+          "over_odds": -104,
+          "under_odds": -118
+        },
+        {
+          "player_name": "Luke Kennard",
+          "prop_type": "assists",
+          "line": 3.5,
+          "bookmaker": "fanduel",
+          "over_odds": -106,
+          "under_odds": -114
+        },
+        {
+          "player_name": "Scotty Pippen Jr",
+          "prop_type": "assists",
+          "line": 5.5,
+          "bookmaker": "fanduel",
+          "over_odds": -102,
+          "under_odds": -120
+        },
+        {
+          "player_name": "G.G. Jackson",
+          "prop_type": "points",
+          "line": 18.5,
+          "bookmaker": "fanduel",
+          "over_odds": -102,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Luke Kennard",
+          "prop_type": "points",
+          "line": 13.5,
+          "bookmaker": "fanduel",
+          "over_odds": -105,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Scotty Pippen Jr",
+          "prop_type": "points",
+          "line": 13.5,
+          "bookmaker": "fanduel",
+          "over_odds": -106,
+          "under_odds": -114
+        },
+        {
+          "player_name": "Scotty Pippen Jr",
+          "prop_type": "pra",
+          "line": 23.5,
+          "bookmaker": "fanduel",
+          "over_odds": 100,
+          "under_odds": -128
+        },
+        {
+          "player_name": "Luke Kennard",
+          "prop_type": "pra",
+          "line": 21.5,
+          "bookmaker": "fanduel",
+          "over_odds": -104,
+          "under_odds": -122
+        },
+        {
+          "player_name": "Scotty Pippen Jr",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "fanduel",
+          "over_odds": -115,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Luke Kennard",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "fanduel",
+          "over_odds": -110,
+          "under_odds": -110
+        },
+        {
+          "player_name": "G.G. Jackson",
+          "prop_type": "rebounds",
+          "line": 5.5,
+          "bookmaker": "fanduel",
+          "over_odds": 112,
+          "under_odds": -138
+        },
+        {
+          "player_name": "Kelly Oubre Jr",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -123,
+          "under_odds": -111
+        },
+        {
+          "player_name": "Tobias Harris",
+          "prop_type": "assists",
+          "line": 2.5,
+          "bookmaker": "betrivers",
+          "over_odds": -110,
+          "under_odds": -121
+        }
+      ]
+    },
+    {
+      "bdl_game_id": 22301130,
+      "odds_api_event_id": "7f1d5bb19c3e00b8198a9f75cf0aa3b6",
+      "home_team": "Denver Nuggets",
+      "away_team": "Atlanta Hawks",
+      "home_abbrev": "DEN",
+      "away_abbrev": "ATL",
+      "commence_time": "2024-04-07T01:00:00Z",
+      "snapshot_timestamp": "2024-04-07T00:00:00Z",
+      "player_props": [
+        {
+          "player_name": "Aaron Gordon",
+          "prop_type": "assists",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": 130,
+          "under_odds": -166
+        },
+        {
+          "player_name": "Bogdan Bogdanovic",
+          "prop_type": "assists",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": 114,
+          "under_odds": -145
+        },
+        {
+          "player_name": "Dejounte Murray",
+          "prop_type": "assists",
+          "line": 8.5,
+          "bookmaker": "draftkings",
+          "over_odds": 110,
+          "under_odds": -140
+        },
+        {
+          "player_name": "Jalen Johnson",
+          "prop_type": "assists",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -190,
+          "under_odds": 145
+        },
+        {
+          "player_name": "Kentavious Caldwell-Pope",
+          "prop_type": "assists",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": 130,
+          "under_odds": -166
+        },
+        {
+          "player_name": "Nikola Jokic",
+          "prop_type": "assists",
+          "line": 8.5,
+          "bookmaker": "draftkings",
+          "over_odds": -166,
+          "under_odds": 130
+        },
+        {
+          "player_name": "Aaron Gordon",
+          "prop_type": "points",
+          "line": 15.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Bogdan Bogdanovic",
+          "prop_type": "points",
+          "line": 16.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Bruno Fernando",
+          "prop_type": "points",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Clint Capela",
+          "prop_type": "points",
+          "line": 11.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "De'Andre Hunter",
+          "prop_type": "points",
+          "line": 15.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Dejounte Murray",
+          "prop_type": "points",
+          "line": 22.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Jalen Johnson",
+          "prop_type": "points",
+          "line": 15.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Kentavious Caldwell-Pope",
+          "prop_type": "points",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Michael Porter Jr",
+          "prop_type": "points",
+          "line": 18.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Nikola Jokic",
+          "prop_type": "points",
+          "line": 28.5,
+          "bookmaker": "draftkings",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Aaron Gordon",
+          "prop_type": "pra",
+          "line": 26.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Bogdan Bogdanovic",
+          "prop_type": "pra",
+          "line": 23.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Clint Capela",
+          "prop_type": "pra",
+          "line": 23.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "De'Andre Hunter",
+          "prop_type": "pra",
+          "line": 21.5,
+          "bookmaker": "draftkings",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Dejounte Murray",
+          "prop_type": "pra",
+          "line": 35.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Jalen Johnson",
+          "prop_type": "pra",
+          "line": 28.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Michael Porter Jr",
+          "prop_type": "pra",
+          "line": 27.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Nikola Jokic",
+          "prop_type": "pra",
+          "line": 50.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Aaron Gordon",
+          "prop_type": "rebounds",
+          "line": 6.5,
+          "bookmaker": "draftkings",
+          "over_odds": -125,
+          "under_odds": -105
+        },
+        {
+          "player_name": "Bogdan Bogdanovic",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -110,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Bruno Fernando",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -135,
+          "under_odds": 105
+        },
+        {
+          "player_name": "Clint Capela",
+          "prop_type": "rebounds",
+          "line": 10.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "De'Andre Hunter",
+          "prop_type": "rebounds",
+          "line": 3.5,
+          "bookmaker": "draftkings",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Dejounte Murray",
+          "prop_type": "rebounds",
+          "line": 4.5,
+          "bookmaker": "draftkings",
+          "over_odds": -115,
+          "under_odds": -115
+        },
+        {
+          "player_name": "Jalen Johnson",
+          "prop_type": "rebounds",
+          "line": 7.5,
+          "bookmaker": "draftkings",
+          "over_odds": -140,
+          "under_odds": 110
+        },
+        {
+          "player_name": "Kentavious Caldwell-Pope",
+          "prop_type": "rebounds",
+          "line": 2.5,
+          "bookmaker": "draftkings",
+          "over_odds": 100,
+          "under_odds": -130
+        },
+        {
+          "player_name": "Michael Porter Jr",
+          "prop_type": "rebounds",
+          "line": 7.5,
+          "bookmaker": "draftkings",
+          "over_odds": 110,
+          "under_odds": -140
+        },
+        {
+          "player_name": "Nikola Jokic",
+          "prop_type": "rebounds",
+          "line": 13.5,
+          "bookmaker": "draftkings",
+          "over_odds": 105,
+          "under_odds": -135
+        },
+        {
+          "player_name": "Vit Krejci",
+          "prop_type": "points",
+          "line": 3.5,
+          "bookmaker": "fanduel",
+          "over_odds": -104,
+          "under_odds": -118
+        },
+        {
+          "player_name": "Vit Krejci",
+          "prop_type": "pra",
+          "line": 6.5,
+          "bookmaker": "fanduel",
+          "over_odds": -130,
+          "under_odds": 102
+        },
+        {
+          "player_name": "Clint Capela",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": 133,
+          "under_odds": -184
+        },
+        {
+          "player_name": "De'Andre Hunter",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -117,
+          "under_odds": -117
+        },
+        {
+          "player_name": "Michael Porter Jr",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -111,
+          "under_odds": -123
+        },
+        {
+          "player_name": "Vit Krejci",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": 110,
+          "under_odds": -145
+        },
+        {
+          "player_name": "Kentavious Caldwell-Pope",
+          "prop_type": "pra",
+          "line": 15.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -125,
+          "under_odds": -109
+        },
+        {
+          "player_name": "Vit Krejci",
+          "prop_type": "rebounds",
+          "line": 1.5,
+          "bookmaker": "pointsbetus",
+          "over_odds": -130,
+          "under_odds": 100
+        },
+        {
+          "player_name": "Kobe Bufkin",
+          "prop_type": "points",
+          "line": 4.5,
+          "bookmaker": "mybookieag",
+          "over_odds": -125,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Garrison Mathews",
+          "prop_type": "points",
+          "line": 5.5,
+          "bookmaker": "mybookieag",
+          "over_odds": -105,
+          "under_odds": -135
+        },
+        {
+          "player_name": "Kobe Bufkin",
+          "prop_type": "rebounds",
+          "line": 1.5,
+          "bookmaker": "mybookieag",
+          "over_odds": -115,
+          "under_odds": -120
+        },
+        {
+          "player_name": "Garrison Mathews",
+          "prop_type": "rebounds",
+          "line": 1.5,
+          "bookmaker": "mybookieag",
+          "over_odds": 115,
+          "under_odds": -160
+        },
+        {
+          "player_name": "Bruno Fernando",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "betmgm",
+          "over_odds": 140,
+          "under_odds": -185
+        },
+        {
+          "player_name": "Kobe Bufkin",
+          "prop_type": "assists",
+          "line": 1.5,
+          "bookmaker": "betmgm",
+          "over_odds": -120,
+          "under_odds": -110
+        },
+        {
+          "player_name": "Garrison Mathews",
+          "prop_type": "assists",
+          "line": 0.5,
+          "bookmaker": "betmgm",
+          "over_odds": 115,
+          "under_odds": -155
+        },
+        {
+          "player_name": "Bruno Fernando",
+          "prop_type": "pra",
+          "line": 12.5,
+          "bookmaker": "williamhill_us",
+          "over_odds": -117,
+          "under_odds": -117
+        },
+        {
+          "player_name": "Kobe Bufkin",
+          "prop_type": "pra",
+          "line": 8.5,
+          "bookmaker": "betmgm",
+          "over_odds": -105,
+          "under_odds": -125
+        },
+        {
+          "player_name": "Garrison Mathews",
+          "prop_type": "pra",
+          "line": 7.5,
+          "bookmaker": "betmgm",
+          "over_odds": -130,
+          "under_odds": -105
+        }
+      ]
+    }
+  ],
+  "api_credits_used": 161,
+  "game_market_snapshots_fetched": 0,
+  "fetched_at": "2026-03-22T18:45:09.252467+00:00"
+}
