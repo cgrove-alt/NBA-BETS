@@ -1,0 +1,120 @@
+{
+  "n_trades": 223,
+  "roi": {
+    "observed": 0.12523415489126338,
+    "ci_lower": 0.004384024699097034,
+    "ci_upper": 0.24358144969809317,
+    "std_error": 0.06065977313832012,
+    "p_value_positive": 0.0209
+  },
+  "win_rate": {
+    "observed": 0.5964125560538116,
+    "ci_lower": 0.5336322869955157,
+    "ci_upper": 0.6591928251121076,
+    "std_error": 0.032210179045404616,
+    "p_value_positive": 0.0
+  },
+  "sharpe": {
+    "observed": 2.8619752149970954,
+    "ci_lower": -0.22314478077214167,
+    "ci_upper": 6.033053515262566,
+    "std_error": 1.6023818236702811,
+    "p_value_positive": 0.0352
+  },
+  "p_above_breakeven": 0.9908,
+  "concentration": {
+    "unique_players": 67,
+    "hhi": 0.0253,
+    "top_5_pnl_pct": 89.4,
+    "top_10_pnl_pct": 142.3,
+    "top_20_pnl_pct": 202.8
+  },
+  "monthly": {
+    "2024-11": {
+      "trades": 32,
+      "win_rate": 0.5312,
+      "roi": -0.0179,
+      "roi_ci_lower": -0.3418,
+      "roi_ci_upper": 0.3157,
+      "pnl": -15.43
+    },
+    "2024-12": {
+      "trades": 68,
+      "win_rate": 0.5294,
+      "roi": 0.0317,
+      "roi_ci_lower": -0.1972,
+      "roi_ci_upper": 0.2634,
+      "pnl": 57.82
+    },
+    "2025-01": {
+      "trades": 32,
+      "win_rate": 0.5938,
+      "roi": 0.0791,
+      "roi_ci_lower": -0.2531,
+      "roi_ci_upper": 0.3948,
+      "pnl": 64.11
+    },
+    "2025-02": {
+      "trades": 32,
+      "win_rate": 0.6562,
+      "roi": 0.248,
+      "roi_ci_lower": -0.0695,
+      "roi_ci_upper": 0.538,
+      "pnl": 213.49
+    },
+    "2025-03": {
+      "trades": 48,
+      "win_rate": 0.6458,
+      "roi": 0.2069,
+      "roi_ci_lower": -0.0535,
+      "roi_ci_upper": 0.4436,
+      "pnl": 271.84
+    },
+    "2025-04": {
+      "trades": 11,
+      "win_rate": 0.8182,
+      "roi": 0.5152,
+      "roi_ci_lower": -0.0084,
+      "roi_ci_upper": 0.9068,
+      "pnl": 156.27
+    }
+  },
+  "monthly_t_stat": 2.45,
+  "monthly_p_value": 0.0006,
+  "rolling": {
+    "n_windows": 13,
+    "wr_min": 0.4333,
+    "wr_max": 0.7,
+    "roi_min": -0.1502,
+    "roi_max": 0.338,
+    "pct_positive_windows": 0.6923
+  },
+  "regime": {
+    "first_half_roi": 0.0255,
+    "second_half_roi": 0.2236,
+    "first_half_wr": 0.5405,
+    "second_half_wr": 0.6518
+  },
+  "prop_pra": {
+    "n_trades": 201,
+    "roi": {
+      "observed": 0.09857937182296561,
+      "ci_lower": -0.03231994676718156,
+      "ci_upper": 0.22640252033664415,
+      "std_error": 0.06557012349490383,
+      "p_value_positive": 0.0683
+    },
+    "win_rate": 0.5821
+  },
+  "prop_rebounds": {
+    "n_trades": 22,
+    "roi": {
+      "observed": 0.3609074583587328,
+      "ci_lower": -0.005603366172736319,
+      "ci_upper": 0.6794518615802814,
+      "std_error": 0.17524280679113963,
+      "p_value_positive": 0.0273
+    },
+    "win_rate": 0.7273
+  }
+}

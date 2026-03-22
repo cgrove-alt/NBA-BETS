@@ -1,6 +1,6 @@
 {
-  "run_date": "2026-03-20T18:43:30.825398",
-  "n_windows": 1,
+  "run_date": "2026-03-22T13:13:35.024638",
+  "n_windows": 2,
   "windows": [
     {
       "window": "Window 1",
@@ -9,116 +9,194 @@
         "2022-23"
       ],
       "test_season": "2023-24",
-      "train_time_sec": 48.1,
+      "train_time_sec": 84.2,
       "test_samples": 19120,
       "diagnostics": {
         "total_samples": 19120,
-        "skip_zero_line_assists": 167,
-        "skip_zero_line_points": 9,
-        "skip_zero_line_rebounds": 23,
-        "skip_zero_line_pra": 2
+        "skipped_bench_player": 8713
       },
       "by_prop_type": {
         "points": {
-          "n_predictions": 19111,
-          "rmse": 6.5,
-          "mae": 5.075,
-          "r2": 0.4331,
-          "bias": 0.526,
-          "baseline_rmse": 7.023,
-          "directional_accuracy": 0.5997
+          "n_predictions": 10407,
+          "rmse": 7.2,
+          "mae": 5.689,
+          "r2": 0.3584,
+          "bias": 0.942,
+          "baseline_rmse": 7.302,
+          "directional_accuracy": 0.5321,
+          "trades": 665,
+          "trade_wins": 468,
+          "trade_win_rate": 0.7038,
+          "trade_roi": 0.3667
         },
         "rebounds": {
-          "n_predictions": 19097,
-          "rmse": 2.643,
-          "mae": 2.029,
-          "r2": 0.4187,
-          "bias": 0.078,
-          "baseline_rmse": 2.888,
-          "directional_accuracy": 0.6018
+          "n_predictions": 10407,
+          "rmse": 2.711,
+          "mae": 2.114,
+          "r2": 0.4489,
+          "bias": 0.218,
+          "baseline_rmse": 2.72,
+          "directional_accuracy": 0.5221
         },
         "assists": {
-          "n_predictions": 18953,
-          "rmse": 2.074,
-          "mae": 1.545,
-          "r2": 0.4406,
-          "bias": -0.17,
-          "baseline_rmse": 2.193,
-          "directional_accuracy": 0.6012
+          "n_predictions": 10407,
+          "rmse": 2.276,
+          "mae": 1.734,
+          "r2": 0.4276,
+          "bias": -0.065,
+          "baseline_rmse": 2.332,
+          "directional_accuracy": 0.5647
         },
         "pra": {
-          "n_predictions": 19118,
-          "rmse": 8.12,
-          "mae": 6.374,
-          "r2": 0.4992,
-          "bias": 0.239,
-          "baseline_rmse": 9.397,
-          "directional_accuracy": 0.6514
+          "n_predictions": 10407,
+          "rmse": 8.864,
+          "mae": 7.05,
+          "r2": 0.4315,
+          "bias": 0.845,
+          "baseline_rmse": 9.21,
+          "directional_accuracy": 0.5762,
+          "trades": 944,
+          "trade_wins": 705,
+          "trade_win_rate": 0.7468,
+          "trade_roi": 0.4271
         }
       },
       "betting": {
-        "total_trades": 0,
-        "wins": 0,
-        "losses": 0,
-        "win_rate": 0,
-        "total_wagered": 0,
-        "total_pnl": 0,
-        "roi": 0
+        "total_trades": 1609,
+        "wins": 1173,
+        "losses": 436,
+        "win_rate": 0.729,
+        "total_wagered": 46150.74,
+        "total_pnl": 18627.63,
+        "roi": 0.4036
+      }
+    },
+    {
+      "window": "Window 2",
+      "train_seasons": [
+        "2022-23",
+        "2023-24"
+      ],
+      "test_season": "2024-25",
+      "train_time_sec": 84.0,
+      "test_samples": 17347,
+      "diagnostics": {
+        "total_samples": 17347,
+        "skipped_bench_player": 11133
+      },
+      "by_prop_type": {
+        "points": {
+          "n_predictions": 6214,
+          "rmse": 7.255,
+          "mae": 5.724,
+          "r2": 0.3644,
+          "bias": 0.492,
+          "baseline_rmse": 7.422,
+          "directional_accuracy": 0.5634,
+          "trades": 779,
+          "trade_wins": 516,
+          "trade_win_rate": 0.6624,
+          "trade_roi": 0.2638
+        },
+        "rebounds": {
+          "n_predictions": 6214,
+          "rmse": 2.755,
+          "mae": 2.159,
+          "r2": 0.4702,
+          "bias": 0.328,
+          "baseline_rmse": 2.775,
+          "directional_accuracy": 0.5353,
+          "trades": 17,
+          "trade_wins": 13,
+          "trade_win_rate": 0.7647,
+          "trade_roi": 0.4471
+        },
+        "assists": {
+          "n_predictions": 6214,
+          "rmse": 2.259,
+          "mae": 1.747,
+          "r2": 0.4732,
+          "bias": 0.24,
+          "baseline_rmse": 2.311,
+          "directional_accuracy": 0.5345
+        },
+        "pra": {
+          "n_predictions": 6214,
+          "rmse": 8.843,
+          "mae": 7.02,
+          "r2": 0.45,
+          "bias": 0.761,
+          "baseline_rmse": 9.213,
+          "directional_accuracy": 0.5894,
+          "trades": 1019,
+          "trade_wins": 686,
+          "trade_win_rate": 0.6732,
+          "trade_roi": 0.2977
+        }
+      },
+      "betting": {
+        "total_trades": 1815,
+        "wins": 1215,
+        "losses": 600,
+        "win_rate": 0.6694,
+        "total_wagered": 52671.61,
+        "total_pnl": 14979.34,
+        "roi": 0.2844
       }
     }
   ],
   "aggregate": {
     "by_prop_type": {
       "points": {
-        "n_predictions": 19111,
-        "rmse": 6.5,
-        "mae": 5.075,
-        "r2": 0.4331,
-        "bias": 0.526,
-        "directional_accuracy": 0.5997,
-        "total_trades": 0,
-        "trade_win_rate": 0
+        "n_predictions": 16621,
+        "rmse": 7.221,
+        "mae": 5.702,
+        "r2": 0.3606,
+        "bias": 0.774,
+        "directional_accuracy": 0.5438,
+        "total_trades": 1444,
+        "trade_win_rate": 0.6814
       },
       "rebounds": {
-        "n_predictions": 19097,
-        "rmse": 2.643,
-        "mae": 2.029,
-        "r2": 0.4187,
-        "bias": 0.078,
-        "directional_accuracy": 0.6018,
-        "total_trades": 0,
-        "trade_win_rate": 0
+        "n_predictions": 16621,
+        "rmse": 2.728,
+        "mae": 2.131,
+        "r2": 0.4569,
+        "bias": 0.259,
+        "directional_accuracy": 0.527,
+        "total_trades": 17,
+        "trade_win_rate": 0.7647
       },
       "assists": {
-        "n_predictions": 18953,
-        "rmse": 2.074,
-        "mae": 1.545,
-        "r2": 0.4406,
-        "bias": -0.17,
-        "directional_accuracy": 0.6012,
+        "n_predictions": 16621,
+        "rmse": 2.27,
+        "mae": 1.739,
+        "r2": 0.4446,
+        "bias": 0.049,
+        "directional_accuracy": 0.5534,
         "total_trades": 0,
         "trade_win_rate": 0
       },
       "pra": {
-        "n_predictions": 19118,
-        "rmse": 8.12,
-        "mae": 6.374,
-        "r2": 0.4992,
-        "bias": 0.239,
-        "directional_accuracy": 0.6514,
-        "total_trades": 0,
-        "trade_win_rate": 0
+        "n_predictions": 16621,
+        "rmse": 8.856,
+        "mae": 7.039,
+        "r2": 0.4384,
+        "bias": 0.814,
+        "directional_accuracy": 0.5811,
+        "total_trades": 1963,
+        "trade_win_rate": 0.7086
       }
     },
     "betting": {
-      "total_trades": 0,
-      "wins": 0,
-      "losses": 0,
-      "win_rate": 0,
-      "total_wagered": 0,
-      "total_pnl": 0,
-      "roi": 0
+      "total_trades": 3424,
+      "wins": 2388,
+      "losses": 1036,
+      "win_rate": 0.6974,
+      "total_wagered": 98822.35,
+      "total_pnl": 33606.97,
+      "roi": 0.3401
     }
   },
-  "total_runtime_sec": 572.9
+  "total_runtime_sec": 663.6
 }

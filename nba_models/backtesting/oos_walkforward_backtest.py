@@ -336,7 +336,29 @@ def evaluate_window(window: dict) -> dict | None:
     player_stats_by_game = load_player_stats(game_ids, all_seasons, team_id_map)
 
     total_records = sum(len(v) for v in player_stats_by_game.values())
-    logger.info("  Loaded %d games, %d player-game records", len(games), total_records)
+    logger.info("  Loaded %d games, %d player-game records (CSV)", len(games), total_records)
+
+    # If CSV player stats are sparse (e.g., 2024-25 not in CSVs), supplement
+    # with BDL player stats cache. This enables Window 2 (test on 2024-25).
+    BDL_STATS_PATH = os.path.join(ROOT, "data", "historical_lines", "player_stats_2024.json")
+    BDL_META_PATH = os.path.join(ROOT, "data", "historical_lines", "player_stats_2024_meta.json")
+    if os.path.exists(BDL_STATS_PATH) and os.path.exists(BDL_META_PATH):
+        from nba_models.backtesting.real_lines_backtest import load_bdl_player_stats
+        try:
+            bdl_stats = load_bdl_player_stats(games, team_meta, team_id_map)
+            bdl_records = sum(len(v) for v in bdl_stats.values())
+            if bdl_records > 0:
+                # Merge: BDL stats fill in games not covered by CSV
+                for gid, players in bdl_stats.items():
+                    if gid not in player_stats_by_game:
+                        player_stats_by_game[gid] = players
+                new_total = sum(len(v) for v in player_stats_by_game.values())
+                logger.info(
+                    "  Supplemented with BDL data: %d → %d player-game records (+%d)",
+                    total_records, new_total, new_total - total_records,
+                )
+        except Exception as exc:
+            logger.warning("  Failed to load BDL supplement: %s", exc)
 
     # --- 2. Build walk-forward features ---
     logger.info("Step 2: Building walk-forward features...")

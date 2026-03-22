@@ -78,22 +78,33 @@ except ImportError:
 
 
 def load_season_games(season: str) -> pd.DataFrame:
-    """Load game data for a season from the live_seasons CSV.
+    """Load game data for a season from live_seasons or historical CSV.
 
     Args:
-        season: Season label like '2024-25'.
+        season: Season label like '2024-25' or '2023-24'.
 
     Returns:
         DataFrame with one row per unique game, including date, teams,
         game_id, and matchup info.
     """
-    # Find the most recent live_seasons CSV
+    # Try live_seasons CSV first (has recent seasons)
     csv_files = sorted(LIVE_SEASONS_DIR.glob("live_seasons_*.csv"))
-    if not csv_files:
-        raise FileNotFoundError(f"No live_seasons CSV found in {LIVE_SEASONS_DIR}")
+    df = pd.DataFrame()
+    if csv_files:
+        df = pd.read_csv(csv_files[-1])
+        season_df = df[df["SEASON_YEAR"] == season].copy()
+    else:
+        season_df = pd.DataFrame()
 
-    df = pd.read_csv(csv_files[-1])
-    season_df = df[df["SEASON_YEAR"] == season].copy()
+    # If not in live_seasons, check historical totals CSV
+    if season_df.empty:
+        hist_path = ROOT / "data" / "NBA-Data-2010-2024-main" / "regular_season_totals_2010_2024.csv"
+        if hist_path.exists():
+            hist_df = pd.read_csv(hist_path)
+            season_df = hist_df[hist_df["SEASON_YEAR"] == season].copy()
+            if not season_df.empty:
+                # Normalize date format (historical may have 'T00:00:00' suffix)
+                season_df["GAME_DATE"] = season_df["GAME_DATE"].str[:10]
 
     if season_df.empty:
         raise ValueError(f"No games found for season {season}")

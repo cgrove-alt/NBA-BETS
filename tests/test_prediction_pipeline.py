@@ -21,7 +21,7 @@ def test_confidence_shrink_respects_sample_size():
 
 def test_disabled_props_rejected():
     """Disabled prop types should be rejected."""
-    for prop_type in ["assists", "threes", "spread"]:
+    for prop_type in ["points", "assists", "threes", "spread"]:
         result = evaluate_bet(
             prop_type=prop_type,
             predicted=30.0,

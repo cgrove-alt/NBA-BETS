@@ -59,12 +59,12 @@ PROP_BIAS_CORRECTION: dict[str, float] = {
 # ---------------------------------------------------------------------------
 # Disabled prop types (no demonstrated model edge)
 # ---------------------------------------------------------------------------
-# Final configuration after full audit + calibration (2026-03-20).
-# Model has genuine over-selection edge on rebounds (+17.9%) and PRA (+2.9%).
-# Points is marginal (+2.5% pre-calibration), kept enabled for volume.
-# Assists consistently negative (-14% calibrated) — disabled.
+# Post-statistical-analysis configuration (2026-03-22).
+# Bootstrap significance: rebounds p=0.027 (significant), PRA p=0.068 (marginal).
+# Points p=0.463 — no edge, disabled.
+# Assists consistently negative — disabled.
 # Threes too stochastic. Spread worse than market.
-DISABLED_PROPS: list[str] = ['assists', 'threes', 'spread']
+DISABLED_PROPS: list[str] = ['points', 'assists', 'threes', 'spread']
 
 # ---------------------------------------------------------------------------
 # Edge quality tiers

@@ -6194,11 +6194,54 @@ def train_all_models(
         return X_with_line
 
     # ---------------------------------------------------------------------------
-    # Fix 1.1 + 1.3 + 1.4: Simplified prop training with reduced features,
-    # residual targets, and single LightGBM per prop.
+    # Load real sportsbook lines for blended baseline
+    # ---------------------------------------------------------------------------
+    # When real lines are available (from The Odds API historical data),
+    # use them as the residual baseline instead of season_avg. This teaches
+    # the model to predict deviations from what the MARKET expects, not
+    # just from the season average. This is critical for generating genuine
+    # under predictions — the market already prices in survivorship effects.
+
+    _real_lines_lookup: dict[tuple[str, str, str], float] = {}
+    _lines_dir = Path("data/historical_lines")
+    if _lines_dir.exists():
+        _line_files = sorted(_lines_dir.glob("20*.json"))
+        if _line_files:
+            print(f"\n--- Loading real sportsbook lines ({len(_line_files)} files) ---")
+            _prop_type_map = {
+                "player_points": "points",
+                "player_rebounds": "rebounds",
+                "player_assists": "assists",
+                "player_points_rebounds_assists": "pra",
+                "points": "points",
+                "rebounds": "rebounds",
+                "assists": "assists",
+                "pra": "pra",
+            }
+            for _lf in _line_files:
+                try:
+                    with open(_lf) as _f:
+                        _data = json.load(_f)
+                    _date = _data.get("date", _lf.stem)
+                    for _game in _data.get("games", []):
+                        for _prop in _game.get("player_props", []):
+                            _pname = _prop.get("player_name", "").strip().lower()
+                            _ptype = _prop_type_map.get(_prop.get("prop_type", ""), "")
+                            _line = _prop.get("line", 0)
+                            if _pname and _ptype and _line > 0:
+                                _key = (_pname, _date, _ptype)
+                                # Keep DraftKings line (highest priority)
+                                if _key not in _real_lines_lookup or _prop.get("bookmaker") == "draftkings":
+                                    _real_lines_lookup[_key] = _line
+                except Exception:
+                    pass
+            print(f"  Loaded {len(_real_lines_lookup)} player-date-prop real lines")
+
+    # ---------------------------------------------------------------------------
+    # Simplified prop training with reduced features and residual targets.
     # ---------------------------------------------------------------------------
 
-    # Season avg column map for residual target computation (Fix 1.4)
+    # Season avg column map for residual target computation
     SEASON_AVG_COL = {
         'points': 'season_pts_avg',
         'rebounds': 'season_reb_avg',
@@ -6237,12 +6280,34 @@ def train_all_models(
             print(f"  Dropped {n_dropped} samples with missing season averages")
         season_avgs = season_avgs_raw[valid_mask]
         y_raw_valid = y_raw[valid_mask]
-        y_residual_raw = y_raw_valid - season_avgs
+
+        # Build blended baseline: use real sportsbook lines where available,
+        # fall back to season average where not. This teaches the model to
+        # predict deviations from the MARKET expectation.
+        baselines = season_avgs.copy()
+        n_real_lines = 0
+        if _real_lines_lookup:
+            valid_indices = np.where(valid_mask)[0]
+            for i, orig_idx in enumerate(valid_indices):
+                sample = player_data[orig_idx]
+                pname = sample.get('player_name', '').strip().lower()
+                gdate = sample.get('game_date', '')
+                key = (pname, gdate, prop_name)
+                if key in _real_lines_lookup:
+                    baselines[i] = _real_lines_lookup[key]
+                    n_real_lines += 1
+
+        if n_real_lines > 0:
+            print(f"  Baseline: {n_real_lines} real sportsbook lines + "
+                  f"{len(baselines) - n_real_lines} season avg fallbacks")
+        else:
+            print("  Baseline: season average only (no real lines available)")
+
+        y_residual_raw = y_raw_valid - baselines
 
         # De-mean residuals: center targets at 0 to prevent systematic over/under bias.
-        # The raw residual mean is +1-3 (survivorship bias from >=15 min filter).
-        # Without de-meaning, the model always predicts positive residuals → always "over".
-        # Store the offset so we can add it back at inference if needed.
+        # With real sportsbook lines as baseline, the de-meaning offset should be
+        # smaller (lines are closer to actuals than season averages are).
         residual_mean_offset = float(y_residual_raw.mean())
         y_residual = y_residual_raw - residual_mean_offset
         print(f"  Raw residual: mean={y_residual_raw.mean():.2f}, std={y_residual_raw.std():.2f}")
@@ -6338,19 +6403,33 @@ def train_all_models(
         available_cols = [c for c in reduced_cols if c in X_with_line.columns]
         X_q = X_with_line[available_cols] if available_cols else X_with_line
 
-        # Compute calibration lines (season averages as proxy for market lines)
+        # Compute calibration lines — use real sportsbook lines where available,
+        # season averages as fallback. Calibrating against real lines gives
+        # honest P(over) that reflects market-relative probability.
         q_sa_col = SEASON_AVG_COL.get(prop_name)
         if q_sa_col is not None:
-            cal_lines = X_with_line[q_sa_col].fillna(0).values
+            cal_lines = X_with_line[q_sa_col].fillna(0).values.copy()
         else:
             cal_lines = (
                 X_with_line['season_pts_avg'].fillna(0).values
                 + X_with_line['season_reb_avg'].fillna(0).values
                 + X_with_line['season_ast_avg'].fillna(0).values
-            )
+            ).copy()
 
-        # Compute survivorship offset for this prop type (same as ensemble's)
-        # This is mean(actual - season_avg) for the filtered population.
+        # Override with real sportsbook lines where available
+        n_real_cal = 0
+        if _real_lines_lookup:
+            for i, sample in enumerate(player_data):
+                pname = sample.get('player_name', '').strip().lower()
+                gdate = sample.get('game_date', '')
+                key = (pname, gdate, prop_name)
+                if key in _real_lines_lookup:
+                    cal_lines[i] = _real_lines_lookup[key]
+                    n_real_cal += 1
+            if n_real_cal > 0:
+                print(f"  Calibration: {n_real_cal} real lines + {len(cal_lines) - n_real_cal} season avg")
+
+        # Compute survivorship offset (actual - baseline for the filtered population)
         q_surv_offset = float(np.mean(y[cal_lines > 0] - cal_lines[cal_lines > 0]))
 
         try:
