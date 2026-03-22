@@ -59,13 +59,36 @@ _progress: dict = {}
 # ---------------------------------------------------------------------------
 INITIAL_BANKROLL = 1000.0
 PROP_TYPES = ["points", "rebounds", "assists", "pra"]
+
+# Default season config — overridden by --season flag
 TEST_SEASON_LABEL = "2024-25"
 TEST_SEASON_INT = 2024
-CONTEXT_SEASONS = ["2023-24", "2024-25"]
+
+# Season configs: test_season → {context_seasons, bdl_stats_file, test_date_range}
+SEASON_CONFIGS = {
+    "2023-24": {
+        "test_int": 2023,
+        "context_seasons": ["2022-23", "2023-24"],
+        "test_start": "2023-10-01",
+        "test_end": "2024-06-30",
+        "oos_train_seasons": ["2021-22", "2022-23"],
+        "oos_train_date_end": "2023-06-30",
+    },
+    "2024-25": {
+        "test_int": 2024,
+        "context_seasons": ["2023-24", "2024-25"],
+        "test_start": "2024-10-01",
+        "test_end": "2025-06-30",
+        "oos_train_seasons": ["2021-22", "2022-23", "2023-24"],
+        "oos_train_date_end": "2024-06-30",
+    },
+}
+
+CONTEXT_SEASONS = ["2023-24", "2024-25"]  # Default, overridden at runtime
 LINES_DIR = os.path.join(ROOT, "data", "historical_lines")
 OUTPUT_DIR = os.path.join(ROOT, "data", "backtest_results")
 MIN_MINUTES = 15
-MIN_SEASON_GAMES = 10  # Require N games before trusting features
+MIN_SEASON_GAMES = 10
 
 
 # ---------------------------------------------------------------------------
@@ -75,10 +98,11 @@ def load_bdl_player_stats(
     csv_games: list[dict],
     team_meta: dict,
     team_id_map: dict,
+    season_int: int | None = None,
 ) -> dict[int, list[dict]]:
     """Load BDL player stats and convert to process_games_for_training format.
 
-    Reads the enhanced BDL cache (player_stats_2024.json + _meta.json),
+    Reads the enhanced BDL cache (player_stats_{season}.json + _meta.json),
     maps BDL game IDs to NBA.com game IDs by matching date + teams,
     and converts player stats to the pipeline format.
 
@@ -86,18 +110,20 @@ def load_bdl_player_stats(
         csv_games: Games loaded from CSV (with NBA.com IDs).
         team_meta: Team metadata from _build_team_metadata().
         team_id_map: NBA.com team_id → compact team_id.
+        season_int: Season start year (e.g., 2023 for 2023-24). Defaults to TEST_SEASON_INT.
 
     Returns:
         player_stats_by_game: dict mapping NBA.com game_id → [player stat dicts]
     """
-    stats_path = os.path.join(LINES_DIR, f"player_stats_{TEST_SEASON_INT}.json")
-    meta_path = os.path.join(LINES_DIR, f"player_stats_{TEST_SEASON_INT}_meta.json")
+    _season = season_int if season_int is not None else TEST_SEASON_INT
+    stats_path = os.path.join(LINES_DIR, f"player_stats_{_season}.json")
+    meta_path = os.path.join(LINES_DIR, f"player_stats_{_season}_meta.json")
 
     if not os.path.exists(stats_path):
         raise FileNotFoundError(
             f"BDL stats cache not found: {stats_path}\n"
             f"Run: BALLDONTLIE_API_KEY=<key> python nba_models/backtesting/"
-            f"fetch_player_stats.py --season {TEST_SEASON_INT} --force"
+            f"fetch_player_stats.py --season {_season} --force"
         )
     if not os.path.exists(meta_path):
         raise FileNotFoundError(
@@ -364,7 +390,7 @@ def build_player_feature_index(
 # ---------------------------------------------------------------------------
 # Main backtest
 # ---------------------------------------------------------------------------
-def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dict | None:
+def run_backtest(args: argparse.Namespace, model_dir: Path | None = None, season_cfg: dict | None = None) -> dict | None:
     """Execute the real-lines walk-forward backtest.
 
     Args:
@@ -394,7 +420,9 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
 
     # ── 2. Load player stats (BDL for 2024-25) ────────────────────────
     logger.info("Step 2/6: Loading BDL player stats ...")
-    player_stats_by_game = load_bdl_player_stats(games, team_meta, team_id_map)
+    player_stats_by_game = load_bdl_player_stats(
+        games, team_meta, team_id_map, season_int=TEST_SEASON_INT
+    )
 
     total_records = sum(len(v) for v in player_stats_by_game.values())
     logger.info(
@@ -443,11 +471,13 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
         ]:
             _f.setdefault("prop_line_vs_recent", (_f.get(_sa, 0) or 0) - (_f.get(_rec, 0) or 0))
 
-    # Filter to test season (Oct 2024 – Jun 2025)
+    # Filter to test season using season config
+    _test_start = season_cfg["test_start"]
+    _test_end = season_cfg["test_end"]
     test_data = [
         p
         for p in player_data
-        if "2024-10-01" <= p["game_date"] <= "2025-06-30"
+        if _test_start <= p["game_date"] <= _test_end
     ]
     test_data.sort(key=lambda x: x["game_date"])
     logger.info(
@@ -467,19 +497,22 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
     # ── 5. Load or train models ────────────────────────────────────────
     oos_mode = getattr(args, "oos", False)
 
+    # Use season config or defaults
+    if season_cfg is None:
+        season_cfg = SEASON_CONFIGS.get(TEST_SEASON_LABEL, SEASON_CONFIGS["2024-25"])
+
     if oos_mode:
         # TRUE OUT-OF-SAMPLE: train fresh models on data BEFORE test season.
-        # This trains on 2021-2024 CSV data and tests on 2024-25 real lines.
-        logger.info("Step 5/6: OOS MODE — training fresh models on pre-2024 data ...")
+        logger.info("Step 5/6: OOS MODE — training fresh models for %s ...", TEST_SEASON_LABEL)
         from nba_models.backtesting.oos_walkforward_backtest import train_fresh_models
 
-        # Also load CSV player stats for pre-2024 seasons (training data)
-        train_seasons = ["2021-22", "2022-23", "2023-24"]
+        # Load CSV player stats for training seasons
+        train_seasons = season_cfg["oos_train_seasons"]
         csv_games = load_team_games(train_seasons, team_id_map, team_meta)
         csv_game_ids = {g["id"] for g in csv_games}
         csv_player_stats = load_player_stats(csv_game_ids, train_seasons, team_id_map)
 
-        logger.info("  CSV training data: %d games", len(csv_games))
+        logger.info("  Training on seasons %s: %d games", train_seasons, len(csv_games))
 
         # Build training features from CSV data
         _tracker_train = [
@@ -491,8 +524,8 @@ def run_backtest(args: argparse.Namespace, model_dir: Path | None = None) -> dic
         _, train_player_data = process_games_for_training(csv_games, csv_player_stats)
         logger.info("  Training samples: %d", len(train_player_data))
 
-        # Train fresh models using OOS walk-forward infrastructure
-        train_date_end = "2024-06-30"  # Train on data up to end of 2023-24 season
+        # Train fresh models
+        train_date_end = season_cfg["oos_train_date_end"]
         ensemble_models, quantile_models = train_fresh_models(
             train_player_data, train_date_end
         )
@@ -1277,15 +1310,28 @@ def main() -> int:
     parser.add_argument(
         "--oos",
         action="store_true",
-        help="True OOS mode: train fresh models on pre-2024 data only",
+        help="True OOS mode: train fresh models on pre-test-season data only",
+    )
+    parser.add_argument(
+        "--season",
+        type=str,
+        default="2024-25",
+        choices=list(SEASON_CONFIGS.keys()),
+        help="Test season (default: 2024-25)",
     )
     args = parser.parse_args()
 
-    global INITIAL_BANKROLL
+    global INITIAL_BANKROLL, TEST_SEASON_LABEL, TEST_SEASON_INT, CONTEXT_SEASONS
     INITIAL_BANKROLL = args.bankroll
 
+    # Apply season config
+    season_cfg = SEASON_CONFIGS[args.season]
+    TEST_SEASON_LABEL = args.season
+    TEST_SEASON_INT = season_cfg["test_int"]
+    CONTEXT_SEASONS = season_cfg["context_seasons"]
+
     model_dir = Path(args.model_dir) if args.model_dir else None
-    results = run_backtest(args, model_dir=model_dir)
+    results = run_backtest(args, model_dir=model_dir, season_cfg=season_cfg)
 
     if results and "error" not in results:
         logger.info("Backtest completed successfully!")
