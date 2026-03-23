@@ -118,7 +118,8 @@ RETRY_BACKOFF_FACTOR = 2.0
 RETRY_INITIAL_DELAY = 1.0  # seconds
 
 # Circuit breaker configuration
-CIRCUIT_BREAKER_THRESHOLD = 3  # Open after N consecutive failures
+CIRCUIT_BREAKER_THRESHOLD = 10  # Open after N consecutive failures
+CIRCUIT_BREAKER_RESET_SECONDS = 300  # Auto-reset after 5 minutes
 
 
 class CircuitBreakerOpenError(Exception):
@@ -128,39 +129,39 @@ class CircuitBreakerOpenError(Exception):
 
 class NbaStatsCircuitBreaker:
     """
-    Session-scoped circuit breaker for stats.nba.com API.
+    Circuit breaker for stats.nba.com API with timed auto-reset.
 
-    After THRESHOLD consecutive timeout/connection failures across ANY
-    stats.nba.com call, the circuit opens and all subsequent calls raise
-    CircuitBreakerOpenError immediately. This prevents wasting minutes
-    per game on a completely unresponsive API.
+    After THRESHOLD consecutive timeout/connection failures, the circuit
+    opens and all calls raise CircuitBreakerOpenError. After RESET_SECONDS,
+    the circuit half-opens to allow a single test call. If that succeeds,
+    the circuit closes. If it fails, the circuit re-opens.
 
-    The circuit stays open for the duration of the process. Each new run
-    of daily_predictions.py gets a fresh circuit breaker.
-
-    If the API recovers (a call succeeds), the circuit closes and the
-    failure counter resets.
+    stats.nba.com is frequently overloaded but usually recovers within
+    minutes. A permanent lockout (the old behavior) killed entire
+    prediction runs.
     """
 
-    def __init__(self, threshold: int = CIRCUIT_BREAKER_THRESHOLD):
+    def __init__(self, threshold: int = CIRCUIT_BREAKER_THRESHOLD,
+                 reset_seconds: float = CIRCUIT_BREAKER_RESET_SECONDS):
         self._lock = threading.Lock()
         self._consecutive_failures = 0
         self._threshold = threshold
+        self._reset_seconds = reset_seconds
         self._is_open = False
+        self._opened_at = 0.0
 
     def record_failure(self):
         """Record a stats.nba.com API failure (timeout/connection error)."""
+        import time
         with self._lock:
             self._consecutive_failures += 1
             if self._consecutive_failures >= self._threshold and not self._is_open:
                 self._is_open = True
+                self._opened_at = time.time()
                 print(
                     f"\n  [Circuit Breaker] stats.nba.com marked DOWN after "
-                    f"{self._consecutive_failures} consecutive failures."
-                )
-                print(
-                    "  [Circuit Breaker] Skipping all NBA stats API calls "
-                    "for this session. BallDontLie data will be used.\n"
+                    f"{self._consecutive_failures} consecutive failures. "
+                    f"Will retry in {self._reset_seconds}s."
                 )
 
     def record_success(self):
@@ -172,11 +173,21 @@ class NbaStatsCircuitBreaker:
 
     @property
     def is_open(self) -> bool:
-        return self._is_open
+        if not self._is_open:
+            return False
+        # Auto-reset after timeout
+        import time
+        if time.time() - self._opened_at > self._reset_seconds:
+            with self._lock:
+                self._is_open = False
+                self._consecutive_failures = 0
+            print("  [Circuit Breaker] Auto-reset after timeout — retrying stats.nba.com")
+            return False
+        return True
 
     def check(self):
         """Raise CircuitBreakerOpenError if circuit is open."""
-        if self._is_open:
+        if self.is_open:
             raise CircuitBreakerOpenError(
                 "stats.nba.com circuit breaker is OPEN — skipping call"
             )

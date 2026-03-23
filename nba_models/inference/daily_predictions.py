@@ -2093,6 +2093,19 @@ def predict_player_prop(
             features = get_cached_features(player_name, prop_type, opponent_id, bdl_player_id=player_id, opp_stats=opp_stats)
 
             if features:
+                # Guard: verify features have minimum required fields.
+                # The model needs season_avg, recent_avg, predicted_minutes etc.
+                # If fallback features (only 27 fields) are used, key averages
+                # may be missing → garbage predictions. Check for critical fields.
+                _critical_keys = {'season_min_avg', 'days_rest', 'opp_def_rating'}
+                _has_critical = sum(1 for k in _critical_keys if features.get(k) is not None)
+                if _has_critical < 2:
+                    logger.debug(
+                        "Incomplete features for %s %s (%d fields, missing critical keys) — skipping",
+                        player_name, prop_type, len(features),
+                    )
+                    return None
+
                 # Inject prop_line features. After the next retrain, models will no
                 # longer include prop_line or prop_line_vs_season in their feature_names
                 # and these values will be ignored. Until then, we keep injecting them
@@ -2606,6 +2619,7 @@ def predict_player_prop(
                     'reason': f'Predicted minutes {_pred_mins:.0f} < 25 (starter-level gate)',
                     'tier': 'no_bet',
                 }
+                _edge_val = abs(predicted_value - line) if predicted_value is not None else 0.0
                 return {
                     'player_name': player_name,
                     'player_id': player_id,
@@ -2618,6 +2632,14 @@ def predict_player_prop(
                     'suggested_bet_size': 0.0,
                     'bet_recommendation': 'PASS',
                     'signal': 'PASS',
+                    'edge': _edge_val,
+                    'over_edge': 0.0,
+                    'under_edge': 0.0,
+                    'edge_quality': 'none',
+                    'ev_per_dollar': 0.0,
+                    'implied_probability': 0.5,
+                    'model_probability': over_prob or 0.5,
+                    'has_edge': False,
                     'bet_filter': bet_filter_result,
                     'bet_filter_passed': False,
                     'bet_filter_tier': 'no_bet',
@@ -2654,6 +2676,14 @@ def predict_player_prop(
                         'suggested_bet_size': 0.0,
                         'bet_recommendation': 'PASS',
                         'signal': 'PASS',
+                        'edge': edge_abs,
+                        'over_edge': 0.0,
+                        'under_edge': 0.0,
+                        'edge_quality': 'none',
+                        'ev_per_dollar': 0.0,
+                        'implied_probability': 0.5,
+                        'model_probability': over_prob or 0.5,
+                        'has_edge': False,
                         'bet_filter': bet_filter_result,
                         'bet_filter_passed': False,
                         'bet_filter_tier': 'no_bet',
@@ -3260,7 +3290,7 @@ def main():
 
                     # Show completion
                     prop_count = len(analysis['player_props'])
-                    edges = [p['edge'] for p in analysis['player_props'] if abs(p['edge']) > 3]
+                    edges = [p.get('edge', 0) for p in analysis['player_props'] if abs(p.get('edge', 0)) > 3]
                     print(f" {prop_count} props analyzed, {len(edges)} edges found")
             else:
                 print(" no props available")
@@ -3396,7 +3426,7 @@ def main():
                     'game': f"{away}@{home}",
                     'bet': f"{prop['player']} {prop['stat']} {direction} {prop['line']}",
                     'prob': prob,
-                    'edge': prop['edge'],
+                    'edge': prop.get('edge', 0),
                     'signal': signal,
                     'line_vendor': vendor,
                     'line_source': source,
