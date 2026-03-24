@@ -3606,7 +3606,7 @@ def main():
                         # Phase 4.3: Initialise line-movement tracker once per game loop
                         _prop_tracker = get_prop_tracker() if HAS_PROP_TRACKER else None
 
-                        def process_prop_task(task):
+                        def process_prop_task(task, _prop_tracker=_prop_tracker):
                             pred = predict_player_prop(
                                 task['player_name'],
                                 task['player_id'],

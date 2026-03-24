@@ -51,8 +51,7 @@ def _get_postgres_connection():
         return None
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
-        return conn
+        return psycopg2.connect(db_url)
     except Exception as exc:
         logger.debug("PropOddsTracker: PostgreSQL unavailable (%s), using SQLite", exc)
         return None
@@ -420,7 +419,7 @@ class PropOddsTracker:
                 ORDER BY timestamp ASC
             """, (game_date, player_name, prop_type, cutoff))
             cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
             cur.close()
             return rows
         except Exception as exc:

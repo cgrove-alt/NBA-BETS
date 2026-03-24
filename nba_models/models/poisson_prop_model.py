@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -93,11 +93,11 @@ class PoissonPropModel:
 
     def __init__(
         self,
-        features: Optional[List[str]] = None,
+        features: list[str] | None = None,
         min_fg3a: float = DEFAULT_MIN_FG3A,
         min_games: int = DEFAULT_MIN_GAMES,
     ) -> None:
-        self.features: List[str] = features or []
+        self.features: list[str] = features or []
         self.min_fg3a = min_fg3a
         self.min_games = min_games
 
@@ -183,17 +183,16 @@ class PoissonPropModel:
             P(X > 2.5) = P(X >= 3) = 1 - P(X <= 2) = 1 - CDF(2, λ)
         """
         lambdas = self.predict(X)
-        probs = np.array([
+        return np.array([
             _poisson_over_prob(lam, line) for lam in lambdas
         ])
-        return probs
 
     def predict_single(
         self,
-        features_dict: Dict[str, float],
+        features_dict: dict[str, float],
         line: float,
-        streak_context: Optional[Dict] = None,
-    ) -> Dict[str, Any]:
+        streak_context: dict | None = None,
+    ) -> dict[str, Any]:
         """
         Predict from a raw feature dict.
 
@@ -283,7 +282,7 @@ class PoissonPropModel:
             raise RuntimeError("PoissonPropModel is not fitted yet.")
 
     @staticmethod
-    def _not_fitted_result(line: float) -> Dict[str, Any]:
+    def _not_fitted_result(line: float) -> dict[str, Any]:
         return {
             'lambda': None,
             'over_prob': None,
@@ -307,7 +306,7 @@ def compute_poisson_over_prob(lam: float, line: float) -> float:
     return _poisson_over_prob(lam, line)
 
 
-def detect_threes_streak(features_dict: Dict[str, float]) -> Dict[str, Any]:
+def detect_threes_streak(features_dict: dict[str, float]) -> dict[str, Any]:
     """
     Detect hot/cold streak in a player's recent three-point shooting.
 
@@ -372,7 +371,7 @@ def _log_add_exp(a: float, b: float) -> float:
     return b + math.log1p(math.exp(a - b))
 
 
-def _last3_pct(features_dict: Dict[str, float]) -> Optional[float]:
+def _last3_pct(features_dict: dict[str, float]) -> float | None:
     """Compute last-3 game 3P% from feature dict, or None if data absent."""
     fg3m = features_dict.get('fg3m_last3') or features_dict.get('last3_fg3m_avg')
     fg3a = features_dict.get('fg3a_last3') or features_dict.get('last3_fg3a_avg')
@@ -381,7 +380,7 @@ def _last3_pct(features_dict: Dict[str, float]) -> Optional[float]:
     return None
 
 
-def _detect_streak(features_dict: Dict[str, float]) -> tuple:
+def _detect_streak(features_dict: dict[str, float]) -> tuple:
     """
     Returns (streak_type, fade_multiplier) where fade_multiplier is the
     fractional change to apply to λ.  Positive = boost, Negative = fade.

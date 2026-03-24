@@ -44,7 +44,8 @@ import logging
 import math
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 import numpy as np
 
@@ -76,7 +77,7 @@ class DynamicEnsembleWeighter:
 
     def __init__(self) -> None:
         # Key: (model_name, prop_type)  Value: deque[(prediction, actual)]
-        self._history: Dict[tuple, deque] = {}
+        self._history: dict[tuple, deque] = {}
 
     # ------------------------------------------------------------------
     # Public interface
@@ -99,8 +100,8 @@ class DynamicEnsembleWeighter:
         self,
         model_names: Sequence[str],
         prop_type: str = 'points',
-        recent_predictions: Optional[Dict[str, float]] = None,
-    ) -> Dict[str, float]:
+        recent_predictions: dict[str, float] | None = None,
+    ) -> dict[str, float]:
         """
         Compute normalised weights for the given set of models.
 
@@ -124,7 +125,7 @@ class DynamicEnsembleWeighter:
             return {}
 
         # Step 1: base weights from inverse-MAE
-        raw_weights: Dict[str, float] = {}
+        raw_weights: dict[str, float] = {}
         for name in model_names:
             mae = self._recent_mae(name, prop_type)
             raw_weights[name] = 1.0 / max(mae, 0.1)  # inverse-MAE
@@ -137,13 +138,13 @@ class DynamicEnsembleWeighter:
         total = sum(raw_weights.values())
         if total <= 0:
             equal = 1.0 / len(model_names)
-            return {n: equal for n in model_names}
+            return dict.fromkeys(model_names, equal)
 
         return {n: raw_weights[n] / total for n in model_names}
 
     def get_model_stats(
         self, model_name: str, prop_type: str
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Return accuracy metrics for a (model, prop_type) pair."""
         key = (model_name.lower(), prop_type.lower())
         history = list(self._history.get(key, []))
@@ -237,9 +238,9 @@ class DynamicEnsembleWeighter:
 
     def _apply_diversity_penalty(
         self,
-        weights: Dict[str, float],
-        predictions: Dict[str, float],
-    ) -> Dict[str, float]:
+        weights: dict[str, float],
+        predictions: dict[str, float],
+    ) -> dict[str, float]:
         """
         Reduce combined weight for model pairs with high prediction correlation.
 
@@ -254,7 +255,7 @@ class DynamicEnsembleWeighter:
         adjusted = dict(weights)
 
         # Build list of recent predictions per model for correlation estimation
-        recent_preds: Dict[str, List[float]] = {}
+        recent_preds: dict[str, list[float]] = {}
         for name in names:
             # Use history if available; fall back to just the current prediction
             history_data = []
@@ -285,7 +286,7 @@ class DynamicEnsembleWeighter:
         return adjusted
 
     @staticmethod
-    def _pairwise_correlation(xs: List[float], ys: List[float]) -> Optional[float]:
+    def _pairwise_correlation(xs: list[float], ys: list[float]) -> float | None:
         """Pearson correlation; returns None if insufficient data."""
         n = min(len(xs), len(ys))
         if n < 5:

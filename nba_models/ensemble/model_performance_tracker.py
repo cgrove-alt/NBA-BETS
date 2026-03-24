@@ -45,7 +45,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 import numpy as np
 
@@ -60,7 +60,7 @@ class ModelPerformanceTracker:
     per-model accuracy reporting.
     """
 
-    def __init__(self, log_dir: Optional[Path] = None) -> None:
+    def __init__(self, log_dir: Path | None = None) -> None:
         self.log_dir = Path(log_dir) if log_dir else _DEFAULT_LOG_DIR
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._pred_log = self.log_dir / "predictions.jsonl"
@@ -76,8 +76,8 @@ class ModelPerformanceTracker:
         player: str,
         prop_type: str,
         line: float,
-        predictions: Dict[str, float],
-        ensemble_pred: Optional[float] = None,
+        predictions: dict[str, float],
+        ensemble_pred: float | None = None,
         american_odds: int = -110,
     ) -> None:
         """Append a prediction record to the JSONL log."""
@@ -118,7 +118,7 @@ class ModelPerformanceTracker:
         self,
         prop_type: str,
         window: int = 50,
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> dict[str, dict[str, float]]:
         """
         Compute per-model accuracy metrics over the last *window* settled games.
 
@@ -131,13 +131,13 @@ class ModelPerformanceTracker:
         actuals = self._load_jsonl(self._actual_log)
 
         # Build actual lookup: (date, player, prop_type) → actual
-        actual_map: Dict[tuple, float] = {}
+        actual_map: dict[tuple, float] = {}
         for rec in actuals:
             key = (rec.get('date'), rec.get('player'), rec.get('prop_type'))
             actual_map[key] = rec.get('actual', 0.0)
 
         # Filter predictions for this prop type and join with actuals
-        matched: List[Dict] = []
+        matched: list[dict] = []
         for rec in preds:
             if rec.get('prop_type', '').lower() != prop_type.lower():
                 continue
@@ -151,7 +151,7 @@ class ModelPerformanceTracker:
         matched = matched[-window:]
 
         # Aggregate per-model errors
-        errors_by_model: Dict[str, List[float]] = defaultdict(list)
+        errors_by_model: dict[str, list[float]] = defaultdict(list)
         for rec in matched:
             actual = rec['actual']
             for model_name, pred_val in rec.get('predictions', {}).items():
@@ -160,7 +160,7 @@ class ModelPerformanceTracker:
             if rec.get('ensemble_pred') is not None:
                 errors_by_model['ensemble'].append(rec['ensemble_pred'] - actual)
 
-        results: Dict[str, Dict[str, float]] = {}
+        results: dict[str, dict[str, float]] = {}
         for model_name, errs in errors_by_model.items():
             arr = np.array(errs)
             results[model_name] = {
@@ -202,7 +202,7 @@ class ModelPerformanceTracker:
             logger.warning("ModelPerformanceTracker: failed to write log: %s", exc)
 
     @staticmethod
-    def _load_jsonl(path: Path) -> List[dict]:
+    def _load_jsonl(path: Path) -> list[dict]:
         if not path.exists():
             return []
         records = []

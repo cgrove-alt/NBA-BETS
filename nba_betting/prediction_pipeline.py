@@ -343,7 +343,7 @@ def evaluate_bet(
             'tier': 'no_bet',
             'prob_edge_tier': 'noise',
             'prob_edge': 0.0,
-            'reason': f'Predicted value is None or NaN — skipping',
+            'reason': 'Predicted value is None or NaN — skipping',
             'true_ev': None,
             'ev_edge': None,
             'market_implied_prob': None,
