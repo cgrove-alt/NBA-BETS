@@ -86,6 +86,8 @@ from nba_betting.constants import (
     QUANTILE_TARGET_SLOPE,
     PROB_CLAMP_MIN,   # Phase 1.1: probability safety floor (0.05)
     PROB_CLAMP_MAX,   # Phase 1.1: probability safety ceiling (0.95)
+    SPREAD_BETTING_ENABLED,
+    SPREAD_AS_ML_FEATURE,
 )
 from nba_models.models.model_classes import smart_fillna
 from nba_models.inference.model_compat import (
@@ -95,6 +97,35 @@ from nba_models.inference.model_compat import (
     predict_regression_value,
     prepare_loaded_model_artifact,
 )
+
+# ---------------------------------------------------------------------------
+# Phase 3.3: Poisson probability + regression-to-mean for threes
+# ---------------------------------------------------------------------------
+try:
+    from nba_models.models.poisson_prop_model import (
+        compute_poisson_over_prob,
+        detect_threes_streak,
+    )
+    from nba_betting.prop_config import get_prop_config as _get_prop_config
+    HAS_POISSON_MODEL = True
+except Exception as _pm_err:
+    HAS_POISSON_MODEL = False
+    logger.debug("Poisson model unavailable: %s", _pm_err)
+
+# Phase 3.2: Dynamic ensemble weighting + per-model performance tracker
+# ---------------------------------------------------------------------------
+try:
+    from nba_models.ensemble.dynamic_weighting import DynamicEnsembleWeighter
+    from nba_models.ensemble.model_performance_tracker import ModelPerformanceTracker
+    _WEIGHTER_PATH = Path(__file__).resolve().parents[2] / "data" / "model_performance" / "ensemble_weights.json"
+    _ENSEMBLE_WEIGHTER: DynamicEnsembleWeighter = DynamicEnsembleWeighter.load(_WEIGHTER_PATH)
+    _PERF_TRACKER: ModelPerformanceTracker = ModelPerformanceTracker()
+    HAS_DYNAMIC_WEIGHTING = True
+except Exception as _dw_err:
+    HAS_DYNAMIC_WEIGHTING = False
+    _ENSEMBLE_WEIGHTER = None  # type: ignore[assignment]
+    _PERF_TRACKER = None  # type: ignore[assignment]
+    logger.debug("Dynamic ensemble weighting unavailable: %s", _dw_err)
 
 
 # ---------------------------------------------------------------------------
@@ -1780,6 +1811,14 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
     if freshness and odds:
         freshness.record_odds_fetch()
 
+    # Phase 3.1: Run spread prediction BEFORE moneyline so we can inject it
+    # as a feature.  The spread model encodes point-differential information
+    # that helps moneyline calibration even though spread betting is disabled.
+    predicted_spread = predict_spread(spread_features if spread_features else ml_features, models)
+
+    if SPREAD_AS_ML_FEATURE and predicted_spread is not None:
+        ml_features['model_spread_pred'] = float(predicted_spread)
+
     # Moneyline prediction (with injury adjustments)
     home_prob, away_prob = predict_moneyline(ml_features, models)
 
@@ -1802,8 +1841,7 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
         'away_edge': (away_prob - away_implied) * 100,
     }
 
-    # Spread prediction — use spread_features (richer than moneyline_features)
-    predicted_spread = predict_spread(spread_features if spread_features else ml_features, models)
+    # Spread computation was already run above (Phase 3.1 reorder)
     market_spread = odds.get('spread', 0)  # Negative = home favored
 
     # FIXED: Use app.py's proven formula for spread edge calculation.
@@ -1906,11 +1944,12 @@ def print_game_analysis(analysis: dict):
 
     # Spread
     sp = analysis['spread']
-    print("\n  SPREAD:")
+    spread_disabled_note = "" if SPREAD_BETTING_ENABLED else " [BETTING DISABLED — used as ML feature]"
+    print(f"\n  SPREAD:{spread_disabled_note}")
     print(f"    Model: {home} {sp['predicted_spread']:+.1f}")
     print(f"    Market: {home} {sp['market_spread']:+.1f}")
     print(f"    Cover Prob: {sp['cover_prob']:.1%} | Edge: {sp['edge_pct']:+.1f}%")
-    if abs(sp['edge_pct']) > 2:
+    if SPREAD_BETTING_ENABLED and abs(sp['edge_pct']) > 2:
         print(f"    >>> {sp['bet_side']}")
 
     # Player props (if any)
@@ -2224,7 +2263,9 @@ def predict_player_prop(
                 if isinstance(model_data, dict) and model_data.get('ensemble'):
                     base_models = model_data['models']
                     meta_model = model_data['meta_model']
-                    model_data.get('model_weights', {})
+                    # Phase 3.2: stored training-time weights serve as prior;
+                    # dynamic weighter overrides them when enough history exists.
+                    stored_weights = model_data.get('model_weights', {})
                     scaler = model_data.get('scaler')
                     feature_names = model_data.get('feature_names', [])
 
@@ -2237,19 +2278,62 @@ def predict_player_prop(
 
                     # Get predictions from tree-based models only (ridge can have scaling issues)
                     tree_models = ['xgboost', 'lightgbm', 'catboost', 'random_forest']
-                    base_preds = []
+                    base_preds_dict: dict = {}
                     for name in tree_models:
                         if name in base_models and base_models[name] is not None:
                             try:
                                 pred = base_models[name].predict(X_scaled)[0]
                                 if -50 < pred < 100:  # Sanity check
-                                    base_preds.append(pred)
+                                    base_preds_dict[name] = float(pred)
                             except Exception:
                                 continue
 
-                    # Compute weighted average if we have predictions
-                    if base_preds:
-                        predicted_value = float(np.mean(base_preds))
+                    # Phase 3.2: Compute weighted average using dynamic weights.
+                    # Priority: dynamic (perf-based) > stored training weights > equal.
+                    if base_preds_dict:
+                        if HAS_DYNAMIC_WEIGHTING and _ENSEMBLE_WEIGHTER is not None:
+                            dyn_weights = _ENSEMBLE_WEIGHTER.get_weights(
+                                model_names=list(base_preds_dict.keys()),
+                                prop_type=prop_type,
+                                recent_predictions=base_preds_dict,
+                            )
+                            predicted_value = float(sum(
+                                dyn_weights.get(n, 1.0 / len(base_preds_dict)) * v
+                                for n, v in base_preds_dict.items()
+                            ))
+                            logger.debug(
+                                "Dynamic weights for %s %s: %s",
+                                player_name, prop_type,
+                                {n: f"{w:.3f}" for n, w in dyn_weights.items()},
+                            )
+                        elif stored_weights:
+                            # Use training-time weights if dynamic weighter unavailable
+                            wt_total = sum(
+                                stored_weights.get(n, 1.0) for n in base_preds_dict
+                            )
+                            if wt_total > 0:
+                                predicted_value = float(sum(
+                                    stored_weights.get(n, 1.0) * v / wt_total
+                                    for n, v in base_preds_dict.items()
+                                ))
+                            else:
+                                predicted_value = float(np.mean(list(base_preds_dict.values())))
+                        else:
+                            predicted_value = float(np.mean(list(base_preds_dict.values())))
+
+                        # Phase 3.2: Log individual model predictions for accuracy tracking
+                        if _PERF_TRACKER is not None:
+                            try:
+                                _PERF_TRACKER.log_predictions(
+                                    date=datetime.now(ET).strftime('%Y-%m-%d'),
+                                    player=player_name,
+                                    prop_type=prop_type,
+                                    line=line,
+                                    predictions=base_preds_dict,
+                                    ensemble_pred=predicted_value,
+                                )
+                            except Exception:
+                                pass  # Logging failure must never crash inference
                     else:
                         # Fallback to season average from features
                         predicted_value = features.get('season_pts_avg', 15.0)
@@ -2274,22 +2358,37 @@ def predict_player_prop(
                     # Scale if scaler available
                     X_scaled = scaler.transform(X) if scaler is not None else X.values
 
-                    # Get base model predictions
-                    base_preds = []
+                    # Get base model predictions (preserve order for meta-model)
+                    stacking_preds_dict: dict = {}
                     for name, model in base_models.items():
                         try:
                             pred = model.predict(X_scaled)[0]
                             if -50 < pred < 100:  # Sanity check
-                                base_preds.append(pred)
+                                stacking_preds_dict[name] = float(pred)
                         except Exception:
                             continue
 
-                    # Use meta model for stacking
+                    base_preds = list(stacking_preds_dict.values())
+
+                    # Use meta model for stacking (true stacking — meta-learner
+                    # learns optimal combination of base predictions)
                     if meta_model is not None and base_preds:
                         meta_features = np.array(base_preds).reshape(1, -1)
                         predicted_value = float(meta_model.predict(meta_features)[0])
                     elif base_preds:
-                        predicted_value = float(np.mean(base_preds))
+                        # Phase 3.2: dynamic weights when meta-model absent
+                        if HAS_DYNAMIC_WEIGHTING and _ENSEMBLE_WEIGHTER is not None and stacking_preds_dict:
+                            dyn_weights = _ENSEMBLE_WEIGHTER.get_weights(
+                                model_names=list(stacking_preds_dict.keys()),
+                                prop_type=prop_type,
+                                recent_predictions=stacking_preds_dict,
+                            )
+                            predicted_value = float(sum(
+                                dyn_weights.get(n, 1.0 / len(stacking_preds_dict)) * v
+                                for n, v in stacking_preds_dict.items()
+                            ))
+                        else:
+                            predicted_value = float(np.mean(base_preds))
                     else:
                         predicted_value = features.get('season_pts_avg', 15.0)
 
@@ -2574,6 +2673,61 @@ def predict_player_prop(
             z_score = (predicted_value + bias_fix - line) / effective_sigma
             over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
 
+    # Phase 3.3: Threes-specific enhancements before final calibration
+    #   1. Sample size gate — skip if player has too few games or attempts
+    #   2. Regression-to-mean — fade hot streaks, boost cold ones
+    #   3. Poisson CDF — more accurate P(X > line) for count data
+    threes_streak_info = {}
+    if prop_type.lower() == 'threes' and predicted_value is not None:
+        threes_cfg = _get_prop_config('threes') if HAS_POISSON_MODEL else None
+        if threes_cfg is not None:
+            # 1. Sample size gate
+            _season_games_cnt = features.get('season_games', 0) if features else 0
+            _fg3a_avg_val = features.get('fg3a_avg', 0.0) if features else 0.0
+            if (_season_games_cnt < threes_cfg.min_sample_games
+                    or _fg3a_avg_val < threes_cfg.min_fg3a):
+                logger.debug(
+                    "Threes gate: %s skipped (games=%d, fg3a_avg=%.1f)",
+                    player_name, _season_games_cnt, _fg3a_avg_val,
+                )
+                return None  # Insufficient sample — do not generate a threes bet
+
+            # 2. Regression-to-mean adjustment (streak detection)
+            if features and HAS_POISSON_MODEL:
+                try:
+                    threes_streak_info = detect_threes_streak(features)
+                    streak_fade = threes_streak_info.get('streak_fade', 0.0)
+                    if streak_fade != 0.0:
+                        predicted_value = predicted_value * (1.0 + streak_fade)
+                        bias_fix = PROP_BIAS_CORRECTION.get('threes', 0.0)
+                        z_score = (predicted_value + bias_fix - line) / effective_sigma
+                        over_prob = float(norm.cdf(z_score))
+                        logger.debug(
+                            "Threes streak %s for %s: fade=%.1f%% → pred=%.2f",
+                            threes_streak_info.get('streak_type'), player_name,
+                            streak_fade * 100, predicted_value,
+                        )
+                except Exception:
+                    logger.debug(
+                        "Streak detection failed for %s", player_name, exc_info=True
+                    )
+
+            # 3. Poisson CDF override — more accurate for integer count data
+            if features and HAS_POISSON_MODEL and threes_cfg.use_poisson:
+                try:
+                    lam = max(predicted_value, 0.01)
+                    poisson_prob = compute_poisson_over_prob(lam, line)
+                    # Blend: 70% Poisson, 30% Gaussian to hedge model error
+                    over_prob = 0.70 * poisson_prob + 0.30 * over_prob
+                    logger.debug(
+                        "Threes Poisson: λ=%.2f line=%.1f P_poisson=%.3f P_blend=%.3f",
+                        lam, line, poisson_prob, over_prob,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Poisson CDF failed for %s", player_name, exc_info=True
+                    )
+
     # Apply empirical probability calibration (isotonic regression from backtest)
     if over_prob is not None:
         over_prob = apply_empirical_calibration(over_prob, prop_type)
@@ -2854,6 +3008,10 @@ def predict_player_prop(
         'bet_filter_passed': bet_filter_result.get('should_bet', True),
         'bet_filter_tier': bet_filter_result.get('tier', 'unknown'),
         'bet_filter_reason': bet_filter_result.get('reason', ''),
+        # Phase 3.3: Threes-specific metadata (empty for other prop types)
+        'threes_streak_type': threes_streak_info.get('streak_type', 'neutral'),
+        'threes_streak_fade': threes_streak_info.get('streak_fade', 0.0),
+        'threes_streak_details': threes_streak_info.get('details', ''),
     }
 
 
@@ -3598,8 +3756,9 @@ def main():
                 'edge': a['moneyline']['away_edge']
             })
 
-        # Spread edges
-        if a['spread']['edge_pct'] > 5:
+        # Spread edges — only when betting is enabled (Phase 3.1: disabled,
+        # RMSE 14.2 > market 12-13; spread output is used as ML feature instead)
+        if SPREAD_BETTING_ENABLED and a['spread']['edge_pct'] > 5:
             recommendations.append({
                 'game': f"{away}@{home}",
                 'bet': a['spread']['bet_side'],

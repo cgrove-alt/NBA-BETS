@@ -91,6 +91,20 @@ PROB_EDGE_LOW: float    = 0.03   # 3–5% above breakeven → "Low" confidence t
 MIN_BET_TIER: str = 'high'
 
 # ---------------------------------------------------------------------------
+# Spread model betting flag (Phase 3.1)
+# ---------------------------------------------------------------------------
+# The spread model has RMSE 14.2 vs market RMSE of 12-13 — it is worse than
+# the market and should NOT generate active picks.  However, the spread model
+# output is still useful as a *feature* for the moneyline model (it encodes
+# point-differential information that complements win-probability estimation).
+#
+# SPREAD_BETTING_ENABLED = False  → no spread bets appear in recommendations
+# SPREAD_AS_ML_FEATURE   = True   → predicted_spread is injected into
+#                                    moneyline features as 'model_spread_pred'
+SPREAD_BETTING_ENABLED: bool = False
+SPREAD_AS_ML_FEATURE: bool = True
+
+# ---------------------------------------------------------------------------
 # Edge quality tiers
 # ---------------------------------------------------------------------------
 # Used consistently by edge_calculator, bet_filter, and daily_predictions.

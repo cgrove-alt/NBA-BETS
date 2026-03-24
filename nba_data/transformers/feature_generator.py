@@ -289,6 +289,45 @@ class PlayerFeatureGenerator:
         features['opp_win_pct'] = 0.5
         features['opp_recent_win_pct'] = 0.5
 
+        # Phase 3.3: Opponent 3-point defense features
+        # These are the two most predictive opponent features for threes:
+        #   opp_fg3a_allowed  — avg 3PA allowed per game (league avg ≈ 34)
+        #   opp_fg3_pct_allowed — 3P% allowed (league avg ≈ 36%)
+        # Populated from position_defense_features when real data is available;
+        # otherwise defaults represent league-average defence.
+        features['opp_fg3a_allowed'] = 34.0       # league avg 3PA allowed
+        features['opp_fg3_pct_allowed'] = 0.36    # league avg 3P% allowed
+        # Composite: expected 3PM allowed = 3PA_allowed * 3P%_allowed
+        features['opp_fg3m_allowed'] = round(34.0 * 0.36, 2)
+
+        # Phase 3.3: Player's 3-point attempt trend (last 3 games vs season avg)
+        # A positive value means the player is attempting more threes recently,
+        # which is a strong predictor of 3PM volume.
+        season_fg3a = [
+            (s.get('fg3a', 0) or 0) for _, s in games
+        ]
+        last3_fg3a = [
+            (s.get('fg3a', 0) or 0) for _, s in last_3
+        ]
+        season_fg3a_avg = np.mean(season_fg3a) if season_fg3a else 0.0
+        last3_fg3a_avg = np.mean(last3_fg3a) if last3_fg3a else 0.0
+        features['fg3a_trend_3g'] = round(last3_fg3a_avg - season_fg3a_avg, 3)
+        features['last3_fg3a_avg'] = round(last3_fg3a_avg, 3)
+        features['fg3a_season_avg'] = round(season_fg3a_avg, 3)
+
+        # Last-3 FG3M (makes) for Poisson streak detection
+        last3_fg3m = [
+            (s.get('fg3m', 0) or 0) for _, s in last_3
+        ]
+        last3_fg3a_total = sum(last3_fg3a)
+        last3_fg3m_total = sum(last3_fg3m)
+        features['fg3m_last3'] = round(float(np.mean(last3_fg3m)), 3) if last3_fg3m else 0.0
+        features['fg3a_last3'] = round(last3_fg3a_avg, 3)
+        # Last-3 3P% for hot/cold streak detection
+        features['fg3_pct_last3'] = round(
+            last3_fg3m_total / last3_fg3a_total, 4
+        ) if last3_fg3a_total > 0 else 0.36
+
         # ==========================================
         # OPPONENT SCHEDULE / FATIGUE FEATURES (2.1) - 7 features
         # ==========================================
@@ -318,6 +357,16 @@ class PlayerFeatureGenerator:
 
         if position_defense_features:
             features.update(position_defense_features)
+            # Phase 3.3: override aggregate 3P defense from position-level data
+            # if the caller supplies per-position fg3a / fg3_pct data.
+            if 'opp_fg3a_allowed' in position_defense_features:
+                features['opp_fg3a_allowed'] = position_defense_features['opp_fg3a_allowed']
+            if 'opp_fg3_pct_allowed' in position_defense_features:
+                features['opp_fg3_pct_allowed'] = position_defense_features['opp_fg3_pct_allowed']
+            if 'opp_fg3a_allowed' in position_defense_features and 'opp_fg3_pct_allowed' in position_defense_features:
+                features['opp_fg3m_allowed'] = round(
+                    features['opp_fg3a_allowed'] * features['opp_fg3_pct_allowed'], 2
+                )
         else:
             # Defaults
             for pos in ['guards', 'forwards', 'centers']:
