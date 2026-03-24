@@ -84,6 +84,8 @@ from nba_betting.constants import (
     PROP_BIAS_CORRECTION,
     QUANTILE_DECOMPRESSION_DEFAULTS,
     QUANTILE_TARGET_SLOPE,
+    PROB_CLAMP_MIN,   # Phase 1.1: probability safety floor (0.05)
+    PROB_CLAMP_MAX,   # Phase 1.1: probability safety ceiling (0.95)
 )
 from nba_models.models.model_classes import smart_fillna
 from nba_models.inference.model_compat import (
@@ -128,22 +130,35 @@ def _load_calibrator(prop_type: str):
 
 
 def apply_empirical_calibration(over_prob: float, prop_type: str) -> float:
-    """Apply empirical isotonic calibration to raw over_prob."""
+    """Apply empirical isotonic calibration to raw over_prob.
+
+    Phase 1.1: ALL outputs are clamped to [PROB_CLAMP_MIN, PROB_CLAMP_MAX]
+    (i.e. [0.05, 0.95]) to prevent degenerate probabilities (0.0 or 1.0)
+    from reaching the Kelly sizing formula, which would result in either
+    zero bet size or infinite sizing recommendation.
+    """
+    # Phase 1.1: clamp input before calibration to avoid extrapolation issues
+    over_prob = float(np.clip(over_prob, PROB_CLAMP_MIN, PROB_CLAMP_MAX))
+
     cal = _load_calibrator(prop_type.lower())
     if cal is None:
         return over_prob
     kind, obj = cal
     if kind == "pkl":
         try:
-            return float(obj.predict([over_prob])[0])
+            calibrated = float(obj.predict([over_prob])[0])
         except Exception:
             logger.warning("Isotonic predict failed for %s", prop_type)
-            return over_prob
+            calibrated = over_prob
     elif kind == "json":
         # JSON lookup table at 1% increments
         pct = max(1, min(99, int(round(over_prob * 100))))
-        return obj.get(str(pct), over_prob)
-    return over_prob
+        calibrated = float(obj.get(str(pct), over_prob))
+    else:
+        calibrated = over_prob
+
+    # Phase 1.1: clamp output — isotonic regression can produce boundary values
+    return float(np.clip(calibrated, PROB_CLAMP_MIN, PROB_CLAMP_MAX))
 
 
 def load_quantile_decompression() -> dict:
@@ -2168,9 +2183,10 @@ def predict_player_prop(
                         predicted_value = features.get('season_pts_avg', 15.0)
 
                     # Convert to probability using normal CDF
+                    # Phase 1.1: clamp to [PROB_CLAMP_MIN, PROB_CLAMP_MAX]
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
                     z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
-                    over_prob = float(norm.cdf(z_score))
+                    over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))
 
                 # Handle StackingRegressor format (has 'base_models' key)
                 elif isinstance(model_data, dict) and 'base_models' in model_data and 'meta_model' in model_data:
@@ -2206,9 +2222,10 @@ def predict_player_prop(
                         predicted_value = features.get('season_pts_avg', 15.0)
 
                     # Convert to probability using normal CDF
+                    # Phase 1.1: clamp to [PROB_CLAMP_MIN, PROB_CLAMP_MAX]
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
                     z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
-                    over_prob = float(norm.cdf(z_score))
+                    over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))
 
                 # Handle dict format with single model
                 elif isinstance(model_data, dict) and 'model' in model_data:
@@ -2227,9 +2244,10 @@ def predict_player_prop(
                     predicted_value = float(model.predict(X_scaled)[0])
 
                     # Convert to probability using normal CDF
+                    # Phase 1.1: clamp to [PROB_CLAMP_MIN, PROB_CLAMP_MAX]
                     std = get_prop_std_dev(prop_type)  # FIX: Use prop-specific std
                     z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
-                    over_prob = float(norm.cdf(z_score))
+                    over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))
 
                 # Handle model object with predict method (PropEnsembleModel)
                 elif hasattr(model_data, 'predict'):
@@ -2264,7 +2282,7 @@ def predict_player_prop(
                     elif predicted_value is not None:
                         std = get_prop_std_dev(prop_type)
                         z_score = (predicted_value + PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0) - line) / std
-                        over_prob = float(norm.cdf(z_score))
+                        over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
 
         except Exception:
             logger.warning("Ensemble prediction failed for %s %s", player_name, prop_type, exc_info=True)
@@ -2334,7 +2352,7 @@ def predict_player_prop(
                         # Fall back to norm.cdf if quantile prob fails
                         bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
                         z_score = (predicted_value + bias_fix - line) / effective_sigma
-                        over_prob = float(norm.cdf(z_score))
+                        over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
         except Exception:
             logger.warning("Quantile model failed for %s %s", player_name, prop_type, exc_info=True)
 
@@ -2346,7 +2364,7 @@ def predict_player_prop(
     if predicted_value is not None and not (quantile_model_dict and features and use_api_features):
         bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
         z_score = (predicted_value + bias_fix - line) / effective_sigma
-        over_prob = float(norm.cdf(z_score))
+        over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
 
     # Phase 3: Minutes Oracle adjustment — per-minute rate scaling
     minutes_dist = None
@@ -2391,7 +2409,7 @@ def predict_player_prop(
                     # Recalculate probability with adjusted value
                     bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
                     z_score = (predicted_value + bias_fix - line) / effective_sigma
-                    over_prob = float(norm.cdf(z_score))
+                    over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
 
     # Apply injury-based adjustments to predicted value
     injury_boost_info = {'boost_factor': 1.0, 'reasons': []}
@@ -2415,7 +2433,7 @@ def predict_player_prop(
                 # Recalculate probability with adjusted value
                 bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
                 z_score = (predicted_value + bias_fix - line) / effective_sigma
-                over_prob = float(norm.cdf(z_score))
+                over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
         except Exception:
             logger.warning("Injury boost failed for %s %s", player_name, prop_type, exc_info=True)
 
@@ -2469,7 +2487,7 @@ def predict_player_prop(
                     # Recalculate over_prob with corrected value
                     bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
                     z_score = (predicted_value + bias_fix - line) / effective_sigma
-                    over_prob = float(norm.cdf(z_score))
+                    over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
         except Exception:
             logger.warning("Calibration adjustment failed for %s %s", player_name, prop_type, exc_info=True)
 
@@ -2482,7 +2500,7 @@ def predict_player_prop(
             predicted_value = max(lower, min(upper, predicted_value))
             bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
             z_score = (predicted_value + bias_fix - line) / effective_sigma
-            over_prob = float(norm.cdf(z_score))
+            over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
 
     # Apply empirical probability calibration (isotonic regression from backtest)
     if over_prob is not None:
@@ -2569,7 +2587,12 @@ def predict_player_prop(
     # over_prob comes from QuantilePropModel.predict_over_probability() or
     # norm.cdf(z_score) — both are calibrated. Do NOT use confidence_score
     # (which has r=0.10 correlation with accuracy) for bet sizing.
+    #
+    # Phase 1.1: Clamp over_prob to [PROB_CLAMP_MIN, PROB_CLAMP_MAX] before
+    # deriving win_prob. calculate_kelly_bet_size() rejects win_prob ≥ 1 or ≤ 0
+    # with a warning and returns 0.0 — this clamp prevents that silent failure.
     if abs(edge) > 2.0:
+        over_prob = float(np.clip(over_prob, PROB_CLAMP_MIN, PROB_CLAMP_MAX))
         win_prob = over_prob if over_prob > 0.5 else (1 - over_prob)
         decimal_odds = american_to_decimal(american_odds)
         default_bankroll = 1000.0

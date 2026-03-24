@@ -67,6 +67,30 @@ PROP_BIAS_CORRECTION: dict[str, float] = {
 DISABLED_PROPS: list[str] = ['points', 'assists', 'threes', 'spread']
 
 # ---------------------------------------------------------------------------
+# Probability clamping — safety floor/ceiling for ALL probability outputs
+# ---------------------------------------------------------------------------
+# Applied after every norm.cdf call, isotonic calibration, and ensemble output
+# to prevent degenerate values (0.0/1.0) from flowing into Kelly sizing.
+# These are the single source of truth — import and use everywhere.
+PROB_CLAMP_MIN: float = 0.05
+PROB_CLAMP_MAX: float = 0.95
+
+# ---------------------------------------------------------------------------
+# Probability-edge tiers (Phase 1.2 — bet selection filter)
+# ---------------------------------------------------------------------------
+# Edge = model_prob - BREAK_EVEN_PROB_110 (not market implied prob).
+# "7% edge" means the model predicts P(win) = 52.38% + 7% = 59.38%.
+# These tiers replace the ratio-to-threshold system for clearer interpretation.
+PROB_EDGE_HIGH: float   = 0.07   # >7% above breakeven → "High" confidence tier
+PROB_EDGE_MEDIUM: float = 0.05   # 5–7% above breakeven → "Medium" confidence tier
+PROB_EDGE_LOW: float    = 0.03   # 3–5% above breakeven → "Low" confidence tier
+# below 3% → noise — do not bet
+
+# Minimum tier required to generate a bet recommendation.
+# Change to 'medium' or 'low' to increase bet volume at lower conviction.
+MIN_BET_TIER: str = 'high'
+
+# ---------------------------------------------------------------------------
 # Edge quality tiers
 # ---------------------------------------------------------------------------
 # Used consistently by edge_calculator, bet_filter, and daily_predictions.
@@ -104,19 +128,35 @@ BACKTEST_SANITY: dict[str, float] = {
 }
 
 # ---------------------------------------------------------------------------
-# Kelly sizing fractions by confidence tier
+# Kelly sizing (Phase 1.3)
 # ---------------------------------------------------------------------------
+# Quarter-Kelly is the single fractional multiplier applied to full Kelly.
+# The bet tier (high/medium/low) determines WHETHER to bet at all;
+# sizing always uses DEFAULT_KELLY_FRACTION × full_kelly × bankroll.
+#
+# Formula: actual_bet = DEFAULT_KELLY_FRACTION × ((b×p − q) / b) × bankroll
+#   where b = decimal_odds − 1, p = win_prob, q = 1 − p
+#
+# Rationale: quarter-Kelly minimises risk of ruin while preserving ~75% of
+# the theoretical growth rate of full Kelly (Kelly, 1956; Thorp, 2008).
+DEFAULT_KELLY_FRACTION: float = 0.25   # Quarter-Kelly — reduces variance vs full Kelly
+
+# Uniform Kelly fractions: all active tiers use the same DEFAULT_KELLY_FRACTION.
+# Tier only gates entry, not sizing. This prevents the old system where
+# moderate-tier bets used 0.0625× full Kelly (too small to be actionable).
 KELLY_FRACTIONS: dict[str, float] = {
-    'elite':    0.50,   # 50% fractional Kelly for elite edges
-    'strong':   0.35,   # 35% fractional Kelly
-    'moderate': 0.25,   # 25% fractional Kelly
-    'low':      0.00,   # Legacy key — kept for backward compatibility
-    'weak':     0.00,   # Returned by prediction_pipeline.evaluate_bet()
-    'avoid':    0.00,   # Returned by get_edge_quality_tier() in daily_predictions
+    'high':     DEFAULT_KELLY_FRACTION,   # Phase 1.2 tier: >7% prob edge
+    'medium':   DEFAULT_KELLY_FRACTION,   # Phase 1.2 tier: 5–7% prob edge
+    'low':      0.00,                     # Phase 1.2 tier: 3–5% — excluded by MIN_BET_TIER
+    'elite':    DEFAULT_KELLY_FRACTION,   # Legacy tier alias
+    'strong':   DEFAULT_KELLY_FRACTION,   # Legacy tier alias
+    'moderate': DEFAULT_KELLY_FRACTION,   # Legacy tier alias
+    'weak':     0.00,                     # Legacy: below threshold
+    'avoid':    0.00,                     # Legacy: below threshold
 }
 
-MAX_BET_FRACTION: float = 0.03    # 3% of bankroll maximum per bet
-MIN_BET_FRACTION: float = 0.005   # 0.5% of bankroll minimum
+MAX_BET_FRACTION: float = 0.05    # 5% of bankroll hard cap per bet
+MIN_BET_FRACTION: float = 0.005   # 0.5% of bankroll minimum (avoid dust bets)
 
 # ---------------------------------------------------------------------------
 # Quantile decompression defaults — DISABLED (Fix 2.2)

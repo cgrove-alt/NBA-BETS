@@ -24,7 +24,19 @@ from __future__ import annotations
 import numpy as np
 from typing import Optional
 
-from nba_betting.constants import DISABLED_PROPS, KELLY_FRACTIONS, MAX_BET_FRACTION
+from nba_betting.constants import (
+    DISABLED_PROPS,
+    KELLY_FRACTIONS,
+    MAX_BET_FRACTION,
+    DEFAULT_KELLY_FRACTION,
+    PROB_CLAMP_MIN,
+    PROB_CLAMP_MAX,
+    PROB_EDGE_HIGH,
+    PROB_EDGE_MEDIUM,
+    PROB_EDGE_LOW,
+    MIN_BET_TIER,
+    BREAK_EVEN_PROB_110,
+)
 
 try:
     from nba_betting.odds.devig import american_to_implied, multiplicative_devig
@@ -71,11 +83,11 @@ MAX_EDGE = {
 
 # DISABLED_PROPS imported from nba_betting.constants (single source of truth)
 
-# Bet sizing constraints (Improvement 2)
+# Bet sizing constraints (Phase 1.3)
 MIN_GAMES = 10          # Minimum player sample size
 MIN_CONFIDENCE = 0.65   # Minimum calibrated win probability (raised from 0.62)
-MAX_BET_PCT = 0.03      # Hard cap: 3% of bankroll per bet
-KELLY_FRACTION = 0.25   # Quarter-Kelly for conservative sizing
+MAX_BET_PCT = MAX_BET_FRACTION   # 5% hard cap per bet (from constants)
+KELLY_FRACTION = DEFAULT_KELLY_FRACTION  # Quarter-Kelly (from constants)
 
 # Confidence reliability controls
 # Early-season samples are noisier; shrink probabilities toward 50% until
@@ -85,7 +97,6 @@ CONFIDENCE_SHRINK_MIN_FACTOR = 0.35
 
 # Minimum true EV required when real odds are available.
 # Tighter thresholds on weaker/market-efficient markets reduce false positives.
-# Minimum true EV required when real odds are available.
 # Raised to 5% to ensure genuine edge over market — low thresholds pass
 # bets that are just noise.
 MIN_TRUE_EV = {
@@ -95,6 +106,15 @@ MIN_TRUE_EV = {
     'pra': 0.05,
     'moneyline': 0.04,
     'spread': 0.04,
+}
+
+# Minimum probability edge (model_prob - breakeven) for each tier (Phase 1.2).
+# These come from constants.py and are the single source of truth.
+# Exposed here as locals for use within this module.
+_PROB_EDGE_THRESHOLDS = {
+    'high':   PROB_EDGE_HIGH,    # 0.07
+    'medium': PROB_EDGE_MEDIUM,  # 0.05
+    'low':    PROB_EDGE_LOW,     # 0.03
 }
 
 
@@ -114,6 +134,60 @@ def american_to_decimal(odds: int) -> float:
     if odds > 0:
         return 1 + odds / 100
     return 1 + 100 / abs(odds)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.2: Probability-edge tier classification
+# ---------------------------------------------------------------------------
+
+def get_prob_edge_tier(
+    model_prob: float,
+    breakeven_prob: float = BREAK_EVEN_PROB_110,
+    min_bet_tier: str = MIN_BET_TIER,
+) -> tuple[str, float, bool]:
+    """
+    Classify a bet by its probability edge above the breakeven point.
+
+    The "edge" here is how much the model's win probability exceeds the
+    sportsbook's implied breakeven — NOT the difference between predicted
+    stat value and the line.
+
+    Tiers (at -110 odds, breakeven ≈ 52.38%):
+        High   — model_prob > breakeven + 7%  (i.e., >59.38%)
+        Medium — model_prob > breakeven + 5%  (i.e., >57.38%)
+        Low    — model_prob > breakeven + 3%  (i.e., >55.38%)
+        None   — below Low threshold → do not bet
+
+    Args:
+        model_prob:     Calibrated win probability from the model (0–1).
+        breakeven_prob: Implied breakeven probability at the offered odds.
+                        Defaults to BREAK_EVEN_PROB_110 (52.38%).
+        min_bet_tier:   Minimum tier to consider as a "should_bet" decision.
+                        Defaults to MIN_BET_TIER ('high').
+
+    Returns:
+        Tuple of (tier: str, prob_edge: float, should_bet: bool)
+        where tier is 'high' | 'medium' | 'low' | 'noise',
+        prob_edge is model_prob - breakeven_prob (can be negative),
+        and should_bet reflects whether tier meets min_bet_tier.
+    """
+    prob_edge = float(model_prob) - float(breakeven_prob)
+
+    if prob_edge >= PROB_EDGE_HIGH:
+        tier = 'high'
+    elif prob_edge >= PROB_EDGE_MEDIUM:
+        tier = 'medium'
+    elif prob_edge >= PROB_EDGE_LOW:
+        tier = 'low'
+    else:
+        tier = 'noise'
+
+    # Determine if this tier meets the minimum betting threshold
+    tier_rank = {'high': 3, 'medium': 2, 'low': 1, 'noise': 0}
+    min_rank = tier_rank.get(min_bet_tier, 3)
+    should_bet_flag = tier_rank.get(tier, 0) >= min_rank
+
+    return tier, prob_edge, should_bet_flag
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +262,8 @@ def evaluate_bet(
     over_odds: int | None = None,
     under_odds: int | None = None,
     pre_calibrated: bool = False,
+    min_edge_pct: float | None = None,
+    kelly_fraction: float = DEFAULT_KELLY_FRACTION,
 ) -> dict:
     """
     Full prediction pipeline: calibrate → filter → size.
@@ -209,6 +285,14 @@ def evaluate_bet(
         pre_calibrated:  If True, skip temperature scaling and use raw_confidence
                          directly. Use when confidence comes from a well-calibrated
                          source (e.g., quantile model interpolation).
+        min_edge_pct:    Minimum probability edge (model_prob - breakeven_prob)
+                         required to generate a bet, as a decimal (e.g. 0.07 for
+                         7%). Overrides MIN_BET_TIER from constants if provided.
+                         When None, the tier system from constants.MIN_BET_TIER is
+                         used (default 'high', i.e. 0.07).
+        kelly_fraction:  Fractional Kelly multiplier. Defaults to quarter-Kelly
+                         (DEFAULT_KELLY_FRACTION = 0.25). Formula:
+                         bet = kelly_fraction × ((b×p−q)/b) × bankroll.
 
     Returns:
         dict with keys:
@@ -218,7 +302,9 @@ def evaluate_bet(
             signed_edge         (float) — predicted - line (positive = over)
             confidence          (float) — calibrated win probability
             bet_size            (float) — recommended bet amount in dollars
-            tier                (str)   — 'elite' | 'strong' | 'moderate' | 'weak' | 'no_bet'
+            tier                (str)   — 'high' | 'medium' | 'low' | 'noise' | 'no_bet'
+            prob_edge_tier      (str)   — same as tier using Phase 1.2 prob-edge system
+            prob_edge           (float) — model_prob - breakeven_prob
             reason              (str)   — human-readable explanation
             true_ev             (float | None) — true expected value (when odds provided)
             ev_edge             (float | None) — model prob minus market implied prob
@@ -273,6 +359,8 @@ def evaluate_bet(
         'confidence_reliability': None,
         'bet_size': 0.0,
         'tier': 'no_bet',
+        'prob_edge_tier': 'noise',
+        'prob_edge': 0.0,
         'reason': '',
         'true_ev': None,
         'ev_edge': None,
@@ -350,19 +438,14 @@ def evaluate_bet(
     result['confidence'] = confidence
     result['confidence_reliability'] = reliability_factor
 
-    # ---------- Gate 4: Minimum confidence ----------
+    # ---------- Gate 4: Minimum confidence / prob-edge (Phase 1.2) ----------
     if use_prob_edge:
         # In probability-edge mode, the model's absolute confidence is biased
         # by survivorship (always P(over) > 0.5). Instead of checking absolute
         # confidence > 0.65, check that the model's probability for the chosen
-        # direction exceeds the MARKET's probability by at least MIN_PROB_EDGE.
-        # This allows both over AND under bets when the model disagrees with
-        # the market by enough to overcome vig.
+        # direction exceeds the BREAK-EVEN probability by at least min_edge_pct.
         # Under bets remain unprofitable (46.3% win rate) even with the
-        # half-offset distribution correction. The model can identify
-        # profitable overs (56.1%) but lacks the data to identify unders —
-        # this requires real sportsbook lines during training, not season-avg
-        # proxies. Disable unders and use high-conviction over filtering.
+        # half-offset distribution correction.
         if direction == 'under':
             result['reason'] = (
                 "Under bets disabled — model trained on season-avg proxies, "
@@ -370,15 +453,26 @@ def evaluate_bet(
             )
             return result
 
-        MIN_PROB_EDGE = 0.05  # 5% probability edge for overs
-        model_dir_prob = confidence
-        market_dir_prob = _nv_over
-        prob_edge = model_dir_prob - market_dir_prob
-        if prob_edge < MIN_PROB_EDGE:
+        # Classify by probability edge above breakeven (Phase 1.2 tier system).
+        # min_edge_pct overrides MIN_BET_TIER when explicitly provided.
+        _prob_tier, _prob_edge_val, _tier_passes = get_prob_edge_tier(
+            model_prob=confidence,
+            breakeven_prob=BREAK_EVEN_PROB_110,
+            min_bet_tier=MIN_BET_TIER,
+        )
+        result['prob_edge_tier'] = _prob_tier
+        result['prob_edge'] = _prob_edge_val
+
+        # Apply explicit min_edge_pct override when caller provides one
+        if min_edge_pct is not None:
+            _tier_passes = _prob_edge_val >= float(min_edge_pct)
+
+        if not _tier_passes:
+            _required = min_edge_pct if min_edge_pct is not None else _PROB_EDGE_THRESHOLDS.get(MIN_BET_TIER, PROB_EDGE_HIGH)
             result['reason'] = (
-                f"Probability edge {prob_edge:.3f} < minimum {MIN_PROB_EDGE} "
-                f"(model: {model_dir_prob:.1%} vs market: {market_dir_prob:.1%}, "
-                f"direction: {direction})"
+                f"Probability edge {_prob_edge_val:.3f} below minimum {_required:.3f} "
+                f"(tier: {_prob_tier}, model: {confidence:.1%}, "
+                f"breakeven: {BREAK_EVEN_PROB_110:.1%})"
             )
             return result
     else:
@@ -388,17 +482,27 @@ def evaluate_bet(
             )
             return result
 
-    # ---------- Step: Tier classification ----------
-    threshold = MIN_EDGE.get(prop_type, 2.0)
-    ratio = abs_edge / threshold if threshold > 0 else 0
-    if ratio >= 2.5:
-        tier = 'elite'
-    elif ratio >= 1.5:
-        tier = 'strong'
-    elif ratio >= 1.0:
-        tier = 'moderate'
+        # Populate prob_edge fields even in non-prob-edge mode (informational)
+        _prob_tier, _prob_edge_val, _ = get_prob_edge_tier(confidence)
+        result['prob_edge_tier'] = _prob_tier
+        result['prob_edge'] = _prob_edge_val
+
+    # ---------- Step: Tier classification (legacy + Phase 1.2) ----------
+    # Use the Phase 1.2 prob-edge tier as the primary tier label.
+    # Legacy tiers (elite/strong/moderate) are computed for backward compat.
+    if use_prob_edge:
+        tier = result['prob_edge_tier']  # 'high' | 'medium' | 'low' | 'noise'
     else:
-        tier = 'weak'
+        threshold = MIN_EDGE.get(prop_type, 2.0)
+        ratio = abs_edge / threshold if threshold > 0 else 0
+        if ratio >= 2.5:
+            tier = 'elite'
+        elif ratio >= 1.5:
+            tier = 'strong'
+        elif ratio >= 1.0:
+            tier = 'moderate'
+        else:
+            tier = 'weak'
 
     result['tier'] = tier
 
@@ -471,17 +575,23 @@ def evaluate_bet(
         )
         return result
 
-    # Use tiered Kelly fractions from constants (elite/strong/moderate/low)
-    kelly_tier_fraction = KELLY_FRACTIONS.get(tier, 0.25)
-    bet_fraction = min(kelly_full * kelly_tier_fraction, MAX_BET_FRACTION)
+    # ---------- Step: Kelly bet sizing (Phase 1.3) ----------
+    # Formula: actual_bet = kelly_fraction × full_kelly × bankroll
+    # kelly_fraction defaults to DEFAULT_KELLY_FRACTION (quarter-Kelly = 0.25).
+    # All active tiers use the same kelly_fraction; the tier gates entry only.
+    # Hard cap at MAX_BET_FRACTION (5%) prevents catastrophic single-bet loss.
+    effective_kelly_fraction = float(kelly_fraction)
+    bet_fraction = min(kelly_full * effective_kelly_fraction, MAX_BET_FRACTION)
     bet_size = round(bankroll * bet_fraction, 2)
 
     # ---------- All gates passed ----------
     result['should_bet'] = True
     result['bet_size'] = bet_size
+    _edge_label = f"{abs_edge:.2f}" if not use_prob_edge else f"{_prob_edge_val:.1%} above BE"
     result['reason'] = (
-        f"{tier.upper()} edge: {abs_edge:.2f} ({direction}) | "
-        f"confidence: {confidence:.1%} | bet: ${bet_size:.2f}"
+        f"{tier.upper()} edge: {_edge_label} ({direction}) | "
+        f"confidence: {confidence:.1%} | kelly: {effective_kelly_fraction:.2f}× | "
+        f"bet: ${bet_size:.2f}"
     )
 
     return result
@@ -491,12 +601,24 @@ def evaluate_bet(
 # Convenience: batch evaluation
 # ---------------------------------------------------------------------------
 
-def evaluate_bets_batch(predictions: list[dict], bankroll: float = 1000.0) -> list[dict]:
+def evaluate_bets_batch(
+    predictions: list[dict],
+    bankroll: float = 1000.0,
+    min_edge_pct: float | None = None,
+    kelly_fraction: float = DEFAULT_KELLY_FRACTION,
+) -> list[dict]:
     """
     Evaluate a list of prediction dicts through the full pipeline.
 
     Each input dict must have keys: prop_type, predicted, line.
-    Optional keys: raw_confidence, games_played.
+    Optional keys: raw_confidence, games_played, over_odds, under_odds,
+                   pre_calibrated, min_edge_pct, kelly_fraction.
+
+    Args:
+        predictions:  List of prediction dicts.
+        bankroll:     Bankroll for Kelly sizing (applied to all bets).
+        min_edge_pct: Override minimum probability edge for all bets.
+        kelly_fraction: Kelly fraction for all bets (default quarter-Kelly).
 
     Returns:
         List of evaluate_bet() result dicts (augmented with original input).
@@ -513,6 +635,8 @@ def evaluate_bets_batch(predictions: list[dict], bankroll: float = 1000.0) -> li
             over_odds=pred.get('over_odds'),
             under_odds=pred.get('under_odds'),
             pre_calibrated=pred.get('pre_calibrated', False),
+            min_edge_pct=pred.get('min_edge_pct', min_edge_pct),
+            kelly_fraction=pred.get('kelly_fraction', kelly_fraction),
         )
         ev['input'] = pred
         results.append(ev)

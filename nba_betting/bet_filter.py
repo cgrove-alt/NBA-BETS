@@ -14,7 +14,16 @@ Improvement 2: Bet Selection Filter
 """
 
 import numpy as np
-from nba_betting.constants import DISABLED_PROPS
+from nba_betting.constants import (
+    DISABLED_PROPS,
+    PROB_EDGE_HIGH,
+    PROB_EDGE_MEDIUM,
+    PROB_EDGE_LOW,
+    MIN_BET_TIER,
+    BREAK_EVEN_PROB_110,
+    DEFAULT_KELLY_FRACTION,
+    MAX_BET_FRACTION,
+)
 
 # ---------------------------------------------------------------------------
 # Thresholds
@@ -49,12 +58,59 @@ MIN_CONFIDENCE = 0.62  # Minimum calibrated probability to bet
 
 
 # ---------------------------------------------------------------------------
+# Phase 1.2: Probability-edge tier classification
+# ---------------------------------------------------------------------------
+
+def get_bet_confidence_tier(
+    model_prob: float,
+    breakeven_prob: float = BREAK_EVEN_PROB_110,
+    min_bet_tier: str = MIN_BET_TIER,
+) -> tuple[str, float, bool]:
+    """
+    Classify a calibrated win probability into a confidence tier.
+
+    The tier reflects how far the model's probability exceeds the sportsbook
+    break-even, NOT an absolute probability threshold.
+
+    Tiers at -110 odds (breakeven ≈ 52.38%):
+        High   — prob_edge > 7%  (model_prob > ~59.4%) → bet
+        Medium — prob_edge > 5%  (model_prob > ~57.4%) → bet if MIN_BET_TIER ≤ 'medium'
+        Low    — prob_edge > 3%  (model_prob > ~55.4%) → bet if MIN_BET_TIER = 'low'
+        Noise  — below 3% edge  → do not bet
+
+    Args:
+        model_prob:     Calibrated win probability (0–1). Must be clamped to
+                        [PROB_CLAMP_MIN, PROB_CLAMP_MAX] before calling.
+        breakeven_prob: Implied breakeven probability from the offered odds.
+        min_bet_tier:   Minimum tier for a positive bet decision.
+
+    Returns:
+        Tuple of (tier, prob_edge, should_bet).
+    """
+    prob_edge = float(model_prob) - float(breakeven_prob)
+
+    if prob_edge >= PROB_EDGE_HIGH:
+        tier = 'high'
+    elif prob_edge >= PROB_EDGE_MEDIUM:
+        tier = 'medium'
+    elif prob_edge >= PROB_EDGE_LOW:
+        tier = 'low'
+    else:
+        tier = 'noise'
+
+    tier_rank = {'high': 3, 'medium': 2, 'low': 1, 'noise': 0}
+    should = tier_rank.get(tier, 0) >= tier_rank.get(min_bet_tier, 3)
+    return tier, prob_edge, should
+
+
+# ---------------------------------------------------------------------------
 # Core filter function
 # ---------------------------------------------------------------------------
 
 def should_bet(prop_type: str, predicted_value: float, line_value: float,
                confidence: float = None, games_played: int = None,
-               is_over: bool = True, true_ev: float = None):
+               is_over: bool = True, true_ev: float = None,
+               min_edge_pct: float = None):
     """
     Determine if a prediction warrants a bet.
 
@@ -64,13 +120,17 @@ def should_bet(prop_type: str, predicted_value: float, line_value: float,
         predicted_value: Model's predicted value for the stat / margin.
         line_value:      Market line (over/under or spread number).
         confidence:      Calibrated win probability from the model (0-1).
-                         If None, confidence check is skipped.
+                         If provided, the Phase 1.2 probability-edge tier check
+                         is applied in addition to stat-based edge thresholds.
         games_played:    Number of games the player has played this season.
                          If None, sample size check is skipped.
         is_over:         True  → we are betting the OVER / home ATS.
                          False → we are betting the UNDER / away ATS.
         true_ev:         True expected value from devigged odds (0-1 scale).
                          If provided, EV gate takes priority over stat-based edge.
+        min_edge_pct:    Minimum probability edge above breakeven required to bet.
+                         If None, uses MIN_BET_TIER from constants (default 'high'
+                         → requires PROB_EDGE_HIGH = 0.07 = 7% above breakeven).
 
     Returns:
         Tuple of (should_bet: bool, reason: str, edge: float)
@@ -112,6 +172,33 @@ def should_bet(prop_type: str, predicted_value: float, line_value: float,
             f"Confidence {confidence:.3f} below minimum {MIN_CONFIDENCE}"
         ), edge
 
+    # Phase 1.2: Probability-edge tier gate.
+    # When calibrated confidence is available, also check that the model's
+    # win probability exceeds the sportsbook break-even by the required margin.
+    if confidence is not None:
+        _tier, _prob_edge, _passes = get_bet_confidence_tier(
+            model_prob=confidence,
+            breakeven_prob=BREAK_EVEN_PROB_110,
+            min_bet_tier=MIN_BET_TIER,
+        )
+        # Apply explicit min_edge_pct override when provided
+        if min_edge_pct is not None:
+            _passes = _prob_edge >= float(min_edge_pct)
+            _required = float(min_edge_pct)
+        else:
+            _required = {
+                'high': PROB_EDGE_HIGH,
+                'medium': PROB_EDGE_MEDIUM,
+                'low': PROB_EDGE_LOW,
+            }.get(MIN_BET_TIER, PROB_EDGE_HIGH)
+
+        if not _passes:
+            return False, (
+                f"Probability edge {_prob_edge:.3f} < required {_required:.3f} "
+                f"(tier: {_tier}, confidence: {confidence:.3f}, "
+                f"breakeven: {BREAK_EVEN_PROB_110:.4f})"
+            ), edge
+
     tier = get_edge_tier(edge, prop_type)
     conf_str = f"{confidence:.3f}" if confidence is not None else "N/A"
     return True, f"Edge={edge:.2f}, Confidence={conf_str}, Tier={tier}", edge
@@ -122,18 +209,25 @@ def should_bet(prop_type: str, predicted_value: float, line_value: float,
 # ---------------------------------------------------------------------------
 
 def calculate_bet_size(edge: float, confidence: float, bankroll: float,
-                       prop_type: str = 'points', max_bet_pct: float = 0.03,
-                       kelly_fraction: float = 0.25) -> float:
+                       prop_type: str = 'points',
+                       max_bet_pct: float = MAX_BET_FRACTION,
+                       kelly_fraction: float = DEFAULT_KELLY_FRACTION,
+                       decimal_odds: float = 1.909) -> float:
     """
-    Calculate recommended bet size using fractional Kelly criterion.
+    Calculate recommended bet size using fractional Kelly criterion (Phase 1.3).
+
+    Formula: actual_bet = kelly_fraction × full_kelly × bankroll
+    where full_kelly = (b×p − q) / b, b = decimal_odds − 1, q = 1 − p.
 
     Args:
-        edge:           Predicted edge (|predicted - line|).
-        confidence:     Calibrated win probability (0-1).
+        edge:           Predicted edge (|predicted - line|). Used for logging only.
+        confidence:     Calibrated win probability (0–1). Must be > 0.5 to bet.
         bankroll:       Current bankroll in dollars.
-        prop_type:      Prop type (used for logging only).
-        max_bet_pct:    Hard cap on bet as fraction of bankroll (default 3%).
-        kelly_fraction: What fraction of full Kelly to use (default 25%).
+        prop_type:      Prop type (informational only).
+        max_bet_pct:    Hard cap as fraction of bankroll (default: MAX_BET_FRACTION = 5%).
+        kelly_fraction: Fractional Kelly multiplier (default: DEFAULT_KELLY_FRACTION = 0.25,
+                        i.e. quarter-Kelly). Configurable for tuning.
+        decimal_odds:   Decimal odds for the bet (default 1.909 = -110 American).
 
     Returns:
         Recommended bet amount in dollars (0 if Kelly is non-positive).
@@ -141,23 +235,21 @@ def calculate_bet_size(edge: float, confidence: float, bankroll: float,
     if confidence <= 0.5:
         return 0.0
 
-    # Standard -110 odds → decimal odds = 1.909
-    odds_decimal = 1.909
-    b = odds_decimal - 1  # Net profit per unit staked = 0.909
-    p = confidence
-    q = 1 - p
+    b = decimal_odds - 1  # Net profit per unit staked
+    p = float(confidence)
+    q = 1.0 - p
 
-    # Full Kelly: f* = (b*p - q) / b
+    # Full Kelly: f* = (b×p − q) / b
     kelly_full = (b * p - q) / b
 
     if kelly_full <= 0:
         return 0.0
 
-    # Fractional Kelly
-    bet_fraction = kelly_full * kelly_fraction
+    # Fractional Kelly (Phase 1.3: actual_bet = kelly_fraction × full_kelly × bankroll)
+    bet_fraction = kelly_full * float(kelly_fraction)
 
-    # Hard cap at max_bet_pct
-    bet_fraction = min(bet_fraction, max_bet_pct)
+    # Hard cap per bet (Phase 1.3: default 5%)
+    bet_fraction = min(bet_fraction, float(max_bet_pct))
 
     return round(bankroll * bet_fraction, 2)
 
