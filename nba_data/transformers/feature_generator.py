@@ -20,7 +20,19 @@ import numpy as np
 
 class PlayerFeatureGenerator:
     """
-    Generates all 150 features for player prop predictions.
+    Generates all features for player prop predictions.
+
+    Feature sections:
+    - BASIC (1-50): Season/recent averages, trends, efficiency, rest
+    - GAME CONTEXT (2.2): B2B direction, travel, schedule load, season phase
+    - 3-POINT (51-66): FG3%, variance, streaks, volume
+    - POSITION/ROLE (67-75): Guard/Forward/Center indicators
+    - OPPONENT (76-88): Defensive ratings, pace, win pct
+    - OPPONENT SCHEDULE/FATIGUE (2.1): Opp rest, b2b, defensive tier
+    - GAME CONTEXT (89-91): Home/away, team pace
+    - POSITION DEFENSE (92-108): Opp defense vs each position
+    - REBOUNDS MODEL (2.3): OREB/DREB splits, opp rebounding, confidence flag
+    - ADVANCED (109+): Pace adjustments, regression, recency ratios
 
     This is the canonical feature generation logic. Training and prediction
     MUST use this exact implementation to ensure consistency.
@@ -40,6 +52,20 @@ class PlayerFeatureGenerator:
         position_defense_features: dict = None,
         team_pace: float = 100.0,
         opp_pace: float = 100.0,
+        # 2.1 Opponent-adjusted context
+        opp_days_rest: int = 2,
+        opp_is_b2b: bool = False,
+        opp_b2b_home: bool = False,
+        opp_b2b_away: bool = False,
+        opp_def_tier: int = 2,          # 1=elite(top10), 2=middle, 3=weak(bottom10)
+        opp_oreb_pct: float = 0.245,    # Opponent offensive rebound %
+        opp_dreb_pct: float = 0.755,    # Opponent defensive rebound %
+        # 2.2 Game context
+        travel_distance: float = 0.0,
+        games_last_7: int = 3,
+        season_phase: int = 1,          # 0=early(Oct-Nov), 1=mid(Dec-Jan), 2=late(Feb-Apr), 3=playoff-push(Apr)
+        is_b2b_home: bool = False,      # Player's team: b2b at home
+        is_b2b_away: bool = False,      # Player's team: b2b away
     ) -> dict[str, float] | None:
         """
         Generate all 150 features for a player for a specific game.
@@ -104,6 +130,8 @@ class PlayerFeatureGenerator:
         ast = [get_stat(s, 'ast') for _, s in recent]
         fg3m = [get_stat(s, 'fg3m') for _, s in recent]
         mins = [parse_min(s.get('min', 0)) for _, s in recent]
+        oreb = [get_stat(s, 'oreb') for _, s in recent]
+        dreb = [get_stat(s, 'dreb') for _, s in recent]
 
         # Season stats
         season_pts = [get_stat(s, 'pts') for _, s in games]
@@ -111,6 +139,8 @@ class PlayerFeatureGenerator:
         season_ast = [get_stat(s, 'ast') for _, s in games]
         season_fg3m = [get_stat(s, 'fg3m') for _, s in games]
         season_mins = [parse_min(s.get('min', 0)) for _, s in games]
+        season_oreb = [get_stat(s, 'oreb') for _, s in games]
+        season_dreb = [get_stat(s, 'dreb') for _, s in games]
 
         # Calculate averages
         season_pts_avg = np.mean(season_pts)
@@ -200,6 +230,23 @@ class PlayerFeatureGenerator:
         features['is_back_to_back'] = 1 if days_rest == 1 else 0
 
         # ==========================================
+        # GAME CONTEXT FEATURES (2.2) - 8 features
+        # ==========================================
+
+        # Back-to-back with home/away direction
+        features['is_b2b_home'] = 1 if (days_rest == 1 and is_home and is_b2b_home) else 0
+        features['is_b2b_away'] = 1 if (days_rest == 1 and not is_home and is_b2b_away) else 0
+        # Condensed schedule load
+        features['games_last_7_days'] = games_last_7
+        features['is_high_schedule_load'] = 1 if games_last_7 >= 4 else 0
+        # Travel fatigue
+        features['travel_distance'] = travel_distance
+        features['is_long_travel'] = 1 if travel_distance >= 1500 else 0
+        # Season phase: 0=early, 1=mid, 2=late, 3=playoff-push
+        features['season_phase'] = season_phase
+        features['is_late_season'] = 1 if season_phase >= 2 else 0
+
+        # ==========================================
         # 3-POINT FEATURES (51-66)
         # ==========================================
 
@@ -243,6 +290,21 @@ class PlayerFeatureGenerator:
         features['opp_recent_win_pct'] = 0.5
 
         # ==========================================
+        # OPPONENT SCHEDULE / FATIGUE FEATURES (2.1) - 7 features
+        # ==========================================
+
+        features['opp_days_rest'] = opp_days_rest
+        features['opp_is_back_to_back'] = 1 if opp_is_b2b else 0
+        features['opp_b2b_home'] = 1 if opp_b2b_home else 0
+        features['opp_b2b_away'] = 1 if opp_b2b_away else 0
+        # Opponent defensive tier: 1=elite, 2=middle, 3=weak
+        features['opp_def_tier'] = opp_def_tier
+        features['opp_is_elite_defense'] = 1 if opp_def_tier == 1 else 0
+        features['opp_is_weak_defense'] = 1 if opp_def_tier == 3 else 0
+        # Rest advantage: positive = player's team is more rested
+        features['rest_advantage_vs_opp'] = float(days_rest - opp_days_rest)
+
+        # ==========================================
         # GAME CONTEXT (89-91)
         # ==========================================
 
@@ -268,6 +330,38 @@ class PlayerFeatureGenerator:
             features['opp_ast_vs_pos_diff'] = 0.0
             features['opp_fg3m_vs_pos_diff'] = 0.0
             features['opp_pts_vs_pos_std'] = 5.0
+
+        # ==========================================
+        # REBOUNDS MODEL FEATURES (2.3) - 13 features
+        # ==========================================
+
+        # Offensive / defensive rebound splits (season)
+        season_oreb_avg = np.mean(season_oreb) if season_oreb else 0.0
+        season_dreb_avg = np.mean(season_dreb) if season_dreb else 0.0
+        last5_oreb = [get_stat(s, 'oreb') for _, s in last_5]
+        last5_dreb = [get_stat(s, 'dreb') for _, s in last_5]
+        features['season_oreb_avg'] = season_oreb_avg
+        features['season_dreb_avg'] = season_dreb_avg
+        features['last5_oreb_avg'] = np.mean(last5_oreb) if last5_oreb else 0.0
+        features['last5_dreb_avg'] = np.mean(last5_dreb) if last5_dreb else 0.0
+        features['recent_oreb_avg'] = np.mean(oreb) if oreb else 0.0
+        features['recent_dreb_avg'] = np.mean(dreb) if dreb else 0.0
+
+        # Fraction of total rebounds that are offensive vs defensive
+        _total_reb = season_oreb_avg + season_dreb_avg
+        features['oreb_fraction'] = season_oreb_avg / _total_reb if _total_reb > 0 else 0.25
+        features['dreb_fraction'] = season_dreb_avg / _total_reb if _total_reb > 0 else 0.75
+
+        # Opponent rebounding context
+        features['opp_oreb_pct'] = opp_oreb_pct   # How often opponent grabs own misses (bad for player's team)
+        features['opp_dreb_pct'] = opp_dreb_pct   # How often opponent grabs defensive boards (bad for player's oreb)
+
+        # Low-confidence flag for rebounds: high variance position (guards) or opponent strong rebounding
+        _reb_cv = (features['recent_reb_std'] / season_reb_avg) if season_reb_avg > 0 else 1.0
+        features['reb_volatility'] = round(_reb_cv, 3)
+        features['is_low_confidence_rebounds'] = 1 if (
+            _reb_cv > 0.60 or season_reb_avg < 3.0
+        ) else 0
 
         # ==========================================
         # ADVANCED FEATURES (109-150) - 42 features

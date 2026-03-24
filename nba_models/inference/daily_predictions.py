@@ -787,6 +787,16 @@ def generate_complete_prop_features(
     is_home: bool = False,
     vegas_total: float = None,
     opp_stats: dict = None,
+    # Phase 2.1: Opponent schedule context
+    opp_days_rest: int = 2,
+    opp_is_b2b: bool = False,
+    opp_def_tier: int = 2,
+    # Phase 2.2: Player team game context
+    travel_distance: float = 0.0,
+    games_last_7: int = 3,
+    season_phase: int = 1,
+    is_b2b_home: bool = False,
+    is_b2b_away: bool = False,
 ) -> dict | None:
     """
     Generate ALL 150 features matching what the model was trained on.
@@ -845,6 +855,9 @@ def generate_complete_prop_features(
                 'fta': game.get('ft_att') or game.get('fta', 0) or 0,
                 'min': game.get('min', 0) or 0,
                 'turnover': game.get('tov') or game.get('turnover', 0) or 0,
+                # Phase 2.3: offensive/defensive rebound splits
+                'oreb': game.get('oreb', 0) or 0,
+                'dreb': game.get('dreb', 0) or 0,
                 'team': {'id': game.get('team_id')},
                 'game': {
                     'home_team': {'id': 0},  # Simplified
@@ -917,8 +930,34 @@ def generate_complete_prop_features(
         'opp_pts_factor': _def_scale,
         'opp_reb_factor': _def_scale,
         'opp_ast_factor': _def_scale,
+        # Phase 2.1: Opponent schedule / fatigue
+        'opp_days_rest': opp_days_rest,
+        'opp_is_back_to_back': 1 if opp_is_b2b else 0,
+        'opp_b2b_home': 0,
+        'opp_b2b_away': 1 if (opp_is_b2b and not is_home) else 0,
+        'opp_def_tier': opp_def_tier,
+        'opp_is_elite_defense': 1 if opp_def_tier == 1 else 0,
+        'opp_is_weak_defense': 1 if opp_def_tier == 3 else 0,
+        # Phase 2.2: Game context
+        'travel_distance': travel_distance,
+        'games_last_7_days': games_last_7,
+        'is_high_schedule_load': 1 if games_last_7 >= 4 else 0,
+        'is_long_travel': 1 if travel_distance >= 1500 else 0,
+        'season_phase': season_phase,
+        'is_late_season': 1 if season_phase >= 2 else 0,
+        'is_b2b_home': 1 if is_b2b_home else 0,
+        'is_b2b_away': 1 if is_b2b_away else 0,
+        # Phase 2.3: Opponent rebounding context
+        'opp_oreb_pct': _opp.get('oreb_pct', 0.245),
+        'opp_dreb_pct': _opp.get('dreb_pct', 0.755),
+        'opp_oreb_avg': _opp.get('oreb_avg', 8.5),
+        'opp_dreb_avg': _opp.get('dreb_avg', 26.0),
     }
     base_features.update(opponent_features)
+
+    # Fill rest_advantage_vs_opp after days_rest is known from base_features
+    _player_days_rest = base_features.get('days_rest', 2)
+    base_features['rest_advantage_vs_opp'] = float(_player_days_rest - opp_days_rest)
 
     # Add pace-adjusted features with real pace data
     _team_pace = _opp.get('team_pace', _pace)
@@ -1020,7 +1059,13 @@ def apply_injury_adjustments(
 
 def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
                         bdl_player_id: int = None, is_home: bool = False,
-                        vegas_total: float = None, opp_stats: dict = None) -> dict:
+                        vegas_total: float = None, opp_stats: dict = None,
+                        # Phase 2 context
+                        opp_days_rest: int = 2, opp_is_b2b: bool = False,
+                        opp_def_tier: int = 2,
+                        travel_distance: float = 0.0, games_last_7: int = 3,
+                        season_phase: int = 1, is_b2b_home: bool = False,
+                        is_b2b_away: bool = False) -> dict:
     """
     Get cached features or generate new ones using Balldontlie data.
 
@@ -1058,6 +1103,15 @@ def get_cached_features(player_name: str, prop_type: str, opponent_id: int,
                 is_home=is_home,
                 vegas_total=vegas_total,
                 opp_stats=opp_stats,
+                # Phase 2: game context passthrough
+                opp_days_rest=opp_days_rest,
+                opp_is_b2b=opp_is_b2b,
+                opp_def_tier=opp_def_tier,
+                travel_distance=travel_distance,
+                games_last_7=games_last_7,
+                season_phase=season_phase,
+                is_b2b_home=is_b2b_home,
+                is_b2b_away=is_b2b_away,
             )
             if features:
                 _player_feature_cache[cache_key] = features
@@ -2105,7 +2159,25 @@ def predict_player_prop(
     if model_data and use_api_features:
         try:
             # Get cached features (or generate new ones) - use Balldontlie ID for fast lookup
-            features = get_cached_features(player_name, prop_type, opponent_id, bdl_player_id=player_id, opp_stats=opp_stats)
+            # Extract Phase 2 game context when available
+            _gc = game_context or {}
+            _is_home = _gc.get('is_home', False)
+            features = get_cached_features(
+                player_name, prop_type, opponent_id,
+                bdl_player_id=player_id,
+                is_home=_is_home,
+                opp_stats=opp_stats,
+                # Phase 2.1: Opponent schedule
+                opp_days_rest=_gc.get('opp_days_rest', 2),
+                opp_is_b2b=bool(_gc.get('opp_is_back_to_back', False)),
+                opp_def_tier=_gc.get('opp_def_tier', 2),
+                # Phase 2.2: Player game context
+                travel_distance=float(_gc.get('travel_distance', 0.0)),
+                games_last_7=int(_gc.get('games_last_7_days', 3)),
+                season_phase=int(_gc.get('season_phase', 1)),
+                is_b2b_home=bool(_gc.get('is_b2b_home', False)),
+                is_b2b_away=bool(_gc.get('is_b2b_away', False)),
+            )
 
             if features:
                 # Guard: verify features have minimum required fields.
@@ -3142,6 +3214,95 @@ def main():
                     home_team_id = home_team.get('id')
                     away_team_id = away_team.get('id')
 
+                    # ================================================================
+                    # PHASE 2: Compute game-level schedule / travel context
+                    # ================================================================
+                    try:
+                        from nba_data.transformers.travel_fatigue import TravelFatigueCalculator
+                        _travel_calc = TravelFatigueCalculator()
+
+                        # Compute season phase from target_date
+                        _td_month = int(target_date[5:7])
+                        if _td_month in (10, 11):
+                            _season_phase = 0   # early season
+                        elif _td_month in (12, 1):
+                            _season_phase = 1   # mid season
+                        elif _td_month in (2, 3):
+                            _season_phase = 2   # late season (post All-Star)
+                        else:
+                            _season_phase = 3   # playoff push (Apr+)
+
+                        # Fetch recent game schedules for both teams for rest/travel
+                        def _get_recent_team_games(team_id, before_date, limit=7):
+                            """Fetch team's recent games from API for fatigue calc."""
+                            try:
+                                if not api:
+                                    return []
+                                recent = api.get_games(
+                                    team_ids=[team_id],
+                                    per_page=limit,
+                                )
+                                # Filter completed games before today and format for TravelFatigueCalculator
+                                result = []
+                                for g in recent:
+                                    gd = g.get('date', '') or ''
+                                    if isinstance(gd, str) and 'T' in gd:
+                                        gd = gd.split('T')[0]
+                                    if gd and gd < before_date and g.get('status') == 'Final':
+                                        ht = g.get('home_team', {}) or {}
+                                        result.append({
+                                            'date': gd,
+                                            'home_team_id': ht.get('id', team_id),
+                                        })
+                                result.sort(key=lambda x: x['date'], reverse=True)
+                                return result[:limit]
+                            except Exception:
+                                return []
+
+                        _home_recent = _get_recent_team_games(home_team_id, target_date)
+                        _away_recent = _get_recent_team_games(away_team_id, target_date)
+
+                        _home_travel = _travel_calc.get_travel_features(
+                            team_id=home_team_id,
+                            game_date=target_date,
+                            opponent_id=away_team_id,
+                            is_home=True,
+                            team_games=_home_recent,
+                        )
+                        _away_travel = _travel_calc.get_travel_features(
+                            team_id=away_team_id,
+                            game_date=target_date,
+                            opponent_id=home_team_id,
+                            is_home=False,
+                            team_games=_away_recent,
+                        )
+
+                        # Compute opp_def_tier from analysis stats
+                        _home_opp_stats = analysis.get('away_stats', {}) or {}
+                        _away_opp_stats = analysis.get('home_stats', {}) or {}
+                        _home_def_rating = _home_opp_stats.get('def_rating', 114)
+                        _away_def_rating = _away_opp_stats.get('def_rating', 114)
+
+                        # Simple tier classification using absolute thresholds
+                        def _def_tier(dr):
+                            if not dr:
+                                return 2
+                            if dr <= 111.0:
+                                return 1  # elite
+                            elif dr >= 117.0:
+                                return 3  # weak
+                            return 2
+
+                        _home_def_tier = _def_tier(_away_def_rating)  # home team faces away's defense
+                        _away_def_tier = _def_tier(_home_def_rating)  # away team faces home's defense
+
+                    except Exception:
+                        _home_travel = {'days_rest': 2, 'is_back_to_back': 0, 'travel_distance': 0, 'games_last_7_days': 3}
+                        _away_travel = {'days_rest': 2, 'is_back_to_back': 0, 'travel_distance': 0, 'games_last_7_days': 3}
+                        _home_def_tier = 2
+                        _away_def_tier = 2
+                        _season_phase = 1
+
                     # Get injured players for injury boost calculation
                     # Note: We use injury_tracker_v3 for primary injury checking (ID-based)
                     # but also extract names from injury_details for boost calculation
@@ -3249,9 +3410,19 @@ def main():
                                         'spread': odds.get('spread', 0),
                                         'total': odds.get('total', 220),
                                         'is_home': player_team_id == home_team_id,
-                                        'is_b2b': False,
-                                        'days_rest': 1,
                                         'opponent_team_id': opponent_id,
+                                        # Phase 2.2: Player team schedule context
+                                        'days_rest': (_home_travel if player_team_id == home_team_id else _away_travel).get('days_rest', 2),
+                                        'is_b2b': bool((_home_travel if player_team_id == home_team_id else _away_travel).get('is_back_to_back', 0)),
+                                        'travel_distance': (_home_travel if player_team_id == home_team_id else _away_travel).get('travel_distance', 0.0),
+                                        'games_last_7_days': (_home_travel if player_team_id == home_team_id else _away_travel).get('games_last_7_days', 3),
+                                        'season_phase': _season_phase,
+                                        'is_b2b_home': bool((_home_travel if player_team_id == home_team_id else _away_travel).get('is_back_to_back', 0) and player_team_id == home_team_id),
+                                        'is_b2b_away': bool((_home_travel if player_team_id == home_team_id else _away_travel).get('is_back_to_back', 0) and player_team_id != home_team_id),
+                                        # Phase 2.1: Opponent schedule context
+                                        'opp_days_rest': (_away_travel if player_team_id == home_team_id else _home_travel).get('days_rest', 2),
+                                        'opp_is_back_to_back': bool((_away_travel if player_team_id == home_team_id else _home_travel).get('is_back_to_back', 0)),
+                                        'opp_def_tier': _away_def_tier if player_team_id == home_team_id else _home_def_tier,
                                     },
                                 })
 
