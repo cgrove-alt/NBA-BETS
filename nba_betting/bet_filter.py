@@ -236,6 +236,9 @@ def calculate_bet_size(edge: float, confidence: float, bankroll: float,
         return 0.0
 
     b = decimal_odds - 1  # Net profit per unit staked
+    if b <= 0:
+        # decimal_odds <= 1.0 means no profit or a loss on a win — invalid for Kelly
+        return 0.0
     p = float(confidence)
     q = 1.0 - p
 

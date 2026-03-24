@@ -311,7 +311,7 @@ def evaluate_bet(
             market_implied_prob (float | None) — devigged market probability
             best_odds           (int | None)   — American odds for the bet side
     """
-    # Gate 0: Line validation — reject nonsensical lines
+    # Gate 0: Input validation
     if line is None or line <= 0:
         return {
             'should_bet': False,
@@ -322,7 +322,28 @@ def evaluate_bet(
             'confidence_reliability': None,
             'bet_size': 0.0,
             'tier': 'no_bet',
+            'prob_edge_tier': 'noise',
+            'prob_edge': 0.0,
             'reason': f'Invalid line ({line}) — skipping edge calculation',
+            'true_ev': None,
+            'ev_edge': None,
+            'market_implied_prob': None,
+            'best_odds': None,
+        }
+    # Gate 0b: NaN/None predicted value guard
+    if predicted is None or (isinstance(predicted, float) and np.isnan(predicted)):
+        return {
+            'should_bet': False,
+            'direction': 'over',
+            'edge': 0.0,
+            'signed_edge': 0.0,
+            'confidence': 0.5,
+            'confidence_reliability': None,
+            'bet_size': 0.0,
+            'tier': 'no_bet',
+            'prob_edge_tier': 'noise',
+            'prob_edge': 0.0,
+            'reason': f'Predicted value is None or NaN — skipping',
             'true_ev': None,
             'ev_edge': None,
             'market_implied_prob': None,
@@ -476,16 +497,16 @@ def evaluate_bet(
             )
             return result
     else:
+        # Populate prob_edge fields before early return so diagnostics are accurate
+        _prob_tier, _prob_edge_val, _ = get_prob_edge_tier(confidence)
+        result['prob_edge_tier'] = _prob_tier
+        result['prob_edge'] = _prob_edge_val
+
         if confidence < MIN_CONFIDENCE:
             result['reason'] = (
                 f"Calibrated confidence {confidence:.3f} < minimum {MIN_CONFIDENCE}"
             )
             return result
-
-        # Populate prob_edge fields even in non-prob-edge mode (informational)
-        _prob_tier, _prob_edge_val, _ = get_prob_edge_tier(confidence)
-        result['prob_edge_tier'] = _prob_tier
-        result['prob_edge'] = _prob_edge_val
 
     # ---------- Step: Tier classification (legacy + Phase 1.2) ----------
     # Use the Phase 1.2 prob-edge tier as the primary tier label.
