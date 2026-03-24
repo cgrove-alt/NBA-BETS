@@ -102,6 +102,10 @@ from backend.schemas import (
     BriefingSections,
     SettingsResponse,
     SettingsUpdateRequest,
+    BookOddsEntry,
+    PropLineMovementResponse,
+    PropLineMovement,
+    PropOddsSnapshotItem,
 )
 
 # Singleton data service instance
@@ -490,6 +494,15 @@ def _build_prop_prediction(player_data: dict, prop_key: str) -> PropPrediction |
     # Frontend expects edge to be raw points (e.g., +2.5), not percentage
     raw_edge = prediction - line if line and line > 0 else 0
 
+    # Phase 4.1: Real Odds Integration — populate from DataService's Phase 4 fields
+    implied_probability = player_data.get(f"{prop_key}_implied_prob")
+    ev_per_dollar = player_data.get(f"{prop_key}_ev_per_dollar")
+    # Phase 4.2: Line Shopping
+    best_book = player_data.get(f"{prop_key}_best_book")
+    best_odds = player_data.get(f"{prop_key}_best_odds")
+    # Phase 4.3: Line Movement
+    line_movement_signal = player_data.get(f"{prop_key}_line_movement_signal")
+
     return PropPrediction(
         prediction=prediction,
         confidence=confidence,
@@ -497,7 +510,11 @@ def _build_prop_prediction(player_data: dict, prop_key: str) -> PropPrediction |
         edge_pct=min(edge_pct_from_ds, 100.0) if edge_pct_from_ds > 0 else max(edge_pct_from_ds, -100.0),  # Capped at ±100%
         pick=pick,
         line=line,  # Can be None now
-        implied_probability=None,
+        implied_probability=implied_probability,
+        ev_per_dollar=ev_per_dollar,
+        best_book=best_book,
+        best_odds=best_odds,
+        line_movement_signal=line_movement_signal,
     )
 
 
@@ -1271,6 +1288,26 @@ def get_best_bets(
                     explanation_parts.append(note)
                 explanation = ". ".join(explanation_parts)
 
+                # Phase 4: Extract odds integration fields from player dict
+                _implied_prob = player.get(f"{prop_key}_implied_prob")
+                _ev_per_dollar = player.get(f"{prop_key}_ev_per_dollar")
+                _ev_dollars = round(_ev_per_dollar * 100, 2) if _ev_per_dollar is not None else None
+                _best_book = player.get(f"{prop_key}_best_book")
+                _best_odds = player.get(f"{prop_key}_best_odds")
+                _line_movement_signal = player.get(f"{prop_key}_line_movement_signal")
+
+                # Line shopping: build per-book comparison from stored snapshot data if available
+                _book_comparison: list[BookOddsEntry] = []
+                _per_book_raw = player.get(f"{prop_key}_per_book", [])
+                for _pb in (_per_book_raw or []):
+                    _book_comparison.append(BookOddsEntry(
+                        book=_pb.get("book", ""),
+                        line=_pb.get("line"),
+                        over_odds=_pb.get("over_odds"),
+                        under_odds=_pb.get("under_odds"),
+                        implied_prob_over=_pb.get("implied_prob_over"),
+                    ))
+
                 best_bets.append(BestBet(
                     player_name=player_name,
                     player_id=player_id,
@@ -1292,6 +1329,16 @@ def get_best_bets(
                     line_vendor=bet_line_vendor,
                     line_source=bet_line_source,
                     bettable=is_bettable,
+                    # Phase 4.1: Real Odds
+                    implied_probability=_implied_prob,
+                    ev_per_dollar=_ev_per_dollar,
+                    ev_dollars=_ev_dollars,
+                    # Phase 4.2: Line Shopping
+                    best_book=_best_book,
+                    best_odds=_best_odds,
+                    book_comparison=_book_comparison,
+                    # Phase 4.3: Line Movement
+                    line_movement_signal=_line_movement_signal,
                 ))
 
     # Determine data source for response metadata
@@ -1718,11 +1765,31 @@ def _load_predictions_from_postgres(date: str) -> list | None:
         import psycopg2
         conn = psycopg2.connect(database_url)
         cur = conn.cursor()
+
+        # Detect optional Phase 4 columns
         cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'predictions_history'
+              AND column_name IN (
+                  'line_source', 'line_vendor',
+                  'implied_probability', 'ev_per_dollar',
+                  'best_odds', 'best_book', 'line_movement_signal'
+              )
+        """)
+        existing_cols = {row[0] for row in cur.fetchall()}
+
+        def _col(name):
+            return name if name in existing_cols else f"NULL AS {name}"
+
+        cur.execute(f"""
             SELECT player_name, team, prop_type, prediction,
                    pred_low, pred_median, pred_high, line,
                    confidence_score, edge_quality_tier, suggested_bet_size,
-                   bet_recommendation, uncertainty_flag, pick, edge
+                   bet_recommendation, uncertainty_flag, pick, edge,
+                   {_col('line_source')}, {_col('line_vendor')},
+                   {_col('implied_probability')}, {_col('ev_per_dollar')},
+                   {_col('best_odds')}, {_col('best_book')},
+                   {_col('line_movement_signal')}
             FROM predictions_history
             WHERE date = %s
             ORDER BY confidence_score DESC NULLS LAST
@@ -1739,7 +1806,10 @@ def _load_predictions_from_postgres(date: str) -> list | None:
             (player_name, team, prop_type, prediction,
              pred_low, pred_median, pred_high, line,
              confidence_score, edge_quality_tier, suggested_bet_size,
-             bet_recommendation, uncertainty_flag, pick, edge) = row
+             bet_recommendation, uncertainty_flag, pick, edge,
+             line_source, line_vendor,
+             implied_probability, ev_per_dollar,
+             best_odds, best_book, line_movement_signal) = row
 
             predictions.append(DailyPrediction(
                 player_name=player_name or 'Unknown',
@@ -1757,6 +1827,13 @@ def _load_predictions_from_postgres(date: str) -> list | None:
                 uncertainty_flag=uncertainty_flag,
                 pick=pick,
                 edge=float(edge) if edge is not None else None,
+                line_source=line_source,
+                line_vendor=line_vendor,
+                implied_probability=float(implied_probability) if implied_probability is not None else None,
+                ev_per_dollar=float(ev_per_dollar) if ev_per_dollar is not None else None,
+                best_odds=int(best_odds) if best_odds is not None else None,
+                best_book=best_book,
+                line_movement_signal=line_movement_signal,
             ))
 
         return predictions
@@ -1823,16 +1900,27 @@ def _load_best_bets_from_postgres(
         cur.execute("""
             SELECT column_name FROM information_schema.columns
             WHERE table_name = 'predictions_history'
-              AND column_name IN ('line_source', 'line_vendor')
+              AND column_name IN (
+                  'line_source', 'line_vendor',
+                  'implied_probability', 'ev_per_dollar',
+                  'best_odds', 'best_book', 'line_movement_signal',
+                  'over_odds', 'under_odds'
+              )
         """)
         existing_cols = {row[0] for row in cur.fetchall()}
-        line_source_expr = "line_source" if "line_source" in existing_cols else "NULL AS line_source"
-        line_vendor_expr = "line_vendor" if "line_vendor" in existing_cols else "NULL AS line_vendor"
+
+        def _col(name):
+            return name if name in existing_cols else f"NULL AS {name}"
 
         cur.execute(f"""
             SELECT player_name, team, prop_type, prediction, line,
                    confidence_score, edge_quality_tier, bet_recommendation,
-                   pick, edge, game, injury_boost, {line_source_expr}, {line_vendor_expr}
+                   pick, edge, game, injury_boost,
+                   {_col('line_source')}, {_col('line_vendor')},
+                   {_col('implied_probability')}, {_col('ev_per_dollar')},
+                   {_col('best_odds')}, {_col('best_book')},
+                   {_col('line_movement_signal')},
+                   {_col('over_odds')}, {_col('under_odds')}
             FROM predictions_history
             WHERE date = %s
               AND pick IS NOT NULL AND pick != ''
@@ -1860,7 +1948,10 @@ def _load_best_bets_from_postgres(
             (player_name, team, prop_type_raw, prediction, line,
              confidence_score, edge_quality_tier, bet_recommendation,
              pick, edge_pct_val, game_str, injury_boost,
-             line_source, line_vendor) = row
+             line_source, line_vendor,
+             implied_probability, ev_per_dollar,
+             best_odds, best_book, line_movement_signal,
+             over_odds_db, under_odds_db) = row
 
             # Skip rows with missing critical data
             if prediction is None or line is None or confidence_score is None:
@@ -1930,6 +2021,12 @@ def _load_best_bets_from_postgres(
             if line_vendor:
                 signals.append(f"Line: {line_vendor}")
 
+            # Phase 4 fields
+            _implied_prob = float(implied_probability) if implied_probability is not None else None
+            _ev_per_dollar = float(ev_per_dollar) if ev_per_dollar is not None else None
+            _best_odds = int(best_odds) if best_odds is not None else None
+            _line_movement_signal = line_movement_signal or None
+
             best_bets.append(BestBet(
                 player_name=player_name or "Unknown",
                 player_id=player_id,
@@ -1949,6 +2046,12 @@ def _load_best_bets_from_postgres(
                 line_vendor=(line_vendor or 'unknown').lower(),
                 line_source=(line_source or 'unknown').lower(),
                 bettable=is_bettable,
+                implied_probability=_implied_prob,
+                ev_per_dollar=_ev_per_dollar,
+                ev_dollars=round(_ev_per_dollar * 100, 2) if _ev_per_dollar is not None else None,
+                best_book=best_book,
+                best_odds=_best_odds,
+                line_movement_signal=_line_movement_signal,
             ))
 
         if not best_bets:
@@ -2134,6 +2237,92 @@ def get_line_movement(
         odds_history=snapshots,
         movement_analysis=movement,
         count=len(snapshots),
+    )
+
+
+# ============== PROP LINE MOVEMENT ENDPOINT (Phase 4.3) ==============
+
+@app.get("/api/prop-line-movement/{player_name}/{prop_type}", response_model=PropLineMovementResponse)
+def get_prop_line_movement(
+    player_name: str,
+    prop_type: str,
+    game_date: str = Query(None, description="Date YYYY-MM-DD (defaults to today)"),
+):
+    """Get line movement history for a specific player prop.
+
+    Tracks how the prop line has moved from opening to current across all
+    sportsbooks, and returns a movement signal (CONFIRMS_MODEL / WARNS_MODEL / NEUTRAL).
+
+    Args:
+        player_name: Player's full name (URL-encoded)
+        prop_type: Prop type (Points, Rebounds, Assists, 3PM, PRA)
+        game_date: Date to query; defaults to today
+
+    Returns:
+        PropLineMovementResponse with snapshots, movement analysis, and per-book comparison
+    """
+    from datetime import date as _date_cls
+
+    if game_date is None:
+        game_date = str(_date_cls.today())
+
+    try:
+        from nba_betting.odds.prop_odds_tracker import get_prop_tracker
+        tracker = get_prop_tracker()
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Prop odds tracker not available")
+
+    snapshots_raw = tracker.get_snapshots(game_date, player_name, prop_type)
+    movement_raw = tracker.get_line_movement(game_date, player_name, prop_type)
+    book_comparison_raw = tracker.get_book_comparison(game_date, player_name, prop_type)
+
+    # Build response snapshots
+    snapshot_items = [
+        PropOddsSnapshotItem(
+            timestamp=s.get("timestamp", ""),
+            book_name=s.get("book_name", ""),
+            line=s.get("line", 0.0),
+            over_odds=s.get("over_odds"),
+            under_odds=s.get("under_odds"),
+            implied_prob_over=s.get("implied_prob_over"),
+            is_opening=s.get("is_opening", False),
+        )
+        for s in snapshots_raw
+    ]
+
+    # Build movement object
+    movement = None
+    if movement_raw:
+        movement = PropLineMovement(
+            opening_line=movement_raw.get("opening_line"),
+            current_line=movement_raw.get("current_line"),
+            movement=movement_raw.get("movement"),
+            movement_signal=movement_raw.get("movement_signal"),
+            opening_timestamp=movement_raw.get("opening_timestamp"),
+            current_timestamp=movement_raw.get("current_timestamp"),
+            num_snapshots=movement_raw.get("num_snapshots", len(snapshots_raw)),
+        )
+
+    # Build book comparison
+    book_comparison = [
+        BookOddsEntry(
+            book=b.get("book", ""),
+            line=b.get("line"),
+            over_odds=b.get("over_odds"),
+            under_odds=b.get("under_odds"),
+            implied_prob_over=b.get("implied_prob_over"),
+        )
+        for b in book_comparison_raw
+    ]
+
+    return PropLineMovementResponse(
+        player_name=player_name,
+        prop_type=prop_type,
+        game_date=game_date,
+        snapshots=snapshot_items,
+        movement=movement,
+        book_comparison=book_comparison,
+        count=len(snapshot_items),
     )
 
 

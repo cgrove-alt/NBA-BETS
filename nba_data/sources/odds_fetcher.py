@@ -63,6 +63,13 @@ PLAYER_PROP_MARKETS = {
 # Reverse mapping: Odds API market key -> our prop type name
 MARKET_TO_PROP = {v: k for k, v in PLAYER_PROP_MARKETS.items()}
 
+# All sportsbooks queried for line shopping (prioritized order for dedup)
+ALL_PROP_BOOKS = [
+    "draftkings", "fanduel", "betmgm", "caesars", "betrivers", "pointsbet",
+]
+# Tier-1 books that guarantee best-odds search matters (DK/FD are primary)
+TIER1_PROP_BOOKS = ["draftkings", "fanduel"]
+
 # Full NBA team names (The Odds API) -> 3-letter abbreviations (our data)
 FULL_NAME_TO_ABBREV = {
     "Atlanta Hawks": "ATL",
@@ -1038,30 +1045,41 @@ class PlayerPropFetcher:
 
         return event_map
 
-    def fetch_props_for_event(self, event_id: str) -> list[dict]:
-        """Fetch player props for a single event (~4 credits).
+    def fetch_props_for_event(self, event_id: str, bookmakers: list[str] | None = None) -> list[dict]:
+        """Fetch player props for a single event.
+
+        API credit cost: ~4 credits per call (4 prop markets × 1 region).
+        With all-books mode: same 4 credits; The Odds API includes all books
+        in a single response when requested.
 
         Args:
             event_id: The Odds API event ID.
+            bookmakers: List of bookmaker keys to include. Defaults to DraftKings
+                        and FanDuel (lowest cost, highest quality for primary lines).
 
         Returns:
             List of parsed prop dicts with player_name, prop_type, line,
             over_odds, under_odds, bookmaker.
         """
+        books_str = ",".join(bookmakers) if bookmakers else "draftkings,fanduel"
         data = self._make_request(
             f"sports/{NBA_SPORT_KEY}/events/{event_id}/odds",
             params={
                 "regions": "us",
                 "markets": self.PROP_MARKETS_STR,
-                "bookmakers": "draftkings,fanduel",
+                "bookmakers": books_str,
                 "oddsFormat": "american",
             },
         )
         if not data or not isinstance(data, dict):
             return []
 
+        return self._parse_prop_outcomes(data)
+
+    def _parse_prop_outcomes(self, api_response: dict) -> list[dict]:
+        """Parse The Odds API event-level response into a list of prop dicts."""
         props = []
-        for book in data.get("bookmakers", []):
+        for book in api_response.get("bookmakers", []):
             book_key = book["key"]
             for market in book.get("markets", []):
                 prop_type = MARKET_TO_PROP.get(market["key"])
@@ -1092,8 +1110,22 @@ class PlayerPropFetcher:
                 for pl in player_lines.values():
                     if "over_odds" in pl and "under_odds" in pl:
                         props.append(pl)
-
         return props
+
+    def fetch_props_for_event_all_books(self, event_id: str) -> list[dict]:
+        """Fetch player props from ALL supported sportsbooks for line shopping.
+
+        Same API credit cost as fetch_props_for_event (The Odds API charges per
+        market, not per bookmaker), but returns richer data for line shopping.
+
+        Args:
+            event_id: The Odds API event ID.
+
+        Returns:
+            List of prop dicts, one per (player, prop_type, bookmaker) combination.
+            Each dict has: player_name, prop_type, line, over_odds, under_odds, bookmaker.
+        """
+        return self.fetch_props_for_event(event_id, bookmakers=ALL_PROP_BOOKS)
 
     def _dedupe_props(self, props: list[dict]) -> list[dict]:
         """Deduplicate props, keeping DraftKings > FanDuel > others."""
@@ -1110,28 +1142,171 @@ class PlayerPropFetcher:
                     best[key] = p
         return list(best.values())
 
+    @staticmethod
+    def _remove_vig(over_odds: int, under_odds: int) -> tuple[float, float]:
+        """Convert American odds pair to vig-free implied probabilities.
+
+        Uses the multiplicative devigging method (fair odds = raw / sum of raws).
+
+        Args:
+            over_odds: American odds for the over side.
+            under_odds: American odds for the under side.
+
+        Returns:
+            (nv_over, nv_under) — vig-free implied probabilities that sum to 1.0.
+        """
+        def to_raw(odds: int) -> float:
+            if odds >= 0:
+                return 100.0 / (odds + 100.0)
+            return abs(odds) / (abs(odds) + 100.0)
+
+        raw_over = to_raw(over_odds)
+        raw_under = to_raw(under_odds)
+        total = raw_over + raw_under
+        if total <= 0:
+            return 0.5, 0.5
+        return raw_over / total, raw_under / total
+
+    def get_line_shop_results(
+        self,
+        all_book_props: list[dict],
+    ) -> dict[tuple[str, str], dict]:
+        """Compute line-shopping results across all sportsbooks.
+
+        For each (player_name, prop_type) pair, finds:
+        - The best available over odds (highest American odds = most valuable)
+        - The best available under odds
+        - The book offering each best-odds side
+        - EV per dollar for both sides at the best available line
+        - Per-book breakdown for dashboard display
+
+        Args:
+            all_book_props: Output of fetch_props_for_event_all_books(). Each item
+                            has player_name, prop_type, line, over_odds, under_odds, bookmaker.
+
+        Returns:
+            Dict keyed by (player_name, prop_type) with line-shopping data:
+            {
+                "best_over_book": str,
+                "best_over_odds": int,
+                "best_under_book": str,
+                "best_under_odds": int,
+                "line": float,               # consensus line (most common value)
+                "implied_prob_over": float,  # vig-free prob using best over odds
+                "per_book": [{"book": str, "line": float, "over_odds": int,
+                              "under_odds": int, "implied_prob_over": float}],
+            }
+        """
+        # Group by (player_name, prop_type)
+        grouped: dict[tuple[str, str], list[dict]] = {}
+        for p in all_book_props:
+            key = (p["player_name"], p["prop_type"])
+            grouped.setdefault(key, []).append(p)
+
+        results: dict[tuple[str, str], dict] = {}
+        for key, book_props in grouped.items():
+            best_over_odds = None
+            best_over_book = None
+            best_under_odds = None
+            best_under_book = None
+            per_book = []
+            lines_seen = []
+
+            for bp in book_props:
+                over_o = bp.get("over_odds", -110)
+                under_o = bp.get("under_odds", -110)
+                line = bp.get("line", 0)
+                book = bp.get("bookmaker", "unknown")
+                lines_seen.append(line)
+
+                # American odds: higher is better for the bettor
+                if best_over_odds is None or over_o > best_over_odds:
+                    best_over_odds = over_o
+                    best_over_book = book
+                if best_under_odds is None or under_o > best_under_odds:
+                    best_under_odds = under_o
+                    best_under_book = book
+
+                nv_over, _ = self._remove_vig(over_o, under_o)
+                per_book.append({
+                    "book": book,
+                    "line": line,
+                    "over_odds": over_o,
+                    "under_odds": under_o,
+                    "implied_prob_over": round(nv_over, 4),
+                })
+
+            # Consensus line: most common value (modal)
+            from collections import Counter
+            consensus_line = Counter(lines_seen).most_common(1)[0][0] if lines_seen else 0.0
+
+            # Vig-free implied probability at the best available over odds
+            best_over_book_entry = next(
+                (bp for bp in book_props if bp.get("bookmaker") == best_over_book), None
+            )
+            if best_over_book_entry:
+                nv_over, _ = self._remove_vig(
+                    best_over_book_entry["over_odds"],
+                    best_over_book_entry["under_odds"],
+                )
+            else:
+                nv_over = self._remove_vig(best_over_odds or -110, best_under_odds or -110)[0]
+
+            results[key] = {
+                "best_over_book": best_over_book,
+                "best_over_odds": best_over_odds,
+                "best_under_book": best_under_book,
+                "best_under_odds": best_under_odds,
+                "line": consensus_line,
+                "implied_prob_over": round(nv_over, 4),
+                "per_book": sorted(per_book, key=lambda x: x["over_odds"], reverse=True),
+            }
+
+        return results
+
     def get_props_for_game(
         self,
         bdl_game_id: int,
         event_id: str,
         id_mapper=None,
+        line_shop: bool = True,
     ) -> dict[int, dict]:
         """Main interface: fetch props and return in daily_predictions format.
+
+        Fetches props from all supported sportsbooks when line_shop=True (same
+        API credit cost). Includes per-book EV and best-odds information.
 
         Args:
             bdl_game_id: Balldontlie game ID.
             event_id: The Odds API event ID.
             id_mapper: Optional IDMapper for resolving player names to BDL IDs.
+            line_shop: If True (default), fetch from all books for line shopping.
+                       Set False to use only DK/FD (legacy behaviour).
 
         Returns:
-            Dict keyed by player_id (BDL ID or hash) with prop lines in the
-            same format that daily_predictions.py expects:
-            {player_id: {'player_id': id, 'points_line': 25.5,
-                         'points_vendor': 'draftkings', 'points_over_odds': -110, ...}}
+            Dict keyed by player_id (BDL ID or hash) with prop lines:
+            {player_id: {
+                'player_id': id,
+                'points_line': 25.5,
+                'points_vendor': 'draftkings',       # primary/deduped book
+                'points_over_odds': -110,
+                'points_under_odds': -115,
+                'points_best_over_book': 'fanduel',  # line shopping winner
+                'points_best_over_odds': -108,
+                'points_implied_prob_over': 0.514,
+                'points_per_book': [...],            # list of per-book data
+            }}
         """
-        raw_props = self.fetch_props_for_event(event_id)
+        if line_shop:
+            raw_props = self.fetch_props_for_event_all_books(event_id)
+        else:
+            raw_props = self.fetch_props_for_event(event_id)
+
         if not raw_props:
             return {}
+
+        # Compute line shopping results before deduplication
+        line_shop_data = self.get_line_shop_results(raw_props) if line_shop else {}
 
         deduped = self._dedupe_props(raw_props)
 
@@ -1147,6 +1322,16 @@ class PlayerPropFetcher:
             entry[f"{pt}_vendor"] = p["bookmaker"]
             entry[f"{pt}_over_odds"] = p.get("over_odds", -110)
             entry[f"{pt}_under_odds"] = p.get("under_odds", -110)
+
+            # Inject line shopping data
+            shop = line_shop_data.get((name, pt), {})
+            if shop:
+                entry[f"{pt}_best_over_book"] = shop.get("best_over_book")
+                entry[f"{pt}_best_over_odds"] = shop.get("best_over_odds")
+                entry[f"{pt}_best_under_book"] = shop.get("best_under_book")
+                entry[f"{pt}_best_under_odds"] = shop.get("best_under_odds")
+                entry[f"{pt}_implied_prob_over"] = shop.get("implied_prob_over")
+                entry[f"{pt}_per_book"] = shop.get("per_book", [])
 
         # Resolve player names to BDL IDs
         result: dict[int, dict] = {}

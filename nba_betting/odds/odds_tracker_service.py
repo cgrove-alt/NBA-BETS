@@ -58,6 +58,17 @@ try:
 except ImportError:
     HAS_PROP_FETCHER = False
 
+# Optional: PropOddsTracker for line movement snapshot storage
+try:
+    from nba_betting.odds.prop_odds_tracker import get_prop_tracker as _get_prop_tracker
+    HAS_PROP_TRACKER = True
+except ImportError:
+    try:
+        from prop_odds_tracker import get_prop_tracker as _get_prop_tracker
+        HAS_PROP_TRACKER = True
+    except ImportError:
+        HAS_PROP_TRACKER = False
+
 
 # =============================================================================
 # CONFIGURATION
@@ -169,7 +180,7 @@ class OddsTrackerService:
         self.db_path = db_path
         self.log_file = log_file
         self.enable_prop_tracking = (
-            self._env_flag(PROP_TRACKING_ENV_VAR)
+            self._env_flag(PROP_TRACKING_ENV_VAR, default=True)
             if enable_prop_tracking is None
             else bool(enable_prop_tracking)
         )
@@ -204,6 +215,7 @@ class OddsTrackerService:
 
         # Player prop tracking
         self._prop_fetcher = None
+        self._prop_tracker = None
         self._prop_events = []  # Cached events list
         self._prop_runs = 0
         self._prop_successful = 0
@@ -217,6 +229,12 @@ class OddsTrackerService:
                 self.logger.warning(f"PlayerPropFetcher init failed: {e}")
         elif self.enable_prop_tracking and not HAS_PROP_FETCHER:
             self.logger.warning("Prop tracking enabled but PlayerPropFetcher dependency not available")
+
+        if self.enable_prop_tracking and HAS_PROP_TRACKER:
+            try:
+                self._prop_tracker = _get_prop_tracker()
+            except Exception as e:
+                self.logger.warning(f"PropOddsTracker init failed: {e}")
 
         # Register event listeners
         self.scheduler.add_listener(self._job_executed_listener, EVENT_JOB_EXECUTED)
@@ -412,23 +430,60 @@ class OddsTrackerService:
             # Schedule pre-game refresh jobs for any new games
             self._schedule_pre_game_refreshes(events)
 
-            # Fetch props for each event (~4 credits each)
+            # Fetch props for each event (all books for line movement tracking)
             total_props = 0
+            total_snapshots = 0
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            is_first_fetch_today = self._last_prop_fetch is None or (
+                self._last_prop_fetch.date() < datetime.now().date()
+            )
+
             for event in events:
                 event_id = event.get("id")
                 if not event_id:
                     continue
 
-                props = self._prop_fetcher.fetch_props_for_event(event_id)
+                # Use all-books fetch so we can do line shopping + line movement
+                try:
+                    props = self._prop_fetcher.fetch_props_for_event_all_books(event_id)
+                except AttributeError:
+                    # Fallback if method not yet available
+                    props = self._prop_fetcher.fetch_props_for_event(event_id)
+
                 if props:
                     total_props += len(props)
                     self._store_tracked_props(event, props)
+
+                    # Store snapshots in PropOddsTracker for line movement analysis
+                    if self._prop_tracker:
+                        snap_records = [
+                            {
+                                "player_name": p.get("player_name", ""),
+                                "prop_type": p.get("prop_type", ""),
+                                "book_name": p.get("bookmaker", ""),
+                                "line": p.get("line", 0.0),
+                                "over_odds": p.get("over_odds"),
+                                "under_odds": p.get("under_odds"),
+                            }
+                            for p in props
+                            if p.get("player_name") and p.get("prop_type") and p.get("bookmaker")
+                        ]
+                        try:
+                            stored = self._prop_tracker.store_snapshots_bulk(
+                                game_date=today_str,
+                                props=snap_records,
+                                is_opening=is_first_fetch_today,
+                            )
+                            total_snapshots += stored
+                        except Exception as snap_err:
+                            self.logger.debug(f"Snapshot store failed: {snap_err}")
 
             self._prop_successful += 1
             self._last_prop_fetch = datetime.now()
             credits = self._prop_fetcher.remaining_requests
             self.logger.info(
-                f"Prop tracking: {total_props} props from {len(events)} events "
+                f"Prop tracking: {total_props} props from {len(events)} events, "
+                f"{total_snapshots} snapshots stored "
                 f"(credits remaining: {credits})"
             )
 
@@ -557,9 +612,38 @@ class OddsTrackerService:
             return
 
         try:
-            props = self._prop_fetcher.fetch_props_for_event(event_id)
+            try:
+                props = self._prop_fetcher.fetch_props_for_event_all_books(event_id)
+            except AttributeError:
+                props = self._prop_fetcher.fetch_props_for_event(event_id)
+
             if props:
                 self._store_tracked_props(event, props)
+
+                # Store closing-window snapshots for line movement analysis
+                if self._prop_tracker:
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    snap_records = [
+                        {
+                            "player_name": p.get("player_name", ""),
+                            "prop_type": p.get("prop_type", ""),
+                            "book_name": p.get("bookmaker", ""),
+                            "line": p.get("line", 0.0),
+                            "over_odds": p.get("over_odds"),
+                            "under_odds": p.get("under_odds"),
+                        }
+                        for p in props
+                        if p.get("player_name") and p.get("prop_type") and p.get("bookmaker")
+                    ]
+                    try:
+                        self._prop_tracker.store_snapshots_bulk(
+                            game_date=today_str,
+                            props=snap_records,
+                            is_opening=False,
+                        )
+                    except Exception:
+                        pass
+
                 self.logger.info(
                     f"Pre-game refresh: {len(props)} props for "
                     f"{event.get('home_team')} vs {event.get('away_team')}"

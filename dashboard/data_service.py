@@ -2206,19 +2206,34 @@ class DataService:
             today_et = datetime.now(ZoneInfo('America/New_York')).strftime('%Y-%m-%d')
             game_str = f"{away_abbrev}@{home_abbrev}"
 
-            # Detect optional columns
+            # Detect optional columns (safe for fresh deployments)
+            _phase4_cols = [
+                'line_source', 'line_vendor',
+                'implied_probability', 'ev_per_dollar',
+                'best_odds', 'best_book', 'line_movement_signal',
+                'over_odds', 'under_odds',
+            ]
             cur.execute("""
                 SELECT column_name FROM information_schema.columns
                 WHERE table_name = 'predictions_history'
-                  AND column_name IN ('line_source', 'line_vendor')
-            """)
+                  AND column_name = ANY(%s)
+            """, (_phase4_cols,))
             existing_cols = {row[0] for row in cur.fetchall()}
-            line_source_expr = "line_source" if "line_source" in existing_cols else "NULL"
-            line_vendor_expr = "line_vendor" if "line_vendor" in existing_cols else "NULL"
+
+            def _col(name: str, alias: str | None = None) -> str:
+                """Return column expression, falling back to NULL if not present."""
+                if name in existing_cols:
+                    return f"{name}" if alias is None else f"{name} AS {alias}"
+                return f"NULL AS {alias or name}"
 
             cur.execute(f"""
                 SELECT player_name, team, prop_type, prediction, line,
-                       confidence_score, edge, pick, {line_source_expr}, {line_vendor_expr}
+                       confidence_score, edge, pick,
+                       {_col('line_source')}, {_col('line_vendor')},
+                       {_col('implied_probability')}, {_col('ev_per_dollar')},
+                       {_col('best_odds')}, {_col('best_book')},
+                       {_col('line_movement_signal')},
+                       {_col('over_odds')}, {_col('under_odds')}
                 FROM predictions_history
                 WHERE date = %s AND game = %s
                   AND pick IS NOT NULL AND pick != ''
@@ -2239,7 +2254,10 @@ class DataService:
             # Group rows by player
             players_by_name: dict[str, dict] = {}
             for (player_name, team, prop_type_raw, prediction, line,
-                 confidence, edge, pick, line_source, line_vendor) in rows:
+                 confidence, edge, pick, line_source, line_vendor,
+                 implied_probability, ev_per_dollar,
+                 best_odds, best_book, line_movement_signal,
+                 over_odds_db, under_odds_db) in rows:
                 if player_name not in players_by_name:
                     players_by_name[player_name] = {
                         'player_name': player_name,
@@ -2261,6 +2279,14 @@ class DataService:
                 p[f'{prop_key}_line_vendor'] = (line_vendor or 'unknown').lower()
                 p[f'{prop_key}_line_source'] = (line_source or 'unknown').lower()
                 p[f'{prop_key}_bettable'] = (line_vendor or '').lower() in ('draftkings', 'fanduel')
+                # Phase 4: Real odds integration
+                p[f'{prop_key}_implied_prob'] = float(implied_probability) if implied_probability is not None else None
+                p[f'{prop_key}_ev_per_dollar'] = float(ev_per_dollar) if ev_per_dollar is not None else None
+                p[f'{prop_key}_best_odds'] = int(best_odds) if best_odds is not None else None
+                p[f'{prop_key}_best_book'] = best_book
+                p[f'{prop_key}_line_movement_signal'] = line_movement_signal or 'NEUTRAL'
+                p[f'{prop_key}_over_odds'] = int(over_odds_db) if over_odds_db is not None else -110
+                p[f'{prop_key}_under_odds'] = int(under_odds_db) if under_odds_db is not None else -110
 
             # Split into home/away
             home_players = [p for p in players_by_name.values() if p.get('team') == home_abbrev]
@@ -4813,6 +4839,26 @@ class DataService:
             result[f"{prop_key}_line_vendor"] = line_vendor if used_real_line else "estimated"
             result[f"{prop_key}_line_source"] = line_source if used_real_line else "model"
             result[f"{prop_key}_bettable"] = line_vendor in ('draftkings', 'fanduel') if used_real_line else False
+
+            # Phase 4.1: Compute implied probability and EV from model confidence + standard juice.
+            # The live ML path doesn't have real American odds; derive from the predicted pick
+            # and confidence score (model_prob ≈ calibrated_confidence/100).
+            # We assume -110 juice as the baseline unless a real line is available.
+            _model_prob = calibrated_confidence / 100.0
+            # -110 juice → raw implied = 110/210 ≈ 0.5238; vig-free = 0.5 (symmetric)
+            _implied_vig_free = 0.50  # symmetric assumption at -110
+            result[f"{prop_key}_implied_prob"] = round(_implied_vig_free, 4)
+            # EV per dollar at -110: (model_prob * 100/110) - (1 - model_prob)
+            _payout = 100 / 110  # profit per dollar at -110
+            _ev = (_model_prob * _payout) - (1.0 - _model_prob)
+            result[f"{prop_key}_ev_per_dollar"] = round(_ev, 4)
+            # Phase 4.2: No line shopping in live path (use primary vendor)
+            result[f"{prop_key}_best_book"] = line_vendor if used_real_line else None
+            result[f"{prop_key}_best_odds"] = -110  # default assumption
+            result[f"{prop_key}_over_odds"] = -110
+            result[f"{prop_key}_under_odds"] = -110
+            # Phase 4.3: No historical snapshots in live path → NEUTRAL
+            result[f"{prop_key}_line_movement_signal"] = "NEUTRAL"
 
             # Add injury adjustment info for transparency
             if injury_adjustment != 1.0:
