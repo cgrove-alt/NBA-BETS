@@ -142,44 +142,101 @@ def _supports_sample_weight(model) -> bool:
 # ---------------------------------------------------------------------------
 REDUCED_FEATURES: dict[str, list[str]] = {
     'points': [
+        # Player averages
         'season_pts_avg', 'last5_pts_avg', 'last3_pts_avg', 'recent_pts_avg',
         'season_min_avg', 'last5_min_avg', 'predicted_minutes',
-        'opp_def_rating', 'opp_pts_allowed', 'opp_pts_allowed_recent',
-        'opp_def_strength',
-        'opp_pace', 'is_home', 'days_rest', 'usage_rate', 'ts_pct',
+        # Efficiency
+        'usage_rate', 'ts_pct',
+        # Trends
         'pts_trend', 'pts_recency_ratio', 'season_games',
-        'is_back_to_back', 'blowout_probability', 'spread_magnitude',
-        'implied_game_total',
+        # Opponent defense (2.1)
+        'opp_def_rating', 'opp_pts_allowed', 'opp_pts_allowed_recent',
+        'opp_def_strength', 'opp_def_tier', 'opp_is_elite_defense', 'opp_is_weak_defense',
+        'opp_pts_vs_pos_diff',
+        # Opponent fatigue (2.1)
+        'opp_is_back_to_back', 'rest_advantage_vs_opp',
+        # Pace
+        'opp_pace', 'implied_game_total',
+        # Game context (2.2)
+        'is_home', 'days_rest', 'is_back_to_back',
+        'games_last_7_days', 'travel_distance', 'season_phase',
+        # Blowout / spread
+        'blowout_probability', 'spread_magnitude',
+        # Prop line
         'prop_line_vs_recent',
     ],
     'rebounds': [
+        # Player averages
         'season_reb_avg', 'last5_reb_avg', 'last3_reb_avg', 'recent_reb_avg',
         'season_min_avg', 'last5_min_avg', 'predicted_minutes',
-        'opp_reb_factor', 'opp_def_rating',
-        'is_center', 'is_forward', 'opp_pace', 'is_home', 'days_rest',
+        # Rebound splits (2.3)
+        'season_oreb_avg', 'season_dreb_avg', 'last5_oreb_avg', 'last5_dreb_avg',
+        'oreb_fraction', 'dreb_fraction', 'reb_volatility', 'is_low_confidence_rebounds',
+        # Trends
         'reb_trend', 'reb_recency_ratio', 'season_games',
-        'is_back_to_back', 'blowout_probability',
+        # Position
+        'is_center', 'is_forward', 'pos_reb_factor',
+        # Opponent rebounding context (2.3)
+        'opp_reb_factor', 'opp_reb_vs_pos_diff',
+        'opp_oreb_pct', 'opp_dreb_pct',
+        # Opponent defense
+        'opp_def_rating', 'opp_def_tier',
+        # Opponent fatigue (2.1)
+        'opp_is_back_to_back', 'rest_advantage_vs_opp',
+        # Pace
+        'opp_pace',
+        # Game context (2.2)
+        'is_home', 'days_rest', 'is_back_to_back',
+        'games_last_7_days', 'season_phase',
+        # Blowout
+        'blowout_probability',
+        # Prop line
         'prop_line_vs_recent',
     ],
     'assists': [
+        # Player averages
         'season_ast_avg', 'last5_ast_avg', 'last3_ast_avg', 'recent_ast_avg',
         'season_min_avg', 'last5_min_avg', 'predicted_minutes',
-        'opp_def_rating', 'opp_def_strength',
-        'is_guard', 'is_ball_handler', 'opp_pace', 'is_home', 'days_rest',
+        # Trends
         'ast_trend', 'ast_recency_ratio', 'season_games',
-        'is_back_to_back', 'blowout_probability',
+        # Position
+        'is_guard', 'is_ball_handler', 'pos_ast_factor',
+        # Opponent defense (2.1)
+        'opp_def_rating', 'opp_def_strength', 'opp_def_tier',
+        'opp_ast_vs_pos_diff',
+        # Opponent fatigue (2.1)
+        'opp_is_back_to_back', 'rest_advantage_vs_opp',
+        # Pace
+        'opp_pace',
+        # Game context (2.2)
+        'is_home', 'days_rest', 'is_back_to_back',
+        'games_last_7_days', 'season_phase',
+        # Blowout
+        'blowout_probability',
+        # Prop line
         'prop_line_vs_recent',
     ],
     'pra': [
+        # Player averages
         'season_pts_avg', 'season_reb_avg', 'season_ast_avg',
         'last5_pts_avg', 'last5_reb_avg', 'last5_ast_avg',
         'pra_avg', 'last3_pra_avg', 'season_min_avg', 'last5_min_avg',
         'predicted_minutes',
+        # Efficiency
+        'usage_rate',
+        # Opponent defense (2.1)
         'opp_def_rating', 'opp_def_strength', 'opp_pts_allowed_recent',
-        'opp_pace', 'is_home', 'days_rest',
-        'usage_rate', 'season_games',
-        'is_back_to_back', 'blowout_probability', 'spread_magnitude',
-        'implied_game_total',
+        'opp_def_tier', 'opp_is_weak_defense',
+        # Opponent fatigue (2.1)
+        'opp_is_back_to_back', 'rest_advantage_vs_opp',
+        # Pace
+        'opp_pace', 'implied_game_total',
+        # Game context (2.2)
+        'is_home', 'days_rest', 'is_back_to_back',
+        'games_last_7_days', 'season_phase',
+        # Blowout / spread
+        'blowout_probability', 'spread_magnitude',
+        # Prop line
         'prop_line_vs_recent',
     ],
 }
@@ -1252,6 +1309,47 @@ class TeamStatsCalculator:
     def __init__(self, window: int = 10):
         self.window = window
         self.team_games = defaultdict(list)
+        # Phase 2.3: Track team-level OREB/DREB per game for rebounding context
+        # team_id -> list of (game_date, oreb, dreb) tuples
+        self.team_rebound_games = defaultdict(list)
+
+    def add_team_rebound_stats(self, team_id: int, game_date: str, oreb: float, dreb: float):
+        """
+        Record team oreb/dreb for a game.
+        Called after processing all player stats for the game.
+        """
+        self.team_rebound_games[team_id].append((game_date, oreb, dreb))
+
+    def get_team_oreb_dreb_before_date(self, team_id: int, date: str, window: int = 10) -> dict:
+        """
+        Get team's OREB/DREB rates before a specific date for opponent rebounding context.
+
+        Returns dict with oreb_pct, dreb_pct, oreb_avg, dreb_avg.
+        """
+        if team_id not in self.team_rebound_games:
+            return {'opp_oreb_pct': 0.245, 'opp_dreb_pct': 0.755, 'opp_oreb_avg': 8.5, 'opp_dreb_avg': 26.0}
+
+        records = [(d, o, r) for d, o, r in self.team_rebound_games[team_id] if d < date]
+        if not records:
+            return {'opp_oreb_pct': 0.245, 'opp_dreb_pct': 0.755, 'opp_oreb_avg': 8.5, 'opp_dreb_avg': 26.0}
+
+        records.sort(key=lambda x: x[0], reverse=True)
+        recent = records[:window]
+
+        oreb_vals = [r[1] for r in recent]
+        dreb_vals = [r[2] for r in recent]
+        oreb_avg = np.mean(oreb_vals)
+        dreb_avg = np.mean(dreb_vals)
+        total_reb = oreb_avg + dreb_avg
+        oreb_pct = oreb_avg / total_reb if total_reb > 0 else 0.245
+        dreb_pct = dreb_avg / total_reb if total_reb > 0 else 0.755
+
+        return {
+            'opp_oreb_pct': round(oreb_pct, 3),
+            'opp_dreb_pct': round(dreb_pct, 3),
+            'opp_oreb_avg': round(oreb_avg, 1),
+            'opp_dreb_avg': round(dreb_avg, 1),
+        }
 
     def add_game(self, game: dict):
         """Add a game to the historical record."""
@@ -2124,6 +2222,9 @@ class PlayerStatsCalculator:
             'fta': stats.get('fta', 0) or 0,
             'min': self._parse_minutes(stats.get('min', '0')),
             'turnover': stats.get('turnover', 0) or 0,
+            # Phase 2.3: Offensive/defensive rebound splits
+            'oreb': stats.get('oreb', 0) or 0,
+            'dreb': stats.get('dreb', 0) or 0,
             'team_id': player_team_id,
             'opponent_id': opponent_id,
         }))
@@ -2171,6 +2272,11 @@ class PlayerStatsCalculator:
         ast = [g['ast'] for _, g in recent]
         fg3m = [g['fg3m'] for _, g in recent]
         mins = [g['min'] for _, g in recent]
+        # Phase 2.3: oreb/dreb splits (fall back to 0 if not stored in older data)
+        oreb = [g.get('oreb', 0) or 0 for _, g in recent]
+        dreb = [g.get('dreb', 0) or 0 for _, g in recent]
+        season_oreb = [g.get('oreb', 0) or 0 for _, g in games]
+        season_dreb = [g.get('dreb', 0) or 0 for _, g in games]
 
         # TIER 1.1: Get position and role features
         player_info = self.player_info.get(player_id, {})
@@ -2344,6 +2450,26 @@ class PlayerStatsCalculator:
         recent_min = features.get('recent_min_avg', 0)
         features['minutes_cv'] = abs(recent_min - season_min) / max(season_min, 1)
         features['minutes_recency_ratio'] = recent_min / season_min if season_min > 0 else 1.0
+
+        # Phase 2.3: Offensive/defensive rebound splits
+        _season_oreb_avg = np.mean(season_oreb) if season_oreb else 0.0
+        _season_dreb_avg = np.mean(season_dreb) if season_dreb else 0.0
+        _last5_oreb = [g.get('oreb', 0) or 0 for _, g in last_5]
+        _last5_dreb = [g.get('dreb', 0) or 0 for _, g in last_5]
+        features['season_oreb_avg'] = _season_oreb_avg
+        features['season_dreb_avg'] = _season_dreb_avg
+        features['last5_oreb_avg'] = np.mean(_last5_oreb) if _last5_oreb else 0.0
+        features['last5_dreb_avg'] = np.mean(_last5_dreb) if _last5_dreb else 0.0
+        features['recent_oreb_avg'] = np.mean(oreb) if oreb else 0.0
+        features['recent_dreb_avg'] = np.mean(dreb) if dreb else 0.0
+        _total_reb_splits = _season_oreb_avg + _season_dreb_avg
+        features['oreb_fraction'] = _season_oreb_avg / _total_reb_splits if _total_reb_splits > 0 else 0.25
+        features['dreb_fraction'] = _season_dreb_avg / _total_reb_splits if _total_reb_splits > 0 else 0.75
+
+        # Rebound volatility for low-confidence flag
+        _reb_cv = features.get('recent_reb_std', 0) / max(season_reb, 1)
+        features['reb_volatility'] = round(_reb_cv, 3)
+        features['is_low_confidence_rebounds'] = 1 if (_reb_cv > 0.60 or season_reb < 3.0) else 0
 
         return features
 
@@ -2741,6 +2867,45 @@ class PlayerStatsCalculator:
 # =============================================================================
 # NEW FEATURE HELPER FUNCTIONS
 # =============================================================================
+
+
+def classify_defensive_tier(def_rating: float, all_team_def_ratings: list | None = None) -> int:
+    """
+    Classify a team's defense into tiers: 1=elite(top10), 2=middle, 3=weak(bottom10).
+
+    When all_team_def_ratings provided, uses percentile-based ranking.
+    Otherwise falls back to absolute thresholds (lower def_rating = better defense).
+
+    NBA 2024-25 approximate thresholds:
+      Elite (top 10):  def_rating <= 111.0
+      Weak (bottom 10): def_rating >= 117.0
+
+    Returns:
+        1 = elite defense
+        2 = middle
+        3 = weak defense (favorable for props)
+    """
+    if all_team_def_ratings and len(all_team_def_ratings) >= 10:
+        sorted_ratings = sorted(all_team_def_ratings)
+        n = len(sorted_ratings)
+        top10_threshold = sorted_ratings[max(0, int(n * 0.33) - 1)]  # bottom third = elite defense
+        bottom10_threshold = sorted_ratings[min(n - 1, int(n * 0.67))]  # top third = weak defense
+        if def_rating <= top10_threshold:
+            return 1  # elite
+        elif def_rating >= bottom10_threshold:
+            return 3  # weak
+        else:
+            return 2  # middle
+    else:
+        # Absolute fallback
+        if not def_rating:
+            return 2
+        if def_rating <= 111.0:
+            return 1
+        elif def_rating >= 117.0:
+            return 3
+        return 2
+
 
 def calculate_blowout_risk_features(home_stats: dict, away_stats: dict, vegas_spread: float = None) -> dict:
     """
@@ -3391,6 +3556,66 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
                     if opp_league_ast_avg > 0 else 1.0
                 )
 
+                # ================================================================
+                # PHASE 2: NEW FEATURE ENGINEERING UPGRADES
+                # ================================================================
+
+                # 2.1 Opponent schedule / fatigue context
+                # Opponent rest and back-to-back status
+                _opp_travel = away_travel_features if is_home else home_travel_features
+                _opp_days_rest = _opp_travel.get('days_rest', 2)
+                _opp_is_b2b = _opp_travel.get('is_back_to_back', 0) == 1
+                # B2B direction: was opp's last game at home or away?
+                _opp_b2b_home = _opp_is_b2b and not bool(_opp_travel.get('is_back_to_back', 0))  # will override below
+                # Determine if opponent's current game is their second of a b2b at home vs away
+                _opp_now_home = not is_home  # opponent is home when player is away
+                _opp_b2b_home = _opp_is_b2b and _opp_now_home
+                _opp_b2b_away = _opp_is_b2b and not _opp_now_home
+                enhanced_features['opp_days_rest'] = _opp_days_rest
+                enhanced_features['opp_is_back_to_back'] = 1 if _opp_is_b2b else 0
+                enhanced_features['opp_b2b_home'] = 1 if _opp_b2b_home else 0
+                enhanced_features['opp_b2b_away'] = 1 if _opp_b2b_away else 0
+                enhanced_features['rest_advantage_vs_opp'] = float(
+                    enhanced_features.get('days_rest', 2) - _opp_days_rest
+                )
+
+                # Opponent defensive tier (1=elite, 2=middle, 3=weak)
+                # Collect all current def ratings for percentile-based ranking
+                _all_def_ratings = []
+                for _tid in range(1, 31):
+                    _ts = team_calc.get_team_stats_before_date(_tid, game_date)
+                    if _ts:
+                        _all_def_ratings.append(_ts.get('def_rating', 114))
+                _opp_def_rating_for_tier = opponent_stats.get('def_rating', 114) if opponent_stats else 114
+                enhanced_features['opp_def_tier'] = classify_defensive_tier(
+                    _opp_def_rating_for_tier, _all_def_ratings or None
+                )
+                enhanced_features['opp_is_elite_defense'] = 1 if enhanced_features['opp_def_tier'] == 1 else 0
+                enhanced_features['opp_is_weak_defense'] = 1 if enhanced_features['opp_def_tier'] == 3 else 0
+
+                # 2.2 Game context: travel distance for player's team, schedule load
+                _player_travel = home_travel_features if is_home else away_travel_features
+                enhanced_features['travel_distance'] = _player_travel.get('travel_distance', 0.0)
+                enhanced_features['games_last_7_days'] = _player_travel.get('games_last_7_days', 3)
+                enhanced_features['is_high_schedule_load'] = 1 if enhanced_features['games_last_7_days'] >= 4 else 0
+                enhanced_features['is_long_travel'] = 1 if enhanced_features['travel_distance'] >= 1500 else 0
+
+                # B2B direction for player's team
+                _player_is_b2b = enhanced_features.get('is_back_to_back', 0) == 1
+                enhanced_features['is_b2b_home'] = 1 if (_player_is_b2b and is_home) else 0
+                enhanced_features['is_b2b_away'] = 1 if (_player_is_b2b and not is_home) else 0
+
+                # Season phase (already set above, but ensure it's in enhanced_features)
+                # season_phase already set from existing code; add late_season flag
+                enhanced_features['is_late_season'] = 1 if enhanced_features.get('season_phase', 1) >= 2 else 0
+
+                # 2.3 Opponent rebounding context
+                _opp_reb_context = team_calc.get_team_oreb_dreb_before_date(opponent_team_id, game_date)
+                enhanced_features['opp_oreb_pct'] = _opp_reb_context.get('opp_oreb_pct', 0.245)
+                enhanced_features['opp_dreb_pct'] = _opp_reb_context.get('opp_dreb_pct', 0.755)
+                enhanced_features['opp_oreb_avg'] = _opp_reb_context.get('opp_oreb_avg', 8.5)
+                enhanced_features['opp_dreb_avg'] = _opp_reb_context.get('opp_dreb_avg', 26.0)
+
                 player_data.append({
                     'player_id': player_id,
                     'player_name': f"{ps.get('player', {}).get('first_name', '')} {ps.get('player', {}).get('last_name', '')}",
@@ -3409,6 +3634,9 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
 
         # IMPROVEMENT 3: Update team player performance tracker
         # (AFTER building features to ensure no data leakage)
+        # Also track per-team oreb/dreb aggregates for Phase 2.3
+        _team_oreb_sums = defaultdict(float)
+        _team_dreb_sums = defaultdict(float)
         for ps_track in game_player_stats:
             track_team_id = ps_track.get('team', {}).get('id')
             if track_team_id:
@@ -3417,6 +3645,13 @@ def process_games_for_training(games: list[dict], player_stats_by_game: dict[int
                     ps_track.get('reb', 0) or 0,
                     ps_track.get('ast', 0) or 0,
                 ))
+                _team_oreb_sums[track_team_id] += ps_track.get('oreb', 0) or 0
+                _team_dreb_sums[track_team_id] += ps_track.get('dreb', 0) or 0
+
+        # Record team-level oreb/dreb totals for rebounding context (Phase 2.3)
+        for _tid, _oreb in _team_oreb_sums.items():
+            _dreb = _team_dreb_sums.get(_tid, 0)
+            team_calc.add_team_rebound_stats(_tid, game_date, _oreb, _dreb)
 
         # Skip team example if insufficient history
         if not home_stats or not away_stats:
