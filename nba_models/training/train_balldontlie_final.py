@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -112,22 +113,28 @@ def prepare_spread_data(games_data: list[dict]) -> tuple[pd.DataFrame, np.ndarra
 
 
 class SimpleMoneylineModel:
-    """Simple moneyline model using Gradient Boosting."""
+    """Simple moneyline model using Gradient Boosting with isotonic calibration."""
 
     def __init__(self):
-        self.model = GradientBoostingClassifier(
+        # Phase 1.1: Wrap with CalibratedClassifierCV (isotonic regression).
+        # Raw tree-based classifiers produce poorly calibrated probabilities
+        # (win_prob can approach 0.0 or 1.0 even for borderline predictions).
+        # Isotonic calibration maps raw scores to well-calibrated probabilities
+        # using a held-out validation fold.
+        _base = GradientBoostingClassifier(
             n_estimators=100,
             max_depth=5,
             learning_rate=0.1,
             random_state=42,
         )
+        self.model = CalibratedClassifierCV(_base, method='isotonic', cv=3)
         self.scaler = StandardScaler()
         self.feature_names = []
         self.is_fitted = False
         self.training_metrics = {}
 
     def train(self, X: pd.DataFrame, y: np.ndarray, test_size: float = 0.2) -> dict:
-        """Train the model."""
+        """Train the model with isotonic calibration."""
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=42, stratify=y
@@ -143,8 +150,8 @@ class SimpleMoneylineModel:
         X_train_scaled = self.scaler.fit_transform(X_train_clean)
         X_test_scaled = self.scaler.transform(X_test_clean)
 
-        # Train
-        print("  Training Gradient Boosting Classifier...")
+        # Train (CalibratedClassifierCV fits base estimator + calibrator)
+        print("  Training Gradient Boosting Classifier with isotonic calibration...")
         self.model.fit(X_train_scaled, y_train)
         self.is_fitted = True
 
@@ -310,13 +317,28 @@ from model_trainer import EnsembleMoneylineWrapper
 
 
 class EnsembleMoneylineModel:
-    """Ensemble model combining multiple classifiers."""
+    """Ensemble model combining multiple isotonically-calibrated classifiers."""
 
     def __init__(self):
+        # Phase 1.1: Each base classifier is wrapped with CalibratedClassifierCV
+        # using isotonic regression. This corrects the systematic overconfidence
+        # of tree ensembles (RandomForest, GradientBoosting) which tend to push
+        # probabilities toward 0/1 due to averaging over many trees.
+        # LogisticRegression is already well-calibrated by design (max-likelihood
+        # objective), but wrapping it is harmless and ensures consistency.
         self.models = {
-            'lr': LogisticRegression(max_iter=1000, random_state=42),
-            'rf': RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1),
-            'gb': GradientBoostingClassifier(n_estimators=100, max_depth=5, random_state=42),
+            'lr': CalibratedClassifierCV(
+                LogisticRegression(max_iter=1000, random_state=42),
+                method='isotonic', cv=3,
+            ),
+            'rf': CalibratedClassifierCV(
+                RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1),
+                method='isotonic', cv=3,
+            ),
+            'gb': CalibratedClassifierCV(
+                GradientBoostingClassifier(n_estimators=100, max_depth=5, random_state=42),
+                method='isotonic', cv=3,
+            ),
         }
         self.scaler = StandardScaler()
         self.feature_names = []

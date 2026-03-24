@@ -1090,31 +1090,37 @@ class DynamicKellyCalculator:
 
 def get_kelly_multiplier_for_tier(edge_tier: str) -> float:
     """
-    Get Kelly multiplier based on edge quality tier.
+    Get Kelly multiplier based on edge quality tier (Phase 1.3).
 
-    Maps edge quality tiers to Kelly criterion multipliers following
-    the approach from edge_quality.py.
+    Under the Phase 1.3 sizing model, the tier determines WHETHER to bet,
+    not how much. All active tiers return 1.0 so that the sole sizing lever
+    is the `fractional` parameter passed to calculate_kelly_bet_size().
+    Setting fractional=0.25 (quarter-Kelly) gives uniform bet sizes that
+    are safe and consistent regardless of the confidence tier.
+
+    Tiers that should not be bet ('weak', 'avoid', 'noise') return 0.0,
+    which calculate_kelly_bet_size() interprets as "no bet".
 
     Args:
-        edge_tier: Edge quality tier ('elite', 'strong', 'moderate', 'weak', 'avoid')
+        edge_tier: Edge quality tier.  Accepts both legacy labels
+                   ('elite', 'strong', 'moderate', 'weak', 'avoid') and
+                   Phase 1.2 prob-edge labels ('high', 'medium', 'low', 'noise').
 
     Returns:
-        Kelly multiplier (fraction of base Kelly to use)
-
-    Examples:
-        >>> get_kelly_multiplier_for_tier('elite')
-        1.0
-        >>> get_kelly_multiplier_for_tier('strong')
-        0.5
-        >>> get_kelly_multiplier_for_tier('moderate')
-        0.25
+        1.0 for any actively-bettable tier, 0.0 for tiers that should not be bet.
     """
     tier_multipliers = {
-        'elite': 1.0,      # 90-100: Bet full (fractional) Kelly
-        'strong': 0.50,    # 75-89: Bet 50% Kelly
-        'moderate': 0.25,  # 60-74: Bet 25% Kelly
-        'weak': 0.0,       # 40-59: Monitor only, no bet
-        'avoid': 0.0       # <40: Do not bet
+        # Phase 1.2 prob-edge tiers
+        'high':     1.0,   # >7% above breakeven → bet at full fractional Kelly
+        'medium':   1.0,   # 5–7% above breakeven → bet at full fractional Kelly
+        'low':      0.0,   # 3–5% → excluded by MIN_BET_TIER='high' by default
+        'noise':    0.0,   # <3% → do not bet
+        # Legacy tiers (retained for backward compatibility)
+        'elite':    1.0,
+        'strong':   1.0,
+        'moderate': 1.0,
+        'weak':     0.0,
+        'avoid':    0.0,
     }
     return tier_multipliers.get(edge_tier.lower(), 0.0)
 
@@ -1132,41 +1138,43 @@ def calculate_kelly_bet_size(
     """
     Calculate Kelly Criterion bet size with safety adjustments.
 
-    Implements the Kelly formula with multiple layers of risk management:
-    1. Fractional Kelly (default 25%) for safety
-    2. Edge tier adjustments (Elite=1x, Strong=0.5x, Moderate=0.25x)
-    3. Drawdown adjustments (reduce stakes during losses)
-    4. Correlation adjustments (reduce when multiple same-day bets)
+    Implements the Kelly formula with safety adjustments (Phase 1.3):
+    1. Fractional Kelly (configurable, default 25% = quarter-Kelly)
+       Formula: actual_bet = fractional × ((b×p − q) / b) × bankroll
+    2. Edge tier gate (Phase 1.3): tier determines IF we bet, not how much.
+       get_kelly_multiplier_for_tier() returns 1.0 for all active tiers.
+    3. Drawdown adjustments (reduce stakes during drawdowns)
+    4. Correlation adjustments (reduce for multiple same-day bets)
     5. Hard cap at max_bet_pct of bankroll per bet (default 5%)
 
-    Kelly formula: f* = (bp - q) / b
+    Kelly formula: f* = (b×p − q) / b
     Where:
-        b = decimal_odds - 1 (net odds)
+        b = decimal_odds − 1 (net odds)
         p = win_prob
-        q = 1 - p
+        q = 1 − p
 
     Args:
-        win_prob: Probability of winning (0-1)
-        decimal_odds: Decimal odds (e.g., 1.91 for -110, 2.0 for +100)
-        bankroll: Current bankroll amount
-        fractional: Fraction of full Kelly to use (default 0.25 = quarter Kelly)
-        edge_tier: Edge quality tier ('elite', 'strong', 'moderate', 'weak', 'avoid')
-                   If None, uses edge_quality_score for adjustment
-        current_drawdown: Current drawdown as decimal (0.15 = 15% drawdown)
-        num_same_day_bets: Number of bets already placed today (for correlation adjustment)
-        max_bet_pct: Maximum bet as % of bankroll (default 0.05 = 5%)
+        win_prob:          Calibrated win probability (0–1). Must be clamped to
+                           [PROB_CLAMP_MIN, PROB_CLAMP_MAX] before calling.
+        decimal_odds:      Decimal odds (e.g., 1.909 for -110, 2.0 for +100).
+        bankroll:          Current bankroll amount.
+        fractional:        Fractional Kelly multiplier (default 0.25 = quarter-Kelly).
+                           This is the configurable lever — use 0.25 for safety.
+        edge_tier:         Confidence tier for gate check. Any active tier ('elite',
+                           'strong', 'moderate', 'high', 'medium') returns 1.0 from
+                           get_kelly_multiplier_for_tier(). Non-bettable tiers
+                           ('weak', 'avoid', 'noise', 'low') return 0 → no bet.
+        current_drawdown:  Current drawdown as decimal (0.15 = 15% drawdown).
+        num_same_day_bets: Number of bets already placed today (correlation adj).
+        max_bet_pct:       Hard cap as fraction of bankroll per bet (default 5%).
 
     Returns:
-        Recommended bet size in dollars
+        Recommended bet size in dollars.
 
     Examples:
-        >>> # Elite tier bet: 55% win prob at -110 odds, $10k bankroll
-        >>> calculate_kelly_bet_size(0.55, 1.91, 10000, edge_tier='elite')
-        ~230.0  # ~2.3% of bankroll
-
-        >>> # Strong tier bet: Same odds but lower confidence
-        >>> calculate_kelly_bet_size(0.55, 1.91, 10000, edge_tier='strong')
-        ~115.0  # ~1.15% of bankroll (50% of elite)
+        >>> # High tier bet: 60% win prob at -110 odds, $10k bankroll, quarter-Kelly
+        >>> calculate_kelly_bet_size(0.60, 1.909, 10000, fractional=0.25, edge_tier='high')
+        ~182.0  # ~1.82% of bankroll
     """
     # Validate inputs
     if win_prob <= 0 or win_prob >= 1:

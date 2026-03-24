@@ -124,12 +124,24 @@ class TestEdgeTierMultipliers:
     """Test edge quality tier Kelly multipliers."""
 
     def test_tier_multipliers(self):
-        """Test that tier multipliers match specification."""
+        """Test tier multipliers: Phase 1.3 uses uniform 1.0 for all active tiers.
+
+        Under Phase 1.3, the tier determines WHETHER to bet, not how much.
+        All active tiers ('elite', 'strong', 'moderate', 'high', 'medium')
+        return 1.0 so that the fractional parameter is the sole sizing lever.
+        Only non-bettable tiers ('weak', 'avoid', 'noise', 'low') return 0.0.
+        """
+        # Active tiers — uniform 1.0 (Phase 1.3)
         assert get_kelly_multiplier_for_tier('elite') == 1.0
-        assert get_kelly_multiplier_for_tier('strong') == 0.50
-        assert get_kelly_multiplier_for_tier('moderate') == 0.25
+        assert get_kelly_multiplier_for_tier('strong') == 1.0    # changed: was 0.50
+        assert get_kelly_multiplier_for_tier('moderate') == 1.0  # changed: was 0.25
+        assert get_kelly_multiplier_for_tier('high') == 1.0
+        assert get_kelly_multiplier_for_tier('medium') == 1.0
+        # Non-bettable tiers — 0.0
         assert get_kelly_multiplier_for_tier('weak') == 0.0
         assert get_kelly_multiplier_for_tier('avoid') == 0.0
+        assert get_kelly_multiplier_for_tier('low') == 0.0
+        assert get_kelly_multiplier_for_tier('noise') == 0.0
 
     def test_tier_case_insensitive(self):
         """Test that tier lookup is case-insensitive."""
@@ -157,7 +169,7 @@ class TestEdgeTierMultipliers:
         assert bet_size > 0, "Elite tier should recommend a bet"
 
     def test_strong_tier_bet_sizing(self):
-        """Test bet sizing for strong tier."""
+        """Test bet sizing for strong tier — Phase 1.3: equal to elite (uniform quarter-Kelly)."""
         win_prob = 0.55
         decimal_odds = 1.91
         bankroll = 10000.0
@@ -172,11 +184,12 @@ class TestEdgeTierMultipliers:
             fractional=0.25, edge_tier='strong'
         )
 
-        # Strong should be ~50% of elite
-        assert abs(strong_bet - elite_bet * 0.5) < 5
+        # Phase 1.3: all active tiers use the same fractional Kelly — sizes are equal
+        assert strong_bet > 0, "Strong tier should recommend a bet"
+        assert strong_bet == elite_bet, "Strong tier uses same sizing as elite (Phase 1.3)"
 
     def test_moderate_tier_bet_sizing(self):
-        """Test bet sizing for moderate tier."""
+        """Test bet sizing for moderate tier — Phase 1.3: equal to elite (uniform quarter-Kelly)."""
         win_prob = 0.55
         decimal_odds = 1.91
         bankroll = 10000.0
@@ -191,8 +204,9 @@ class TestEdgeTierMultipliers:
             fractional=0.25, edge_tier='moderate'
         )
 
-        # Moderate should be ~25% of elite
-        assert abs(moderate_bet - elite_bet * 0.25) < 5
+        # Phase 1.3: all active tiers use the same fractional Kelly — sizes are equal
+        assert moderate_bet > 0, "Moderate tier should recommend a bet"
+        assert moderate_bet == elite_bet, "Moderate tier uses same sizing as elite (Phase 1.3)"
 
     def test_weak_tier_no_bet(self):
         """Test that weak tier returns 0."""

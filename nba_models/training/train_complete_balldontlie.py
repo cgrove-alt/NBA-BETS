@@ -41,6 +41,7 @@ from sklearn.ensemble import (
 )
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -3910,12 +3911,18 @@ class MinutesPredictionModel:
                     eval_metric='logloss',
                 )
             else:
-                self.will_play_classifier = GradientBoostingClassifier(
-                    n_estimators=150,
-                    max_depth=4,
-                    learning_rate=0.05,
-                    min_samples_leaf=10,
-                    random_state=42,
+                # Phase 1.1: Wrap with CalibratedClassifierCV (isotonic regression)
+                # to correct overconfident probability outputs from tree classifiers.
+                self.will_play_classifier = CalibratedClassifierCV(
+                    GradientBoostingClassifier(
+                        n_estimators=150,
+                        max_depth=4,
+                        learning_rate=0.05,
+                        min_samples_leaf=10,
+                        random_state=42,
+                    ),
+                    method='isotonic',
+                    cv=3,
                 )
 
             # FIXED: Use temporal split instead of random split to prevent data leakage
@@ -5464,45 +5471,69 @@ def train_all_models(
     xgb_ml_params = None
     xgb_sp_params = None
 
-    # Build diverse ensemble with multiple model families
+    # Build diverse ensemble with multiple model families.
+    # Phase 1.1: sklearn classifiers are wrapped with CalibratedClassifierCV
+    # (isotonic regression) to correct overconfident probability outputs.
+    # XGBoost, LightGBM, CatBoost use 'logloss' as the training objective which
+    # already provides reasonable calibration — they are NOT wrapped to avoid
+    # conflicting with their internal calibration.
     models = {
-        # Linear model (fast baseline)
-        'lr': LogisticRegression(max_iter=1000, random_state=42, C=1.0),
-
-        # Tree-based models (capture non-linear patterns)
-        'rf': RandomForestClassifier(
-            n_estimators=200, max_depth=12, min_samples_split=5,
-            min_samples_leaf=2, random_state=42, n_jobs=-1
-        ),
-        'gb': GradientBoostingClassifier(
-            n_estimators=150, max_depth=6, learning_rate=0.1,
-            min_samples_split=5, random_state=42
+        # Linear model (fast baseline — already well-calibrated by max-likelihood)
+        'lr': CalibratedClassifierCV(
+            LogisticRegression(max_iter=1000, random_state=42, C=1.0),
+            method='isotonic', cv=3,
         ),
 
-        # Neural network (learns complex feature interactions)
-        'mlp': MLPClassifier(
-            hidden_layer_sizes=(128, 64, 32),
-            activation='relu',
-            solver='adam',
-            alpha=0.001,  # L2 regularization
-            batch_size='auto',
-            learning_rate='adaptive',
-            learning_rate_init=0.001,
-            max_iter=500,
-            early_stopping=True,
-            validation_fraction=0.1,
-            n_iter_no_change=20,
-            random_state=42
+        # Tree-based models — isotonic calibration corrects probability clustering
+        # near 0/1 caused by averaging over many trees (Random Forest) or
+        # stage-wise boosting (Gradient Boosting).
+        'rf': CalibratedClassifierCV(
+            RandomForestClassifier(
+                n_estimators=200, max_depth=12, min_samples_split=5,
+                min_samples_leaf=2, random_state=42, n_jobs=-1,
+            ),
+            method='isotonic', cv=3,
+        ),
+        'gb': CalibratedClassifierCV(
+            GradientBoostingClassifier(
+                n_estimators=150, max_depth=6, learning_rate=0.1,
+                min_samples_split=5, random_state=42,
+            ),
+            method='isotonic', cv=3,
         ),
 
-        # SVM with RBF kernel (good for high-dimensional data)
-        'svm': SVC(
-            kernel='rbf',
-            C=1.0,
-            gamma='scale',
-            probability=True,  # Enable probability estimates
-            random_state=42,
-            cache_size=500
+        # Neural network — sigmoid outputs are nominally calibrated but isotonic
+        # post-processing further corrects overconfidence near the tails.
+        'mlp': CalibratedClassifierCV(
+            MLPClassifier(
+                hidden_layer_sizes=(128, 64, 32),
+                activation='relu',
+                solver='adam',
+                alpha=0.001,
+                batch_size='auto',
+                learning_rate='adaptive',
+                learning_rate_init=0.001,
+                max_iter=500,
+                early_stopping=True,
+                validation_fraction=0.1,
+                n_iter_no_change=20,
+                random_state=42,
+            ),
+            method='isotonic', cv=3,
+        ),
+
+        # SVM — Platt scaling (probability=True) is imprecise; isotonic
+        # calibration gives better-calibrated probabilities.
+        'svm': CalibratedClassifierCV(
+            SVC(
+                kernel='rbf',
+                C=1.0,
+                gamma='scale',
+                probability=False,  # Disable Platt scaling; CalibratedClassifierCV handles it
+                random_state=42,
+                cache_size=500,
+            ),
+            method='isotonic', cv=3,
         ),
     }
 
