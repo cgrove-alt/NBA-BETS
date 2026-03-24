@@ -138,6 +138,27 @@ QUANTILE_TARGET_SLOPE: float = 1.0  # identity (no decompression)
 # ---------------------------------------------------------------------------
 # Exposure / correlation limits
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Phase 4: Odds API integration thresholds
+# ---------------------------------------------------------------------------
+# Minimum edge over market implied probability to flag a bet recommendation.
+# model_prob > implied_prob + MIN_EDGE_OVER_IMPLIED → flag as edge bet.
+# Configurable: increase to reduce false positives, decrease to surface more bets.
+MIN_EDGE_OVER_IMPLIED: float = 0.03   # 3% edge above vig-free implied probability
+
+# Minimum EV per dollar staked to flag a bet (positive EV threshold).
+MIN_EV_PER_DOLLAR: float = 0.02      # $0.02 EV per $1 staked (2 cents on the dollar)
+
+# All sportsbooks queried for line shopping (The Odds API bookmaker keys).
+# DraftKings and FanDuel are first-tier; rest provide additional coverage.
+LINE_SHOP_BOOKS: list[str] = [
+    "draftkings", "fanduel", "betmgm", "caesars", "betrivers", "pointsbet",
+]
+
+# Line movement thresholds for prop signals
+# A movement larger than this (in absolute line units) is considered significant.
+PROP_LINE_MOVEMENT_THRESHOLD: float = 0.5   # 0.5 points movement is notable
+
 MAX_TOTAL_EXPOSURE: float  = 0.20   # 20% of bankroll total at risk
 MAX_GAME_EXPOSURE: float   = 0.10   # 10% on any single game
 MAX_PLAYER_EXPOSURE: float = 0.05   # 5% on any single player

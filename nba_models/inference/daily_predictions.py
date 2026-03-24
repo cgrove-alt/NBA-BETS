@@ -325,6 +325,14 @@ except ImportError:
     logger.error("CRITICAL: bet_filter/prediction_pipeline not importable. Bet filtering disabled.")
     def _should_bet(*args, **kwargs):
         return True, 'filter unavailable', 0.0
+
+# Phase 4 Odds Integration: prop odds tracker for line movement signals
+try:
+    from nba_betting.odds.prop_odds_tracker import PropOddsTracker, get_prop_tracker
+    HAS_PROP_TRACKER = True
+except ImportError:
+    HAS_PROP_TRACKER = False
+    logger.warning("PropOddsTracker not importable — line movement signals disabled.")
     def _calc_bet_size(*args, **kwargs):
         return 0.0
     def _evaluate_bet(*args, **kwargs):
@@ -3222,6 +3230,13 @@ def main():
                                     'under_odds': props.get(f'{prop_type}_under_odds', -110),
                                     'line_source': game_prop_source,
                                     'line_vendor': props.get(f'{prop_type}_vendor', 'unknown'),
+                                    # Phase 4.2: Line shopping fields (populated when source=odds-api)
+                                    'best_over_book': props.get(f'{prop_type}_best_over_book'),
+                                    'best_over_odds': props.get(f'{prop_type}_best_over_odds'),
+                                    'best_under_book': props.get(f'{prop_type}_best_under_book'),
+                                    'best_under_odds': props.get(f'{prop_type}_best_under_odds'),
+                                    'implied_prob_over': props.get(f'{prop_type}_implied_prob_over'),
+                                    'per_book_odds': props.get(f'{prop_type}_per_book', []),
                                     'game_context': {
                                         'spread': odds.get('spread', 0),
                                         'total': odds.get('total', 220),
@@ -3235,6 +3250,9 @@ def main():
                     # TASK 4.1: Execute prop predictions in parallel
                     if prop_tasks:
                         executor = get_executor(max_workers=5)
+
+                        # Phase 4.3: Initialise line-movement tracker once per game loop
+                        _prop_tracker = get_prop_tracker() if HAS_PROP_TRACKER else None
 
                         def process_prop_task(task):
                             pred = predict_player_prop(
@@ -3259,9 +3277,46 @@ def main():
                             # Fix 4: Pass through actual sportsbook odds
                             pred['over_odds'] = task.get('over_odds', -110)
                             pred['under_odds'] = task.get('under_odds')
-                            # Track line source (odds-api vs balldontlie) and vendor (draftkings, fanduel, rebet)
+                            # Track line source (odds-api vs balldontlie) and vendor
                             pred['line_source'] = task.get('line_source', 'unknown')
                             pred['line_vendor'] = task.get('line_vendor', 'unknown')
+
+                            # Phase 4.2: Line shopping — best available odds across all books
+                            pred['best_over_book'] = task.get('best_over_book')
+                            pred['best_over_odds'] = task.get('best_over_odds')
+                            pred['best_under_book'] = task.get('best_under_book')
+                            pred['best_under_odds'] = task.get('best_under_odds')
+                            # Implied probability from vig-free devigging (best available odds)
+                            pred['implied_prob_over'] = task.get('implied_prob_over')
+                            # Per-book EV list for dashboard line-shopping display
+                            pred['per_book_odds'] = task.get('per_book_odds', [])
+
+                            # Phase 4.3: Line movement signal — does smart money agree with our model?
+                            pick = pred.get('pick', '-')
+                            line_movement_signal = 'NEUTRAL'
+                            if _prop_tracker and pick in ('OVER', 'UNDER'):
+                                try:
+                                    line_movement_signal = _prop_tracker.get_movement_signal(
+                                        game_date=target_date,
+                                        player_name=task['player_name'],
+                                        prop_type=task['prop_type'],
+                                        pick=pick,
+                                    )
+                                except Exception:
+                                    pass
+                            pred['line_movement_signal'] = line_movement_signal
+
+                            # Derive the "best book" for the recommended pick side
+                            if pick == 'OVER':
+                                pred['best_book'] = pred.get('best_over_book') or task.get('line_vendor', 'unknown')
+                                pred['best_odds'] = pred.get('best_over_odds') or task.get('over_odds', -110)
+                            elif pick == 'UNDER':
+                                pred['best_book'] = pred.get('best_under_book') or task.get('line_vendor', 'unknown')
+                                pred['best_odds'] = pred.get('best_under_odds') or task.get('under_odds', -110)
+                            else:
+                                pred['best_book'] = task.get('line_vendor', 'unknown')
+                                pred['best_odds'] = task.get('over_odds', -110)
+
                             # Fix 5: Expand uncertainty_flag beyond just injury status
                             if task['uncertainty_flag']:
                                 pred['uncertainty_flag'] = task['uncertainty_flag']
@@ -3346,6 +3401,47 @@ def main():
         pass  # CLV bridge not yet available
     except Exception as e:
         print(f"  Warning: CLV recording failed: {e}")
+
+    # Phase 4.3: Store prop odds snapshots for line movement tracking
+    if HAS_PROP_TRACKER and all_player_props:
+        try:
+            _snap_tracker = get_prop_tracker()
+            snap_records = []
+            for prop in all_player_props:
+                player_name = prop.get('player', '')
+                prop_type = prop.get('stat', '')
+                line = prop.get('line', 0)
+                over_odds_snap = prop.get('over_odds', -110)
+                under_odds_snap = prop.get('under_odds', -110)
+                book = prop.get('line_vendor', 'unknown')
+                if player_name and prop_type and line:
+                    snap_records.append({
+                        'player_name': player_name,
+                        'prop_type': prop_type,
+                        'book_name': book or 'unknown',
+                        'line': line,
+                        'over_odds': over_odds_snap or -110,
+                        'under_odds': under_odds_snap or -110,
+                    })
+                    # Also store per-book snapshots from line shopping
+                    for pb in prop.get('per_book_odds', []):
+                        if pb.get('book') and pb['book'] != book:
+                            snap_records.append({
+                                'player_name': player_name,
+                                'prop_type': prop_type,
+                                'book_name': pb['book'],
+                                'line': pb.get('line', line),
+                                'over_odds': pb.get('over_odds', -110),
+                                'under_odds': pb.get('under_odds', -110),
+                            })
+            stored_count = _snap_tracker.store_snapshots_bulk(
+                game_date=target_date,
+                props=snap_records,
+                is_opening=False,  # Daily predictions run at 9 AM; odds may have opened earlier
+            )
+            print(f"  Stored {stored_count} prop odds snapshots for line movement tracking")
+        except Exception as e:
+            print(f"  Warning: Prop snapshot storage failed: {e}")
 
     # Paper trading: log all predictions for forward validation
     try:
@@ -3475,6 +3571,10 @@ def main():
                 else:
                     display_odds = prop.get('under_odds', prop.get('american_odds', -110))
 
+                # Phase 4.1: Compute EV in dollar terms ($100 stake) for display
+                ev_per_dollar = prop.get('ev_per_dollar', 0) or 0
+                ev_dollars_100 = round(ev_per_dollar * 100, 2)
+
                 row = {
                     'date': target_date,
                     'game': game_str,
@@ -3499,7 +3599,17 @@ def main():
                     'signal': prop.get('signal', bet_rec),
                     'pick': pick,
                     'american_odds': display_odds,
-                    'ev_per_dollar': prop.get('ev_per_dollar', 0),
+                    # Phase 4.1: Real odds integration
+                    'implied_probability': prop.get('implied_probability') or prop.get('implied_prob_over'),
+                    'ev_per_dollar': ev_per_dollar,
+                    'ev_dollars_100': ev_dollars_100,
+                    # Phase 4.2: Line shopping
+                    'best_odds': prop.get('best_odds'),
+                    'best_book': prop.get('best_book'),
+                    'over_odds': prop.get('over_odds', -110),
+                    'under_odds': prop.get('under_odds', -110),
+                    # Phase 4.3: Line movement signal
+                    'line_movement_signal': prop.get('line_movement_signal', 'NEUTRAL'),
                     'has_edge': prop.get('has_edge', False),
                     'uncertainty_flag': prop.get('uncertainty_flag', ''),
                     'injury_boost': prop.get('injury_boost', 1.0),
@@ -3557,11 +3667,24 @@ def main():
                     """)
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_date ON predictions_history(date)")
                     # Add new columns if table already exists (idempotent)
-                    for col, col_type in [("line_source", "VARCHAR(20)"), ("line_vendor", "VARCHAR(50)")]:
+                    # Migration 010 adds line_source/line_vendor; migration 012 adds Phase 4 fields.
+                    _new_cols = [
+                        ("line_source", "VARCHAR(50)"),
+                        ("line_vendor", "VARCHAR(50)"),
+                        ("implied_probability", "FLOAT"),
+                        ("ev_per_dollar", "FLOAT"),
+                        ("best_odds", "INTEGER"),
+                        ("best_book", "VARCHAR(50)"),
+                        ("line_movement_signal", "VARCHAR(20)"),
+                        ("opening_line", "FLOAT"),
+                        ("over_odds", "INTEGER"),
+                        ("under_odds", "INTEGER"),
+                    ]
+                    for col, col_type in _new_cols:
                         try:
                             cursor.execute(f"ALTER TABLE predictions_history ADD COLUMN {col} {col_type}")
                         except Exception:
-                            conn.rollback()  # Column already exists
+                            conn.rollback()  # Column already exists — safe to ignore
                     conn.commit()
 
                     # Delete existing predictions for this date
@@ -3582,12 +3705,18 @@ def main():
                                 line, over_prob, edge, confidence_score,
                                 edge_quality_tier, suggested_bet_size, bet_recommendation,
                                 pick, uncertainty_flag, injury_boost,
-                                line_source, line_vendor
+                                line_source, line_vendor,
+                                implied_probability, ev_per_dollar,
+                                best_odds, best_book, line_movement_signal,
+                                over_odds, under_odds
                             ) VALUES (
                                 %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s,
                                 %s, %s, %s, %s,
                                 %s, %s, %s,
+                                %s, %s, %s,
+                                %s, %s,
+                                %s, %s,
                                 %s, %s, %s,
                                 %s, %s
                             )
@@ -3613,6 +3742,16 @@ def main():
                             safe_val(row.get('injury_boost')),
                             safe_val(row.get('line_source')),
                             safe_val(row.get('line_vendor')),
+                            # Phase 4.1: Real odds integration fields
+                            safe_val(row.get('implied_probability')),
+                            safe_val(row.get('ev_per_dollar')),
+                            # Phase 4.2: Line shopping fields
+                            safe_val(row.get('best_odds')),
+                            safe_val(row.get('best_book')),
+                            # Phase 4.3: Line movement signal
+                            safe_val(row.get('line_movement_signal')),
+                            safe_val(row.get('over_odds')),
+                            safe_val(row.get('under_odds')),
                         ))
                         inserted_count += 1
 

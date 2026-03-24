@@ -41,7 +41,14 @@ class PropPrediction(BaseModel):
     edge_pct: float
     pick: str  # "OVER", "UNDER", or "-"
     line: float | None = None
-    implied_probability: float | None = None
+    # Phase 4.1: Real Odds Integration
+    implied_probability: float | None = None     # Vig-free implied prob for the recommended side
+    ev_per_dollar: float | None = None           # Expected value per dollar staked (positive = value)
+    # Phase 4.2: Line Shopping
+    best_book: str | None = None                 # Sportsbook with best available odds
+    best_odds: int | None = None                 # Best American odds across all books
+    # Phase 4.3: Line Movement
+    line_movement_signal: str | None = None      # "CONFIRMS_MODEL", "WARNS_MODEL", or "NEUTRAL"
 
 
 class PlayerProp(BaseModel):
@@ -149,6 +156,15 @@ class OddsResponse(BaseModel):
 
 # ============== BEST BETS SCHEMA ==============
 
+class BookOddsEntry(BaseModel):
+    """Per-sportsbook odds entry for line shopping display."""
+    book: str
+    line: float | None = None
+    over_odds: int | None = None
+    under_odds: int | None = None
+    implied_prob_over: float | None = None
+
+
 class BestBet(BaseModel):
     player_name: str
     player_id: int
@@ -172,6 +188,16 @@ class BestBet(BaseModel):
     line_vendor: str = "unknown"
     line_source: str = "unknown"
     bettable: bool = True
+    # Phase 4.1: Real Odds Integration
+    implied_probability: float | None = None     # Vig-free implied prob for the recommended side
+    ev_per_dollar: float | None = None           # EV per $1 staked
+    ev_dollars: float | None = None             # EV per $100 staked (= ev_per_dollar * 100)
+    # Phase 4.2: Line Shopping
+    best_book: str | None = None                 # Book with best available odds
+    best_odds: int | None = None                 # Best American odds for the recommended side
+    book_comparison: list[BookOddsEntry] = []    # Per-book breakdown for line shopping display
+    # Phase 4.3: Line Movement
+    line_movement_signal: str | None = None      # "CONFIRMS_MODEL", "WARNS_MODEL", or "NEUTRAL"
 
 
 class BestBetsResponse(BaseModel):
@@ -260,6 +286,16 @@ class DailyPrediction(BaseModel):
     uncertainty_flag: str | None = None
     pick: str | None = None
     edge: float | None = None
+    line_source: str | None = None
+    line_vendor: str | None = None
+    # Phase 4.1: Real Odds Integration
+    implied_probability: float | None = None
+    ev_per_dollar: float | None = None
+    # Phase 4.2: Line Shopping
+    best_odds: int | None = None
+    best_book: str | None = None
+    # Phase 4.3: Line Movement
+    line_movement_signal: str | None = None
 
 
 class DailyPredictionsResponse(BaseModel):
@@ -315,6 +351,41 @@ class LineMovementResponse(BaseModel):
     odds_history: list[OddsSnapshot]
     movement_analysis: LineMovement | None = None
     count: int
+
+
+# ============== PROP LINE MOVEMENT SCHEMAS (Phase 4.3) ==============
+
+class PropOddsSnapshotItem(BaseModel):
+    """Single point-in-time prop odds entry for a specific sportsbook."""
+    timestamp: str
+    book_name: str
+    line: float
+    over_odds: int | None = None
+    under_odds: int | None = None
+    implied_prob_over: float | None = None
+    is_opening: bool = False
+
+
+class PropLineMovement(BaseModel):
+    """Line movement summary from opening to current for a player prop."""
+    opening_line: float | None = None
+    current_line: float | None = None
+    movement: float | None = None           # current_line - opening_line
+    movement_signal: str | None = None     # "CONFIRMS_MODEL", "WARNS_MODEL", "NEUTRAL"
+    opening_timestamp: str | None = None
+    current_timestamp: str | None = None
+    num_snapshots: int = 0
+
+
+class PropLineMovementResponse(BaseModel):
+    """Response for the /api/prop-line-movement endpoint."""
+    player_name: str
+    prop_type: str
+    game_date: str
+    snapshots: list[PropOddsSnapshotItem] = []
+    movement: PropLineMovement | None = None
+    book_comparison: list[BookOddsEntry] = []   # Most recent per-book comparison
+    count: int = 0
 
 
 # ============== BACKTEST RESULTS SCHEMAS ==============
