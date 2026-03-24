@@ -58,6 +58,16 @@ class PropModelConfig:
     # Standard deviation for Z-score computation
     std_dev: float = 5.0
 
+    # Phase 3.3: Minimum sample sizes for reliable predictions
+    # min_sample_games — player must have at least this many season games
+    # min_fg3a — for threes: player must average this many 3PA/game
+    min_sample_games: int = 10
+    min_fg3a: float = 0.0  # Non-zero only for threes
+
+    # Phase 3.3: Use Poisson CDF for over/under probability instead of Gaussian
+    # Only effective when enabled AND a PoissonPropModel artifact is loaded.
+    use_poisson: bool = False
+
     # LightGBM hyperparameters (defaults, overridable by Optuna)
     hyperparameters: dict = field(default_factory=lambda: {
         'n_estimators': 300,
@@ -128,19 +138,57 @@ PROP_REGISTRY: dict[str, PropModelConfig] = {
     ),
     'threes': PropModelConfig(
         prop_type='threes',
-        enabled=False,
+        enabled=False,  # Enabled when Poisson model validates (Phase 3.3)
+        use_poisson=True,
+        min_sample_games=15,   # Need sufficient sample for reliable 3P% estimates
+        min_fg3a=2.0,          # Skip low-volume shooters (< 2 attempts/game)
         target_col='actual_fg3m',
         season_avg_col='season_fg3m_avg',
         std_dev=1.36,
-        min_edge=1.0,
+        # Phase 3.3: Raised minimum edge — threes are highly stochastic and
+        # the Poisson model should only bet when the signal is very clear.
+        min_edge=1.5,
+        # Phase 3.3: Expanded feature set.  New additions:
+        #   opp_fg3a_allowed     — opponent 3PA allowed per game (team defence quality)
+        #   opp_fg3_pct_allowed  — opponent 3P% allowed (shooting quality vs this defence)
+        #   opp_fg3m_allowed     — combined expected makes against this defence
+        #   fg3a_trend_3g        — player 3PA trend (last 3 vs season) — attempt volume signal
+        #   last3_fg3a_avg       — raw last-3 attempts (input to Poisson streak detection)
+        #   fg3a_season_avg      — season attempt baseline
+        #   fg3_pct_last3        — recent shooting % for hot/cold streak detection
+        #   fg3a_consistency     — attempt consistency (from _calc_three_pm_features)
+        #   shooting_confidence  — sample-weighted attempt confidence
         features=[
+            # Player ability (volume and efficiency)
             'season_fg3m_avg', 'last5_fg3m_avg', 'last3_fg3m_avg', 'recent_fg3m_avg',
-            'season_min_avg', 'predicted_minutes',
-            'fg3a_avg', 'fg3_pct', 'regressed_fg3_pct',
-            'fg3_rate', 'fg3_momentum', 'is_volume_shooter',
-            'opp_pace', 'is_home', 'days_rest', 'season_games',
+            'fg3a_avg', 'fg3_pct', 'regressed_fg3_pct', 'fg3_rate',
+            # Attempt trend (Phase 3.3)
+            'fg3a_trend_3g', 'last3_fg3a_avg', 'fg3a_season_avg',
+            # Shooting momentum / streak features (Phase 3.3)
+            'fg3_pct_last3', 'fg3_momentum', 'fg3_hot_streak', 'fg3_cold_streak',
+            # Sample quality
+            'is_volume_shooter', 'fg3a_consistency', 'shooting_confidence', 'season_games',
+            # Opponent 3P defence (Phase 3.3)
+            'opp_fg3a_allowed', 'opp_fg3_pct_allowed', 'opp_fg3m_allowed',
+            # Game context
+            'opp_pace', 'is_home', 'days_rest', 'season_min_avg', 'predicted_minutes',
+            # Sportsbook anchor
             'prop_line_vs_recent',
         ],
+        # Phase 3.3: Minimum sample size — below this, skip the prediction
+        # (enforced in the inference path via season_games check).
+        hyperparameters={
+            'n_estimators': 400,
+            'max_depth': 5,
+            'learning_rate': 0.04,
+            'num_leaves': 24,
+            'min_child_samples': 25,  # Higher than default → less overfitting on sparse data
+            'subsample': 0.8,
+            'colsample_bytree': 0.7,
+            'reg_alpha': 1.0,
+            'reg_lambda': 3.0,
+            'objective': 'poisson',  # Phase 3.3: Poisson loss for count data
+        },
     ),
     'pra': PropModelConfig(
         prop_type='pra',
