@@ -1,22 +1,22 @@
 {
   "points": {
     "slope": 0.832,
-    "mean_gap": 1.53,
+    "mean_gap": 1.55,
     "mean_line": 11.7
   },
   "rebounds": {
-    "slope": 0.822,
-    "mean_gap": 0.42,
+    "slope": 0.817,
+    "mean_gap": 0.41,
     "mean_line": 4.3
   },
   "assists": {
-    "slope": 0.903,
-    "mean_gap": 0.25,
+    "slope": 0.911,
+    "mean_gap": 0.26,
     "mean_line": 2.6
   },
   "pra": {
-    "slope": 0.77,
-    "mean_gap": 2.4,
+    "slope": 0.78,
+    "mean_gap": 2.47,
     "mean_line": 18.6
   }
 }
