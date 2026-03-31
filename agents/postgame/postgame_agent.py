@@ -255,6 +255,259 @@ class PostGameAnalysisAgent(AgentBase):
 
         return results
 
+    def _settle_tracked_bets(self) -> dict:
+        """Settle tracked_bets by matching against settled paper_trades.
+
+        After paper_trades are graded, transfers the results into tracked_bets
+        so CLV tracking and bet-level P&L are complete.
+
+        Matches on: event_date + player name present in selection + prop stat.
+
+        Returns:
+            Dict with 'settled', 'unmatched', 'errors' counts.
+        """
+        results = {'settled': 0, 'unmatched': 0, 'errors': 0}
+
+        try:
+            from nba_betting.edge.bet_tracker import BetTracker, BetStatus
+            from nba_betting.paper_trading import PaperTrader
+            import os
+
+            trader = PaperTrader()
+            tracker = BetTracker(db_path=os.path.join("data", "bet_tracking.db"))
+
+            target = datetime.strptime(self.target_date, '%Y-%m-%d').date()
+            dates_to_settle = [
+                (target - timedelta(days=1)).isoformat(),
+                target.isoformat(),
+            ]
+
+            for game_date in dates_to_settle:
+                # Get settled paper trades for this date
+                daily_report = trader.get_daily_report(game_date)
+                if not daily_report['predictions']:
+                    continue
+
+                # Build lookup: (player_lower, prop_type_lower, direction_lower) -> result
+                trade_lookup = {}
+                for trade in daily_report['predictions']:
+                    if trade.get('result') is None:
+                        continue
+                    key = (
+                        trade['player_name'].lower(),
+                        trade['prop_type'].lower(),
+                        (trade.get('direction') or 'over').lower(),
+                    )
+                    trade_lookup[key] = {
+                        'result': trade['result'],   # 'hit', 'miss', 'push'
+                        'actual_value': trade.get('actual_value'),
+                    }
+
+                if not trade_lookup:
+                    continue
+
+                # Get all pending tracked bets and filter by event_date
+                try:
+                    pending_bets = tracker.get_pending_bets()
+                except Exception as e:
+                    logger.warning(
+                        f"[{self.AGENT_NAME}] Could not fetch pending bets for {game_date}: {e}"
+                    )
+                    continue
+
+                for bet in pending_bets:
+                    # Filter to bets whose event_date matches this game_date
+                    if bet.event_date is None:
+                        continue
+                    if bet.event_date.strftime('%Y-%m-%d') != game_date:
+                        continue
+
+                    # Parse selection: "{player} {stat} {pick} {line}"
+                    selection = bet.selection or ''
+                    parts = selection.split()
+
+                    # Find OVER/UNDER keyword and its index
+                    pick = None
+                    pick_idx = None
+                    for i, part in enumerate(parts):
+                        if part.upper() in ('OVER', 'UNDER'):
+                            pick = part.lower()
+                            pick_idx = i
+                            break
+
+                    if pick is None or pick_idx < 2:
+                        results['unmatched'] += 1
+                        continue
+
+                    # stat is the word immediately before the direction keyword
+                    stat = parts[pick_idx - 1].lower()
+                    player_name = ' '.join(parts[:pick_idx - 1]).lower()
+
+                    # Exact match first
+                    matched = trade_lookup.get((player_name, stat, pick))
+
+                    # Fuzzy fallback: check if the paper trade player_name is
+                    # a substring of the parsed player_name (handles truncation)
+                    if matched is None:
+                        for (tp, ts, td), tdata in trade_lookup.items():
+                            if ts == stat and td == pick and (
+                                tp in player_name or player_name in tp
+                            ):
+                                matched = tdata
+                                break
+
+                    if matched is None:
+                        results['unmatched'] += 1
+                        continue
+
+                    trade_result = matched['result']
+                    actual_value = matched.get('actual_value')
+
+                    if trade_result == 'push':
+                        status = BetStatus.PUSH
+                    elif trade_result == 'hit':
+                        status = BetStatus.WON
+                    else:
+                        status = BetStatus.LOST
+
+                    try:
+                        tracker.settle_bet(
+                            bet_id=bet.bet_id,
+                            status=status,
+                            actual_result=str(actual_value) if actual_value is not None else trade_result,
+                        )
+                        results['settled'] += 1
+                    except Exception as e:
+                        logger.warning(
+                            f"[{self.AGENT_NAME}] Failed to settle bet {bet.bet_id}: {e}"
+                        )
+                        results['errors'] += 1
+
+        except ImportError as e:
+            logger.warning(f"[{self.AGENT_NAME}] tracked_bets settlement skipped (import error): {e}")
+        except Exception as e:
+            logger.error(f"[{self.AGENT_NAME}] _settle_tracked_bets error: {e}")
+
+        if results['settled'] > 0 or results['errors'] > 0:
+            logger.info(
+                f"[{self.AGENT_NAME}] tracked_bets: settled={results['settled']}, "
+                f"unmatched={results['unmatched']}, errors={results['errors']}"
+            )
+        return results
+
+    def _update_bankroll_state(self, game_date: str) -> dict:
+        """Update bankroll_state and bankroll_daily_pl with today's P&L.
+
+        Reads settled paper_trade P&L for should_bet=True bets, then persists
+        the updated bankroll balance to the DB so BankrollManager has accurate
+        state on the next run.
+
+        Args:
+            game_date: Date string (YYYY-MM-DD) to aggregate P&L for.
+
+        Returns:
+            Dict with pnl, bankroll_before, bankroll_after, num_bets, wins, losses.
+            Empty dict if nothing to update or DB unavailable.
+        """
+        try:
+            from agents.core.connections import get_postgres_connection
+            conn = get_postgres_connection()
+            if conn is None:
+                logger.debug(f"[{self.AGENT_NAME}] No PostgreSQL connection; skipping bankroll update")
+                return {}
+
+            cur = conn.cursor()
+
+            # Aggregate P&L from settled paper_trades for should_bet=True bets
+            cur.execute("""
+                SELECT
+                    COUNT(*) FILTER (WHERE result = 'hit')  AS wins,
+                    COUNT(*) FILTER (WHERE result = 'miss') AS losses,
+                    COUNT(*) FILTER (WHERE result IN ('hit', 'miss')) AS total,
+                    COALESCE(SUM(profit_loss), 0)           AS total_pnl,
+                    COALESCE(SUM(bet_size), 0)              AS total_staked
+                FROM paper_trades
+                WHERE game_date = %s
+                  AND should_bet = TRUE
+                  AND result IS NOT NULL
+            """, (game_date,))
+            row = cur.fetchone()
+
+            if row is None or (row[2] or 0) == 0:
+                cur.close()
+                return {}
+
+            wins, losses, total, total_pnl, total_staked = (
+                int(row[0] or 0),
+                int(row[1] or 0),
+                int(row[2] or 0),
+                float(row[3]),
+                float(row[4]),
+            )
+
+            # Load the most recent bankroll balance
+            cur.execute(
+                "SELECT amount FROM bankroll_state ORDER BY updated_at DESC LIMIT 1"
+            )
+            bankroll_row = cur.fetchone()
+            current_bankroll = float(bankroll_row[0]) if bankroll_row else 1000.0
+            new_bankroll = current_bankroll + total_pnl
+
+            # Append a new bankroll_state snapshot
+            cur.execute(
+                "INSERT INTO bankroll_state (amount, updated_at) VALUES (%s, NOW())",
+                (new_bankroll,),
+            )
+
+            # Upsert daily P&L summary (idempotent — re-running is safe)
+            cur.execute("""
+                INSERT INTO bankroll_daily_pl
+                    (date, starting_bankroll, ending_bankroll, total_staked,
+                     total_returned, profit_loss, num_bets, num_wins, num_losses)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (date) DO UPDATE SET
+                    ending_bankroll = EXCLUDED.ending_bankroll,
+                    total_staked    = EXCLUDED.total_staked,
+                    total_returned  = EXCLUDED.total_returned,
+                    profit_loss     = EXCLUDED.profit_loss,
+                    num_bets        = EXCLUDED.num_bets,
+                    num_wins        = EXCLUDED.num_wins,
+                    num_losses      = EXCLUDED.num_losses
+            """, (
+                game_date,
+                current_bankroll,
+                new_bankroll,
+                total_staked,
+                total_staked + total_pnl,   # total_returned
+                total_pnl,
+                total,
+                wins,
+                losses,
+            ))
+
+            conn.commit()
+            cur.close()
+
+            logger.info(
+                f"[{self.AGENT_NAME}] Bankroll updated for {game_date}: "
+                f"${current_bankroll:.2f} → ${new_bankroll:.2f} "
+                f"(P&L: ${total_pnl:+.2f}, {wins}W-{losses}L)"
+            )
+
+            return {
+                'date': game_date,
+                'pnl': total_pnl,
+                'bankroll_before': current_bankroll,
+                'bankroll_after': new_bankroll,
+                'num_bets': total,
+                'wins': wins,
+                'losses': losses,
+            }
+
+        except Exception as e:
+            logger.error(f"[{self.AGENT_NAME}] Bankroll update failed for {game_date}: {e}")
+            return {}
+
     def run(self) -> dict:
         """
         Core post-game analysis.
@@ -268,8 +521,10 @@ class PostGameAnalysisAgent(AgentBase):
         """
         logger.info(f"[{self.AGENT_NAME}] Running for date: {self.target_date}")
 
-        # Step 0: Settle paper trades before analysis
+        # Step 0: Settle paper trades, then sync tracked_bets and bankroll
         settlement_results = self._settle_paper_trades()
+        tracked_bet_results = self._settle_tracked_bets()
+        bankroll_update = self._update_bankroll_state(self.target_date)
 
         service = self._get_calibration_service()
 
@@ -377,6 +632,8 @@ class PostGameAnalysisAgent(AgentBase):
             'pattern_flags': pattern_flags,
             'model_feedback': model_feedback,
             'settlement_results': settlement_results,
+            'tracked_bets_settled': tracked_bet_results,
+            'bankroll_update': bankroll_update,
             'nightly_job_results': nightly_results.get('steps', {}),
             'reasoning': (
                 f"Analyzed {total} predictions for {self.target_date}. "
