@@ -905,6 +905,8 @@ PLAYER_DEFENSIVE_ROLES = {
 }
 
 # Injury boost constants for prop adjustments
+# Positive values → upward (opponent/teammate injury helps this player)
+# Negative-path values (used with 1 - value) → downward adjustments
 PROP_INJURY_BOOST = {
     "perimeter_defender_out_guard_points": 0.08,   # +8% for guards
     "perimeter_defender_out_guard_threes": 0.10,   # +10% for 3PM
@@ -914,6 +916,9 @@ PROP_INJURY_BOOST = {
     "wing_stopper_out_forward_points": 0.08,       # +8% for forwards
     "primary_scorer_out_secondary": 0.10,          # +10% for secondary scorer
     "playmaker_out_secondary_assists": 0.15,       # +15% for secondary handler
+    # Downward path (Phase 1 fix, 2026-03-31): symmetric adjustments when teammate
+    # injuries REDUCE a player's production rather than increasing it.
+    "playmaker_out_scorer_points": 0.05,           # -5% for points: fewer facilitated looks
 }
 
 
@@ -995,6 +1000,14 @@ def calculate_prop_injury_boost(
                 boost = PROP_INJURY_BOOST["playmaker_out_secondary_assists"]
                 boost_factor *= (1 + boost)
                 reasons.append(f"Playmaker {injured_teammate} out (+assists)")
+
+            elif offensive_role == "playmaker" and prop_type == "points":
+                # Downward adjustment (Phase 1 fix, 2026-03-31): when the primary playmaker
+                # is out, secondary scorers lose the facilitated looks they normally receive.
+                # This is the symmetric counterpart to the upward boosts above.
+                reduction = PROP_INJURY_BOOST["playmaker_out_scorer_points"]
+                boost_factor *= (1 - reduction)
+                reasons.append(f"Playmaker {injured_teammate} out (-scoring creation)")
 
     # Cap at +/- 15%
     boost_factor = max(0.85, min(1.15, boost_factor))

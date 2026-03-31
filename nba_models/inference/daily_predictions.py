@@ -386,7 +386,15 @@ except ImportError:
 
 # Helper function to map confidence + edge to quality tier
 def get_edge_quality_tier(confidence_score: float, edge: float) -> str:
-    """Map confidence score (0-100) + edge magnitude to edge quality tier."""
+    """Map confidence score (0-100) + edge magnitude to edge quality tier.
+
+    Thresholds verified against the over_prob confidence formula (Phase 1 fix, 2026-03-31).
+    With confidence = 40 + abs(over_prob - 0.5) * 100:
+      confidence >= 65  →  over_prob >= 0.75  (meaningful model lean)
+      confidence >= 70  →  over_prob >= 0.80  (strong model lean)
+      confidence >= 75  →  over_prob >= 0.85  (very strong model lean)
+    These thresholds correctly gate elite/strong tiers on high-probability predictions.
+    """
     abs_edge = abs(edge)
     if abs_edge >= 20 and confidence_score >= 75:
         return 'elite'
@@ -2751,40 +2759,24 @@ def predict_player_prop(
     suggested_bet_size = 0.0
     bet_recommendation = 'PASS'  # Phase 4: default to PASS
 
-    # Calculate confidence score based on prediction band width (Task 2.4)
-    if pred_low is not None and pred_high is not None and pred_median is not None:
-        band_width = pred_high - pred_low
-        # STATISTICALLY CALIBRATED confidence multipliers (61K prediction backtest)
-        # Calibration target: confidence score ≈ accuracy - 3% (conservative)
-        # Analysis: THREES had 80% confidence but only 67% accuracy (worst calibration)
-        #           REBOUNDS needed +0.9 adjustment to reduce dominance (was 84% of high-conf bets)
-        #           ASSISTS/POINTS/PRA need more aggressive multipliers for better bet flow
-        multipliers = {
-            'assists': 4.9,    # 73.2% accuracy → 70% target confidence (well-calibrated)
-            'points': 1.6,     # 71.7% accuracy → 68% target confidence (more aggressive for bet flow)
-            'rebounds': 3.9,   # 71.7% accuracy → 68% target confidence (reduced from 3.0 to fix dominance)
-            'threes': 8.4,     # 67.1% accuracy → 64% target confidence (MAJOR fix: was massively overconfident)
-            'pra': 1.3,        # 71.4% accuracy → 68% target confidence (more aggressive for combo stat)
-        }
-        multiplier = multipliers.get(prop_type.lower(), 3.0)  # Default 3.0
-
-        # Formula: confidence = 90 - (band_width * multiplier), clamped to [40, 90]
-        confidence_score = max(40.0, min(90.0, 90.0 - (band_width * multiplier)))
-    elif predicted_value is not None:
-        # BUG FIX: More granular confidence based on edge magnitude and prediction difference
-        # Higher edge and larger prediction difference = higher confidence
-        pred_diff_pct = abs(predicted_value - line) / max(line, 1.0) if line > 0 else 0
-        edge_magnitude = abs(edge)
-
-        # Combine edge and prediction difference for confidence score (0-100 scale)
-        # Strong edge (>20%) AND large diff (>20%) = high confidence (~80-90)
-        # Weak edge (<5%) OR small diff (<5%) = low confidence (~40-50)
-        confidence_from_edge = min(edge_magnitude * 2, 50.0)  # 0-50 from edge
-        confidence_from_diff = min(pred_diff_pct * 200, 50.0)  # 0-50 from diff
-        confidence_score = 50.0 + (confidence_from_edge + confidence_from_diff) / 2
-
-        # Clamp to reasonable range [40, 90]
-        confidence_score = max(40.0, min(90.0, confidence_score))
+    # Calculate confidence score from over_prob distance from 50% (Phase 1 fix, 2026-03-31).
+    # The old band_width formula was fragile: it required per-prop-type multipliers tuned
+    # by hand on a specific backtest, and was based on the quantile band width which has
+    # weak correlation with actual prediction accuracy.
+    #
+    # over_prob (already computed from the z-score above) is monotonically related to
+    # prediction certainty — the further it is from 0.5, the more decisive the model is
+    # about which side of the line the outcome will fall on.
+    #
+    # Mapping:
+    #   over_prob = 0.50  →  confidence = 40.0  (no edge, model is uncertain)
+    #   over_prob = 0.65  →  confidence = 55.0  (moderate lean)
+    #   over_prob = 0.75  →  confidence = 65.0  (meaningful edge)
+    #   over_prob = 0.85  →  confidence = 75.0  (strong edge)
+    #   over_prob = 0.90  →  confidence = 80.0  (very strong edge)
+    #   over_prob = 1.00  →  confidence = 90.0  (maximum certainty, theoretical)
+    distance_from_50 = abs(over_prob - 0.5) * 2  # 0 to 1 scale
+    confidence_score = max(40.0, min(90.0, 40.0 + distance_from_50 * 50.0))
 
     # Phase 3: Adjust confidence based on minutes uncertainty
     if minutes_dist:
@@ -2796,23 +2788,14 @@ def predict_player_prop(
         # 'low' = no penalty
         confidence_score = max(40.0, min(90.0, confidence_score))
 
-    # Phase 5: Apply calibration confidence adjustment
-    if calibration_applied and calibration_applied.get('adjustments_applied'):
-        try:
-            adjuster = _get_calibration_adjuster()
-            if adjuster:
-                conf_result = adjuster.apply_adjustments(
-                    predicted_value=0,  # Ignored — only want confidence multiplier
-                    confidence=confidence_score,
-                    prop_type=prop_type.lower(),
-                    position=_pos_group if HAS_CALIBRATION_ADJUSTER else None,
-                    minutes_bucket=_min_bucket if HAS_CALIBRATION_ADJUSTER else None,
-                    player_tier=_player_tier if HAS_CALIBRATION_ADJUSTER else None,
-                )
-                confidence_score = conf_result['adjusted_confidence']
-                confidence_score = max(40.0, min(90.0, confidence_score))
-        except Exception:
-            logger.warning("Confidence calibration failed for %s %s", player_name, prop_type, exc_info=True)
+    # Phase 5: Calibration confidence adjustment — DISABLED (Phase 1 fix, 2026-03-31).
+    # The calibration adjuster was trained on the old band_width-based confidence signal.
+    # After replacing that formula with the over_prob-based formula (Fix 2 above), the
+    # adjuster's learned corrections are derived from a different input distribution and
+    # would push confidence in the wrong direction. It must be retrained on the new signal
+    # before being re-enabled.
+    # if calibration_applied and calibration_applied.get('adjustments_applied'):
+    #     ... (disabled — retrain adjuster on over_prob confidence before re-enabling)
 
     # Calculate edge quality tier based on confidence + edge magnitude (Task 2.4)
     edge_quality_tier = get_edge_quality_tier(confidence_score, edge)

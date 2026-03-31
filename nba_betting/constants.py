@@ -43,17 +43,27 @@ PROP_STD_DEVS: dict[str, float] = {
 DEFAULT_PROP_STD_DEV: float = 5.0  # fallback when prop type is unknown
 
 # ---------------------------------------------------------------------------
-# Per-prop bias corrections — DISABLED (Fix 2.1)
+# Per-prop bias corrections — Re-enabled (Phase 1 fixes, 2026-03-31)
 # ---------------------------------------------------------------------------
-# Removed: contradictory corrections (+1.38 in constants, -0.986 in fix2,
-# +5.89 in Phase 3 validation). Hardcoded bias corrections mask root cause.
-# Fix 1.4 (residual prediction) eliminates bias at the source.
+# Values are the NEGATIVE of the measured aggregate bias from the OOS
+# walk-forward backtest (data/backtest_results/oos_walkforward_results.json,
+# run 2026-03-22, 2 windows, 33K+ predictions).
+#
+# Applied as: z_score = (predicted_value + bias_fix - line) / sigma
+# A positive model bias (over-predicts) requires a negative correction.
+#
+# Aggregate biases from the JSON:
+#   points:   +0.774  →  correction: -0.774
+#   rebounds: +0.259  →  correction: -0.259
+#   assists:  +0.049  →  correction: -0.049  (small, near-zero)
+#   threes:   not measured (disabled prop)   →  0.0
+#   pra:      +0.814  →  correction: -0.814
 PROP_BIAS_CORRECTION: dict[str, float] = {
-    'points':   0.0,
-    'rebounds':  0.0,
-    'assists':   0.0,
-    'threes':    0.0,
-    'pra':       0.0,
+    'points':   -0.774,   # OOS aggregate bias: +0.774 — model over-predicts points
+    'rebounds':  -0.259,  # OOS aggregate bias: +0.259 — model over-predicts rebounds
+    'assists':   -0.049,  # OOS aggregate bias: +0.049 — near-zero, small correction
+    'threes':    0.0,     # Not in OOS walkforward (disabled prop); no correction applied
+    'pra':       -0.814,  # OOS aggregate bias: +0.814 — model over-predicts pra
 }
 
 # ---------------------------------------------------------------------------
