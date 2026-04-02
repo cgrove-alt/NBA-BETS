@@ -330,9 +330,21 @@ class BalldontlieAPI:
         data = self._get("players", params)
         return data.get("data", []) if data else []
 
-    def get_player(self, player_id: int) -> dict:
-        """Get a specific player by ID (cached 1 week — player metadata rarely changes)."""
-        data = self._get(f"players/{player_id}", cache_ttl="static")
+    def get_player(self, player_id: int, force_refresh: bool = False) -> dict:
+        """Get a specific player by ID (cached 24h — refreshes daily to catch mid-season trades).
+
+        Args:
+            player_id: Balldontlie player ID.
+            force_refresh: If True, bypass cache and fetch fresh data from API.
+        """
+        if force_refresh:
+            # Bypass read cache but still write result so future calls are fast
+            data = self._get(f"players/{player_id}", cache_ttl=None)
+            if data:
+                # Persist fresh data with historical TTL
+                _write_cache(f"players/{player_id}", {}, data)
+        else:
+            data = self._get(f"players/{player_id}", cache_ttl="historical")
         return data.get("data", {}) if data else {}
 
     def get_games(

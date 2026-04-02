@@ -3536,6 +3536,34 @@ def main():
                             except Exception:
                                 pass
 
+                        # Validate player belongs to one of the teams in this game.
+                        # If not, try a force-refresh (stale cache due to trade) then skip.
+                        if player_team_id not in (home_team_id, away_team_id):
+                            if player_team_id is not None and api:
+                                # Team ID mismatch — cached roster data may be stale.
+                                # Force-refresh the player record from the API once.
+                                try:
+                                    refreshed = api.get_player(player_id, force_refresh=True)
+                                    if refreshed:
+                                        team_data = refreshed.get('team', {})
+                                        if isinstance(team_data, dict):
+                                            player_team_id = team_data.get('id')
+                                        else:
+                                            player_team_id = refreshed.get('team_id')
+                                        props['team_id'] = player_team_id
+                                except Exception:
+                                    pass
+
+                            if player_team_id not in (home_team_id, away_team_id):
+                                home_abbrev = analysis['home_team']
+                                away_abbrev = analysis['away_team']
+                                print(
+                                    f"    SKIP {player_name}: team_id={player_team_id} not in "
+                                    f"game teams {home_team_id}={home_abbrev} / {away_team_id}={away_abbrev}. "
+                                    f"Stale roster cache or wrong game mapping."
+                                )
+                                continue
+
                         # Determine opponent/teammate injuries
                         if player_team_id == home_team_id:
                             opponent_id = away_team_id
