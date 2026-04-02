@@ -216,6 +216,61 @@ class PostGameAnalysisAgent(AgentBase):
 
         return patterns
 
+    DRIFT_WARN_THRESHOLD = 1.0  # points of systematic bias that triggers a warning
+
+    def _check_calibration_drift(self, predictions: list) -> list:
+        """Check whether predicted vs actual bias has drifted beyond threshold.
+
+        Computes mean signed error (predicted - actual) per prop type using the
+        current date's predictions. Logs a WARNING when any prop type exceeds
+        DRIFT_WARN_THRESHOLD so that the on-call pipeline can react before the
+        bias compounds across multiple days.
+
+        Args:
+            predictions: List of prediction dicts with 'prop_type',
+                'predicted_value', and 'actual_value' keys.
+
+        Returns:
+            List of drift alert dicts (empty when everything is in range).
+        """
+        from collections import defaultdict
+
+        buckets: dict = defaultdict(list)
+        for rec in predictions:
+            prop_type = rec.get('prop_type', '')
+            predicted = rec.get('predicted_value')
+            actual = rec.get('actual_value')
+            if predicted is None or actual is None or not prop_type:
+                continue
+            buckets[prop_type].append(predicted - actual)
+
+        alerts = []
+        for prop_type, errors in buckets.items():
+            if len(errors) < 5:
+                continue  # too few samples to be meaningful
+            mean_bias = sum(errors) / len(errors)
+            if abs(mean_bias) > self.DRIFT_WARN_THRESHOLD:
+                direction = 'over-predicting' if mean_bias > 0 else 'under-predicting'
+                logger.warning(
+                    "[%s] CALIBRATION DRIFT: %s %s by %.2f points "
+                    "(n=%d, threshold=%.1f) — consider triggering recalibration",
+                    self.AGENT_NAME, prop_type, direction, abs(mean_bias),
+                    len(errors), self.DRIFT_WARN_THRESHOLD,
+                )
+                alerts.append({
+                    'prop_type': prop_type,
+                    'mean_bias': round(mean_bias, 3),
+                    'n_samples': len(errors),
+                    'direction': direction,
+                })
+            else:
+                logger.debug(
+                    "[%s] calibration OK: %s bias=%.2f (n=%d)",
+                    self.AGENT_NAME, prop_type, mean_bias, len(errors),
+                )
+
+        return alerts
+
     def _settle_paper_trades(self) -> dict:
         """Settle paper trades for target_date and the day before.
 
@@ -568,6 +623,9 @@ class PostGameAnalysisAgent(AgentBase):
         clv_values = [p.get('clv', 0) for p in predictions if p.get('clv') is not None]
         clv_avg = sum(clv_values) / len(clv_values) if clv_values else 0
 
+        # Check for calibration drift and log warnings
+        drift_alerts = self._check_calibration_drift(predictions)
+
         # Step 3: Identify large misses
         large_misses = self._identify_large_misses(predictions)
         logger.info(f"[{self.AGENT_NAME}] Found {len(large_misses)} large misses")
@@ -631,6 +689,7 @@ class PostGameAnalysisAgent(AgentBase):
             'miss_analysis': miss_analyses,
             'pattern_flags': pattern_flags,
             'model_feedback': model_feedback,
+            'drift_alerts': drift_alerts,
             'settlement_results': settlement_results,
             'tracked_bets_settled': tracked_bet_results,
             'bankroll_update': bankroll_update,

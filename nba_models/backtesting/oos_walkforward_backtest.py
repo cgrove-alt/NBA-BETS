@@ -106,6 +106,66 @@ def simulate_prop_line(features: dict, prop_type: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Real sportsbook lines loader
+# ---------------------------------------------------------------------------
+def load_real_lines_index(date_start: str, date_end: str, data_dir: str = None) -> dict:
+    """Load real sportsbook prop lines from historical_lines/ for a date range.
+
+    Returns a nested dict: {game_date: {player_name_lower: {prop_type: line}}}
+    Falls back gracefully if files are missing.
+    """
+    if data_dir is None:
+        data_dir = os.path.join(ROOT, "data", "historical_lines")
+
+    index: dict = {}
+    from datetime import date, timedelta
+
+    try:
+        start = date.fromisoformat(date_start)
+        end = date.fromisoformat(date_end)
+    except ValueError:
+        logger.warning("load_real_lines_index: invalid date range %s – %s", date_start, date_end)
+        return index
+
+    current = start
+    loaded = 0
+    while current <= end:
+        path = os.path.join(data_dir, f"{current.isoformat()}.json")
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    day_data = json.load(f)
+                day_key = current.isoformat()
+                day_index: dict = {}
+                for game in day_data.get("games", []):
+                    for prop in game.get("player_props", []):
+                        pname = prop.get("player_name", "").lower().strip()
+                        ptype = prop.get("prop_type", "").lower().strip()
+                        line = prop.get("line")
+                        if pname and ptype and line is not None and line > 0:
+                            if pname not in day_index:
+                                day_index[pname] = {}
+                            # Keep first occurrence (typically best bookmaker)
+                            if ptype not in day_index[pname]:
+                                day_index[pname][ptype] = float(line)
+                if day_index:
+                    index[day_key] = day_index
+                    loaded += 1
+            except Exception as exc:
+                logger.debug("Could not load real lines for %s: %s", current.isoformat(), exc)
+        current += timedelta(days=1)
+
+    logger.info(
+        "Loaded real sportsbook lines for %d / %d dates (%s – %s)",
+        loaded,
+        (end - start).days + 1,
+        date_start,
+        date_end,
+    )
+    return index
+
+
+# ---------------------------------------------------------------------------
 # Inject prop_line_vs_recent feature (mirrors train_all_models logic)
 # ---------------------------------------------------------------------------
 PROP_LINE_SEASON_AVG_MAP = {
@@ -395,6 +455,11 @@ def evaluate_window(window: dict) -> dict | None:
     test_data.sort(key=lambda x: x["game_date"])
     logger.info("  Test set: %d player-game samples", len(test_data))
 
+    # Load real sportsbook lines for the test window
+    real_lines_index = load_real_lines_index(test_start, test_end)
+    real_line_hits = 0
+    real_line_misses = 0
+
     if not test_data:
         logger.error("  No test data in date range %s to %s", test_start, test_end)
         return None
@@ -423,11 +488,23 @@ def evaluate_window(window: dict) -> dict | None:
             diag["skipped_bench_player"] += 1
             continue
 
+        player_name_lower = player_name.lower().strip()
+        day_lines = real_lines_index.get(game_date, {})
+        player_lines = day_lines.get(player_name_lower, {})
+
         for prop_type in PROP_TYPES:
             if prop_type not in ensemble_models:
                 continue
 
-            prop_line = simulate_prop_line(features, prop_type)
+            # Prefer real sportsbook line; fall back to season-average proxy
+            real_line = player_lines.get(prop_type)
+            if real_line and real_line > 0:
+                prop_line = real_line
+                real_line_hits += 1
+            else:
+                prop_line = simulate_prop_line(features, prop_type)
+                real_line_misses += 1
+
             if prop_line <= 0:
                 diag[f"skip_zero_line_{prop_type}"] += 1
                 continue
@@ -528,6 +605,17 @@ def evaluate_window(window: dict) -> dict | None:
             logger.info("  Processed %d/%d test samples", i + 1, len(test_data))
 
     # --- 5. Compute metrics ---
+    total_line_lookups = real_line_hits + real_line_misses
+    if total_line_lookups > 0:
+        logger.info(
+            "  Real sportsbook lines: %d / %d prop lookups used real lines (%.1f%% coverage)",
+            real_line_hits,
+            total_line_lookups,
+            100.0 * real_line_hits / total_line_lookups,
+        )
+    else:
+        logger.info("  Real sportsbook lines: none available — using season-average proxies")
+
     logger.info("Step 5: Computing metrics...")
     window_metrics: dict = {
         "window": name,
@@ -812,7 +900,10 @@ def print_report(results: dict) -> str:
         "  * Features are walk-forward safe (point-in-time calculators)."
     )
     lines.append(
-        "  * Prop lines simulated via season-average-only (Fix 3.1, decorrelated)."
+        "  * Prop lines use real sportsbook odds when available (data/historical_lines/);"
+    )
+    lines.append(
+        "    season-average proxy used as fallback (Fix 3.1)."
     )
     lines.append(
         "  * Models are frozen during test evaluation (no retraining)."

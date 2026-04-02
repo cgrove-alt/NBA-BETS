@@ -742,12 +742,14 @@ class InjuryReportManager:
 
         return base_value * minutes_factor
 
-    def calculate_injury_impact(self, team_id: int) -> dict:
+    def calculate_injury_impact(self, team_id: int, game_date: str = None) -> dict:
         """
         Calculate the overall impact of injuries on team performance.
 
         Args:
             team_id: NBA team ID
+            game_date: Game date (YYYY-MM-DD). When provided, fetches only stats
+                available before this date to prevent look-ahead bias during training.
 
         Returns:
             Dictionary with injury impact metrics
@@ -780,7 +782,11 @@ class InjuryReportManager:
 
             if player_id:
                 try:
-                    stats = fetch_player_stats_auto(player_id, self.season)
+                    if game_date:
+                        from nba_data.sources.data_fetcher import fetch_player_stats_before_date_auto
+                        stats = fetch_player_stats_before_date_auto(player_id, before_date=game_date, season=self.season)
+                    else:
+                        stats = fetch_player_stats_auto(player_id, self.season)
                     season_avg = stats.get("season_averages", {})
                     player_value = self.calculate_player_value(season_avg, position)
 
@@ -1569,13 +1575,14 @@ class MatchupFeatureGenerator:
             "weakest_position": pos_matchup.get("weakest_position", "C"),
         }
 
-    def analyze_injury_impact(self, home_team_id: int, away_team_id: int) -> dict:
+    def analyze_injury_impact(self, home_team_id: int, away_team_id: int, game_date: str = None) -> dict:
         """
         Analyze injury impact for both teams.
 
         Args:
             home_team_id: Home team NBA ID
             away_team_id: Away team NBA ID
+            game_date: Game date (YYYY-MM-DD) for temporal-safe stat lookups.
 
         Returns:
             Dictionary with injury impact features
@@ -1591,8 +1598,8 @@ class MatchupFeatureGenerator:
         home_bdl_id = TEAM_ABBREV_TO_BDL.get(home_abbrev, home_team_id) if home_abbrev else home_team_id
         away_bdl_id = TEAM_ABBREV_TO_BDL.get(away_abbrev, away_team_id) if away_abbrev else away_team_id
 
-        home_injuries = self.injury_manager.calculate_injury_impact(home_bdl_id)
-        away_injuries = self.injury_manager.calculate_injury_impact(away_bdl_id)
+        home_injuries = self.injury_manager.calculate_injury_impact(home_bdl_id, game_date=game_date)
+        away_injuries = self.injury_manager.calculate_injury_impact(away_bdl_id, game_date=game_date)
 
         return {
             "home_injury_impact": home_injuries.get("total_impact", 0),
@@ -1743,7 +1750,7 @@ class MatchupFeatureGenerator:
                 print(f"    WARNING: Positional matchup analysis failed: {type(e).__name__}")
 
             # Injury impact analysis
-            injury_features = self.analyze_injury_impact(home_team_id, away_team_id)
+            injury_features = self.analyze_injury_impact(home_team_id, away_team_id, game_date=game_date)
             # Don't include injury_details dict in flat features
             injury_flat = {k: v for k, v in injury_features.items() if k != "injury_details"}
             features.update(injury_flat)
