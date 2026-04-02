@@ -1,22 +1,30 @@
 {
+  "_comment": "Quantile decompression constants. Regenerate after each retrain via scripts/calibrate_quantile_decompression.py",
+  "_last_updated": "2026-04-02T20:45:00Z",
+  "_source": "OOS walk-forward backtest (2024-25 season). Fixed formula in train_complete_balldontlie.py now measures mean(medians - actuals) not mean(medians - season_avg_proxy).",
   "points": {
     "slope": 0.832,
-    "mean_gap": 1.55,
-    "mean_line": 11.7
+    "mean_gap": 0.774,
+    "mean_line": 19.9
   },
   "rebounds": {
     "slope": 0.817,
-    "mean_gap": 0.41,
-    "mean_line": 4.3
+    "mean_gap": 0.259,
+    "mean_line": 5.1
   },
   "assists": {
     "slope": 0.911,
-    "mean_gap": 0.26,
-    "mean_line": 2.6
+    "mean_gap": 0.049,
+    "mean_line": 4.1
   },
   "pra": {
     "slope": 0.78,
-    "mean_gap": 2.47,
-    "mean_line": 18.6
+    "mean_gap": 0.814,
+    "mean_line": 30.0
+  },
+  "threes": {
+    "slope": 1.0,
+    "mean_gap": 0.0,
+    "mean_line": 2.5
   }
 }

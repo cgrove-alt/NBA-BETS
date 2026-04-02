@@ -141,10 +141,13 @@ def _compute_decompression_params(
     """
     if len(rows) < min_samples:
         logger.warning(
-            "  Insufficient data for '%s' (%d rows, need %d). Using canonical defaults.",
+            "  Insufficient data for '%s' (%d rows, need %d). "
+            "Will preserve existing file values instead of overwriting with defaults.",
             prop_type, len(rows), min_samples,
         )
-        return QUANTILE_DECOMPRESSION_DEFAULTS[prop_type].copy()
+        # Return a sentinel dict (no '_n' key) so run_full_calibration knows
+        # not to overwrite the file for this prop.
+        return {'_insufficient_data': True}
 
     predictions = np.array([r['predicted'] for r in rows])
     actuals     = np.array([r['actual']    for r in rows])

@@ -6756,8 +6756,7 @@ def train_all_models(
 
             if 0.5 in q_model.quantile_models:
                 medians = q_model.quantile_models[0.5].predict(X_scaled_q)
-                # Compute slope and mean_gap from median predictions vs actual lines
-                # Use season avg as proxy for "line" in training context
+                # Use season avg as proxy for "line" — needed for slope (regression-to-mean)
                 mapping = PROP_LINE_SEASON_AVG_MAP.get(prop_name)
                 if mapping:
                     lines = X_test_q[mapping[0]].fillna(0).values
@@ -6766,12 +6765,21 @@ def train_all_models(
                              X_test_q['season_reb_avg'].fillna(0) +
                              X_test_q['season_ast_avg'].fillna(0)).values
 
-                valid = lines > 0
+                # Actual outcomes for the test split (same indexing as X_test_q)
+                y_test = y[split_idx:]
+
+                # valid: both the line proxy and actual outcome must be positive
+                valid = (lines > 0) & (y_test > 0)
                 if valid.sum() > 20:
                     from numpy.polynomial.polynomial import polyfit
                     coeffs = polyfit(lines[valid], medians[valid], 1)
                     slope = float(coeffs[1])
-                    mean_gap = float(np.mean(medians[valid] - lines[valid]))
+                    # mean_gap = how much the model over-predicts actual outcomes.
+                    # Positive → model is too high → level_fix = -mean_gap corrects it.
+                    # Previously this used (medians - season_avg_proxy) which measures
+                    # bias relative to a proxy, not real over/under-prediction, and
+                    # produces systematically wrong values (e.g. 1.55 instead of 0.77).
+                    mean_gap = float(np.mean(medians[valid] - y_test[valid]))
                     mean_line = float(np.mean(lines[valid]))
                     decomp_params[prop_name] = {
                         'slope': round(slope, 3),
