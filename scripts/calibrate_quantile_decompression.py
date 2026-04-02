@@ -171,8 +171,25 @@ def _compute_decompression_params(
         slope, _ = np.polyfit(lines, predictions, 1)
         slope = float(slope)
 
-    # Mean residual: actual - predicted (positive = systematic under-prediction)
-    residuals = actuals - predictions
+    # Load the currently-live mean_gap so we can undo the level fix before
+    # measuring residuals.  Stored predictions = raw_model_output - old_mean_gap
+    # (because level_fix = -mean_gap is added during decompress).  Adding
+    # old_mean_gap back recovers the raw quantile model output, breaking the
+    # circular dependency where re-calibration always saw the post-correction
+    # residual and converged to the wrong value each retrain cycle.
+    try:
+        with open(OUTPUT_PATH) as _f:
+            _cur = json.load(_f)
+        _old_mean_gap = float(_cur.get(prop_type, {}).get('mean_gap', 0.0))
+    except (FileNotFoundError, json.JSONDecodeError):
+        _old_mean_gap = 0.0
+    raw_predictions = predictions + _old_mean_gap
+
+    # mean_gap sign convention: positive = model over-predicts (raw > actual).
+    # level_fix = -mean_gap therefore subtracts from predictions to correct
+    # overestimation.  Old convention (actual - predicted) had the wrong sign
+    # and caused level_fix to amplify over-prediction instead of damping it.
+    residuals = raw_predictions - actuals
     mean_gap = float(np.mean(residuals))
 
     # Median line (needed for slope correction formula in decompress_quantile_prediction)

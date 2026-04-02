@@ -2525,6 +2525,23 @@ def predict_player_prop(
                     player_season_avg=_s_avg if features else None
                 )
 
+                # Fix 2: Apply PROP_BIAS_CORRECTION to predicted_value so the
+                # displayed prediction reflects the systematic over-prediction
+                # correction, not just the z-score used for probability.
+                _bias_corr = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
+                if _bias_corr != 0.0:
+                    predicted_value += _bias_corr
+
+                # Fix 3: Sanity clamp — predicted value shouldn't exceed 1.5x the
+                # sportsbook line or 2x the player's season average (whichever is
+                # larger).  Prevents absurd quantile outputs (e.g. 22 pts for an
+                # 8.5-line player) that are a model quality issue, not real signal.
+                _s_avg_val = _s_avg if _s_avg else None
+                _max_reasonable = (
+                    max(_s_avg_val * 2.0, line * 1.5) if _s_avg_val else line * 2.0
+                )
+                predicted_value = min(predicted_value, _max_reasonable)
+
                 # Derive player-specific sigma from quantile spread
                 quantile_sigma = compute_quantile_sigma(pred_low, pred_high, prop_type)
                 effective_sigma = quantile_sigma
@@ -2536,9 +2553,10 @@ def predict_player_prop(
                     try:
                         over_prob = quantile_model_obj.predict_over_probability(features, line)
                     except Exception:
-                        # Fall back to norm.cdf if quantile prob fails
-                        bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
-                        z_score = (predicted_value + bias_fix - line) / effective_sigma
+                        # Fall back to norm.cdf if quantile prob fails.
+                        # PROP_BIAS_CORRECTION already applied to predicted_value (Fix 2),
+                        # so omit bias_fix here to avoid double-counting.
+                        z_score = (predicted_value - line) / effective_sigma
                         over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
         except Exception:
             logger.warning("Quantile model failed for %s %s", player_name, prop_type, exc_info=True)
