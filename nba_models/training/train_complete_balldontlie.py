@@ -6766,12 +6766,13 @@ def train_all_models(
                              X_test_q['season_reb_avg'].fillna(0) +
                              X_test_q['season_ast_avg'].fillna(0)).values
 
+                y_test_vals = y[split_idx:]
                 valid = lines > 0
                 if valid.sum() > 20:
                     from numpy.polynomial.polynomial import polyfit
                     coeffs = polyfit(lines[valid], medians[valid], 1)
                     slope = float(coeffs[1])
-                    mean_gap = float(np.mean(medians[valid] - lines[valid]))
+                    mean_gap = float(np.mean(medians[valid] - y_test_vals[valid]))
                     mean_line = float(np.mean(lines[valid]))
                     decomp_params[prop_name] = {
                         'slope': round(slope, 3),

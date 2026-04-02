@@ -2567,8 +2567,8 @@ def predict_player_prop(
     # Recalculate over_prob with quantile-derived sigma ONLY if quantile model
     # didn't already set it via predict_over_probability above
     if predicted_value is not None and not (quantile_model_dict and features and use_api_features):
-        bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
-        z_score = (predicted_value + bias_fix - line) / effective_sigma
+        # PROP_BIAS_CORRECTION already applied to predicted_value (Fix 2), omit here.
+        z_score = (predicted_value - line) / effective_sigma
         over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
 
     # Phase 3: Minutes Oracle adjustment — per-minute rate scaling
@@ -2612,8 +2612,8 @@ def predict_player_prop(
                     predicted_value = adjusted_value
 
                     # Recalculate probability with adjusted value
-                    bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
-                    z_score = (predicted_value + bias_fix - line) / effective_sigma
+                    # PROP_BIAS_CORRECTION already in predicted_value, omit bias_fix.
+                    z_score = (predicted_value - line) / effective_sigma
                     over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
 
     # Apply injury-based adjustments to predicted value
@@ -2636,8 +2636,8 @@ def predict_player_prop(
                 predicted_value = adjusted_value
 
                 # Recalculate probability with adjusted value
-                bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
-                z_score = (predicted_value + bias_fix - line) / effective_sigma
+                # PROP_BIAS_CORRECTION already in predicted_value, omit bias_fix.
+                z_score = (predicted_value - line) / effective_sigma
                 over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
         except Exception:
             logger.warning("Injury boost failed for %s %s", player_name, prop_type, exc_info=True)
@@ -2690,8 +2690,8 @@ def predict_player_prop(
                 if calibration_applied.get('total_value_adjustment', 0) != 0:
                     predicted_value = calibration_applied['adjusted_value']
                     # Recalculate over_prob with corrected value
-                    bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
-                    z_score = (predicted_value + bias_fix - line) / effective_sigma
+                    # PROP_BIAS_CORRECTION already in predicted_value, omit bias_fix.
+                    z_score = (predicted_value - line) / effective_sigma
                     over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
         except Exception:
             logger.warning("Calibration adjustment failed for %s %s", player_name, prop_type, exc_info=True)
@@ -2703,8 +2703,8 @@ def predict_player_prop(
         upper = original_predicted_value + max_total
         if predicted_value < lower or predicted_value > upper:
             predicted_value = max(lower, min(upper, predicted_value))
-            bias_fix = PROP_BIAS_CORRECTION.get(prop_type.lower(), 0.0)
-            z_score = (predicted_value + bias_fix - line) / effective_sigma
+            # PROP_BIAS_CORRECTION already in predicted_value, omit bias_fix.
+            z_score = (predicted_value - line) / effective_sigma
             over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
 
     # Phase 3.3: Threes-specific enhancements before final calibration
@@ -2733,8 +2733,8 @@ def predict_player_prop(
                     streak_fade = threes_streak_info.get('streak_fade', 0.0)
                     if streak_fade != 0.0:
                         predicted_value = predicted_value * (1.0 + streak_fade)
-                        bias_fix = PROP_BIAS_CORRECTION.get('threes', 0.0)
-                        z_score = (predicted_value + bias_fix - line) / effective_sigma
+                        # PROP_BIAS_CORRECTION already in predicted_value, omit bias_fix.
+                        z_score = (predicted_value - line) / effective_sigma
                         over_prob = float(norm.cdf(z_score))
                         logger.debug(
                             "Threes streak %s for %s: fade=%.1f%% → pred=%.2f",
