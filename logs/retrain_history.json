@@ -1,11 +1,5 @@
 [
   {
-    "timestamp": "2026-02-27T08:47:57.523927",
-    "success": true,
-    "game_count": 0,
-    "model_age_days": 0.023997561986799594
-  },
-  {
     "timestamp": "2026-02-27T08:47:57.575194",
     "success": true,
     "trigger": "github_actions",
@@ -298,5 +292,11 @@
     "success": true,
     "trigger": "github_actions",
     "run_id": "24024768265"
+  },
+  {
+    "timestamp": "2026-04-07T08:54:46.723954",
+    "success": true,
+    "trigger": "github_actions",
+    "run_id": "24071671663"
   }
 ]
