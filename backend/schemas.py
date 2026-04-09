@@ -266,6 +266,9 @@ class HealthResponse(BaseModel):
     database_connected: bool = False
     redis_connected: bool = False
     checks: dict[str, Any] = {}
+    environment: dict[str, Any] = {}
+    warnings: list[str] = []
+    issues: list[str] = []
 
 
 # ============== DAILY PREDICTIONS SCHEMAS ==============

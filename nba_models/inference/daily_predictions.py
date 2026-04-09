@@ -75,6 +75,7 @@ def fetch_current_injuries(target_date=None):
 
 # Required for pickle deserialization of quantile models
 from nba_models.models.model_trainer import QuantilePropModel  # noqa: F401
+from nba_data.utils.runtime_config import resolve_nba_season
 
 # Canonical constants — single source of truth across the entire pipeline.
 # Do NOT redefine PROP_STD_DEVS or quantile defaults locally; update nba_betting/constants.py.
@@ -671,7 +672,7 @@ def fetch_team_tracking_data(team_id: int, n_games: int = 3) -> tuple['ShotAtlas
         rotation_tracker = RotationTracker()
 
         # Get recent game IDs for team
-        game_ids = fetch_season_games(season="2025-26", team_id=team_id)
+        game_ids = fetch_season_games(season=resolve_nba_season(), team_id=team_id)
         recent_games = game_ids[-n_games:] if game_ids else []
 
         for game_id in recent_games:
@@ -732,11 +733,12 @@ _team_stats_calc = None  # TeamStatsCalculator for team features
 _position_def_calc = None  # PositionDefenseCalculator for opponent features
 _balldontlie_api = None  # Shared Balldontlie API instance
 
-def get_feature_engine(season: str = "2025-26") -> PlayerPropFeatureGenerator:
+def get_feature_engine(season: str | None = None) -> PlayerPropFeatureGenerator:
     """Get or create the feature generator for player prop features."""
     global _prop_feature_gen
-    if _prop_feature_gen is None:
-        _prop_feature_gen = PlayerPropFeatureGenerator(season=season)
+    resolved_season = resolve_nba_season(season)
+    if _prop_feature_gen is None or getattr(_prop_feature_gen, "season", None) != resolved_season:
+        _prop_feature_gen = PlayerPropFeatureGenerator(season=resolved_season)
     return _prop_feature_gen
 
 def get_id_mapper():
@@ -765,11 +767,12 @@ def get_bdl_player_id(player_name: str) -> int | None:
     return None
 
 
-def get_injury_manager(season: str = "2025-26") -> InjuryReportManager:
+def get_injury_manager(season: str | None = None) -> InjuryReportManager:
     """Get or create the injury manager for injury data."""
     global _injury_manager
-    if _injury_manager is None:
-        _injury_manager = InjuryReportManager(season=season)
+    resolved_season = resolve_nba_season(season)
+    if _injury_manager is None or getattr(_injury_manager, "season", None) != resolved_season:
+        _injury_manager = InjuryReportManager(season=resolved_season)
         try:
             _injury_manager.fetch_all_injuries()
         except Exception:
@@ -1728,7 +1731,7 @@ def analyze_game(game: dict, odds: dict, models: dict) -> dict:
     try:
         features = generate_game_features(
             home_abbrev, away_abbrev,
-            season="2025-26",
+            season=resolve_nba_season(),
             include_advanced=True,
             injury_manager=injury_mgr
         )
