@@ -52,6 +52,7 @@ ET = ZoneInfo('America/New_York')
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dashboard.data_service import get_data_service, DataService
+from nba_betting.constants import DISABLED_PROPS  # Single source of truth for which props to skip
 from backend.schemas import (
     HealthResponse,
     GamesResponse,
@@ -1183,6 +1184,10 @@ def get_best_bets(
             }
 
             for prop_type, prop_key in prop_key_map.items():
+                # Skip props that have no demonstrated model edge
+                if prop_key in DISABLED_PROPS:
+                    continue
+
                 # Apply prop type filter
                 if prop_type_filter and prop_type not in prop_type_filter:
                     continue
@@ -3438,6 +3443,10 @@ def log_game_predictions(game_id: str):
     for player in all_players:
         player_name = player.get("player_name", "")
         for prop_type, prop_key in prop_key_map.items():
+            # Skip props that have no demonstrated model edge
+            if prop_key in DISABLED_PROPS:
+                continue
+
             pred_key = f"{prop_key}_pred"
             if pred_key not in player or player.get(pred_key) is None:
                 continue
@@ -3538,6 +3547,10 @@ def generate_and_settle_game(
             for player in all_players:
                 player_name = player.get("player_name", "")
                 for prop_type, prop_key in prop_key_map.items():
+                    # Skip props that have no demonstrated model edge
+                    if prop_key in DISABLED_PROPS:
+                        continue
+
                     pred_key = f"{prop_key}_pred"
                     if pred_key not in player or player.get(pred_key) is None:
                         continue

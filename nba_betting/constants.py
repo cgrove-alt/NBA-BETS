@@ -72,8 +72,14 @@ PROP_BIAS_CORRECTION: dict[str, float] = {
 # Post-statistical-analysis configuration (2026-03-22).
 # Bootstrap significance: rebounds p=0.027 (significant), PRA p=0.068 (marginal).
 # Points p=0.463 — no edge, disabled.
-# Assists consistently negative — disabled.
+# Assists: 45.3% hit rate (30-day, 2026-04-15 analysis) — disabled.
+#   Bias swings both over and under; no fixable directional correction.
+#   Paper trading enforcement bug fixed 2026-04-15: api.py best-bets and
+#   paper trading loggers now check DISABLED_PROPS before serving/logging.
 # Threes too stochastic. Spread worse than market.
+#
+# ENFORCEMENT: bet_filter.py, prediction_pipeline.py, and backend/api.py
+# (best-bets endpoint + both paper trading loggers) all check this list.
 DISABLED_PROPS: list[str] = ['points', 'assists', 'threes', 'spread']
 
 # ---------------------------------------------------------------------------
