@@ -17,6 +17,7 @@ _PROP_STAT_MAP = {
     "rebounds": "reb",
     "assists": "ast",
     "threes": "fg3m",
+    "3pm": "fg3m",   # Alternative name used by some logging paths
 }
 
 
@@ -48,13 +49,17 @@ def _fetch_actual_stats(game_date: str) -> dict:
         logger.info("No games found for %s", game_date)
         return {}
 
-    # Only settle Final games
+    # Only settle Final games — match "Final", "Final - OT", etc.
     game_ids = [
         g["id"] for g in games
-        if str(g.get("status", "")).lower() == "final"
+        if "final" in str(g.get("status", "")).lower()
     ]
     if not game_ids:
-        logger.info("No completed games for %s (%d games found)", game_date, len(games))
+        logger.info(
+            "No completed games for %s (%d games found, statuses: %s)",
+            game_date, len(games),
+            [g.get("status") for g in games[:5]],
+        )
         return {}
 
     # Fetch box-score stats for every completed game

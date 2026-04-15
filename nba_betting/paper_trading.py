@@ -302,7 +302,11 @@ class PaperTrader:
                     (row_id, trade_id, player_name, prop_type, line, direction,
                      should_bet, bet_size, over_odds, under_odds) = row
 
-                    key = (player_name, prop_type)
+                    # Normalize prop_type for lookup: paper_trades may store uppercase
+                    # ("POINTS") from the API logging path; actual_stats always uses
+                    # lowercase ("points"). "3pm" is also used as an alias for "threes".
+                    norm_prop = (prop_type or "").lower()
+                    key = (player_name, norm_prop)
                     if key not in actual_stats:
                         continue
 
@@ -344,7 +348,8 @@ class PaperTrader:
                     (row_id, trade_id, player_name, prop_type, line, direction,
                      should_bet, bet_size, over_odds, under_odds) = row
 
-                    key = (player_name, prop_type)
+                    norm_prop = (prop_type or "").lower()
+                    key = (player_name, norm_prop)
                     if key not in actual_stats:
                         continue
 
