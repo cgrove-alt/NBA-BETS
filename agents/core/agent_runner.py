@@ -43,6 +43,7 @@ AGENT_CATALOG = {
     'orchestrator': ('agents.orchestrator.orchestrator_agent',  'PredictionOrchestratorAgent',    '30 11,15 17 * * *'),
     'watchdog':     ('agents.watchdog.watchdog_agent',          'ModelWatchdogAgent',             '30 1 * * *'),
     'briefing':     ('agents.briefing.briefing_agent',          'DailyBriefingAgent',             '0 12,18 * * *'),
+    'settlement':   ('agents.settlement.settlement_agent',      'SettlementAgent',                '0 2 * * *'),
 }
 
 

@@ -4056,6 +4056,65 @@ def run_nightly_settlement():
     return result
 
 
+@app.post("/api/settlement/backfill")
+def backfill_settlement():
+    """One-shot backfill: recompute profit_loss for all settled should_bet bets with P&L = 0.
+
+    Targets rows where result IN ('hit','miss') AND should_bet=TRUE AND profit_loss = 0.
+    Uses $10 default paper bet and stored odds (defaulting to -110 if null).
+
+    Safe to call multiple times — only rows with profit_loss=0 are updated.
+    """
+    try:
+        from nba_betting.paper_trading import PaperTrader
+        trader = PaperTrader()
+        result = trader.backfill_profit_loss()
+        return {"status": "ok", **result}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "updated_count": 0}
+
+
+@app.post("/api/settlement/settle-range")
+def settle_date_range(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD (inclusive)"),
+):
+    """Settle all unsettled paper trades between two dates.
+
+    Useful for catching up after settlement outages. Calls settle_date()
+    for each date in the range.
+    """
+    from datetime import date as date_cls, timedelta
+    from nba_betting.settle_trades import settle_date
+
+    try:
+        start = date_cls.fromisoformat(start_date)
+        end = date_cls.fromisoformat(end_date)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
+
+    results = []
+    total_settled = 0
+    current = start
+    while current <= end:
+        date_str = current.isoformat()
+        try:
+            count = settle_date(date_str)
+            results.append({"date": date_str, "settled": count})
+            total_settled += count
+        except Exception as e:
+            results.append({"date": date_str, "error": str(e)})
+        current += timedelta(days=1)
+
+    return {
+        "status": "ok",
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_settled": total_settled,
+        "by_date": results,
+    }
+
+
 # ============== DEBUG ENDPOINTS ==============
 
 @app.get("/api/debug/player/{player_id}/stats")

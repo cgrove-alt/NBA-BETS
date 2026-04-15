@@ -23,6 +23,11 @@ except (ImportError, TypeError):
 
 logger = logging.getLogger(__name__)
 
+# Standard paper bet size used when should_bet=True but no explicit bet_size is stored.
+# Historically the pipeline logged bet_size=0 even for recommended bets because
+# suggested_bet_size was null; this constant ensures P&L is always computable.
+DEFAULT_PAPER_BET = 10.0
+
 
 def _american_to_decimal(american_odds: int) -> float:
     """Convert American odds to decimal odds.
@@ -180,6 +185,10 @@ class PaperTrader:
             should_bet = signal in ("BET",)
 
         bet_size = float(prediction.get("bet_size") or prediction.get("suggested_bet_size", 0) or 0)
+        # If this is a recommended bet but no size was provided, use the default paper bet.
+        # The pipeline historically left suggested_bet_size=None for all BET-signal props.
+        if should_bet and not bet_size:
+            bet_size = DEFAULT_PAPER_BET
 
         over_odds = prediction.get("over_odds")
         if over_odds is not None:
@@ -302,13 +311,19 @@ class PaperTrader:
                         actual_value, line, direction, should_bet, bet_size,
                         over_odds, under_odds
                     )
+                    # Also write back the effective bet_size so total_wagered queries work.
+                    # Bets logged before the DEFAULT_PAPER_BET fix have bet_size=0.
+                    effective_bet = float(bet_size or 0)
+                    if should_bet and not effective_bet:
+                        effective_bet = DEFAULT_PAPER_BET
 
                     cur.execute("""
                         UPDATE paper_trades
                         SET actual_value = %s, result = %s, profit_loss = %s,
-                            settled_at = %s
+                            bet_size = %s, settled_at = %s
                         WHERE id = %s
-                    """, (actual_value, result, profit, datetime.now().isoformat(), row_id))
+                    """, (actual_value, result, profit, effective_bet,
+                          datetime.now().isoformat(), row_id))
                     settled += 1
 
                 cur.close()
@@ -338,13 +353,17 @@ class PaperTrader:
                         actual_value, line, direction, should_bet, bet_size,
                         over_odds, under_odds
                     )
+                    effective_bet = float(bet_size or 0)
+                    if should_bet and not effective_bet:
+                        effective_bet = DEFAULT_PAPER_BET
 
                     conn.execute("""
                         UPDATE paper_trades
                         SET actual_value = ?, result = ?, profit_loss = ?,
-                            settled_at = ?
+                            bet_size = ?, settled_at = ?
                         WHERE id = ?
-                    """, (actual_value, result, profit, datetime.now().isoformat(), row_id))
+                    """, (actual_value, result, profit, effective_bet,
+                          datetime.now().isoformat(), row_id))
                     settled += 1
 
                 conn.commit()
@@ -378,15 +397,105 @@ class PaperTrader:
             result = "miss"
 
         profit = 0.0
-        if should_bet and bet_size and bet_size > 0:
+        if should_bet:
+            # Use stored bet_size, falling back to DEFAULT_PAPER_BET for bets that were
+            # logged before the default was introduced (bet_size was always 0 then).
+            effective_bet = bet_size if (bet_size and bet_size > 0) else DEFAULT_PAPER_BET
             odds = over_odds if dir_lower == "over" else under_odds
             decimal_odds = _american_to_decimal(odds)
             if result == "hit":
-                profit = bet_size * (decimal_odds - 1)
+                profit = effective_bet * (decimal_odds - 1)
             else:
-                profit = -bet_size
+                profit = -effective_bet
 
         return (result, profit)
+
+    def backfill_profit_loss(self) -> dict:
+        """Recompute profit_loss and bet_size for all settled bets that have no P&L.
+
+        Targets rows where:
+          - result IN ('hit', 'miss')   — already settled
+          - should_bet = TRUE           — recommended bet
+          - profit_loss IS NULL OR profit_loss = 0  — P&L never computed
+
+        Uses DEFAULT_PAPER_BET ($10) and stored odds (defaulting to -110 if null).
+
+        Returns:
+            Dict with updated_count and error (if any).
+        """
+        updated = 0
+
+        if self._use_postgres:
+            try:
+                cur = self._pg_conn.cursor()
+                cur.execute("""
+                    SELECT id, direction, result, bet_size, over_odds, under_odds
+                    FROM paper_trades
+                    WHERE result IN ('hit', 'miss')
+                      AND should_bet = TRUE
+                      AND (profit_loss IS NULL OR profit_loss = 0)
+                """)
+                rows = cur.fetchall()
+
+                for (row_id, direction, result, bet_size, over_odds, under_odds) in rows:
+                    dir_lower = (direction or "over").lower()
+                    effective_bet = float(bet_size or 0) or DEFAULT_PAPER_BET
+                    odds = over_odds if dir_lower == "over" else under_odds
+                    decimal_odds = _american_to_decimal(odds)
+
+                    if result == "hit":
+                        profit = effective_bet * (decimal_odds - 1)
+                    else:
+                        profit = -effective_bet
+
+                    cur.execute("""
+                        UPDATE paper_trades
+                        SET profit_loss = %s, bet_size = %s
+                        WHERE id = %s
+                    """, (profit, effective_bet, row_id))
+                    updated += 1
+
+                cur.close()
+                logger.info(f"backfill_profit_loss: updated {updated} rows in PostgreSQL")
+            except Exception as e:
+                logger.error(f"backfill_profit_loss failed: {e}")
+                return {"updated_count": updated, "error": str(e)}
+        else:
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    rows = conn.execute("""
+                        SELECT id, direction, result, bet_size, over_odds, under_odds
+                        FROM paper_trades
+                        WHERE result IN ('hit', 'miss')
+                          AND should_bet = 1
+                          AND (profit_loss IS NULL OR profit_loss = 0)
+                    """).fetchall()
+
+                    for (row_id, direction, result, bet_size, over_odds, under_odds) in rows:
+                        dir_lower = (direction or "over").lower()
+                        effective_bet = float(bet_size or 0) or DEFAULT_PAPER_BET
+                        odds = over_odds if dir_lower == "over" else under_odds
+                        decimal_odds = _american_to_decimal(odds)
+
+                        if result == "hit":
+                            profit = effective_bet * (decimal_odds - 1)
+                        else:
+                            profit = -effective_bet
+
+                        conn.execute("""
+                            UPDATE paper_trades
+                            SET profit_loss = ?, bet_size = ?
+                            WHERE id = ?
+                        """, (profit, effective_bet, row_id))
+                        updated += 1
+
+                    conn.commit()
+                logger.info(f"backfill_profit_loss: updated {updated} rows in SQLite")
+            except Exception as e:
+                logger.error(f"backfill_profit_loss (SQLite) failed: {e}")
+                return {"updated_count": updated, "error": str(e)}
+
+        return {"updated_count": updated}
 
     def get_summary(self, days: int = None) -> dict:
         """Return comprehensive paper trading performance summary.

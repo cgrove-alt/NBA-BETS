@@ -94,6 +94,10 @@ AGENT_SCHEDULES = {
         {'hour': '1', 'minute': '30'},
         '1:30 AM ET — model health check',
     ),
+    'settlement': (
+        {'hour': '2', 'minute': '0'},
+        '2 AM ET — settle paper trades from yesterday',
+    ),
     'briefing': (
         {'hour': '12,18', 'minute': '0'},
         'Noon + 6 PM ET — daily briefing',
