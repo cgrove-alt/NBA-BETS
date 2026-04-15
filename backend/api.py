@@ -4130,6 +4130,41 @@ def settle_date_range(
 
 # ============== DEBUG ENDPOINTS ==============
 
+@app.get("/api/debug/settlement/{date}")
+def debug_settlement_date(date: str):
+    """Debug: show what BDL API returns for games on a date and whether stats can be fetched."""
+    try:
+        from nba_data.sources.balldontlie_api import BalldontlieAPI
+        api = BalldontlieAPI()
+
+        games = api.get_games(dates=[date])
+        all_statuses = [g.get("status") for g in (games or [])]
+        final_games = [g["id"] for g in (games or []) if "final" in str(g.get("status", "")).lower()]
+
+        stats_sample = []
+        if final_games:
+            stats = api.get_player_stats(game_ids=final_games[:1])
+            if stats:
+                s = stats[0]
+                player_data = s.get("player", {})
+                stats_sample.append({
+                    "player": f"{player_data.get('first_name')} {player_data.get('last_name')}",
+                    "pts": s.get("pts"),
+                    "reb": s.get("reb"),
+                    "ast": s.get("ast"),
+                })
+
+        return {
+            "date": date,
+            "games_found": len(games or []),
+            "all_statuses": all_statuses,
+            "final_game_ids": final_games,
+            "stats_sample": stats_sample,
+        }
+    except Exception as e:
+        return {"date": date, "error": str(e)}
+
+
 @app.get("/api/debug/player/{player_id}/stats")
 def get_player_debug_stats(player_id: int):
     """Return raw season and recent stats for a player so model inputs can be audited."""
