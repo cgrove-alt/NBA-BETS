@@ -464,6 +464,43 @@ class BalldontlieAPI:
         data = self._get("stats", params)
         return data.get("data", []) if data else []
 
+    def get_player_stats_for_games(self, game_ids: list[int]) -> list[dict]:
+        """Fetch ALL player stats for given game IDs, looping through all pages.
+
+        Unlike get_player_stats(), this method follows next_cursor pagination so
+        it returns every stat line for every player in the listed games — not just
+        the first 100 results.
+
+        Requires: All-Star tier or higher
+
+        Args:
+            game_ids: Game IDs to fetch stats for.
+
+        Returns:
+            List of all player stat lines across all pages.
+        """
+        all_stats = []
+        cursor = None
+        while True:
+            params: dict = {"game_ids[]": game_ids, "per_page": 100}
+            if cursor:
+                params["cursor"] = cursor
+            data = self._get("stats", params)
+            if not data:
+                break
+            page_stats = data.get("data", [])
+            if not page_stats:
+                break
+            all_stats.extend(page_stats)
+            cursor = data.get("meta", {}).get("next_cursor")
+            if not cursor:
+                break
+        logger.info(
+            "Fetched %d stat lines across %d game(s) via paginated fetch",
+            len(all_stats), len(game_ids),
+        )
+        return all_stats
+
     def get_player_stats_paginated(
         self,
         player_id: int,

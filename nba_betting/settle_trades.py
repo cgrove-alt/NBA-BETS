@@ -6,12 +6,15 @@ all paper trade predictions against actual outcomes.
 Designed to run daily via Railway scheduler, after games complete.
 """
 
+import re
 import logging
 from datetime import date, timedelta
 
 logger = logging.getLogger(__name__)
 
-# BDL stat field → prop_type mapping used by paper trading
+# prop_type (as stored in paper_trades) → BDL stat field name
+# All aliases for the same stat collapse to the same canonical key so that
+# predictions logged with "pts" and those logged with "points" both settle.
 _PROP_STAT_MAP = {
     "points": "pts",
     "rebounds": "reb",
@@ -19,6 +22,60 @@ _PROP_STAT_MAP = {
     "threes": "fg3m",
     "3pm": "fg3m",   # Alternative name used by some logging paths
 }
+
+# Short-form aliases used by the model pipeline → canonical prop_type names
+# used as keys in actual_stats.  Ensures "pts" in paper_trades matches the
+# "points" key built from _PROP_STAT_MAP above.
+_PROP_TYPE_ALIASES: dict[str, str] = {
+    "pts": "points",
+    "reb": "rebounds",
+    "ast": "assists",
+    "fg3m": "threes",
+    "3pm": "threes",
+    # canonical names map to themselves (idempotent)
+    "points": "points",
+    "rebounds": "rebounds",
+    "assists": "assists",
+    "threes": "threes",
+    "pra": "pra",
+}
+
+
+def _normalize_prop_type(prop_type: str) -> str:
+    """Canonical prop_type for settlement lookups.
+
+    Maps short-form aliases ("pts", "reb", "ast", "fg3m") to the canonical
+    names used as keys in actual_stats ("points", "rebounds", etc.).
+    Unknown prop_types are returned lowercased as-is.
+    """
+    return _PROP_TYPE_ALIASES.get((prop_type or "").lower(), (prop_type or "").lower())
+
+
+# Tokens to strip when normalizing player names for matching
+_SUFFIX_RE = re.compile(r'\s+(jr\.?|sr\.?|ii|iii|iv|v)$', re.IGNORECASE)
+
+
+def _normalize_player_name(name: str) -> str:
+    """Canonical form of a player name for fuzzy matching during settlement.
+
+    Steps:
+    1. Lowercase + strip outer whitespace
+    2. Remove Jr./Sr./II/III/IV/V suffixes (BDL sometimes includes, props APIs omit)
+    3. Remove all non-alphanumeric-space chars (periods, apostrophes, hyphens)
+    4. Collapse internal whitespace
+
+    >>> _normalize_player_name("LeBron James")
+    'lebron james'
+    >>> _normalize_player_name("Marcus Morris Sr.")
+    'marcus morris'
+    >>> _normalize_player_name("Jaren Jackson Jr.")
+    'jaren jackson'
+    """
+    name = name.lower().strip()
+    name = _SUFFIX_RE.sub("", name)
+    name = re.sub(r"[^a-z0-9 ]", "", name)
+    name = " ".join(name.split())
+    return name
 
 
 def _fetch_actual_stats(game_date: str) -> dict:
@@ -62,8 +119,13 @@ def _fetch_actual_stats(game_date: str) -> dict:
         )
         return {}
 
-    # Fetch box-score stats for every completed game
-    stats = api.get_player_stats(game_ids=game_ids)
+    # Fetch box-score stats for every completed game — paginate to get ALL players
+    # (a typical NBA night with 5+ games has 130+ stat lines, exceeding the 100-row
+    # default page size of get_player_stats).
+    if hasattr(api, "get_player_stats_for_games"):
+        stats = api.get_player_stats_for_games(game_ids=game_ids)
+    else:
+        stats = api.get_player_stats(game_ids=game_ids)
     if not stats:
         logger.warning("No player stats returned for %d games on %s", len(game_ids), game_date)
         return {}
@@ -76,22 +138,38 @@ def _fetch_actual_stats(game_date: str) -> dict:
         if not first or not last:
             continue
         player_name = f"{first} {last}"
+        # Normalized name used as the lookup key — handles Jr./Sr./punctuation
+        # differences between BDL ("P.J. Washington") and the Odds API / paper_trades
+        # ("PJ Washington").  _normalize_player_name strips periods, suffixes, and
+        # collapses whitespace so both forms become "pj washington".
+        norm_name = _normalize_player_name(player_name)
 
-        # Map each prop type to its stat value
+        # Map each prop type to its stat value.
+        # Store under BOTH the canonical long-form name ("points") and the short-form
+        # alias ("pts") so that paper_trades rows logged with either format settle
+        # correctly without requiring a DB migration.
         for prop_type, stat_key in _PROP_STAT_MAP.items():
             val = stat_line.get(stat_key)
             if val is not None:
-                actual[(player_name, prop_type)] = float(val)
+                fval = float(val)
+                actual[(norm_name, prop_type)] = fval
+                # Also index by short alias so "pts" in paper_trades finds "points" data
+                alias = _PROP_TYPE_ALIASES.get(stat_key)
+                if alias and alias != prop_type:
+                    actual[(norm_name, alias)] = fval
+                # And by the raw BDL field name (e.g., "pts") as a direct alias
+                actual[(norm_name, stat_key)] = fval
 
         # PRA (points + rebounds + assists) — a combined prop
         pts = stat_line.get("pts") or 0
         reb = stat_line.get("reb") or 0
         ast = stat_line.get("ast") or 0
-        actual[(player_name, "pra")] = float(pts + reb + ast)
+        actual[(norm_name, "pra")] = float(pts + reb + ast)
 
+    unique_players = len({name for (name, _) in actual.keys()})
     logger.info(
-        "Fetched stats for %d player-prop combos across %d games on %s",
-        len(actual), len(game_ids), game_date,
+        "Fetched stats for %d player-prop combos (%d players) across %d games on %s",
+        len(actual), unique_players, len(game_ids), game_date,
     )
     return actual
 

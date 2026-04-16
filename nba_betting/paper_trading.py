@@ -302,11 +302,20 @@ class PaperTrader:
                     (row_id, trade_id, player_name, prop_type, line, direction,
                      should_bet, bet_size, over_odds, under_odds) = row
 
-                    # Normalize prop_type for lookup: paper_trades may store uppercase
-                    # ("POINTS") from the API logging path; actual_stats always uses
-                    # lowercase ("points"). "3pm" is also used as an alias for "threes".
-                    norm_prop = (prop_type or "").lower()
-                    key = (player_name, norm_prop)
+                    # Normalize both sides of the lookup key so that name differences
+                    # (Jr./Sr., punctuation, casing) and prop_type aliases
+                    # ("pts" vs "points", "reb" vs "rebounds") don't block settlement.
+                    try:
+                        from nba_betting.settle_trades import (
+                            _normalize_player_name,
+                            _normalize_prop_type,
+                        )
+                        norm_name = _normalize_player_name(player_name or "")
+                        norm_prop = _normalize_prop_type(prop_type or "")
+                    except ImportError:
+                        norm_name = (player_name or "").lower().strip()
+                        norm_prop = (prop_type or "").lower()
+                    key = (norm_name, norm_prop)
                     if key not in actual_stats:
                         continue
 
@@ -348,8 +357,17 @@ class PaperTrader:
                     (row_id, trade_id, player_name, prop_type, line, direction,
                      should_bet, bet_size, over_odds, under_odds) = row
 
-                    norm_prop = (prop_type or "").lower()
-                    key = (player_name, norm_prop)
+                    try:
+                        from nba_betting.settle_trades import (
+                            _normalize_player_name,
+                            _normalize_prop_type,
+                        )
+                        norm_name = _normalize_player_name(player_name or "")
+                        norm_prop = _normalize_prop_type(prop_type or "")
+                    except ImportError:
+                        norm_name = (player_name or "").lower().strip()
+                        norm_prop = (prop_type or "").lower()
+                    key = (norm_name, norm_prop)
                     if key not in actual_stats:
                         continue
 
