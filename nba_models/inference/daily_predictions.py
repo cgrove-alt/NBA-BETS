@@ -2654,11 +2654,16 @@ def predict_player_prop(
                 #      computed at avg_minutes pace. This is what we used
                 #      before but it carries through any contamination present
                 #      in avg_minutes.
+                # Key naming matches the codebase convention: recent_fg3m_*
+                # for 3-pointers made (fg3 alone is ambiguous between made/att).
+                # PlayerStatsCalculator.get_player_stats_before_date populates
+                # these; dashboard/data_service.py populates the same keys in
+                # its recent-stats payload.
                 per_min_key_map = {
                     'points':   'recent_pts_per_min',
                     'rebounds': 'recent_reb_per_min',
                     'assists':  'recent_ast_per_min',
-                    'threes':   'recent_fg3_per_min',
+                    'threes':   'recent_fg3m_per_min',
                 }
                 per_min_key = per_min_key_map.get(prop_type)
                 rate_source = 'legacy_pred_div_avg'

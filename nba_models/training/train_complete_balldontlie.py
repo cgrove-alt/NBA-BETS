@@ -2282,6 +2282,22 @@ class PlayerStatsCalculator:
         ast = [g['ast'] for _, g in recent]
         fg3m = [g['fg3m'] for _, g in recent]
         mins = [g['min'] for _, g in recent]
+
+        # Per-minute rates (audit 2026-05-15) — robust to minutes-restricted
+        # outliers by construction (totals/totals). Power the rate-based
+        # projection in nba_models/inference/daily_predictions.py:predict_player_prop.
+        # Existing recent_*_avg features stay unchanged so the model's feature
+        # contract is preserved — these are NEW fields the rate-projection
+        # consumer in inference reads in addition to whatever the model uses.
+        total_recent_mins = sum(mins) if mins else 0.0
+        if total_recent_mins > 0:
+            recent_pts_per_min = sum(pts) / total_recent_mins
+            recent_reb_per_min = sum(reb) / total_recent_mins
+            recent_ast_per_min = sum(ast) / total_recent_mins
+            recent_fg3m_per_min = sum(fg3m) / total_recent_mins
+        else:
+            recent_pts_per_min = recent_reb_per_min = 0.0
+            recent_ast_per_min = recent_fg3m_per_min = 0.0
         # Phase 2.3: oreb/dreb splits (fall back to 0 if not stored in older data)
         oreb = [g.get('oreb', 0) or 0 for _, g in recent]
         dreb = [g.get('dreb', 0) or 0 for _, g in recent]
@@ -2328,6 +2344,13 @@ class PlayerStatsCalculator:
             'recent_fg3m_avg': np.mean(fg3m),
             'recent_fg3m_std': np.std(fg3m) if len(fg3m) > 1 else 0,
             'recent_min_avg': np.mean(mins),
+            # Per-minute rates (additive — does NOT replace existing avg fields).
+            # Consumed by the rate-based projection in predict_player_prop,
+            # which blends rate × predicted_minutes with the model's output.
+            'recent_pts_per_min': recent_pts_per_min,
+            'recent_reb_per_min': recent_reb_per_min,
+            'recent_ast_per_min': recent_ast_per_min,
+            'recent_fg3m_per_min': recent_fg3m_per_min,
 
             # NEW: Minutes trend and consistency features
             'min_trend': np.mean([g['min'] for _, g in last_5]) - np.mean(mins) if mins else 0,
