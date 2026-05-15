@@ -4230,7 +4230,14 @@ def main():
                             bet_recommendation VARCHAR(20),
                             pick VARCHAR(10),
                             uncertainty_flag VARCHAR(50),
-                            injury_boost BOOLEAN,
+                            -- injury_boost is a numeric multiplier (e.g., 1.05
+                            -- = +5% boost), NOT a boolean. The original schema
+                            -- typed it as BOOLEAN by mistake — every daily run
+                            -- since failed DB persistence with "column is of
+                            -- type boolean but expression is of type numeric"
+                            -- and silently fell back to CSV-only. The ALTER
+                            -- TABLE in _new_cols below fixes existing tables.
+                            injury_boost DOUBLE PRECISION,
                             line_source VARCHAR(20),
                             line_vendor VARCHAR(50),
                             created_at TIMESTAMP DEFAULT NOW(),
@@ -4257,6 +4264,26 @@ def main():
                             cursor.execute(f"ALTER TABLE predictions_history ADD COLUMN {col} {col_type}")
                         except Exception:
                             conn.rollback()  # Column already exists — safe to ignore
+
+                    # One-shot migration: change injury_boost from BOOLEAN to
+                    # DOUBLE PRECISION on existing tables. The USING clause
+                    # coerces existing true/false rows to 1.0/0.0 so legacy
+                    # rows survive the type change. Idempotent — succeeds even
+                    # if the column is already DOUBLE PRECISION (becomes a
+                    # no-op ALTER).
+                    try:
+                        cursor.execute(
+                            "ALTER TABLE predictions_history "
+                            "ALTER COLUMN injury_boost TYPE DOUBLE PRECISION "
+                            "USING (CASE WHEN injury_boost IS NULL THEN NULL "
+                            "WHEN injury_boost = TRUE THEN 1.0 "
+                            "WHEN injury_boost = FALSE THEN 0.0 ELSE 1.0 END)"
+                        )
+                    except Exception:
+                        # Either the column is already DOUBLE PRECISION (no-op
+                        # already committed) or the alter genuinely failed; in
+                        # both cases roll back so subsequent statements work.
+                        conn.rollback()
                     conn.commit()
 
                     # Delete existing predictions for this date

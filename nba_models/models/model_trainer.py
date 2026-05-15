@@ -11,6 +11,7 @@ Implements machine learning models for NBA betting predictions:
 from __future__ import annotations
 
 import json
+import logging
 import pickle
 import warnings
 from datetime import datetime
@@ -5102,13 +5103,49 @@ class ModelTrainingPipeline:
         """Load all saved models."""
         model_files = list(MODEL_DIR.glob("*.pkl"))
 
+        # Legacy artifacts that pre-date the dict-payload pickle schema. These
+        # files contain bare class instances (StackingMetaLearner, PlattScaling,
+        # etc.) and produced "Warning: Error loading X: argument of type 'Y' is
+        # not iterable" spam at every API startup because the loader's dict
+        # checks below fail with TypeError on them. They're for disabled
+        # markets (spread, moneyline_stacking) per constants.py, so skipping
+        # them is correct — but we keep listing them here so adding new
+        # disabled artifacts is a one-line change rather than a re-debug.
+        legacy_disabled_artifacts = {
+            "spread_stacking",
+            "spread_stacking_baseline",
+            "spread_stacking_metalearner",
+            "spread_quantile",
+            "moneyline_stacking",
+            "moneyline_stacking_baseline",
+            "moneyline_stacking_metalearner",
+            "prop_platt_calibrator",
+        }
+
         for filepath in model_files:
             model_name = filepath.stem
+
+            if model_name in legacy_disabled_artifacts:
+                # Skip silently — these are intentionally retained on disk for
+                # rollback but should not be loaded into the live model dict.
+                logging.debug("Skipping legacy disabled artifact: %s", model_name)
+                continue
 
             try:
                 # First, try direct loading to check for ensemble/wrapper or prop models
                 with open(filepath, "rb") as f:
                     model_data = pickle.load(f)
+
+                # Defensive: many legacy pickles are bare class instances rather
+                # than dict payloads. Skip silently — `in` / .get() raise
+                # TypeError on non-dict objects and previously generated
+                # noisy "Warning: Error loading" messages at every startup.
+                if not isinstance(model_data, dict):
+                    logging.debug(
+                        "Skipping non-dict pickle payload: %s (type=%s)",
+                        model_name, type(model_data).__name__,
+                    )
+                    continue
 
                 # Check if this is a prop model FIRST (before ensemble check)
                 # Prop models have 'prop_type' key OR are named 'player_*'

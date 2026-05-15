@@ -1952,11 +1952,26 @@ def fetch_league_team_stats(season="2025-26"):
     Fetch league-wide team statistics for ranking and comparison.
 
     Args:
-        season: NBA season
+        season: NBA season string in "YYYY-YY" form (e.g., "2025-26")
 
     Returns:
-        List of team stats dictionaries
+        List of team stats dicts. Each dict is enriched with TEAM_ABBREVIATION
+        looked up from nba_api.stats.static.teams (the LeagueDashTeamStats
+        endpoint stopped returning that field, so we map TEAM_ID → abbrev
+        ourselves). Returns rows with DEF_RATING/OFF_RATING/PACE populated.
+
+    Notes (2026-05-15 audit):
+      - The default measure_type_detailed_defense='Base' returns only basic
+        counting stats. To get DEF_RATING/OFF_RATING/PACE we must explicitly
+        request 'Advanced'. Without this, every caller fell back to neutral
+        defaults (def_rating=114, pace=100) and every prediction's matchup
+        features were uninformative.
+      - TEAM_ABBREVIATION used to be a field on this response but was removed
+        upstream. Mapping TEAM_ID -> abbreviation via the static teams table
+        is the supported way (IDs are stable across seasons).
     """
+    from nba_api.stats.static import teams as _static_teams
+
     _nba_stats_circuit_breaker.check()
     _rate_limiter.wait()
 
@@ -1964,11 +1979,29 @@ def fetch_league_team_stats(season="2025-26"):
         league_stats = leaguedashteamstats.LeagueDashTeamStats(
             season=season,
             season_type_all_star="Regular Season",
-            per_mode_detailed="PerGame"
+            per_mode_detailed="PerGame",
+            measure_type_detailed_defense="Advanced",
         )
         stats_dict = league_stats.get_normalized_dict()
         _nba_stats_circuit_breaker.record_success()
-        return stats_dict.get("LeagueDashTeamStats", [])
+        rows = stats_dict.get("LeagueDashTeamStats", []) or []
+
+        # Build TEAM_ID -> abbreviation map once, then attach it to each row
+        # so callers that look up via TEAM_ABBREVIATION still work.
+        _id_to_abbrev = {
+            int(t['id']): t['abbreviation']
+            for t in _static_teams.get_teams()
+        }
+        for row in rows:
+            tid = row.get('TEAM_ID')
+            if tid is None:
+                continue
+            try:
+                row['TEAM_ABBREVIATION'] = _id_to_abbrev.get(int(tid), '')
+            except (TypeError, ValueError):
+                row['TEAM_ABBREVIATION'] = ''
+
+        return rows
     except CircuitBreakerOpenError:
         raise
     except Exception:

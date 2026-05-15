@@ -1372,10 +1372,23 @@ class DataService:
                                 'pts_allowed': round(float(team.get("DEF_RATING", 114.0)), 1),
                                 'source': 'nba_api',
                             }
-                        self._opponent_stats_cache = stats_cache
-                        self._opponent_stats_timestamp = datetime.now()
-                        used_nba_api = True
-                        print(f"Refreshed opponent stats from nba_api: {len(stats_cache)} teams")
+                        # Only treat the nba_api path as "used" if we actually
+                        # got per-team rows. Previously `used_nba_api = True`
+                        # was set unconditionally inside this branch, so when
+                        # every row was dropped (missing TEAM_ABBREVIATION
+                        # field after the upstream schema change) the BDL
+                        # fallback below was skipped — and matchup features
+                        # silently defaulted to neutral values for every prop.
+                        if stats_cache:
+                            self._opponent_stats_cache = stats_cache
+                            self._opponent_stats_timestamp = datetime.now()
+                            used_nba_api = True
+                            print(f"Refreshed opponent stats from nba_api: {len(stats_cache)} teams")
+                        else:
+                            print(
+                                "nba_api returned rows but none had usable "
+                                "TEAM_ABBREVIATION — falling back to BDL"
+                            )
                 except Exception as e:
                     print(f"nba_api opponent stats failed, trying BDL: {e}")
 
