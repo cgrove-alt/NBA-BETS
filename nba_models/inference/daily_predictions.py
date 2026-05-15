@@ -2641,16 +2641,71 @@ def predict_player_prop(
             if avg_minutes > 10 and predicted_minutes > 0:
                 # Use post-decompression predicted_value for consistent rate calculation.
                 # The rate should reflect the final predicted production level.
-                rate = predicted_value / avg_minutes
-                minutes_delta = rate * (predicted_minutes - avg_minutes)
-                adjusted_value = predicted_value + minutes_delta
+                #
+                # Rate source priority (audit 2026-05-15):
+                #   1. Direct recent_{prop}_per_min field if features expose it.
+                #      Computed in dashboard/data_service.py as
+                #      sum(stat) / sum(minutes) over filtered recent games —
+                #      structurally robust to minutes-restricted outliers
+                #      (a 12-min foul-out at low PRA contributes proportionally
+                #      to both numerator and denominator).
+                #   2. Fallback: predicted_value / avg_minutes, the legacy
+                #      heuristic that assumes the model's prediction was
+                #      computed at avg_minutes pace. This is what we used
+                #      before but it carries through any contamination present
+                #      in avg_minutes.
+                per_min_key_map = {
+                    'points':   'recent_pts_per_min',
+                    'rebounds': 'recent_reb_per_min',
+                    'assists':  'recent_ast_per_min',
+                    'threes':   'recent_fg3_per_min',
+                }
+                per_min_key = per_min_key_map.get(prop_type)
+                rate_source = 'legacy_pred_div_avg'
+                if per_min_key and features and features.get(per_min_key, 0) > 0:
+                    rate = features[per_min_key]
+                    rate_source = 'recent_per_min'
+                elif prop_type == 'pra' and features:
+                    pts_pm = features.get('recent_pts_per_min', 0) or 0
+                    reb_pm = features.get('recent_reb_per_min', 0) or 0
+                    ast_pm = features.get('recent_ast_per_min', 0) or 0
+                    if (pts_pm + reb_pm + ast_pm) > 0:
+                        rate = pts_pm + reb_pm + ast_pm
+                        rate_source = 'recent_per_min'
+                    else:
+                        rate = predicted_value / avg_minutes
+                else:
+                    rate = predicted_value / avg_minutes
 
-                # Cap minutes adjustment to ±15% of predicted value
-                max_adj = abs(predicted_value) * 0.15
+                if rate_source == 'recent_per_min':
+                    # Rate-based projection — predict directly from rate ×
+                    # expected minutes. Blend with the model's prediction so we
+                    # don't completely discard its non-minutes signal (matchup,
+                    # pace, role, etc.). Weight 0.6 toward the rate projection
+                    # for counting stats; the model still contributes 0.4 of
+                    # the final value.
+                    rate_projection = rate * predicted_minutes
+                    adjusted_value = 0.6 * rate_projection + 0.4 * predicted_value
+                    # Wider cap because this is a structural correction, not a
+                    # nudge: allow up to ±35% when rate-based projection
+                    # disagrees sharply with the model.
+                    max_adj = abs(predicted_value) * 0.35
+                else:
+                    minutes_delta = rate * (predicted_minutes - avg_minutes)
+                    adjusted_value = predicted_value + minutes_delta
+                    max_adj = abs(predicted_value) * 0.15  # legacy nudge cap
+
                 adjusted_value = max(predicted_value - max_adj, min(predicted_value + max_adj, adjusted_value))
 
                 # Only apply if adjustment is meaningful (>1% change)
                 if abs(adjusted_value - predicted_value) / max(abs(predicted_value), 0.1) > 0.01:
+                    logger.info(
+                        "Minutes-rate adjustment for %s %s (%s): "
+                        "%.2f -> %.2f (rate=%.4f, predicted_min=%.1f, avg_min=%.1f)",
+                        player_name, prop_type, rate_source,
+                        predicted_value, adjusted_value, rate,
+                        predicted_minutes, avg_minutes,
+                    )
                     predicted_value = adjusted_value
 
                     # Recalculate probability with adjusted value

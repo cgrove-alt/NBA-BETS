@@ -205,7 +205,7 @@ class MinutesFeatureGenerator:
         except (ValueError, TypeError):
             target_date = datetime.now()
 
-        valid_logs = []
+        loose_logs = []
         for log in game_logs:
             # Extract minutes
             mins = self._extract_minutes(log)
@@ -222,21 +222,33 @@ class MinutesFeatureGenerator:
                 except (ValueError, TypeError):
                     pass
 
-            valid_logs.append({
+            loose_logs.append({
                 'minutes': mins,
                 'date': log_date_str or ''  # Ensure never None for sorting
             })
 
-        if not valid_logs:
+        if not loose_logs:
             return features
 
         # Sort by date (most recent first) - use empty string for missing dates
-        valid_logs.sort(key=lambda x: x.get('date') or '', reverse=True)
+        loose_logs.sort(key=lambda x: x.get('date') or '', reverse=True)
+
+        # Two-pass filter (audit 2026-05-15): for rotation/starter players, drop
+        # sub-15-min outlier games when computing season_min_avg, recent_min_avg
+        # etc. Otherwise a single foul-out or blowout in the recent set
+        # systematically biases predicted_minutes downward — which then biases
+        # every downstream per-prop projection. Falls back to the loose set if
+        # the strict filter leaves <5 samples.
+        loose_min_avg = sum(log['minutes'] for log in loose_logs) / len(loose_logs)
+        strict_threshold = 15.0 if loose_min_avg >= 22 else 5.0
+        strict_logs = [log for log in loose_logs if log['minutes'] >= strict_threshold]
+        valid_logs = strict_logs if len(strict_logs) >= 5 else loose_logs
 
         # All minutes values
         all_mins = [log['minutes'] for log in valid_logs]
         features['games_played'] = len(all_mins)
         features['season_min_avg'] = np.mean(all_mins)
+        features['min_filter_threshold'] = strict_threshold
 
         # Recent games (last 5)
         recent_logs = valid_logs[:5]

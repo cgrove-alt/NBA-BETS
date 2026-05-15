@@ -1473,30 +1473,63 @@ class DataService:
             if not stats:
                 return {}
 
-            # Extract stat values from recent games
-            pts_values = []
-            reb_values = []
-            ast_values = []
-            fg3_values = []  # 3PM (makes)
-            fg3a_values = []  # 3PA (attempts) - for volume context
-            min_values = []
+            # Extract stat values from recent games.
+            #
+            # Filter strategy (2026-05-15 audit, ref: Wembanyama UNDER 44.5 PRA
+            # case): the old `mins > 5` threshold included sub-15-min
+            # early-exit games for rotation players, dragging their recent
+            # averages down. We now apply a two-pass filter:
+            #   1. Loose pass (>5 min) to learn the player's typical workload
+            #   2. If typical avg is rotation/starter tier (>=22 min), re-filter
+            #      to mins>=15 so sub-15 outliers (blowouts, foul trouble,
+            #      injury managment) don't contaminate stats counting on top
+            #      of the per-minute rate. Falls back to the loose set if
+            #      that leaves <3 games.
+            # Per-minute totals are tracked separately so downstream callers
+            # can do rate-based projection (stat_total / min_total) which is
+            # robust to minutes-restricted outliers by construction.
+            pts_values: list[float] = []
+            reb_values: list[float] = []
+            ast_values: list[float] = []
+            fg3_values: list[float] = []
+            fg3a_values: list[float] = []
+            min_values: list[float] = []
 
+            loose_rows: list[dict] = []
             for game_stat in stats[:num_games]:
                 pts = game_stat.get('pts', 0) or 0
                 reb = game_stat.get('reb', 0) or 0
                 ast = game_stat.get('ast', 0) or 0
                 fg3m = game_stat.get('fg3m', 0) or 0
-                fg3a = game_stat.get('fg3a', 0) or 0  # 3-point attempts
+                fg3a = game_stat.get('fg3a', 0) or 0
                 mins = _parse_minutes(game_stat.get('min', 0))
-
-                # Only include games where player actually played
                 if mins > 5:
-                    pts_values.append(pts)
-                    reb_values.append(reb)
-                    ast_values.append(ast)
-                    fg3_values.append(fg3m)
-                    fg3a_values.append(fg3a)
-                    min_values.append(mins)
+                    loose_rows.append({
+                        'pts': pts, 'reb': reb, 'ast': ast,
+                        'fg3m': fg3m, 'fg3a': fg3a, 'mins': mins,
+                    })
+
+            # Decide threshold based on the loose set's average workload.
+            loose_min_avg = (
+                sum(r['mins'] for r in loose_rows) / len(loose_rows)
+                if loose_rows else 0
+            )
+            min_filter_threshold = 15.0 if loose_min_avg >= 22 else 5.0
+            strict_rows = [r for r in loose_rows if r['mins'] >= min_filter_threshold]
+
+            # Use the stricter set only if it has enough samples to be reliable.
+            chosen_rows = strict_rows if len(strict_rows) >= 3 else loose_rows
+            recent_minutes_filtered_outliers = (
+                len(loose_rows) > len(chosen_rows)
+            )
+
+            for r in chosen_rows:
+                pts_values.append(r['pts'])
+                reb_values.append(r['reb'])
+                ast_values.append(r['ast'])
+                fg3_values.append(r['fg3m'])
+                fg3a_values.append(r['fg3a'])
+                min_values.append(r['mins'])
 
             if not pts_values:
                 return {}
@@ -1544,6 +1577,20 @@ class DataService:
             min_consistency = 1 - (min_std / max(avg_min, 1)) if avg_min > 0 else 0.7
             min_consistency = max(0.3, min(1.0, min_consistency))
 
+            # Per-minute rates — robust to minutes-restricted outliers by
+            # construction (totals/totals, not avg of averages). Downstream
+            # projection: predicted_stat = rate * predicted_minutes.
+            total_mins = sum(min_values) if min_values else 0.0
+            if total_mins > 0:
+                pts_per_min = sum(pts_values) / total_mins
+                reb_per_min = sum(reb_values) / total_mins
+                ast_per_min = sum(ast_values) / total_mins
+                fg3_per_min = sum(fg3_values) / total_mins
+                fg3a_per_min = sum(fg3a_values) / total_mins
+            else:
+                pts_per_min = reb_per_min = ast_per_min = 0.0
+                fg3_per_min = fg3a_per_min = 0.0
+
             result = {
                 'recent_pts_avg': round(avg_pts, 1),
                 'recent_reb_avg': round(avg_reb, 1),
@@ -1551,6 +1598,15 @@ class DataService:
                 'recent_fg3_avg': round(avg_fg3, 1),
                 'recent_fg3a_avg': round(avg_fg3a, 1),  # 3PA for volume context
                 'recent_min_avg': round(avg_min, 1),
+                # Per-minute rates (audit 2026-05-15) — primary signal for
+                # rate-based projection: predicted = rate × predicted_minutes.
+                'recent_pts_per_min': round(pts_per_min, 4),
+                'recent_reb_per_min': round(reb_per_min, 4),
+                'recent_ast_per_min': round(ast_per_min, 4),
+                'recent_fg3_per_min': round(fg3_per_min, 4),
+                'recent_fg3a_per_min': round(fg3a_per_min, 4),
+                'recent_minutes_filter_threshold': min_filter_threshold,
+                'recent_minutes_filtered_outliers': recent_minutes_filtered_outliers,
                 'pts_trend': round(pts_trend, 1),
                 'reb_trend': round(reb_trend, 1),
                 'ast_trend': round(ast_trend, 1),
@@ -2584,25 +2640,46 @@ class DataService:
                             reverse=True
                         )
 
-                        # Filter to games where player actually played (>5 min)
-                        played_games = []
+                        # Two-pass filter to exclude minutes-restricted outlier
+                        # games for rotation/starter players (audit 2026-05-15,
+                        # Wembanyama case). See _get_recent_player_stats for
+                        # the same logic — kept in sync deliberately because
+                        # callers expect the same recent_*_avg semantics.
+                        loose_rows = []
                         for g in games:
                             mins = _parse_minutes(g.get('min', 0))
                             if mins > 5:
-                                played_games.append(g)
-                            if len(played_games) >= 5:
+                                loose_rows.append({
+                                    'pts': g.get('pts', 0) or 0,
+                                    'reb': g.get('reb', 0) or 0,
+                                    'ast': g.get('ast', 0) or 0,
+                                    'fg3m': g.get('fg3m', 0) or 0,
+                                    'fg3a': g.get('fg3a', 0) or 0,
+                                    'mins': mins,
+                                })
+                            if len(loose_rows) >= 10:
                                 break
 
-                        if not played_games:
+                        if not loose_rows:
                             continue
 
-                        # Extract stat arrays
-                        pts_vals = [g.get('pts', 0) or 0 for g in played_games]
-                        reb_vals = [g.get('reb', 0) or 0 for g in played_games]
-                        ast_vals = [g.get('ast', 0) or 0 for g in played_games]
-                        fg3_vals = [g.get('fg3m', 0) or 0 for g in played_games]
-                        fg3a_vals = [g.get('fg3a', 0) or 0 for g in played_games]
-                        min_vals = [_parse_minutes(g.get('min', 0)) for g in played_games]
+                        loose_min_avg = (
+                            sum(r['mins'] for r in loose_rows) / len(loose_rows)
+                        )
+                        min_filter_threshold = 15.0 if loose_min_avg >= 22 else 5.0
+                        strict_rows = [r for r in loose_rows if r['mins'] >= min_filter_threshold]
+                        played_rows = strict_rows if len(strict_rows) >= 3 else loose_rows
+                        played_rows = played_rows[:5]  # cap at most recent 5
+                        recent_minutes_filtered_outliers = (
+                            len(loose_rows) > len(played_rows)
+                        )
+
+                        pts_vals = [r['pts'] for r in played_rows]
+                        reb_vals = [r['reb'] for r in played_rows]
+                        ast_vals = [r['ast'] for r in played_rows]
+                        fg3_vals = [r['fg3m'] for r in played_rows]
+                        fg3a_vals = [r['fg3a'] for r in played_rows]
+                        min_vals = [r['mins'] for r in played_rows]
 
                         avg_pts = sum(pts_vals) / len(pts_vals)
                         avg_reb = sum(reb_vals) / len(reb_vals)
@@ -2632,6 +2709,18 @@ class DataService:
                         min_consistency = 1 - (min_std / max(avg_min, 1)) if avg_min > 0 else 0.7
                         min_consistency = max(0.3, min(1.0, min_consistency))
 
+                        # Per-minute rates (audit 2026-05-15)
+                        total_mins_b = sum(min_vals) if min_vals else 0.0
+                        if total_mins_b > 0:
+                            pts_per_min_b = sum(pts_vals) / total_mins_b
+                            reb_per_min_b = sum(reb_vals) / total_mins_b
+                            ast_per_min_b = sum(ast_vals) / total_mins_b
+                            fg3_per_min_b = sum(fg3_vals) / total_mins_b
+                            fg3a_per_min_b = sum(fg3a_vals) / total_mins_b
+                        else:
+                            pts_per_min_b = reb_per_min_b = ast_per_min_b = 0.0
+                            fg3_per_min_b = fg3a_per_min_b = 0.0
+
                         result = {
                             'recent_pts_avg': round(avg_pts, 1),
                             'recent_reb_avg': round(avg_reb, 1),
@@ -2639,6 +2728,13 @@ class DataService:
                             'recent_fg3_avg': round(avg_fg3, 1),
                             'recent_fg3a_avg': round(avg_fg3a, 1),
                             'recent_min_avg': round(avg_min, 1),
+                            'recent_pts_per_min': round(pts_per_min_b, 4),
+                            'recent_reb_per_min': round(reb_per_min_b, 4),
+                            'recent_ast_per_min': round(ast_per_min_b, 4),
+                            'recent_fg3_per_min': round(fg3_per_min_b, 4),
+                            'recent_fg3a_per_min': round(fg3a_per_min_b, 4),
+                            'recent_minutes_filter_threshold': min_filter_threshold,
+                            'recent_minutes_filtered_outliers': recent_minutes_filtered_outliers,
                             'pts_trend': pts_trend,
                             'reb_trend': reb_trend,
                             'ast_trend': ast_trend,
