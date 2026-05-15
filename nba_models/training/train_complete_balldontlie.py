@@ -155,6 +155,12 @@ REDUCED_FEATURES: dict[str, list[str]] = {
         # Player averages
         'season_pts_avg', 'last5_pts_avg', 'last3_pts_avg', 'recent_pts_avg',
         'season_min_avg', 'last5_min_avg', 'predicted_minutes',
+        # Per-minute rate (audit 2026-05-15): sum(pts)/sum(min) over the recent
+        # window. Robust to minutes-restricted outliers — a 12-min foul-out
+        # contributes proportionally to both numerator and denominator.
+        # Pairing this with predicted_minutes gives the model a clean
+        # rate-based projection signal that averages-of-counts can't express.
+        'recent_pts_per_min',
         # Efficiency
         'usage_rate', 'ts_pct',
         # Trends
@@ -179,6 +185,8 @@ REDUCED_FEATURES: dict[str, list[str]] = {
         # Player averages
         'season_reb_avg', 'last5_reb_avg', 'last3_reb_avg', 'recent_reb_avg',
         'season_min_avg', 'last5_min_avg', 'predicted_minutes',
+        # Per-minute rate (audit 2026-05-15) — see 'points' for rationale.
+        'recent_reb_per_min',
         # Rebound splits (2.3)
         'season_oreb_avg', 'season_dreb_avg', 'last5_oreb_avg', 'last5_dreb_avg',
         'oreb_fraction', 'dreb_fraction', 'reb_volatility', 'is_low_confidence_rebounds',
@@ -207,6 +215,8 @@ REDUCED_FEATURES: dict[str, list[str]] = {
         # Player averages
         'season_ast_avg', 'last5_ast_avg', 'last3_ast_avg', 'recent_ast_avg',
         'season_min_avg', 'last5_min_avg', 'predicted_minutes',
+        # Per-minute rate (audit 2026-05-15) — see 'points' for rationale.
+        'recent_ast_per_min',
         # Trends
         'ast_trend', 'ast_recency_ratio', 'season_games',
         # Position
@@ -232,6 +242,9 @@ REDUCED_FEATURES: dict[str, list[str]] = {
         'last5_pts_avg', 'last5_reb_avg', 'last5_ast_avg',
         'pra_avg', 'last3_pra_avg', 'season_min_avg', 'last5_min_avg',
         'predicted_minutes',
+        # Per-minute rates (audit 2026-05-15) — all three components, the
+        # model can sum them implicitly. See 'points' for rationale.
+        'recent_pts_per_min', 'recent_reb_per_min', 'recent_ast_per_min',
         # Efficiency
         'usage_rate',
         # Opponent defense (2.1)
@@ -7061,6 +7074,40 @@ def main():
         print("  Bias correction recalibration complete.")
     except Exception as e:
         print(f"  Warning: Bias correction recalibration failed: {e}")
+
+    # Post-retrain: refit the minutes oracle on the same data.
+    #
+    # Minutes oracle has its OWN training pipeline (minutes_trainer.py) and
+    # writes to models/minutes_oracle.pkl. Without this hook the oracle stays
+    # frozen at whatever it was last trained on — meaning fixes to feature
+    # generation (e.g., the audit 2026-05-15 mins>=15 starter filter in
+    # minutes_features.py) only affect inference-time feature production,
+    # while the trained weights remain fit to the contaminated old features.
+    # Refit so trainer and inference use the same feature semantics.
+    print("\n  Retraining minutes oracle on refreshed features...")
+    try:
+        import subprocess
+        minutes_trainer = os.path.join(
+            _project_root, "minutes_oracle", "minutes_trainer.py"
+        )
+        # Trainer can take 5-20 min depending on data volume; cap at 30 min so
+        # it can't hang the post-train flow indefinitely.
+        result = subprocess.run(
+            [sys.executable, minutes_trainer, "--quiet"],
+            timeout=1800,
+            check=False,
+        )
+        if result.returncode == 0:
+            print("  Minutes oracle retrain complete.")
+        else:
+            print(
+                f"  Warning: Minutes oracle retrain exited with code "
+                f"{result.returncode} — keeping previous oracle weights."
+            )
+    except subprocess.TimeoutExpired:
+        print("  Warning: Minutes oracle retrain timed out after 30 min.")
+    except Exception as e:
+        print(f"  Warning: Minutes oracle retrain failed: {e}")
 
     print("\n" + "="*60)
     print("All models saved to 'models/' directory")

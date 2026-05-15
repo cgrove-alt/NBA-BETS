@@ -1456,8 +1456,19 @@ class DataService:
         if not self.balldontlie or not player_id:
             return {}
 
-        # Check cache first (1 hour TTL for recent stats)
-        cache_key = f"recent_stats_{player_id}"
+        # Check cache first (1 hour TTL for recent stats).
+        #
+        # The version suffix forces cache invalidation when the payload schema
+        # changes — bump it any time you add/rename fields in the returned
+        # dict. Without this, old cached entries (lacking new fields like
+        # recent_pts_per_min) keep serving until TTL expires, silently
+        # degrading downstream consumers that read the new fields.
+        #
+        # Schema versions:
+        #   v1 (initial): recent_*_avg + trends + stds
+        #   v2 (2026-05-15): added recent_*_per_min, recent_minutes_filter_threshold,
+        #                    recent_minutes_filtered_outliers; two-pass mins filter
+        cache_key = f"recent_stats_v2_{player_id}"
         if use_cache:
             cached = self.cache.get(cache_key)
             if cached:
@@ -2750,8 +2761,10 @@ class DataService:
                         }
                         recent_stats_by_player[pid] = result
 
-                        # Also populate the cache so other code paths benefit
-                        cache_key = f"recent_stats_{pid}"
+                        # Also populate the cache so other code paths benefit.
+                        # Key uses the v2 suffix to match _get_recent_player_stats
+                        # — see the comment there for schema versioning policy.
+                        cache_key = f"recent_stats_v2_{pid}"
                         self.cache.set(cache_key, result, "player_stats")
 
                     print(f"Background: Computed real recent stats for {len(recent_stats_by_player)} players", flush=True)

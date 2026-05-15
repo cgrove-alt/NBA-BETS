@@ -2157,6 +2157,93 @@ def get_player_props_hybrid(
     return props, source_used
 
 
+# Mapping from prop type to its per-minute rate feature name. Kept at module
+# scope so the test suite can target it without reimplementing the schema.
+# Naming convention matches the rest of the codebase: recent_fg3m_* uses 'm'
+# explicitly to mean "made" (as opposed to "attempted").
+_PER_MIN_KEY_MAP = {
+    'points':   'recent_pts_per_min',
+    'rebounds': 'recent_reb_per_min',
+    'assists':  'recent_ast_per_min',
+    'threes':   'recent_fg3m_per_min',
+}
+
+# Blend weights for rate-based projection (audit 2026-05-15). Weight 0.6 toward
+# the rate × predicted_minutes projection; the model retains 0.4 weight so
+# non-minutes signals (matchup, pace, role) still influence the output. These
+# are hand-picked and have NOT been backtested — listed here as named
+# constants so they can be swept against historical data and rotated as one.
+_RATE_PROJECTION_WEIGHT = 0.6
+_MODEL_PROJECTION_WEIGHT = 0.4
+
+# Cap on the magnitude of the adjustment, expressed as a fraction of
+# predicted_value. The rate-based path uses a wider cap because it's a
+# structural correction; the legacy heuristic uses a narrower nudge cap.
+_RATE_PROJECTION_MAX_ADJ_FRAC = 0.35
+_LEGACY_NUDGE_MAX_ADJ_FRAC = 0.15
+
+
+def _compute_minutes_rate_adjustment(
+    predicted_value: float,
+    avg_minutes: float,
+    predicted_minutes: float,
+    prop_type: str,
+    features: dict | None,
+) -> tuple[float, str, float]:
+    """Adjust a model prediction for tonight's expected minutes.
+
+    Returns (adjusted_value, rate_source, rate). rate_source is one of:
+      - 'recent_per_min': features carry recent_{stat}_per_min for this prop;
+        adjusted = 0.6 * (rate * predicted_minutes) + 0.4 * predicted_value,
+        clamped to ±35% of predicted_value.
+      - 'legacy_pred_div_avg': falls back to legacy linear scaling
+        (rate = predicted_value / avg_minutes), nudge capped at ±15%.
+
+    Pure function so tests can drive every branch without touching the model.
+    """
+    # Branch 1: per-minute rate for direct-stat props.
+    per_min_key = _PER_MIN_KEY_MAP.get(prop_type)
+    rate: float = 0.0
+    rate_source = 'legacy_pred_div_avg'
+    if per_min_key and features and (features.get(per_min_key) or 0) > 0:
+        rate = float(features[per_min_key])
+        rate_source = 'recent_per_min'
+    elif prop_type == 'pra' and features:
+        pts_pm = float(features.get('recent_pts_per_min') or 0)
+        reb_pm = float(features.get('recent_reb_per_min') or 0)
+        ast_pm = float(features.get('recent_ast_per_min') or 0)
+        total_pm = pts_pm + reb_pm + ast_pm
+        if total_pm > 0:
+            rate = total_pm
+            rate_source = 'recent_per_min'
+
+    if rate_source == 'legacy_pred_div_avg':
+        # avg_minutes is the model's implicit pace baseline. Without that we
+        # have nothing to scale against — return the model prediction unchanged.
+        if avg_minutes <= 0:
+            return predicted_value, rate_source, 0.0
+        rate = predicted_value / avg_minutes
+        minutes_delta = rate * (predicted_minutes - avg_minutes)
+        adjusted = predicted_value + minutes_delta
+        max_adj = abs(predicted_value) * _LEGACY_NUDGE_MAX_ADJ_FRAC
+    else:
+        rate_projection = rate * predicted_minutes
+        adjusted = (
+            _RATE_PROJECTION_WEIGHT * rate_projection
+            + _MODEL_PROJECTION_WEIGHT * predicted_value
+        )
+        max_adj = abs(predicted_value) * _RATE_PROJECTION_MAX_ADJ_FRAC
+
+    # Symmetric cap relative to predicted_value
+    lo = predicted_value - max_adj
+    hi = predicted_value + max_adj
+    if adjusted < lo:
+        adjusted = lo
+    elif adjusted > hi:
+        adjusted = hi
+    return adjusted, rate_source, rate
+
+
 def predict_player_prop(
     player_name: str,
     player_id: int,
@@ -2642,65 +2729,13 @@ def predict_player_prop(
                 # Use post-decompression predicted_value for consistent rate calculation.
                 # The rate should reflect the final predicted production level.
                 #
-                # Rate source priority (audit 2026-05-15):
-                #   1. Direct recent_{prop}_per_min field if features expose it.
-                #      Computed in dashboard/data_service.py as
-                #      sum(stat) / sum(minutes) over filtered recent games —
-                #      structurally robust to minutes-restricted outliers
-                #      (a 12-min foul-out at low PRA contributes proportionally
-                #      to both numerator and denominator).
-                #   2. Fallback: predicted_value / avg_minutes, the legacy
-                #      heuristic that assumes the model's prediction was
-                #      computed at avg_minutes pace. This is what we used
-                #      before but it carries through any contamination present
-                #      in avg_minutes.
-                # Key naming matches the codebase convention: recent_fg3m_*
-                # for 3-pointers made (fg3 alone is ambiguous between made/att).
-                # PlayerStatsCalculator.get_player_stats_before_date populates
-                # these; dashboard/data_service.py populates the same keys in
-                # its recent-stats payload.
-                per_min_key_map = {
-                    'points':   'recent_pts_per_min',
-                    'rebounds': 'recent_reb_per_min',
-                    'assists':  'recent_ast_per_min',
-                    'threes':   'recent_fg3m_per_min',
-                }
-                per_min_key = per_min_key_map.get(prop_type)
-                rate_source = 'legacy_pred_div_avg'
-                if per_min_key and features and features.get(per_min_key, 0) > 0:
-                    rate = features[per_min_key]
-                    rate_source = 'recent_per_min'
-                elif prop_type == 'pra' and features:
-                    pts_pm = features.get('recent_pts_per_min', 0) or 0
-                    reb_pm = features.get('recent_reb_per_min', 0) or 0
-                    ast_pm = features.get('recent_ast_per_min', 0) or 0
-                    if (pts_pm + reb_pm + ast_pm) > 0:
-                        rate = pts_pm + reb_pm + ast_pm
-                        rate_source = 'recent_per_min'
-                    else:
-                        rate = predicted_value / avg_minutes
-                else:
-                    rate = predicted_value / avg_minutes
-
-                if rate_source == 'recent_per_min':
-                    # Rate-based projection — predict directly from rate ×
-                    # expected minutes. Blend with the model's prediction so we
-                    # don't completely discard its non-minutes signal (matchup,
-                    # pace, role, etc.). Weight 0.6 toward the rate projection
-                    # for counting stats; the model still contributes 0.4 of
-                    # the final value.
-                    rate_projection = rate * predicted_minutes
-                    adjusted_value = 0.6 * rate_projection + 0.4 * predicted_value
-                    # Wider cap because this is a structural correction, not a
-                    # nudge: allow up to ±35% when rate-based projection
-                    # disagrees sharply with the model.
-                    max_adj = abs(predicted_value) * 0.35
-                else:
-                    minutes_delta = rate * (predicted_minutes - avg_minutes)
-                    adjusted_value = predicted_value + minutes_delta
-                    max_adj = abs(predicted_value) * 0.15  # legacy nudge cap
-
-                adjusted_value = max(predicted_value - max_adj, min(predicted_value + max_adj, adjusted_value))
+                adjusted_value, rate_source, rate = _compute_minutes_rate_adjustment(
+                    predicted_value=predicted_value,
+                    avg_minutes=avg_minutes,
+                    predicted_minutes=predicted_minutes,
+                    prop_type=prop_type,
+                    features=features,
+                )
 
                 # Only apply if adjustment is meaningful (>1% change)
                 if abs(adjusted_value - predicted_value) / max(abs(predicted_value), 0.1) > 0.01:

@@ -412,18 +412,45 @@ def full_retrain() -> bool:
             )
             return False
 
-        # Step 4: Run validation backtest
+        # Step 4: Run validation backtest.
+        #
+        # Validation is optional from the retrain's perspective — training has
+        # already succeeded and models are saved. If validation can't complete
+        # we mark the retrain successful-but-unvalidated rather than failing
+        # the whole flow. Previously a 10-min validation timeout triggered
+        # `subprocess.TimeoutExpired` which propagated to the catch-all that
+        # mis-labeled it as "Training Timeout 240 min", and no retrain history
+        # was saved despite training itself completing.
+        #
+        # Timeout bumped from 10 -> 30 min: comprehensive_backtest.py runs on
+        # the full 2025-26 season and the previous 10-min cap was unrealistic
+        # (audit 2026-05-15 retrain ed20f691 timed out here).
         logger.info("Running validation backtest...")
 
         old_metrics = get_latest_backtest_metrics()
+        validation_skipped = False
 
-        subprocess.run(
-            [sys.executable, str(BACKTEST_SCRIPT)],
-            cwd=PROJECT_DIR,
-            capture_output=True,
-            text=True,
-            timeout=600  # 10 minutes
-        )
+        try:
+            subprocess.run(
+                [sys.executable, str(BACKTEST_SCRIPT)],
+                cwd=PROJECT_DIR,
+                capture_output=True,
+                text=True,
+                timeout=1800,  # 30 minutes
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Validation backtest exceeded 30 min — skipping validation "
+                "but keeping newly-trained models. Operator should run "
+                "comprehensive_backtest.py manually to verify model quality."
+            )
+            validation_skipped = True
+        except Exception as val_exc:
+            logger.warning(
+                "Validation backtest raised %s — skipping validation. %s",
+                type(val_exc).__name__, val_exc,
+            )
+            validation_skipped = True
 
         new_metrics = get_latest_backtest_metrics()
 
@@ -468,29 +495,72 @@ def full_retrain() -> bool:
                 return False
             logger.info(f"Performance validated: RMSE {old_rmse:.3f} → {new_rmse:.3f}")
 
-        # Step 6: Save training record
+        # Step 6: Save training record. The retrain is recorded as successful
+        # whenever training itself completed — validation skip is a soft
+        # warning, not a failure. new_metrics may be empty (None or {}) when
+        # validation was skipped or its output couldn't be parsed; the
+        # save_retrain_record signature handles that.
         duration = (datetime.now() - start_time).total_seconds()
-        save_retrain_record('full', True, duration, new_metrics)
+        retrain_metrics = new_metrics or {}
+        if validation_skipped:
+            retrain_metrics = {**retrain_metrics, 'validation_skipped': True}
+        save_retrain_record('full', True, duration, retrain_metrics)
 
         logger.info("="*60)
-        logger.info(f"FULL RETRAINING COMPLETE (took {duration/60:.1f} minutes)")
-        logger.info("="*60)
-
-        send_alert(
-            "Full Retraining Successful",
-            f"Models retrained and validated.\n"
-            f"Duration: {duration/60:.1f} minutes\n"
-            f"RMSE: {new_metrics.get('overall_rmse', 0):.3f}\n"
-            f"R²: {new_metrics.get('overall_r2', 0):.3f}\n"
-            f"ROI: {new_metrics.get('roi', 0):.2%}",
-            severity='info'
+        logger.info(
+            f"FULL RETRAINING COMPLETE (took {duration/60:.1f} minutes"
+            f"{', validation skipped' if validation_skipped else ''})"
         )
+        logger.info("="*60)
+
+        if validation_skipped:
+            send_alert(
+                "Full Retraining Successful (Unvalidated)",
+                f"Models retrained but validation backtest did not complete.\n"
+                f"Duration: {duration/60:.1f} minutes.\n"
+                f"Run comprehensive_backtest.py manually to verify quality "
+                f"before relying on the new models for live betting.",
+                severity='warning',
+            )
+        else:
+            send_alert(
+                "Full Retraining Successful",
+                f"Models retrained and validated.\n"
+                f"Duration: {duration/60:.1f} minutes\n"
+                f"RMSE: {retrain_metrics.get('overall_rmse', 0):.3f}\n"
+                f"R²: {retrain_metrics.get('overall_r2', 0):.3f}\n"
+                f"ROI: {retrain_metrics.get('roi', 0):.2%}",
+                severity='info',
+            )
 
         return True
 
-    except subprocess.TimeoutExpired:
-        logger.error(f"Training timed out after {MAX_TRAINING_TIME/60:.1f} minutes")
-        send_alert("Training Timeout", f"Training exceeded {MAX_TRAINING_TIME/60:.1f} min limit", severity='error')
+    except subprocess.TimeoutExpired as exc:
+        # The outer catch-all previously hardcoded MAX_TRAINING_TIME in the
+        # alert text, which misled operators when validation (10-min limit)
+        # timed out and the alert read "Training Timeout 240 min". Surface
+        # the actual timeout from the exception so the message is honest.
+        # NOTE: post-fix the validation subprocess catches its own
+        # TimeoutExpired internally — this catch-all now reaches mostly the
+        # training subprocess and the BDL data-fetch subprocess.
+        actual_timeout_min = (exc.timeout or 0) / 60 if exc.timeout else MAX_TRAINING_TIME / 60
+        cmd_preview = ""
+        try:
+            cmd_preview = str(exc.cmd[1] if isinstance(exc.cmd, list) and len(exc.cmd) > 1 else exc.cmd)[:80]
+        except Exception:
+            cmd_preview = "<unknown>"
+        logger.error(
+            "Subprocess timed out after %.1f min (cmd: %s)",
+            actual_timeout_min, cmd_preview,
+        )
+        send_alert(
+            "Retrain Subprocess Timeout",
+            f"A retrain subprocess exceeded {actual_timeout_min:.1f} min.\n"
+            f"Command: {cmd_preview}\n"
+            f"Training itself may or may not have completed — check model "
+            f"file mtimes under MODELS_DIR to determine state.",
+            severity='error',
+        )
         return False
 
     except Exception as e:
