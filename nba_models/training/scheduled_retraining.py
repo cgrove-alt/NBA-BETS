@@ -62,13 +62,27 @@ except ImportError as exc:
     EVENT_JOB_EXECUTED = 0
     EVENT_JOB_ERROR = 0
 
-# Configuration — resolve project root by walking up to the .git directory
+# Configuration — resolve project root.
+#
+# This file lives at <repo>/nba_models/training/scheduled_retraining.py, so the
+# repo root is exactly two parents up. Previously we walked up looking for a
+# `.git` directory, but `.git` is NOT shipped in Railway/Docker container
+# builds — so the walk silently fell back to `<this_dir>` (=
+# /app/nba_models/training), pointing MODELS_DIR at a shadow directory the
+# API never reads from. Every retrain on Railway since the .git-walking logic
+# landed has been writing models to /app/nba_models/training/models/ while
+# the API kept serving stale models from /app/models/.
+#
+# Resolution order:
+#   1. NBA_BETS_ROOT env var (escape hatch for non-standard layouts)
+#   2. fixed two-parent walk from __file__ (the true layout)
 _this_dir = Path(__file__).resolve().parent
-PROJECT_DIR = _this_dir
-for _p in (_this_dir, _this_dir.parent, _this_dir.parent.parent, _this_dir.parent.parent.parent):
-    if (_p / ".git").exists():
-        PROJECT_DIR = _p
-        break
+_env_root = os.environ.get("NBA_BETS_ROOT")
+if _env_root and Path(_env_root).is_dir():
+    PROJECT_DIR = Path(_env_root).resolve()
+else:
+    # /app/nba_models/training -> /app
+    PROJECT_DIR = _this_dir.parent.parent
 
 MODELS_DIR = PROJECT_DIR / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)

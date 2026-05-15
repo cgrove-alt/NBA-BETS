@@ -1974,9 +1974,20 @@ def main():
 
     backtester.generate_report(results)
 
-    # Save results for further analysis
+    # Save results for further analysis.
+    #
+    # Write into <repo>/backtest_results/ using an absolute path. The
+    # validation step in nba_models/training/scheduled_retraining.py looks for
+    # the most recently modified JSON in that directory; previously this
+    # script wrote to a cwd-relative file at <cwd>/backtest_results_*.json,
+    # so the retrain validation step never actually found its own backtest
+    # output and silently reported zero metrics on every run. Resolved by
+    # deriving the path from this file's location so it doesn't depend on cwd.
     suffix = "_quick" if args.quick else ""
-    output_file = Path(f"backtest_results_{args.season}{suffix}.json")
+    _repo_root = Path(__file__).resolve().parent.parent.parent
+    _results_dir = _repo_root / "backtest_results"
+    _results_dir.mkdir(parents=True, exist_ok=True)
+    output_file = _results_dir / f"backtest_results_{args.season}{suffix}.json"
     output_data = {
         'games_processed': results.games_processed,
         'games_with_errors': results.games_with_errors,
