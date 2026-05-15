@@ -1,0 +1,15 @@
+{
+  "_doc": "Per-prop additive bias correction. Values are the NEGATIVE of the measured aggregate bias on the full prediction sample (not betting sample) from the most recent OOS walk-forward backtest. Applied as: z_score = (predicted_value + correction - line) / sigma. Regenerate with: python3 scripts/recalibrate_prop_bias.py",
+  "_source": "data/backtest_results/oos_walkforward_results.json",
+  "_source_run_date": "2026-03-22T13:13:35",
+  "_aggregate_n_predictions": 16621,
+  "_generated_at": "2026-05-15T12:36:00",
+  "_method": "negative of aggregate.by_prop_type.{prop}.bias",
+  "corrections": {
+    "points":   -0.774,
+    "rebounds": -0.259,
+    "assists":  -0.049,
+    "threes":    0.0,
+    "pra":      -0.814
+  }
+}

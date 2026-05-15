@@ -2174,6 +2174,8 @@ def predict_player_prop(
     american_odds: int = -110,  # Phase 4: actual odds for edge calc
     under_odds: int = None,  # Phase 4: under side odds for devigging
     opp_stats: dict = None,  # Real opponent defensive stats
+    minutes_multiplier: float = 1.0,  # Lineup-intel cap (e.g., 0.65 = ≤65% of usual)
+    availability_probability: float = 1.0,  # Lineup-intel availability (0-1)
 ) -> dict:
     """
     Predict over/under probability for a player prop.
@@ -2242,11 +2244,39 @@ def predict_player_prop(
                 _critical_keys = {'season_min_avg', 'days_rest', 'opp_def_rating'}
                 _has_critical = sum(1 for k in _critical_keys if features.get(k) is not None)
                 if _has_critical < 2:
-                    logger.debug(
-                        "Incomplete features for %s %s (%d fields, missing critical keys) — skipping",
-                        player_name, prop_type, len(features),
+                    logger.warning(
+                        "Incomplete features for %s %s (%d fields, %d/3 critical keys "
+                        "present) — skipping. Likely cause: circuit breaker open or "
+                        "BDL throttling.",
+                        player_name, prop_type, len(features), _has_critical,
                     )
                     return None
+
+                # Feature-quality flag: derive the expected feature count from
+                # the *model's own* feature_names so the threshold works after
+                # feature-reduction retrains (Phase 1.1 cut some props to ~80
+                # features). Mark degraded only when fewer than 75% of the
+                # model's expected features are populated with non-None values.
+                # Fallback to a generous expected count of 60 when the model
+                # doesn't expose its feature list — keeps the warning useful
+                # without false positives on legitimately compact models.
+                _expected_features: list[str] = []
+                if isinstance(model_data, dict):
+                    _expected_features = list(model_data.get('feature_names') or [])
+                _expected_count = max(60, len(_expected_features))
+                _populated_count = sum(
+                    1 for k in (_expected_features or features.keys())
+                    if features.get(k) is not None
+                )
+                _coverage = _populated_count / _expected_count if _expected_count else 1.0
+                _feature_quality = 'full' if _coverage >= 0.75 else 'degraded'
+                if _feature_quality == 'degraded':
+                    logger.warning(
+                        "Degraded feature set for %s %s: %d/%d fields "
+                        "populated (%.0f%% coverage, threshold 75%%)",
+                        player_name, prop_type,
+                        _populated_count, _expected_count, _coverage * 100,
+                    )
 
                 # Inject prop_line features. After the next retrain, models will no
                 # longer include prop_line or prop_line_vs_season in their feature_names
@@ -2591,6 +2621,18 @@ def predict_player_prop(
 
             predicted_minutes = minutes_dist.get('p50', avg_minutes)
 
+            # Apply lineup-intel minutes_multiplier BEFORE the DNP gate so a
+            # restricted player (e.g., 0.6 multiplier on a 30-min average) gets
+            # the correct 18-minute projection instead of 30. The multiplier
+            # only narrows minutes (never expands), and we floor it at 0.3 to
+            # guard against bad scraper output.
+            if 0.3 <= minutes_multiplier < 1.0:
+                predicted_minutes = predicted_minutes * minutes_multiplier
+                logger.info(
+                    "Minutes restriction applied for %s %s: ×%.2f → %.1f min",
+                    player_name, prop_type, minutes_multiplier, predicted_minutes,
+                )
+
             # DNP filter: skip predictions for players predicted to play < 15 minutes
             if 0 < predicted_minutes < 15:
                 return None
@@ -2615,6 +2657,25 @@ def predict_player_prop(
                     # PROP_BIAS_CORRECTION already in predicted_value, omit bias_fix.
                     z_score = (predicted_value - line) / effective_sigma
                     over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))  # Phase 1.1
+
+    # Apply lineup-intel minutes_multiplier in the no-minutes-oracle fallback.
+    # The primary application happens above (inside `if minutes_dist:`) using
+    # the predicted minutes. When the oracle is unavailable that block doesn't
+    # run, so we have to scale predicted_value here directly — otherwise a
+    # 0.6× minutes restriction silently produces a full season-average forecast.
+    # Counting-stat props scale roughly linearly with minutes, so the same
+    # multiplier applies to the value as to the minutes.
+    if (predicted_value is not None
+            and not minutes_dist
+            and 0.3 <= minutes_multiplier < 1.0):
+        predicted_value = predicted_value * minutes_multiplier
+        z_score = (predicted_value - line) / effective_sigma
+        over_prob = float(np.clip(norm.cdf(z_score), PROB_CLAMP_MIN, PROB_CLAMP_MAX))
+        logger.info(
+            "Minutes restriction (oracle-unavailable path) for %s %s: "
+            "×%.2f → predicted_value %.2f",
+            player_name, prop_type, minutes_multiplier, predicted_value,
+        )
 
     # Apply injury-based adjustments to predicted value
     injury_boost_info = {'boost_factor': 1.0, 'reasons': []}
@@ -3021,6 +3082,11 @@ def predict_player_prop(
         'threes_streak_type': threes_streak_info.get('streak_type', 'neutral'),
         'threes_streak_fade': threes_streak_info.get('streak_fade', 0.0),
         'threes_streak_details': threes_streak_info.get('details', ''),
+        # Data-quality signal: 'full' (≥120 features) or 'degraded' (<120) or
+        # 'unknown' (no API features used). Downstream bet filters should
+        # require 'full' for production-tier bet sizing.
+        'feature_quality': locals().get('_feature_quality', 'unknown'),
+        'feature_count': len(features) if features else 0,
     }
 
 
@@ -3127,6 +3193,32 @@ def main():
         print(f"  Warning: Could not fetch injury data: {e}")
         injury_lookup = {}
         current_injuries = []
+
+    # Lineup intelligence: starter confirmations + minutes-restriction multipliers.
+    # injury_tracker_v3 gives binary OUT/DOUBTFUL/QUESTIONABLE — useful but coarse.
+    # LineupIntelService adds:
+    #   - starter_confidence (is_starter, useful for rookies and rotation moves)
+    #   - availability_probability (continuous, e.g., 0.6 for "GTD lean Q")
+    #   - minutes_multiplier (e.g., 0.65 for a player on a hard minutes cap
+    #     returning from injury — predictions on raw season averages will be
+    #     wildly wrong without this)
+    # Keyed by player_name.lower() since BDL IDs aren't always available upstream.
+    lineup_intel_lookup: dict[str, dict] = {}
+    try:
+        from lineup_intel import LineupIntelService  # noqa: PLC0415
+        _lis = LineupIntelService()
+        _team_abbrevs: set[str] = set()
+        # Defer collection until games are loaded — bail gracefully if unavailable.
+        # We only query intel per-player inside the prop_tasks loop to avoid
+        # rate-limiting the underlying news/injury scrapers.
+        lineup_intel_service = _lis
+        print("  Lineup intel service loaded (queries deferred per player)")
+    except ImportError:
+        lineup_intel_service = None
+        print("  Lineup intel service unavailable (module not installed)")
+    except Exception as e:
+        lineup_intel_service = None
+        print(f"  Lineup intel service init failed: {e}")
 
     if api:
         try:
@@ -3508,6 +3600,50 @@ def main():
                             if status in [InjuryStatus.QUESTIONABLE, InjuryStatus.GTD]:
                                 uncertainty_flag = "HIGH_UNCERTAINTY"
 
+                        # Layered check: LineupIntelService provides finer-grained
+                        # signal than injury_tracker — most importantly the
+                        # minutes_multiplier for players on hard minutes caps
+                        # returning from injury. Defaults: availability=1.0,
+                        # mins_mult=1.0 (no restriction).
+                        player_minutes_multiplier = 1.0
+                        player_availability_prob = 1.0
+                        if lineup_intel_service is not None and player_name:
+                            try:
+                                _li_team = (analysis['home_team']
+                                            if player_team_id == home_team_id
+                                            else analysis['away_team'])
+                                _li = lineup_intel_service.get_player_intel(
+                                    player_name=player_name,
+                                    team=_li_team,
+                                )
+                                if _li is not None:
+                                    player_minutes_multiplier = float(
+                                        getattr(_li, 'minutes_multiplier', 1.0)
+                                    )
+                                    player_availability_prob = float(
+                                        getattr(_li, 'availability_probability', 1.0)
+                                    )
+                                    # Hard gate: availability < 0.5 means lineup
+                                    # intel believes the player is more likely to
+                                    # not play than play. Skip even if injury
+                                    # tracker said QUESTIONABLE — lineup intel
+                                    # aggregates more sources.
+                                    if player_availability_prob < 0.5:
+                                        print(
+                                            f"    Skipping {player_name} "
+                                            f"(lineup intel availability "
+                                            f"{player_availability_prob:.0%}) [DNP filter]"
+                                        )
+                                        continue
+                                    if (player_minutes_multiplier < 0.85
+                                            and uncertainty_flag is None):
+                                        uncertainty_flag = "MINUTES_RESTRICTION"
+                            except Exception:
+                                # Lineup intel is best-effort. Never let it block
+                                # a prediction — the rest of the pipeline still
+                                # has injury_tracker + minutes_oracle to fall back on.
+                                pass
+
                         # Get player metadata
                         bdl_stats_id = None
                         player_position = 'G'
@@ -3569,6 +3705,12 @@ def main():
                                     'uncertainty_flag': uncertainty_flag,
                                     'team_id': player_team_id,
                                     'team_abbrev': team_abbrev,
+                                    # Lineup intel signals (minutes_multiplier
+                                    # captures hard minutes caps for returning
+                                    # players that the season-average baseline
+                                    # cannot otherwise pick up).
+                                    'minutes_multiplier': player_minutes_multiplier,
+                                    'availability_probability': player_availability_prob,
                                     'over_odds': props.get(f'{prop_type}_over_odds', -110),
                                     'under_odds': props.get(f'{prop_type}_under_odds', -110),
                                     'line_source': game_prop_source,
@@ -3624,7 +3766,15 @@ def main():
                                 game_context=task.get('game_context'),
                                 american_odds=task.get('over_odds', -110),
                                 under_odds=task.get('under_odds'),
+                                minutes_multiplier=task.get('minutes_multiplier', 1.0),
+                                availability_probability=task.get('availability_probability', 1.0),
                             )
+                            # predict_player_prop returns None on early-exit paths
+                            # (empty name, incomplete features, sub-15-min DNP, threes
+                            # sample gate). The downstream consumer filters `if pred:`,
+                            # so propagate None instead of mutating it.
+                            if pred is None:
+                                return None
                             # Fix 1: Pass through team abbreviation
                             pred['team_abbrev'] = task.get('team_abbrev', '')
                             # Fix 4: Pass through actual sportsbook odds
@@ -3706,6 +3856,27 @@ def main():
         all_analyses.append(analysis)
         print_game_analysis(analysis)
 
+    # Portfolio-level exposure caps. Per-bet Kelly is correct for the marginal
+    # bet but produces concentrated exposure when multiple high-edge bets land
+    # on the same game/player/prop type — all of which are heavily correlated.
+    # This pass admits bets greedily by edge until each bucket cap is hit and
+    # marks the rest with cap_rejected_reason so they remain visible.
+    if all_player_props:
+        try:
+            from nba_betting.exposure_caps import apply_exposure_caps
+            _cap_summary = apply_exposure_caps(all_player_props)
+            print(
+                f"  Exposure caps: {_cap_summary['admitted']}/"
+                f"{_cap_summary['eligible']} bets admitted "
+                f"(total exposure {_cap_summary['total_exposure']:.1%}, "
+                f"{_cap_summary['rejected']} rejected by caps)"
+            )
+            if _cap_summary['rejections_by_reason']:
+                for reason, count in _cap_summary['rejections_by_reason'].items():
+                    print(f"    - {reason}: {count}")
+        except Exception as e:
+            print(f"  Warning: exposure cap pass failed: {e}")
+
     # Phase 4: Log predictions to calibration tracker
     if HAS_CALIBRATION and all_player_props:
         try:
@@ -3754,6 +3925,45 @@ def main():
         pass  # CLV bridge not yet available
     except Exception as e:
         print(f"  Warning: CLV recording failed: {e}")
+
+    # CLV health surface: print rolling 7-day CLV summary so the operator sees
+    # whether the model is sharp on every run. Beating the closing line is the
+    # only honest signal of model alpha — short-term win rate is mostly noise.
+    # Failure modes this catches:
+    #   - closing_odds_scheduler isn't running (settled_bets stays at 0)
+    #   - model edge has decayed (avg_clv trends negative)
+    try:
+        from nba_betting.edge.clv_analyzer import CLVAnalyzer
+        _clv_summary = CLVAnalyzer().get_clv_summary(days=7)
+        if _clv_summary:
+            _settled = _clv_summary.get('settled_bets', 0)
+            _total = _clv_summary.get('total_bets', 0)
+            _avg = _clv_summary.get('avg_clv', 0.0)
+            _pos_rate = _clv_summary.get('positive_clv_rate', 0.0)
+            print(
+                f"  7-day CLV: avg {_avg:+.2f}% | positive rate {_pos_rate:.0%} | "
+                f"{_settled}/{_total} settled"
+            )
+            if _total > 0 and _settled == 0:
+                print(
+                    "  WARN: bets recorded but none settled — "
+                    "closing_odds_scheduler may not be running"
+                )
+            if _settled >= 50 and _avg < -1.0:
+                print(
+                    f"  WARN: 7-day CLV is {_avg:+.2f}% (significantly negative) — "
+                    "model may have lost edge; investigate before increasing stakes"
+                )
+    except ImportError:
+        # CLVAnalyzer module not installed in this environment — quiet skip.
+        pass
+    except Exception as _clv_exc:
+        # CLV reporting is informational only — never let it break the run.
+        # But surface the failure (DB schema mismatch, missing table, etc.) so
+        # the operator knows CLV is silently broken instead of falsely assuming
+        # it's healthy. Print AND log so it appears in both stdout and logs.
+        print(f"  WARN: CLV summary failed: {type(_clv_exc).__name__}: {_clv_exc}")
+        logger.warning("CLV summary failed: %s", _clv_exc, exc_info=True)
 
     # Phase 4.3: Store prop odds snapshots for line movement tracking
     if HAS_PROP_TRACKER and all_player_props:
@@ -3969,6 +4179,14 @@ def main():
                     'injury_boost': prop.get('injury_boost', 1.0),
                     'line_source': prop.get('line_source', 'unknown'),
                     'line_vendor': prop.get('line_vendor', 'unknown'),
+                    # Portfolio-cap admission flags. cap_admitted=True → eligible
+                    # to stake at suggested_bet_size; False → rejected by an
+                    # exposure cap, do NOT stake; None → not a BET-tier signal.
+                    'cap_admitted': prop.get('cap_admitted'),
+                    'cap_rejected_reason': prop.get('cap_rejected_reason', ''),
+                    # Data-quality signal added by Audit 2026-05-15.
+                    'feature_quality': prop.get('feature_quality', 'unknown'),
+                    'feature_count': prop.get('feature_count', 0),
                 }
                 csv_data.append(row)
 

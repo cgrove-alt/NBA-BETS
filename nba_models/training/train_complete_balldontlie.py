@@ -4999,13 +4999,17 @@ class QuantilePropModel:
         X = smart_fillna(X[self.feature_names])
         X_scaled = self.scaler.transform(X)
 
-        # Shift distribution down by a fraction of the survivorship offset.
-        # The full offset overcorrects because sportsbooks already partially
-        # account for the over-performance of starters. Using half the offset
-        # is a robust compromise: enough to enable under predictions while
-        # not over-correcting into systematic under-prediction.
+        # Shift distribution down by the full survivorship offset.
+        # The offset is computed against the calibration baseline — when real
+        # sportsbook lines are available (training/train_complete_balldontlie.py
+        # _real_lines_lookup path at ~line 6692), the baseline already encodes
+        # the sportsbook's view of survivorship, so the offset isolates pure
+        # model bias and the full correction is appropriate.
+        # 2026-05-15: backtest showed +4.4pt residual over-prediction with the
+        # previous 0.5× scaling (pred-line +5.53 vs actual-line +1.11) — the
+        # half-offset compromise was empirically wrong, switched to full.
         offset = getattr(self, '_survivorship_offset', 0.0)
-        correction = offset * 0.5
+        correction = offset
         return {q: float(model.predict(X_scaled)[0]) - correction
                 for q, model in self.quantile_models.items()}
 
@@ -6579,6 +6583,58 @@ def train_all_models(
         print(f"  Raw residual: mean={y_residual_raw.mean():.2f}, std={y_residual_raw.std():.2f}")
         print(f"  De-meaned residual: mean={y_residual.mean():.4f} (offset={residual_mean_offset:+.2f})")
 
+        # --- Over/under class balancing (2026-05-15) ---
+        # Within the subset of training samples that use REAL sportsbook lines
+        # as the baseline, compute the true over/under outcome and build a
+        # weight vector that balances the two classes at training time.
+        # Samples without a real line keep their original time-decay weight
+        # (we have no honest over/under signal there since the baseline is
+        # season_avg, not a market line). This prevents the model from
+        # over-fitting to the dominant outcome class — the central cause of
+        # the 100% over directional bias observed in the March 22 backtest.
+        if player_sample_weights is None:
+            balanced_weights = np.ones(len(y_raw_valid), dtype=float)
+        else:
+            balanced_weights = player_sample_weights[valid_mask].astype(float).copy()
+
+        if _real_lines_lookup and n_real_lines >= 50:
+            valid_indices = np.where(valid_mask)[0]
+            real_line_mask = np.zeros(len(y_raw_valid), dtype=bool)
+            outcomes_over = np.zeros(len(y_raw_valid), dtype=bool)
+            for i, orig_idx in enumerate(valid_indices):
+                sample = player_data[orig_idx]
+                key = (sample.get('player_name', '').strip().lower(),
+                       sample.get('game_date', ''), prop_name)
+                if key in _real_lines_lookup:
+                    real_line_mask[i] = True
+                    outcomes_over[i] = bool(y_raw_valid[i] > _real_lines_lookup[key])
+
+            n_over = int(outcomes_over[real_line_mask].sum())
+            n_under = int(real_line_mask.sum() - n_over)
+            if n_over > 0 and n_under > 0:
+                # Inverse-frequency weights so each class contributes 50% of
+                # the loss within the real-line subset.
+                w_over = 0.5 / (n_over / (n_over + n_under))
+                w_under = 0.5 / (n_under / (n_over + n_under))
+                over_mask = real_line_mask & outcomes_over
+                under_mask = real_line_mask & ~outcomes_over
+                balanced_weights[over_mask] *= w_over
+                balanced_weights[under_mask] *= w_under
+                print(
+                    f"  Class balance ({prop_name}): {n_over} overs vs {n_under} unders "
+                    f"in real-line subset → over_w={w_over:.3f}, under_w={w_under:.3f}"
+                )
+            else:
+                print(
+                    f"  Class balance ({prop_name}): real-line subset is all "
+                    f"one class ({n_over}/{n_under}) — skipping balance"
+                )
+        else:
+            print(
+                f"  Class balance ({prop_name}): insufficient real lines "
+                f"({n_real_lines}) — using unbalanced training weights"
+            )
+
         # --- Fix 1.1: Feature reduction ---
         reduced_cols = REDUCED_FEATURES.get(prop_name, [])
         available_cols = [c for c in reduced_cols if c in X_with_line.columns]
@@ -6593,9 +6649,12 @@ def train_all_models(
             X_reduced = X_with_line
             print(f"  Warning: using full feature set ({len(X_reduced.columns)} features)")
 
-        # Apply valid_mask to features and weights (Bug fix #7 cont.)
+        # Apply valid_mask to features (Bug fix #7 cont.). Sample weights now
+        # come from `balanced_weights` (computed above), which folds in both
+        # the time-decay weighting from player_sample_weights AND the
+        # over/under class balance from the real-line subset.
         X_reduced = X_reduced.iloc[valid_mask].reset_index(drop=True)
-        prop_weights = player_sample_weights[valid_mask] if player_sample_weights is not None else None
+        prop_weights = balanced_weights
         prop_dates = [d.get('game_date', '') for d in np.array(player_data)[valid_mask]]
 
         # --- Fix 1.3: Single LightGBM per prop (replaces 5-7 model stacking) ---
@@ -6700,6 +6759,12 @@ def train_all_models(
 
         try:
             quantile_model = QuantilePropModel(prop_name)
+            # Note: quantile regression fits each quantile independently, so it is
+            # structurally less prone to directional bias than MSE/MAE regression
+            # on residuals. Class-balanced weights are applied only to the
+            # PropEnsembleModel above; the quantile model uses raw time-decay
+            # weights since each quantile loss already targets its own side of
+            # the distribution.
             q_metrics = quantile_model.train(
                 X_q, y, sample_weights=player_sample_weights,
                 calibration_lines=cal_lines,
@@ -6951,6 +7016,19 @@ def main():
         print("  Quantile decompression calibration complete.")
     except Exception as e:
         print(f"  Warning: Quantile decompression calibration failed: {e}")
+
+    # Post-retrain: recalibrate PROP_BIAS_CORRECTION from latest OOS results.
+    # This keeps the additive bias corrections in sync with current model
+    # behavior. Requires an up-to-date oos_walkforward_results.json — caller
+    # should run the OOS walk-forward backtest before invoking training.
+    print("\n  Recalibrating PROP_BIAS_CORRECTION from OOS results...")
+    try:
+        import subprocess
+        bias_script = os.path.join(_project_root, "scripts", "recalibrate_prop_bias.py")
+        subprocess.run([sys.executable, bias_script], timeout=60, check=False)
+        print("  Bias correction recalibration complete.")
+    except Exception as e:
+        print(f"  Warning: Bias correction recalibration failed: {e}")
 
     print("\n" + "="*60)
     print("All models saved to 'models/' directory")

@@ -125,7 +125,46 @@ agent_scheduler:
     - THE_ODDS_API_KEY
 
 # ============================================================================
-# Service #6: Redis (Provision via Railway dashboard)
+# Service #6: Closing Odds Scheduler (CLV capture)
+# ============================================================================
+# Service Type: Cron Job (every 15 min during game hours)
+# Start Command: python -m nba_betting.odds.closing_odds_scheduler --once
+# Schedule: */15 18-23 * * *  (every 15 min, 6 PM - 11 PM ET)
+# Description: Captures closing odds for previously recorded bets so CLV can
+#              be measured. Without this, the bet tracker stores opening odds
+#              but the closing_odds column stays NULL forever and clv_report.py
+#              produces no usable output.
+#
+# This is the single most important loop for measuring real model alpha. Add
+# it to the Railway dashboard schedule explicitly — the file is reference only.
+
+closing_odds_scheduler:
+  schedule: "*/15 18-23 * * *"  # Every 15 min, 6 PM - 11 PM ET
+  command: python -m nba_betting.odds.closing_odds_scheduler --once
+  timezone: America/New_York
+  timeout: 600
+  retry_on_failure: true
+  max_retries: 2
+
+# ============================================================================
+# Service #7: Weekly CLV Report
+# ============================================================================
+# Service Type: Cron Job
+# Start Command: python scripts/clv_report.py --days 7
+# Schedule: 0 9 * * 1  (Mondays at 9 AM ET)
+# Description: Generates a CLV summary for the previous 7 days. Output saved
+#              to data/backtest_results/clv_report.json. Surfaces whether the
+#              model is sharp (consistently beating the closing line) or whether
+#              edge claims are sample artifacts.
+
+clv_report:
+  schedule: "0 9 * * 1"  # Monday 9 AM ET
+  command: python scripts/clv_report.py --days 7
+  timezone: America/New_York
+  timeout: 120
+
+# ============================================================================
+# Service #8: Redis (Provision via Railway dashboard)
 # ============================================================================
 # - Add Redis service from Railway's built-in integrations
 # - Railway auto-sets REDIS_URL for linked services

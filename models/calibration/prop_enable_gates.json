@@ -1,0 +1,38 @@
+{
+  "_doc": "Per-prop enable/disable gates. A prop is DISABLED if it fails ANY gate; otherwise enabled. Regenerate with: python3 scripts/recalibrate_prop_gates.py",
+  "_source": "data/backtest_results/oos_walkforward_results.json + bootstrap analysis",
+  "_source_run_date": "2026-03-22T13:13:35",
+  "_generated_at": "2026-05-15T12:36:00",
+  "_gates": {
+    "bootstrap_p_value_max": 0.05,
+    "trade_win_rate_min": 0.524,
+    "rmse_vs_baseline_max_ratio": 1.0
+  },
+  "per_prop_status": {
+    "points": {
+      "enabled": false,
+      "reasons": ["bootstrap p=0.463 > 0.05", "no fixable directional edge"]
+    },
+    "rebounds": {
+      "enabled": true,
+      "reasons": ["bootstrap p=0.027 < 0.05", "trade WR 72.7%"]
+    },
+    "assists": {
+      "enabled": false,
+      "reasons": ["hit rate 45.3% < 52.4% breakeven", "bias swings both directions"]
+    },
+    "threes": {
+      "enabled": false,
+      "reasons": ["distribution too stochastic for current model"]
+    },
+    "pra": {
+      "enabled": true,
+      "reasons": ["bootstrap p=0.068 marginal", "trade WR 58.2%, ROI 9.9%"]
+    },
+    "spread": {
+      "enabled": false,
+      "reasons": ["RMSE 14.2 > market ~12-13"]
+    }
+  },
+  "disabled_props": ["points", "assists", "threes", "spread"]
+}

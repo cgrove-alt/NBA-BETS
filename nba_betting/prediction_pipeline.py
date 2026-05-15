@@ -461,23 +461,20 @@ def evaluate_bet(
 
     # ---------- Gate 4: Minimum confidence / prob-edge (Phase 1.2) ----------
     if use_prob_edge:
-        # In probability-edge mode, the model's absolute confidence is biased
-        # by survivorship (always P(over) > 0.5). Instead of checking absolute
-        # confidence > 0.65, check that the model's probability for the chosen
-        # direction exceeds the BREAK-EVEN probability by at least min_edge_pct.
-        # Under bets remain unprofitable (46.3% win rate) even with the
-        # half-offset distribution correction.
-        if direction == 'under':
-            result['reason'] = (
-                "Under bets disabled — model trained on season-avg proxies, "
-                "not sportsbook lines; cannot identify mispriced unders"
-            )
-            return result
+        # Symmetric tier check: convert P(over) to the model's probability for
+        # the *chosen* direction, then compare against breakeven. Direction was
+        # selected at line 362-372 by comparing P(over) to the devigged market
+        # P(over) — so the side that beats the market is always the side tested.
+        # The legacy "under bets disabled" gate (46.3% historical WR with half-
+        # offset correction) was made obsolete by PROP_BIAS_CORRECTION
+        # (constants.py:61-67), which now shifts predicted values to zero-mean
+        # residuals. Unders should be evaluated on the same footing as overs.
+        model_prob_for_direction = confidence if direction == 'over' else (1.0 - confidence)
 
         # Classify by probability edge above breakeven (Phase 1.2 tier system).
         # min_edge_pct overrides MIN_BET_TIER when explicitly provided.
         _prob_tier, _prob_edge_val, _tier_passes = get_prob_edge_tier(
-            model_prob=confidence,
+            model_prob=model_prob_for_direction,
             breakeven_prob=BREAK_EVEN_PROB_110,
             min_bet_tier=MIN_BET_TIER,
         )
@@ -490,10 +487,15 @@ def evaluate_bet(
 
         if not _tier_passes:
             _required = min_edge_pct if min_edge_pct is not None else _PROB_EDGE_THRESHOLDS.get(MIN_BET_TIER, PROB_EDGE_HIGH)
+            # Report the model's probability for the chosen direction — for
+            # under bets, this is 1 - confidence (where `confidence` is P(over)).
+            # Without this, the diagnostic would print "model: 30%" for an
+            # under bet at 70% P(under), making the gate look broken.
             result['reason'] = (
                 f"Probability edge {_prob_edge_val:.3f} below minimum {_required:.3f} "
-                f"(tier: {_prob_tier}, model: {confidence:.1%}, "
-                f"breakeven: {BREAK_EVEN_PROB_110:.1%})"
+                f"(tier: {_prob_tier}, model P({direction}): "
+                f"{model_prob_for_direction:.1%}, breakeven: "
+                f"{BREAK_EVEN_PROB_110:.1%})"
             )
             return result
     else:
@@ -609,9 +611,11 @@ def evaluate_bet(
     result['should_bet'] = True
     result['bet_size'] = bet_size
     _edge_label = f"{abs_edge:.2f}" if not use_prob_edge else f"{_prob_edge_val:.1%} above BE"
+    # Use direction-aware probability so the reason makes sense for unders.
+    _p_dir = p if use_prob_edge else (confidence if direction == 'over' else 1 - confidence)
     result['reason'] = (
         f"{tier.upper()} edge: {_edge_label} ({direction}) | "
-        f"confidence: {confidence:.1%} | kelly: {effective_kelly_fraction:.2f}× | "
+        f"P({direction}): {_p_dir:.1%} | kelly: {effective_kelly_fraction:.2f}× | "
         f"bet: ${bet_size:.2f}"
     )
 
