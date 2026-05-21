@@ -66,7 +66,13 @@ class IncrementalTrainer:
         self.registry = model_registry or ModelRegistry()
 
         if model_dir is None:
-            model_dir = str(Path(__file__).parent.parent / "models")
+            # Resolver returns NBA_BETS_MODEL_DIR (Railway volume) when set,
+            # repo default otherwise. Without this, incremental trainer
+            # writes to the image dir (ephemeral) and updates vanish on
+            # container restart — same failure mode that prompted the
+            # volume-fix project on 2026-05-21. See nba_models/_model_path.py.
+            from nba_models._model_path import get_model_dir
+            model_dir = str(get_model_dir())
         self.model_dir = Path(model_dir)
 
     def get_training_data_from_predictions(

@@ -83,7 +83,12 @@ class ModelRegistry:
             base_path: Base path for storing models. Defaults to 'models' directory.
         """
         if base_path is None:
-            base_path = str(Path(__file__).parent.parent / "models")
+            # Resolver returns NBA_BETS_MODEL_DIR (Railway volume) when set,
+            # repo default otherwise. The model registry writes versioned
+            # snapshots, registry.json, etc. — those need to persist across
+            # restarts. See nba_models/_model_path.py.
+            from nba_models._model_path import get_model_dir
+            base_path = str(get_model_dir())
 
         self.base_path = Path(base_path)
         self.registry_file = self.base_path / "registry.json"

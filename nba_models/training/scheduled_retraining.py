@@ -107,6 +107,34 @@ MIN_DAYS_BETWEEN_FULL_RETRAIN = 14
 MIN_DAYS_BETWEEN_INCREMENTAL = 3
 PERFORMANCE_DEGRADATION_THRESHOLD = 0.05  # 5% RMSE increase triggers alert
 R2_CRITICAL_THRESHOLD = -0.5  # R² below this is critical
+# How many backup_*/backup_incremental_* dirs to keep per category. Five
+# weekly retrains ≈ five weeks of rollback window. Each backup is ~25 MB
+# of .pkl files, so 5 dirs = ~125 MB — fits well within a Railway 5 GB
+# volume while still giving meaningful history.
+MAX_BACKUPS_TO_KEEP = 5
+
+
+def _prune_old_backups(models_dir: Path, prefix: str, keep: int) -> None:
+    """Delete oldest backup_* dirs beyond the keep limit.
+
+    Glob matches `{prefix}*` (e.g. backup_20260521_143015) and sorts by
+    name — since the timestamp is the suffix, name-sort is equivalent to
+    date-sort. Failure to delete any individual dir is logged but doesn't
+    block the retrain (cleanup is best-effort).
+    """
+    try:
+        candidates = sorted(
+            (p for p in models_dir.glob(f"{prefix}*") if p.is_dir()),
+            key=lambda p: p.name,
+        )
+        for old in candidates[:-keep] if len(candidates) > keep else []:
+            try:
+                shutil.rmtree(old)
+                logger.info("Pruned old backup: %s", old)
+            except OSError as exc:
+                logger.warning("Could not prune backup %s: %s", old, exc)
+    except OSError as exc:
+        logger.warning("Backup prune scan failed in %s: %s", models_dir, exc)
 
 # Setup logging
 LOGS_DIR.mkdir(exist_ok=True)
@@ -339,7 +367,13 @@ def full_retrain() -> bool:
         if not fetch_new_data():
             logger.warning("Data fetch failed, continuing with cached data")
 
-        # Step 2: Backup existing models
+        # Step 2: Backup existing models, then prune old backups.
+        #
+        # Backups live on the same volume as MODELS_DIR. Without pruning,
+        # each retrain leaves ~25 MB on disk; a weekly cadence over a year
+        # accumulates ~1.3 GB on a Railway volume that's typically 5 GB
+        # provisioned. We keep the last MAX_BACKUPS to support rollback
+        # while bounding the leak.
         backup_dir = MODELS_DIR / f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         backup_dir.mkdir(parents=True, exist_ok=True)
 
@@ -347,6 +381,7 @@ def full_retrain() -> bool:
             shutil.copy2(model_file, backup_dir / model_file.name)
 
         logger.info(f"Backed up {len(list(backup_dir.glob('*.pkl')))} models to {backup_dir}")
+        _prune_old_backups(MODELS_DIR, prefix="backup_", keep=MAX_BACKUPS_TO_KEEP)
 
         # Step 3: Run training script
         logger.info(f"Running training script: {FULL_TRAIN_SCRIPT}")
@@ -597,6 +632,7 @@ def incremental_update() -> bool:
         # Step 2: Backup meta-learner models
         meta_learner_files = list(MODELS_DIR.glob("*meta_learner*.pkl"))
         if meta_learner_files:
+            _prune_old_backups(MODELS_DIR, prefix="backup_incremental_", keep=MAX_BACKUPS_TO_KEEP)
             backup_dir = MODELS_DIR / f"backup_incremental_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             backup_dir.mkdir(parents=True, exist_ok=True)
 
