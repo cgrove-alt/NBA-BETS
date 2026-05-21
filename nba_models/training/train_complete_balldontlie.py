@@ -7090,10 +7090,20 @@ def main():
         minutes_trainer = os.path.join(
             _project_root, "minutes_oracle", "minutes_trainer.py"
         )
+        # CRITICAL: pass --output explicitly so the subprocess writes to the
+        # active model dir (Railway volume mount when NBA_BETS_MODEL_DIR is
+        # set, image baseline otherwise). minutes_trainer's default --output
+        # is the cwd-relative "models/minutes_oracle.pkl", which on Railway
+        # resolves to /app/models — the ephemeral image dir, NOT the volume.
+        # Verified 2026-05-21 with retrain 20fc0b65: every other model wrote
+        # to the volume correctly, but minutes_oracle.pkl stayed at the
+        # seeded baseline because of this path mismatch.
+        oracle_output_path = str(MODEL_DIR / "minutes_oracle.pkl")
         # Trainer can take 5-20 min depending on data volume; cap at 30 min so
         # it can't hang the post-train flow indefinitely.
         result = subprocess.run(
-            [sys.executable, minutes_trainer, "--quiet"],
+            [sys.executable, minutes_trainer, "--quiet",
+             "--output", oracle_output_path],
             timeout=1800,
             check=False,
         )
