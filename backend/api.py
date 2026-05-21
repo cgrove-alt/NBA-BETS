@@ -53,6 +53,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dashboard.data_service import get_data_service, DataService
 from nba_betting.constants import DISABLED_PROPS  # Single source of truth for which props to skip
+from nba_models._model_path import get_model_dir  # Resolves volume mount when NBA_BETS_MODEL_DIR is set
 from backend.schemas import (
     HealthResponse,
     GamesResponse,
@@ -301,8 +302,8 @@ def health_check():
     except Exception as e:
         checks["redis"] = f"error: {e}"
 
-    # 3. Models check
-    models_dir = Path("models")
+    # 3. Models check — resolver honors NBA_BETS_MODEL_DIR (volume mount).
+    models_dir = get_model_dir()
     pkl_files = list(models_dir.glob("*.pkl")) if models_dir.exists() else []
     models_loaded = len(pkl_files) > 0
     checks["models"] = f"{len(pkl_files)} .pkl files found"
@@ -1476,8 +1477,8 @@ def get_retrain_status():
             "message": "Continuous learning orchestrator active"
         }
 
-    # Get model file ages
-    models_dir = Path("models")
+    # Get model file ages — resolver honors NBA_BETS_MODEL_DIR (volume mount)
+    models_dir = get_model_dir()
     model_files = {}
     if models_dir.exists():
         for pkl_file in models_dir.glob("*.pkl"):
@@ -3054,9 +3055,9 @@ def get_system_health():
         if name not in agents_status:
             agents_status[name] = AgentStatus()
 
-    # Model freshness
+    # Model freshness — resolver honors NBA_BETS_MODEL_DIR
     models_list = []
-    models_dir = Path("models")
+    models_dir = get_model_dir()
     if models_dir.exists():
         for pkl_file in sorted(models_dir.glob("*.pkl")):
             try:

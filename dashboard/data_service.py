@@ -784,7 +784,12 @@ class DataService:
 
     def _load_ml_models(self):
         """Load trained ML models directly for dashboard use."""
-        model_dir = Path(__file__).parent.parent / "models"
+        # Resolver picks up NBA_BETS_MODEL_DIR when set (Railway persistent
+        # volume) and seeds it from the image baseline if empty. Without
+        # this, the dashboard loads from the image dir and misses any model
+        # that a manual retrain wrote to the volume.
+        from nba_models._model_path import get_model_dir
+        model_dir = get_model_dir()
 
         # Custom unpickler to handle class name mismatches
         # Use portable classes from model_classes.py when available

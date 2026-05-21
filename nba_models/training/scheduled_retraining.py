@@ -84,7 +84,11 @@ else:
     # /app/nba_models/training -> /app
     PROJECT_DIR = _this_dir.parent.parent
 
-MODELS_DIR = PROJECT_DIR / "models"
+# Models live where the shared resolver decides — picks up NBA_BETS_MODEL_DIR
+# when set (Railway volume mount) and falls back to PROJECT_DIR/models otherwise.
+# Keeping PROJECT_DIR for non-model paths below (logs, backtest_results).
+from nba_models._model_path import get_model_dir as _get_model_dir
+MODELS_DIR = _get_model_dir()
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR = PROJECT_DIR / "logs"
 DATA_DIR = PROJECT_DIR / "data" / "balldontlie_cache"

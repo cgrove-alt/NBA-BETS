@@ -121,14 +121,14 @@ warnings.filterwarnings('ignore')
 
 # Model save directory.
 #
-# Must be ABSOLUTE so the training script always writes to <repo>/models/
-# regardless of which cwd the caller picked. scheduled_retraining.py launches
-# this script with cwd=<its PROJECT_DIR>, and previously when PROJECT_DIR
-# resolved incorrectly on Railway (no .git) we ended up writing models to
-# /app/nba_models/training/models/ while the API was reading from /app/models/.
-# An absolute MODEL_DIR derived from this file's location prevents that whole
-# class of bug from recurring.
-MODEL_DIR = (Path(__file__).resolve().parent.parent.parent / "models")
+# Resolution via nba_models._model_path.get_model_dir() so an
+# NBA_BETS_MODEL_DIR env var (set on Railway to point at a mounted volume)
+# overrides the default. Without this, retrain output written to the
+# container's ephemeral filesystem gets wiped on every restart — which is
+# exactly what happened to the 101-min retrain on 2026-05-15 (job 323c1601).
+# Helper handles first-mount seeding from the image baseline.
+from nba_models._model_path import get_model_dir as _get_model_dir
+MODEL_DIR = _get_model_dir()
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 

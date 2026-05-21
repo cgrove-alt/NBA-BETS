@@ -169,8 +169,12 @@ except (ImportError, OSError):
     pass
 
 # Model save directory
-MODEL_DIR = Path("models")
-MODEL_DIR.mkdir(exist_ok=True)
+# Resolves NBA_BETS_MODEL_DIR (Railway volume mount) when set, falls back
+# to <repo>/models otherwise. See nba_models/_model_path.py for the seeding
+# behavior on first mount.
+from nba_models._model_path import get_model_dir as _get_model_dir
+MODEL_DIR = _get_model_dir()
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 # Metrics directory
 METRICS_DIR = Path("training_metrics")
